@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
       ailogger.error('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
       ailogger.error(`Row ${rowId} failed processing:`, error);
       if (error instanceof Error) {
-        ailogger.error(`Error processing row for file ${fileName}:`, error.message);
+        ailogger.error(`Error processing row for file ${fileName}:`, error);
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Error processing row in file ${fileName}`,
