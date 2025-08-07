@@ -172,6 +172,7 @@ export default function SpeciesLimitsModal(props: {
                 <FormHelperText sx={{ mt: 0 }}>{newSpeciesLimit === undefined ? `Enable limits` : `Disable limits`}</FormHelperText>
               </Box>
               <Switch
+                aria-label={'enable or disable species limits switch'}
                 checked={newSpeciesLimit !== undefined}
                 onChange={event => handleToggleSwitch(event.target.checked ? 'enable' : 'disable')}
                 color={newSpeciesLimit !== undefined ? 'success' : 'neutral'}
@@ -194,13 +195,14 @@ export default function SpeciesLimitsModal(props: {
               <AccordionSummary>Modify Species Limit</AccordionSummary>
               <AccordionDetails>
                 <FormControl sx={{ width: '100%', height: '100%', mb: 5 }}>
-                  <Input value={'DBH'} disabled />
+                  <Input aria-label={'species limits dbh input'} value={'DBH'} disabled />
                   <FormHelperText>Only DBH limits can be set!</FormHelperText>
                 </FormControl>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <FormControl>
-                    <FormLabel>Lower Limit</FormLabel>
+                  <FormControl id={'set-species-lower-limit'}>
+                    <FormLabel htmlFor={'set-species-lower-limit'}>Lower Limit</FormLabel>
                     <Input
+                      aria-labelledby={'set-species-lower-limit'}
                       type="number"
                       value={newSpeciesLimit?.lowerBound}
                       onChange={e => handleInputChange(e.target.value, 'lower')}
@@ -211,9 +213,10 @@ export default function SpeciesLimitsModal(props: {
                     <FormHelperText>All values BELOW this limit will be flagged!</FormHelperText>
                   </FormControl>
                   <Typography level="body-md">to</Typography>
-                  <FormControl>
-                    <FormLabel>Upper Limit</FormLabel>
+                  <FormControl id={'set-species-upper-limit'}>
+                    <FormLabel htmlFor={'set-species-upper-limit'}>Upper Limit</FormLabel>
                     <Input
+                      aria-labelledby={'set-species-upper-limit'}
                       type="number"
                       value={newSpeciesLimit?.upperBound}
                       onChange={e => handleInputChange(e.target.value, 'upper')}
@@ -225,6 +228,7 @@ export default function SpeciesLimitsModal(props: {
                   </FormControl>
                 </Box>
                 <Slider
+                  aria-label={'species limits range slider'}
                   sx={{ display: 'flex', flex: 1, paddingX: 5 }}
                   getAriaLabel={() => 'Limits range'}
                   value={[newSpeciesLimit?.lowerBound ?? defaultLower, newSpeciesLimit?.upperBound ?? defaultUpper]}

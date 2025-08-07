@@ -6,7 +6,7 @@ import { PersonnelFormGridColumns } from '@/components/client/formcolumns';
 import { DataGridSignals, FormType } from '@/config/macros/formdetails';
 import { Autocomplete, AutocompleteOption, Box, createFilterOptions, ListItemDecorator } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
@@ -27,8 +27,11 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
     roledescription: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const currentSite = useSiteContext();
   const [storedRoles, setStoredRoles] = useState<RoleRDS[]>([]);
+
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
 
   useEffect(() => {
     async function getRoles() {
@@ -70,7 +73,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
               };
 
               let roleValue = '';
-              let roledescriptionValue = '';
+              let roledescriptionValue: string;
 
               if (typeof newValue === 'string') {
                 roleValue = autoCorrectRole(newValue);
@@ -141,7 +144,6 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
               </AutocompleteOption>
             )}
             sx={{ width: '100%' }}
-            autoFocus
           />
         );
       }

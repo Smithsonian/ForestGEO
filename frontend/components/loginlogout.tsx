@@ -31,7 +31,7 @@ export const LoginLogout = () => {
   if (status == 'unauthenticated') {
     return (
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }} data-testid={'login-logout-component'}>
-        <Avatar variant="outlined" size="sm">
+        <Avatar variant="outlined" size="sm" alt={'unknown user (unauthenticated)'}>
           UNK
         </Avatar>
         <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -46,8 +46,8 @@ export const LoginLogout = () => {
   } else {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
-        <IconButton onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)} size="sm">
-          <Avatar variant="outlined" size="sm" src="">
+        <IconButton aria-label={'user avatar icon button'} onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)} size="sm">
+          <Avatar variant="outlined" size="sm" src="" alt={''}>
             <Skeleton loading={status == 'loading'}>
               {typeof session?.user?.name == 'string'
                 ? session.user.name
@@ -95,27 +95,49 @@ export const LoginLogout = () => {
           sx={{ zIndex: 1500 }}
         >
           <MenuItem
+            tabIndex={0}
             onClick={() => {
               router.push('/admin/users');
               setAnchorSettings(null);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                router.push('/admin/users');
+                setAnchorSettings(null);
+              }
             }}
           >
             User Settings
             <ManageAccountsRounded />
           </MenuItem>
           <MenuItem
+            tabIndex={0}
             onClick={() => {
               router.push('/admin/sites');
               setAnchorSettings(null);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                router.push('/admin/sites');
+                setAnchorSettings(null);
+              }
             }}
           >
             Site Settings
             <Public />
           </MenuItem>
+
           <MenuItem
+            tabIndex={0}
             onClick={() => {
               router.push('/admin/userstosites');
               setAnchorSettings(null);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                router.push('/admin/userstosites');
+                setAnchorSettings(null);
+              }
             }}
           >
             User-Site Assignments

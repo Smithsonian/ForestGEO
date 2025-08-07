@@ -119,7 +119,14 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       const isChecked = currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase());
       return (
         <Box key={header} sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
-          <Checkbox size={'lg'} disabled checked={isChecked} label={header} color={isChecked ? 'success' : 'danger'} />
+          <Checkbox
+            aria-label={'current file headers requirement checkbox'}
+            size={'lg'}
+            disabled
+            checked={isChecked}
+            label={header}
+            color={isChecked ? 'success' : 'danger'}
+          />
           <Divider orientation={'vertical'} sx={{ marginX: 2 }} />
         </Box>
       );
@@ -264,9 +271,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleConfirm} autoFocus>
-            Confirm
-          </Button>
+          <Button onClick={handleConfirm}>Confirm</Button>
         </DialogActions>
       </Dialog>
     </>

@@ -507,7 +507,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 p: 3
               }}
             >
-              <DialogTitle>Exporting Data</DialogTitle>
+              <DialogTitle id={'exporting-data'}>Exporting Data</DialogTitle>
               <DialogContent
                 sx={{
                   mt: 1,
@@ -531,6 +531,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </Stack>
                   </Stack>
                   <Switch
+                    aria-label={'toggle whether to export as a CSV or a form'}
                     size={'lg'}
                     checked={exportType === 'csv'}
                     onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
@@ -562,8 +563,11 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   />
                 </Stack>
                 <Divider sx={{ my: 1 }} />
-                <FormLabel>Export Headers:</FormLabel>
+                <FormLabel id={'export-headers'} htmlFor={'display-export-headers'}>
+                  Export Headers:
+                </FormLabel>
                 <Box
+                  id={'display-export-headers'}
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
@@ -597,6 +601,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   }}
                 >
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('valid');
+                      }
+                    }}
                     color={'success'}
                     size={'lg'}
                     aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
@@ -613,6 +626,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows passing validation
                   </Chip>
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('errors');
+                      }
+                    }}
                     color={'danger'}
                     size={'lg'}
                     variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
@@ -629,6 +651,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows failing validation
                   </Chip>
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('pending');
+                      }
+                    }}
                     color={'primary'}
                     size={'lg'}
                     variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}

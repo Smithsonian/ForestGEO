@@ -75,6 +75,7 @@ export const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: st
   return (
     <Tooltip title={error ? 'Invalid unit entered!' : `${isArea ? areaSelectionOptions.join(', ') : unitSelectionOptions.join(', ')}`} color={'primary'}>
       <Input
+        aria-label={'choice for area measurement unit'}
         ref={ref}
         fullWidth
         value={value}
@@ -263,7 +264,7 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
   const handleCommit = () => {
     const correctedValue = getClosestStatus(value);
 
-    ailogger.info('handle commit: corrected value: ', correctedValue);
+    ailogger.info(`handle commit: corrected value: ${correctedValue}`);
 
     apiRef.current.setEditCellValue({
       id,
@@ -276,6 +277,7 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
 
   return (
     <Input
+      aria-label={'commit status cell changes'}
       ref={ref}
       fullWidth
       value={value}
