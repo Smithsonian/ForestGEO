@@ -6,7 +6,7 @@ import { Box, Checkbox, Chip, IconButton, Modal, ModalDialog, Typography } from 
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { formatHeader, PersonnelGridColumns } from '@/components/client/datagridcolumns';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import CloseIcon from '@mui/icons-material/Close';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';
@@ -17,6 +17,8 @@ import ailogger from '@/ailogger';
 export default function IsolatedPersonnelDataGrid() {
   const dataGridRef = useRef<IsolatedDataGridCommonsHandle>(null);
   const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
   const initialPersonnelRDSRow: PersonnelRDS = {
     id: 0,
     personnelID: 0,
@@ -97,6 +99,7 @@ export default function IsolatedPersonnelDataGrid() {
       return (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%' }}>
           <Checkbox
+            aria-label={'toggle person as active/inactive in that census'}
             checked={!!params.value}
             onChange={async e => {
               e.stopPropagation();

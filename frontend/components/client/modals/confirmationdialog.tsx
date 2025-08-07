@@ -21,7 +21,7 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({ open, onClose, 
         <Button onClick={onClose} color="primary">
           Cancel
         </Button>
-        <Button onClick={onConfirm} color="primary" autoFocus>
+        <Button onClick={onConfirm} color="primary">
           Confirm
         </Button>
       </DialogActions>

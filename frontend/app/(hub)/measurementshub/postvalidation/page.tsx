@@ -182,6 +182,7 @@ export default function PostValidationPage() {
               <TableHead>
                 <TableRow>
                   <TableCell
+                    aria-label={'blank space here'}
                     sx={{
                       width: '50px',
                       textAlign: 'center',
@@ -189,6 +190,7 @@ export default function PostValidationPage() {
                     }}
                   />
                   <TableCell
+                    aria-label={isAllSelected ? 'selected cell' : 'unselected cell'}
                     sx={{
                       flex: 0.5,
                       display: 'flex',
@@ -199,6 +201,7 @@ export default function PostValidationPage() {
                     }}
                   >
                     <Checkbox
+                      aria-label={'toggle to select/deselect all'}
                       uncheckedIcon={<Done />}
                       label={isAllSelected ? 'Deselect All' : 'Select All'}
                       checked={isAllSelected}

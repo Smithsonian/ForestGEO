@@ -1,6 +1,6 @@
 'use client';
 
-import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import {
   Alert,
   Box,
@@ -58,6 +58,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   const fetchPreviousStemsData = async (plotCensusNumber: number) => {
     try {
@@ -111,7 +112,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   };
 
   useEffect(() => {
-    if (open) validatePreviousCensusData();
+    if (open) validatePreviousCensusData().catch(ailogger.error);
     else resetState();
   }, [open]);
 
@@ -120,7 +121,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
       const foundCensus = updatedCensusList?.find(census => census?.dateRanges.some(dateRange => dateRange.censusID === selectedStemsCensus.censusID));
       if (foundCensus) {
         const plotCensusNumber = foundCensus.plotCensusNumber;
-        fetchPreviousStemsData(plotCensusNumber);
+        fetchPreviousStemsData(plotCensusNumber).catch(ailogger.error);
       }
     }
   }, [selectedStemsCensus, updatedCensusList]);
@@ -253,6 +254,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
               <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                 <Stack direction={'row'} spacing={2} alignItems={'center'}>
                   <Checkbox
+                    aria-label={'stems rollover checkbox'}
                     checked={rolloverStems}
                     onChange={() => setRolloverStems(!rolloverStems)}
                     disabled={!customizeStems && !selectedStemsCensus.hasStemsData}
@@ -274,7 +276,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
                             paginationModel: { pageSize: 5, page: 0 }
                           }
                         }}
-                        autoHeight
                       />
                     )}
                   </Box>

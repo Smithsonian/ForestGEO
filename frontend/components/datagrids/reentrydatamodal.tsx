@@ -35,7 +35,6 @@ interface ReEnterDataModalProps {
 }
 
 const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
-  gridType,
   row,
   reEnterData,
   handleClose,
@@ -208,7 +207,13 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       return (
         <FormControl key={field} sx={{ minWidth: 200 }}>
           <FormLabel>{headerName}</FormLabel>
-          <Input placeholder={headerName} value={value} onChange={e => handleInputChange(field, e.target.value)} fullWidth />
+          <Input
+            aria-label={'reentry form field input'}
+            placeholder={headerName}
+            value={value}
+            onChange={e => handleInputChange(field, e.target.value)}
+            fullWidth
+          />
         </FormControl>
       );
     });

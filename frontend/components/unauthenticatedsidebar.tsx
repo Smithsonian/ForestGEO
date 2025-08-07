@@ -13,16 +13,18 @@ export default function UnauthenticatedSidebar() {
    * UNAUTHENTICATED SESSION HANDLING:
    */
   return (
-    <Stack direction={'row'} overflow={'hidden'} sx={{ display: 'flex', width: 'fit-content' }}>
+    <Stack direction="row" overflow="hidden" sx={{ display: 'flex', width: 'fit-content' }}>
       <Box
+        component="aside"
+        ref={containerRef}
         className="Sidebar"
         data-testid="sidebar"
+        role="navigation"
+        aria-label="Main navigation"
         sx={{
-          position: {
-            md: 'sticky'
-          },
+          position: { md: 'sticky' },
           height: '100dvh',
-          width: 'calc(var(--Sidebar-width) )',
+          width: 'calc(var(--Sidebar-width))',
           top: 0,
           p: 2,
           flexShrink: 0,
@@ -32,22 +34,29 @@ export default function UnauthenticatedSidebar() {
           borderRight: '1px solid',
           borderColor: 'divider'
         }}
-        ref={containerRef}
       >
         <GlobalStyles
           styles={theme => ({
             ':root': {
               '--Sidebar-width': '300px',
-              [theme.breakpoints.up('lg')]: {
-                '--Sidebar-width': '320px'
-              }
+              [theme.breakpoints.up('lg')]: { '--Sidebar-width': '320px' }
             }
           })}
         />
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Typography level="h1">ForestGEO</Typography>
-        </Box>
+
         <Box
+          role="banner" // Branding landmark
+          aria-label="Application name"
+          sx={{ display: 'flex', gap: 1, alignItems: 'center' }}
+        >
+          <Typography level="h1" component="h1">
+            ForestGEO
+          </Typography>
+        </Box>
+
+        <Box
+          component="nav"
+          aria-label="User actions"
           sx={{
             minHeight: 0,
             overflow: 'hidden auto',
@@ -58,9 +67,15 @@ export default function UnauthenticatedSidebar() {
               gap: 1.5
             }
           }}
-        ></Box>
-        <Divider />
-        <LoginLogout data-testid="login-logout" />
+        >
+          {/* List of unauthenticated user nav items, if added */}
+        </Box>
+
+        <Divider aria-orientation="horizontal" />
+
+        <Box role="region" aria-label="Authentication controls">
+          <LoginLogout data-testid="login-logout" />
+        </Box>
       </Box>
     </Stack>
   );

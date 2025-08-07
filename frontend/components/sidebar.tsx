@@ -284,16 +284,21 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedSite ? (
-          <Stack direction={'column'} alignItems={'start'}>
-            <Typography level="body-lg" className="sidebar-item" data-testid={'selected-site-name'}>{`Site: ${selectedSite?.siteName}`}</Typography>
-            <Stack direction={'column'} alignItems={'start'}>
+          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'}>
+            <Typography
+              id={'site-selected'}
+              level="body-lg"
+              className="sidebar-item"
+              data-testid={'selected-site-name'}
+            >{`Site: ${selectedSite?.siteName}`}</Typography>
+            <Stack direction={'column'} alignItems={'start'} aria-labelledby={'site-selected'}>
               <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
                 &mdash; Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
         ) : (
-          <Typography level="body-lg" className="sidebar-item" data-testid={'pending-site-select'}>
+          <Typography aria-label={'site select prompt'} level="body-lg" className="sidebar-item" data-testid={'pending-site-select'}>
             Select a Site
           </Typography>
         )}
@@ -312,16 +317,16 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedPlot ? (
-          <Stack direction="column" alignItems="start">
+          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'}>
             <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
+            <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
                 &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
         ) : (
-          <Typography className="sidebar-item" data-testid={'pending-plot-select'}>
+          <Typography aria-label={'select a plot'} className="sidebar-item" data-testid={'pending-plot-select'}>
             Select a Plot
           </Typography>
         )}
@@ -349,15 +354,15 @@ export default function Sidebar(props: SidebarProps) {
 
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
-      <>
+      <React.Fragment aria-label={'census record information'}>
         {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
         {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
-      </>
+      </React.Fragment>
     );
 
     return (
-      <Stack direction={'column'} alignItems={'start'}>
+      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'}>
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
@@ -389,7 +394,6 @@ export default function Sidebar(props: SidebarProps) {
       className="census-select sidebar-item"
       name="None"
       required
-      autoFocus
       size={'md'}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
@@ -409,11 +413,11 @@ export default function Sidebar(props: SidebarProps) {
         }
       }}
     >
-      <ListItem
-        onMouseDown={event => event.preventDefault()} // Prevents closing the dropdown
-        onClick={event => event.stopPropagation()} // Prevents any response
-      >
-        <Box
+      <ListItem>
+        <ListItemButton
+          aria-label="render census list item"
+          onMouseDown={e => e.preventDefault()} // still works
+          onClick={e => e.stopPropagation()} // still works
           sx={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -425,6 +429,7 @@ export default function Sidebar(props: SidebarProps) {
             Add New Census
           </Typography>
           <IconButton
+            aria-label={'add new census icon button'}
             size="sm"
             color="primary"
             data-testid={'add-new-census-button'}
@@ -460,13 +465,18 @@ export default function Sidebar(props: SidebarProps) {
           >
             <AddIcon />
           </IconButton>
-        </Box>
+        </ListItemButton>
       </ListItem>
       <Divider orientation={'horizontal'} sx={{ my: 1 }} />
       {censusListContext
         ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
         .map(item => (
-          <Option data-testid={'census-selection-option'} key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
+          <Option
+            aria-label={'census list context item'}
+            data-testid={'census-selection-option'}
+            key={item?.plotCensusNumber}
+            value={item?.plotCensusNumber?.toString()}
+          >
             <Box
               sx={{
                 display: 'flex',
@@ -521,7 +531,6 @@ export default function Sidebar(props: SidebarProps) {
       className="plot-selection"
       name="None"
       required
-      autoFocus
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
@@ -541,7 +550,7 @@ export default function Sidebar(props: SidebarProps) {
       }}
     >
       {plotListContext?.map(item => (
-        <Option value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
+        <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
           <Box
             sx={{
               display: 'flex',
@@ -610,7 +619,6 @@ export default function Sidebar(props: SidebarProps) {
         placeholder="Select a Site"
         name="None"
         required
-        autoFocus
         sx={{ marginRight: '1em' }}
         size={'md'}
         renderValue={renderSiteValue}
@@ -743,7 +751,7 @@ export default function Sidebar(props: SidebarProps) {
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
-                <Avatar sx={{ marginRight: 1 }}>
+                <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
                 <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
@@ -751,7 +759,7 @@ export default function Sidebar(props: SidebarProps) {
               {currentSite !== undefined && (
                 <>
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
-                    <Avatar size={'sm'} sx={{ marginRight: 1 }}>
+                    <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
                       <PlotLogo />
                     </Avatar>
                     <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderPlotOptions()}</Box>
@@ -759,7 +767,7 @@ export default function Sidebar(props: SidebarProps) {
                   {currentPlot !== undefined && (
                     <>
                       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'census-selection-box'}>
-                        <Avatar size={'sm'} sx={{ marginRight: 1 }}>
+                        <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
                         <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderCensusOptions()}</Box>
@@ -802,7 +810,6 @@ export default function Sidebar(props: SidebarProps) {
                   {siteConfigNav.map((item, index: number) => {
                     const Icon = item.icon;
                     const { toggle, setToggle } = toggleArray[index];
-                    const delay = index * 200;
 
                     const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
                       if (isDataIncomplete) {
@@ -929,9 +936,8 @@ export default function Sidebar(props: SidebarProps) {
                               // isOpen
                             >
                               <List size={'md'}>
-                                {item.expanded.map((link, subIndex) => {
+                                {item.expanded.map((link, _subIndex) => {
                                   const SubIcon = link.icon;
-                                  const delay = (subIndex + 1) * 200;
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
