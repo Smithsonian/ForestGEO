@@ -131,9 +131,10 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Name</FormLabel>
+                    <FormControl id={'plot-name-input'}>
+                      <FormLabel htmlFor={'plot-name-input'}>Name</FormLabel>
                       <Input
+                        aria-labelledby={'plot-name-input'}
                         placeholder="Plot Name..."
                         name="plotName"
                         value={editablePlot?.plotName ?? ''}
@@ -143,9 +144,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Location</FormLabel>
+                    <FormControl id={'plot-location-input'}>
+                      <FormLabel htmlFor={'plot-location-input'}>Location</FormLabel>
                       <Input
+                        aria-labelledby={'plot-location-input'}
                         placeholder="Plot Location..."
                         name="locationName"
                         value={editablePlot?.locationName ?? ''}
@@ -155,9 +157,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Country</FormLabel>
+                    <FormControl id={'plot-country-input'}>
+                      <FormLabel htmlFor={'plot-country-input'}>Country</FormLabel>
                       <Input
+                        aria-labelledby={'plot-country-input'}
                         placeholder="Plot Country..."
                         name="countryName"
                         value={editablePlot?.countryName ?? ''}
@@ -167,9 +170,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Plot Shape</FormLabel>
+                    <FormControl id={'plot-shape-input'}>
+                      <FormLabel htmlFor={'plot-shape-input'}>Plot Shape</FormLabel>
                       <Input
+                        aria-labelledby={'plot-shape-input'}
                         placeholder="Plot Shape..."
                         name="plotShape"
                         value={editablePlot?.plotShape ?? 'Plot Shape'}
@@ -179,9 +183,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={8}>
-                    <FormControl>
-                      <FormLabel>Plot Description</FormLabel>
+                    <FormControl id={'plot-desc-input'}>
+                      <FormLabel htmlFor={'plot-desc-input'}>Plot Description</FormLabel>
                       <Input
+                        aria-labelledby={'plot-desc-input'}
                         sx={{ display: 'flex', flex: 1, width: '100%' }}
                         placeholder="Plot Description..."
                         name="plotDescription"
@@ -197,9 +202,10 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Global X-coordinate</FormLabel>
+                    <FormControl id={'global-x-coords'}>
+                      <FormLabel htmlFor={'global-x-coords'}>Global X-coordinate</FormLabel>
                       <Input
+                        aria-labelledby={'global-x-coords'}
                         placeholder="X-coordinate..."
                         name="globalX"
                         value={isEditing ? (editablePlot?.globalX ?? '') : Number(editablePlot?.globalX ?? 0).toFixed(2)}
@@ -209,9 +215,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Global Y-coordinate</FormLabel>
+                    <FormControl id={'global-y-coords'}>
+                      <FormLabel htmlFor={'global-y-coords'}>Global Y-coordinate</FormLabel>
                       <Input
+                        aria-labelledby={'global-y-coords'}
                         placeholder="Y-coordinate..."
                         name="globalY"
                         value={isEditing ? (editablePlot?.globalY ?? '') : Number(editablePlot?.globalY ?? 0).toFixed(2)}
@@ -221,9 +228,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Global Z-coordinate</FormLabel>
+                    <FormControl id={'global-z-coords'}>
+                      <FormLabel htmlFor={'global-z-coords'}>Global Z-coordinate</FormLabel>
                       <Input
+                        aria-labelledby={'global-z-coords'}
                         placeholder="Z-coordinate..."
                         name="globalZ"
                         value={isEditing ? (editablePlot?.globalZ ?? '') : Number(editablePlot?.globalZ ?? 0).toFixed(2)}
@@ -238,9 +246,10 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>X Dimension</FormLabel>
+                    <FormControl id={'plot-x-dim'}>
+                      <FormLabel htmlFor={'plot-x-dim'}>X Dimension</FormLabel>
                       <Input
+                        aria-labelledby={'plot-x-dim'}
                         placeholder="X dimension..."
                         name="dimensionX"
                         value={isEditing ? (editablePlot?.dimensionX ?? '') : Number(editablePlot?.dimensionY ?? 0).toFixed(2)}
@@ -250,9 +259,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Y Dimension</FormLabel>
+                    <FormControl id={'plot-y-dim'}>
+                      <FormLabel htmlFor={'plot-y-dim'}>Y Dimension</FormLabel>
                       <Input
+                        aria-labelledby={'plot-y-dim'}
                         placeholder="Y dimension..."
                         name="dimensionY"
                         value={isEditing ? (editablePlot?.dimensionY ?? '') : Number(editablePlot?.dimensionY ?? 0).toFixed(2)}
@@ -262,9 +272,10 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Plot Area</FormLabel>
+                    <FormControl id={'plot-area'}>
+                      <FormLabel htmlFor={'plot-area'}>Plot Area</FormLabel>
                       <Input
+                        aria-labelledby={'plot-area'}
                         placeholder="Plot Area..."
                         name="area"
                         value={isEditing ? (editablePlot?.area ?? '') : Number(editablePlot?.area ?? 0).toFixed(2)}
@@ -279,8 +290,8 @@ export default function PlotCardModal(props: {
                     </Typography>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Default Dimension Units</FormLabel>
+                    <FormControl id={'default-dim-units'}>
+                      <FormLabel htmlFor={'default-dim-units'}>Default Dimension Units</FormLabel>
                       <Select
                         placeholder={'Select Default Dimension Units'}
                         value={editablePlot?.defaultDimensionUnits ?? ''}
@@ -300,8 +311,8 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Default Coordinate Units</FormLabel>
+                    <FormControl id={'default-coords-units'}>
+                      <FormLabel htmlFor={'default-coords-units'}>Default Coordinate Units</FormLabel>
                       <Select
                         placeholder={'Select Default Coordinate Units'}
                         value={editablePlot?.defaultCoordinateUnits ?? ''}
@@ -321,8 +332,8 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={4}>
-                    <FormControl>
-                      <FormLabel>Default Area Units</FormLabel>
+                    <FormControl id={'default-area-units'}>
+                      <FormLabel htmlFor={'default-area-units'}>Default Area Units</FormLabel>
                       <Select
                         placeholder={'Select Default Area Units'}
                         value={editablePlot?.defaultAreaUnits ?? ''}
@@ -342,8 +353,8 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={6}>
-                    <FormControl>
-                      <FormLabel>Default DBH Units</FormLabel>
+                    <FormControl id={'default-dbh-units'}>
+                      <FormLabel htmlFor={'default-dbh-units'}>Default DBH Units</FormLabel>
                       <Select
                         placeholder={'Select Default DBH Units'}
                         value={editablePlot?.defaultDBHUnits ?? ''}
@@ -363,8 +374,8 @@ export default function PlotCardModal(props: {
                     </FormControl>
                   </Grid>
                   <Grid xs={6}>
-                    <FormControl>
-                      <FormLabel>Default HOM Units</FormLabel>
+                    <FormControl id={'default-hom-units'}>
+                      <FormLabel htmlFor={'default-hom-units'}>Default HOM Units</FormLabel>
                       <Select
                         placeholder={'Select Default HOM Units'}
                         value={editablePlot?.defaultHOMUnits ?? ''}

@@ -40,171 +40,128 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
     .trim();
 
   return (
-    <Box
-      sx={{
-        display: 'inherit', // Ensure layout is flex-based
-        flexDirection: 'column',
-        width: '100%'
-      }}
-    >
+    <Box role="region" aria-labelledby="grid-form-explanations-heading" sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
       <AccordionGroup>
-        <Accordion>
-          <AccordionSummary>
-            <Typography level="title-lg" sx={{ alignSelf: 'center', justifyContent: 'center', alignContent: 'center', my: 2 }}>
+        <Accordion aria-label="Grid and upload form headers explanation">
+          <AccordionSummary id="grid-form-explanation-summary" aria-controls="grid-form-explanation-content">
+            <Typography id="grid-form-explanations-heading" level="title-lg" component="h2" sx={{ textAlign: 'center', my: 2 }}>
               Understanding Grid and Upload Form Headers
             </Typography>
           </AccordionSummary>
-          <AccordionDetails>
-            <FormHelperText sx={{ marginBottom: 1 }}>
+          <AccordionDetails id="grid-form-explanation-content" aria-labelledby="grid-form-explanation-summary">
+            <FormHelperText role="note" aria-live="polite" sx={{ mb: 1 }}>
               Remember that Form headers are <strong>bold</strong> if required for upload!
             </FormHelperText>
+
             <Box
+              role="list"
+              aria-label="Header mapping cards"
               sx={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
                 gap: '1rem',
                 mb: 1,
                 width: '100%',
-                height: '100%',
-                boxSizing: 'border-box',
-                alignItems: 'stretch'
+                boxSizing: 'border-box'
               }}
             >
               {HeadersByDatagridType[datagridType].map((header, index) => (
-                <Card
-                  key={index}
-                  size="sm"
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    borderRadius: 'md'
-                  }}
-                >
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-start', p: 1 }}>
-                    <Chip variant="soft">Grid Header</Chip>
-                  </Box>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      minHeight: 0,
-                      mx: 1
-                    }}
-                  >
-                    <CardContent sx={{ flex: 1, pt: 0 }}>
-                      <Typography level="title-sm" color="primary" sx={{ fontWeight: header.category === 'required' ? 'bold' : 'normal' }}>
-                        {header.label}
-                      </Typography>
-                      {header.label === 'Status' ? (
-                        <Box display="flex" flex={1} flexDirection="column">
-                          <Typography level="body-sm">{cleanedString}</Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                            {matches?.map((category, index) => (
-                              <Chip key={index} variant="soft">
-                                {category}
-                              </Chip>
-                            ))}
-                          </Box>
+                <Card key={index} role="group" aria-labelledby={`grid-header-label-${index}`} size="sm">
+                  <CardContent>
+                    <Chip role="presentation" aria-hidden="true" variant="soft" sx={{ mb: 1 }}>
+                      Grid Header
+                    </Chip>
+                    <Typography
+                      id={`grid-header-label-${index}`}
+                      level="title-sm"
+                      color="primary"
+                      sx={{ fontWeight: header.category === 'required' ? 'bold' : 'normal' }}
+                    >
+                      {header.label}
+                    </Typography>
+
+                    {header.label === 'Status' ? (
+                      <Box role="group" aria-labelledby={`grid-status-desc-${index}`} sx={{ mt: 1 }}>
+                        <Typography id={`grid-status-desc-${index}`} level="body-sm">
+                          {cleanedString}
+                        </Typography>
+                        <Box role="list" aria-label="Grid status categories" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                          {matches?.map((category, idx) => (
+                            <Chip key={idx} role="listitem" aria-label={category} variant="soft">
+                              {category}
+                            </Chip>
+                          ))}
                         </Box>
-                      ) : (
-                        <>
-                          <Typography level="body-sm">{header.explanation}</Typography>
-                          {header.label.includes('date') && (
-                            <Alert startDecorator={<WarningIcon fontSize="large" />} variant="soft" color="danger" sx={{ mb: 2 }}>
-                              <Typography component="div">
-                                Please note: For date fields, accepted formats are
-                                <List marker="decimal">
-                                  <ListItem>
-                                    <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
-                                      <Typography color="primary">YYYY-MM-DD</Typography>
-                                    </Tooltip>
-                                  </ListItem>
-                                  <ListItem>
-                                    <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
-                                      <Typography color="primary">DD-MM-YYYY</Typography>
-                                    </Tooltip>
-                                  </ListItem>
-                                </List>
-                                Hover over formats to see additionally accepted separators.
-                                <br />
-                                Please ensure your dates follow one of these formats.
-                              </Typography>
-                            </Alert>
-                          )}
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                  <Divider orientation={'horizontal'} sx={{ my: 0.5 }} component={'div'} role={'presentation'}>
-                    <Typography level="body-sm" fontWeight={'bold'}>
+                      </Box>
+                    ) : (
+                      <Typography level="body-sm">{header.explanation}</Typography>
+                    )}
+                  </CardContent>
+
+                  <Divider component="div" aria-orientation="horizontal" sx={{ my: 1 }}>
+                    <Typography level="body-sm" fontWeight="bold" component="span">
                       maps to
                     </Typography>
                   </Divider>
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-start', p: 1 }}>
-                    <Chip variant="soft">Form Header</Chip>
-                  </Box>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      minHeight: 0,
-                      mx: 1,
-                      mb: 1
-                    }}
-                  >
-                    <CardContent sx={{ flex: 1, pt: 0 }}>
-                      <Typography
-                        level="title-sm"
-                        color={'primary'}
-                        sx={{ fontWeight: getFormHeaderForGridHeader(datagridType, header.label)?.category === 'required' ? 'bold' : 'normal' }}
-                      >
-                        {getFormHeaderForGridHeader(datagridType, header.label)?.label}
-                      </Typography>
-                      {getFormHeaderForGridHeader(datagridType, header.label)?.label === 'status' ? (
-                        <Box display="flex" flex={1} flexDirection="column">
-                          <Typography level="body-sm">{formCleanedString}</Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                            {formMatches?.map((category, index) => (
-                              <Chip key={index} variant="soft">
-                                {category}
-                              </Chip>
-                            ))}
-                          </Box>
+
+                  <CardContent>
+                    <Chip role="presentation" aria-hidden="true" variant="soft" sx={{ mb: 1 }}>
+                      Form Header
+                    </Chip>
+                    <Typography
+                      id={`form-header-label-${index}`}
+                      level="title-sm"
+                      color="primary"
+                      sx={{
+                        fontWeight: getFormHeaderForGridHeader(datagridType, header.label)?.category === 'required' ? 'bold' : 'normal'
+                      }}
+                    >
+                      {getFormHeaderForGridHeader(datagridType, header.label)?.label}
+                    </Typography>
+
+                    {getFormHeaderForGridHeader(datagridType, header.label)?.label === 'status' ? (
+                      <Box role="group" aria-labelledby={`form-status-desc-${index}`} sx={{ mt: 1 }}>
+                        <Typography id={`form-status-desc-${index}`} level="body-sm">
+                          {formCleanedString}
+                        </Typography>
+                        <Box role="list" aria-label="Form status categories" sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                          {formMatches?.map((category, idx) => (
+                            <Chip key={idx} role="listitem" aria-label={category} variant="soft">
+                              {category}
+                            </Chip>
+                          ))}
                         </Box>
-                      ) : (
-                        <>
-                          <Typography level="body-sm">{getFormHeaderForGridHeader(datagridType, header.label)?.explanation}</Typography>
-                          {getFormHeaderForGridHeader(datagridType, header.label)?.label.includes('date') && (
-                            <Alert startDecorator={<WarningIcon fontSize="large" />} variant="soft" color="danger" sx={{ mb: 2 }}>
-                              <Typography component="div">
-                                Please note: For date fields, accepted formats are
-                                <List marker="decimal">
-                                  <ListItem>
-                                    <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
-                                      <Typography color="primary">YYYY-MM-DD</Typography>
-                                    </Tooltip>
-                                  </ListItem>
-                                  <ListItem>
-                                    <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
-                                      <Typography color="primary">DD-MM-YYYY</Typography>
-                                    </Tooltip>
-                                  </ListItem>
-                                </List>
-                                Hover over formats to see additionally accepted separators.
-                                <br />
-                                Please ensure your dates follow one of these formats.
-                              </Typography>
-                            </Alert>
-                          )}
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
+                      </Box>
+                    ) : (
+                      <Typography level="body-sm">{getFormHeaderForGridHeader(datagridType, header.label)?.explanation}</Typography>
+                    )}
+
+                    {/* Date format alert */}
+                    {getFormHeaderForGridHeader(datagridType, header.label)?.label.includes('date') && (
+                      <Alert role="alert" startDecorator={<WarningIcon fontSize="large" aria-hidden="true" />} variant="soft" color="danger" sx={{ mt: 2 }}>
+                        <Typography component="div" level="body-sm">
+                          Please note: For date fields, accepted formats are
+                          <List marker="decimal" aria-label="Date format list">
+                            <ListItem>
+                              <Tooltip describeChild title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
+                                <Typography color="primary">YYYY-MM-DD</Typography>
+                              </Tooltip>
+                            </ListItem>
+                            <ListItem>
+                              <Tooltip describeChild title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
+                                <Typography color="primary">DD-MM-YYYY</Typography>
+                              </Tooltip>
+                            </ListItem>
+                          </List>
+                          <Typography level="body-sm" component="p" sx={{ mt: 1 }}>
+                            Hover over formats to see additionally accepted separators.
+                            <br />
+                            Please ensure your dates follow one of these formats.
+                          </Typography>
+                        </Typography>
+                      </Alert>
+                    )}
+                  </CardContent>
                 </Card>
               ))}
             </Box>

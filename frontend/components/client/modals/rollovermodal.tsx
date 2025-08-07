@@ -104,7 +104,7 @@ export default function RolloverModal(props: RolloverModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [censusValidationStatus, setCensusValidationStatus] = useState<CensusValidationStatus[]>([]);
-  const [relatedData, setRelatedData] = useState<any[]>([]);
+  // const [relatedData, setRelatedData] = useState<any[]>([]);
   const [rowSelection, setRowSelection] = useState<Record<CategoryKey, GridRowSelectionModel>>(
     () => Object.fromEntries(CATEGORY_KEYS.map(k => [k, { type: 'include', ids: new Set<GridRowId>() }])) as Record<CategoryKey, GridRowSelectionModel>
   );
@@ -127,8 +127,9 @@ export default function RolloverModal(props: RolloverModalProps) {
         selected: cats[key].customize ? cats[key].selected : data
       });
       if (key === 'personnel') {
-        const rolesResponse = await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
-        setRelatedData(await rolesResponse.json());
+        await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
+        // const rolesResponse = await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
+        // setRelatedData(await rolesResponse.json());
       }
       setLoading(false);
     } catch (error: any) {
@@ -307,7 +308,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
           <Grid container spacing={2} sx={{ flex: 1, flexDirection: 'row', width: '100%', height: '100%' }}>
             {CATEGORY_KEYS.map(key => {
-              const { displayName, idKey } = CATEGORY_MAP[key];
+              const { displayName } = CATEGORY_MAP[key];
               const cat = cats[key];
               const flagKey = FLAG_KEY_MAP[key];
 
@@ -353,7 +354,12 @@ export default function RolloverModal(props: RolloverModalProps) {
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                       <Stack direction="row" spacing={2} alignItems="center">
-                        <Checkbox checked={cat.rollover} disabled={!cat.census[flagKey]} onChange={() => updateCat(key, { rollover: !cat.rollover })} />
+                        <Checkbox
+                          aria-label={'toggle rollover checkbox'}
+                          checked={cat.rollover}
+                          disabled={!cat.census[flagKey]}
+                          onChange={() => updateCat(key, { rollover: !cat.rollover })}
+                        />
                         <Typography>Roll over {displayName.toLowerCase()} data</Typography>
                       </Stack>
 
