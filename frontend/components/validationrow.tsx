@@ -70,8 +70,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
 
   return (
     <TableRow sx={{ borderBottom: 'unset' }}>
-      <TableCell sx={{ alignSelf: 'left' }}>
-        <Tooltip title="Toggle Enabled State">
+      {/* Enabled Switch */}
+      <TableCell>
+        <Tooltip describeChild title="Toggle validation enabled state">
           <Switch
             checked={validation.isEnabled}
             onChange={async e => {
@@ -79,49 +80,48 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
               await onSaveChanges(updatedValidation);
             }}
             onClick={e => e.stopPropagation()}
+            aria-label={validation.isEnabled ? 'Disable validation' : 'Enable validation'}
           />
         </Tooltip>
       </TableCell>
 
-      <TableCell sx={{ flexGrow: 0, flexShrink: 1, flexBasis: '20%', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+      {/* Procedure Name */}
+      <TableCell component="th" sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
         {validation.procedureName?.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).join(' ')}
       </TableCell>
 
-      <TableCell sx={{ textAlign: 'left', verticalAlign: 'top' }}>
-        <List marker="disc" sx={{ padding: 0, margin: 0, listStylePosition: 'inside' }}>
+      {/* Description List */}
+      <TableCell>
+        <List aria-label="Validation description list" marker="disc" sx={{ p: 0, m: 0, listStylePosition: 'inside' }}>
           {formattedDescription?.split(';').map((snippet, index) => (
-            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', padding: 0 }}>
-              <Chip sx={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                {snippet}
-              </Chip>
+            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', p: 0 }}>
+              <Chip>{snippet}</Chip>
             </ListItem>
           ))}
         </List>
       </TableCell>
 
-      <TableCell sx={{ textAlign: 'left', verticalAlign: 'top' }}>
-        <List marker="disc" sx={{ padding: 0, margin: 0, listStylePosition: 'inside' }}>
+      {/* Criteria List */}
+      <TableCell>
+        <List aria-label="Validation criteria list" marker="disc" sx={{ p: 0, m: 0, listStylePosition: 'inside' }}>
           {validation.criteria?.split(';').map((snippet, index) => (
-            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', padding: 0 }}>
-              <Chip sx={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                {snippet}
-              </Chip>
+            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', p: 0 }}>
+              <Chip>{snippet}</Chip>
             </ListItem>
           ))}
         </List>
       </TableCell>
 
-      <TableCell
-        sx={{
-          flexGrow: 1,
-          flexShrink: 0,
-          flexBasis: '70%',
-          whiteSpace: 'normal',
-          wordBreak: 'break-word',
-          position: 'relative'
-        }}
-      >
+      {/* Definition / Editor */}
+      <TableCell sx={{ position: 'relative', whiteSpace: 'normal', wordBreak: 'break-word' }}>
         <Box
+          role={'button'}
+          tabIndex={0}
+          component={'button'}
+          onKeyDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
           onClick={e => e.stopPropagation()}
           sx={{
             width: '100%',
@@ -131,23 +131,25 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
             flexDirection: 'column'
           }}
         >
-          {expandedValidationID === validation.validationID ? (
-            <Box sx={{ width: '100%', height: '100%', flexGrow: 1 }}>
+          {open ? (
+            <Box sx={{ width: '100%', flexGrow: 1 }}>
               <CodeEditor
                 value={scriptContent ?? ''}
-                height={'auto'}
+                height="auto"
                 setValue={debouncedSetScriptContent}
                 schemaDetails={memoizedSchemaDetails}
                 isDarkMode={isDarkMode}
                 readOnly={!isEditing}
+                aria-label="Validation script editor"
               />
             </Box>
           ) : (
             <Textarea
               minRows={1}
               maxRows={3}
-              value={validation.definition!.replace(/\${(.*?)}/g, (_match: any, p1: string) => String(replacements[p1 as keyof typeof replacements] ?? ''))}
+              value={validation.definition!.replace(/\${(.*?)}/g, (_match, p1: string) => String(replacements[p1 as keyof typeof replacements] ?? ''))}
               disabled
+              aria-label="Validation definition"
               sx={{
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -159,30 +161,36 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
           )}
         </Box>
 
-        <Box sx={{ position: 'absolute', bottom: '4px', right: '4px' }}>
-          <IconButton onClick={() => handleExpandClick(validation.validationID!)} size="sm">
-            {expandedValidationID === validation.validationID ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+        {/* Expand/Collapse Button */}
+        <Box sx={{ position: 'absolute', bottom: 4, right: 4 }}>
+          <IconButton
+            onClick={() => handleExpandClick(validation.validationID!)}
+            size="sm"
+            aria-label={open ? 'Collapse validation details' : 'Expand validation details'}
+          >
+            {open ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
         </Box>
       </TableCell>
 
-      <TableCell sx={{ alignSelf: 'center', whiteSpace: 'normal', wordBreak: 'break-word', width: '10%' }}>
+      {/* Action Buttons */}
+      <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', width: '10%' }}>
         {isEditing ? (
           <>
-            <Tooltip title="Save Changes">
-              <IconButton variant="solid" onClick={handleSaveChanges}>
+            <Tooltip describeChild title="Save changes">
+              <IconButton variant="solid" onClick={handleSaveChanges} aria-label="Save validation changes">
                 <Save />
               </IconButton>
             </Tooltip>
-            <Tooltip title="Cancel Changes">
-              <IconButton variant="solid" onClick={handleCancelChanges}>
+            <Tooltip describeChild title="Cancel changes">
+              <IconButton variant="solid" onClick={handleCancelChanges} aria-label="Cancel validation changes">
                 <Cancel />
               </IconButton>
             </Tooltip>
           </>
         ) : (
-          <Tooltip title="Edit Validation">
-            <IconButton variant="solid" onClick={handleEditClick}>
+          <Tooltip describeChild title="Edit validation">
+            <IconButton variant="solid" onClick={handleEditClick} aria-label="Edit validation">
               <Edit />
             </IconButton>
           </Tooltip>

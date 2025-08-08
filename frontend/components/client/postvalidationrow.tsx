@@ -75,11 +75,15 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
         </TableCell>
-        <TableCell onClick={() => handleSelectResult(postValidation)} style={{ cursor: 'pointer', padding: '0', textAlign: 'center' }}>
+        <TableCell
+          aria-label={'results column cell'}
+          onClick={() => handleSelectResult(postValidation)}
+          style={{ cursor: 'pointer', padding: '0', textAlign: 'center' }}
+        >
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Checkbox
+              aria-label={'select postvalidation results'}
               uncheckedIcon={<Done />}
-              label={''}
               checked={selectedResults.includes(postValidation)}
               slotProps={{
                 root: ({ checked, focusVisible }) => ({
@@ -131,6 +135,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
               />
             ) : (
               <Textarea
+                aria-label={'display for postvalidation query definition'}
                 minRows={1}
                 maxRows={3}
                 value={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
@@ -173,7 +178,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
       </TableRow>
 
       <Collapse in={expanded} timeout="auto" unmountOnExit>
-        <TableRow sx={{ height: 'auto' }}>
+        <TableRow aria-label={'row for last run results display'} sx={{ height: 'auto' }}>
           <TableCell colSpan={7} sx={{ height: 'auto', border: 'none' }}>
             <Box
               sx={{

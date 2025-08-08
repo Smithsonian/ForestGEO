@@ -70,6 +70,7 @@
     "codemirror": "^6.0.2",
     "css-loader": "^7.1.2",
     "date-fns": "^4.1.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "fast-levenshtein": "^3.0.0",
     "framer-motion": "^12.23.0",
     "idb": "^8.0.3",
@@ -98,7 +99,6 @@
     "style-loader": "^4.0.0",
     "swr": "^2.3.4",
     "tailwind-variants": "^1.0.0",
-    "typescript": "^5.8.3",
     "uuid": "^11.1.0",
     "webpack": "^5.100.2"
   },

@@ -160,7 +160,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               placeholder="Select a Quadrat"
               name={currentQuadrat?.quadratName ?? 'None'}
               required
-              autoFocus
               size={'md'}
               value={currentQuadrat?.quadratName ?? ''}
               renderValue={renderQuadratValue}
@@ -172,7 +171,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             >
               <Option value={''}>None</Option>
               {quadratList?.map(item => (
-                <Option value={item?.quadratName} key={item?.quadratName}>
+                <Option aria-label={`quadrat name option for ${item?.quadratName}`} value={item?.quadratName} key={item?.quadratName}>
                   <Box
                     sx={{
                       display: 'flex',

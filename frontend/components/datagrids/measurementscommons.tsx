@@ -99,7 +99,17 @@ export function EditMeasurements({ params }: { params: GridRenderEditCellParams 
     params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(value) === 0 ? null : parseFloat(formattedValue) });
   };
 
-  return <Input autoFocus value={value} onChange={handleChange} onBlur={handleBlur} size="sm" sx={{ width: '100%', height: '100%' }} type="text" />;
+  return (
+    <Input
+      aria-label={'edit measurements input'}
+      value={value}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      size="sm"
+      sx={{ width: '100%', height: '100%' }}
+      type="text"
+    />
+  );
 }
 
 export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
@@ -146,7 +156,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
-  const [usingQuery, setUsingQuery] = useState('');
+  // const [usingQuery, setUsingQuery] = useState('');
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
   // visibility
@@ -624,7 +634,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
         setRows(data.output);
         setRowCount(data.totalCount);
-        setUsingQuery(data.finishedQuery);
+        // setUsingQuery(data.finishedQuery);
 
         if (isNewRowAdded && pageToFetch === newLastPage) {
           await handleAddNewRow();
@@ -903,7 +913,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           case 'new recruit':
             treeState = (
               <Tooltip title={'New Recruit'} arrow>
-                <Avatar size="sm" variant="soft" color="primary">
+                <Avatar size="sm" variant="soft" color="primary" alt={'new recruit avatar'}>
                   <Grass />
                 </Avatar>
               </Tooltip>
@@ -912,7 +922,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           case 'multi stem':
             treeState = (
               <Tooltip title={'Multi Stem'} arrow>
-                <Avatar size="sm" variant="soft" color="warning">
+                <Avatar size="sm" variant="soft" color="warning" alt={'multi stem avatar'}>
                   <CallSplit />
                 </Avatar>
               </Tooltip>
@@ -921,7 +931,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           case 'old tree':
             treeState = (
               <Tooltip title={'Old Tree'} arrow>
-                <Avatar size={'sm'} variant={'soft'} color={'neutral'}>
+                <Avatar size={'sm'} variant={'soft'} color={'neutral'} alt={'old tree avatar'}>
                   <Forest />
                 </Avatar>
               </Tooltip>
