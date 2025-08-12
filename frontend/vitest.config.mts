@@ -9,6 +9,31 @@ export default defineConfig({
     setupFiles: ['setup.ts'],
     restoreMocks: true,
     clearMocks: true,
-    mockReset: true
+    mockReset: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/**',
+        'build/**',
+        'public/**',
+        'cypress/**',
+        '**/*.d.ts',
+        '**/*.config.*',
+        'next-env.d.ts',
+        'sampledata/**',
+        'sqlscripting/**',
+        'documentation/**'
+      ],
+      include: ['app/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', 'config/**/*.{ts,tsx}', 'testing/**/*.ts'],
+      thresholds: {
+        global: {
+          branches: 60,
+          functions: 60,
+          lines: 60,
+          statements: 60
+        }
+      }
+    }
   }
 });

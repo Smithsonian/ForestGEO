@@ -48,12 +48,12 @@ function pushFetchOk(json: any, init: Partial<Response> = {}) {
     async () =>
       new Response(JSON.stringify(json), {
         status: init.status ?? 200,
-        headers: { 'content-type': 'application/json', ...(init.headers ?? {}) }
+        headers: new Headers({ 'content-type': 'application/json', ...((init.headers as unknown as Record<string, string>) ?? {}) })
       })
   );
 }
 function pushFetchFail(status = 500, body: any = { error: 'fail' }) {
-  fetchQueue.push(async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
+  fetchQueue.push(async () => new Response(JSON.stringify(body), { status, headers: new Headers({ 'content-type': 'application/json' }) }));
 }
 const fetchMock = vi.fn(async (..._args: any[]) => {
   const next = fetchQueue.shift();
@@ -78,9 +78,9 @@ if (!(globalThis as any).fetch) {
 type AnyObj = Record<string, any>;
 let lastConfig: AnyObj | null = null;
 
-const handlers: { GET: RouteHandler; POST: RouteHandler } = {
-  GET: vi.fn<RouteHandler>(),
-  POST: vi.fn<RouteHandler>()
+const handlers = {
+  GET: vi.fn(),
+  POST: vi.fn()
 };
 
 const authFn = vi.fn(async (..._args: any[]) => ({}));
@@ -114,7 +114,7 @@ function subrouteFrom(req: Request, ctx?: { params?: { nextauth?: string[] } }):
 }
 
 function installDefaultHandlers() {
-  handlers.GET.mockImplementation(async (req: Request, ctx?: { params?: { nextauth?: string[] } }) => {
+  (handlers.GET as any).mockImplementation(async (req: Request, ctx?: { params?: { nextauth?: string[] } }) => {
     const sub = subrouteFrom(req, ctx);
 
     if (sub === 'session') {
@@ -142,7 +142,7 @@ function installDefaultHandlers() {
     return new Response(null, { status: 200 });
   });
 
-  handlers.POST.mockImplementation(async (req: Request, ctx?: { params?: { nextauth?: string[] } }) => {
+  (handlers.POST as any).mockImplementation(async (req: Request, ctx?: { params?: { nextauth?: string[] } }) => {
     const sub = subrouteFrom(req, ctx);
 
     // minimal realism for /signin: return a normal 200 (or 302 if you prefer)
@@ -155,8 +155,8 @@ function installDefaultHandlers() {
 
 beforeEach(() => {
   authFn.mockClear();
-  handlers.GET.mockReset();
-  handlers.POST.mockReset();
+  (handlers.GET as any).mockReset();
+  (handlers.POST as any).mockReset();
   signIn.mockClear();
   signOut.mockClear();
   submitCookie.mockClear();

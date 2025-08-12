@@ -1,4 +1,24 @@
-// testing/mockstesting/db-mocks.spec.ts
+/**
+ * @fileoverview Test suite for database mocking infrastructure.
+ *
+ * This comprehensive test suite validates the database mocking system that enables
+ * unit testing of database-dependent code without actual database connections.
+ *
+ * Key components tested:
+ * - PoolMonitor singleton behavior and connection management
+ * - MySQL2 query/execute method mocking with FIFO queue system
+ * - Error propagation and handling in database operations
+ * - Connection lifecycle management (acquire, release, ping)
+ * - Environment variable defaults for test configuration
+ *
+ * The mocking system allows tests to:
+ * 1. Queue predefined responses for database calls
+ * 2. Simulate database errors and connection failures
+ * 3. Verify SQL queries and parameters without database roundtrips
+ * 4. Test transaction behavior and error recovery
+ *
+ * @see /testing/db-mocks.ts
+ */
 import { beforeEach, describe, expect, it } from 'vitest';
 
 // 1) Turn on the mocks from your file under test
@@ -118,7 +138,6 @@ describe('db-mocks wiring (PoolMonitor + mysql2 echo + queues)', () => {
 
   it('chalk + logger are mocked quietly', async () => {
     const chalk = await import('chalk');
-    // @ts-expect-error our mock uses String passthroughs
     expect(chalk.default.red('x')).toBe('x');
 
     const logger = (await import('@/ailogger')).default as any;

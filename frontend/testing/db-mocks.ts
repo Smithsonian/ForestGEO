@@ -70,14 +70,20 @@ class MockConnection implements Partial<PoolConnection> {
     return;
   }
 
-  async query(sql: string, params?: any[]): Promise<[any, any]> {
+  async query(sql: string | any, params?: any): Promise<[any, any]> {
     if (queryQueue.length) return queryQueue.shift()!();
     // Default: echo shape similar to mysql2
+    if (typeof sql === 'string') {
+      return [{ ok: true, sql, params }, undefined];
+    }
     return [{ ok: true, sql, params }, undefined];
   }
 
-  async execute(sql: string, params?: any[]): Promise<[any, any]> {
+  async execute(sql: string | any, params?: any): Promise<[any, any]> {
     if (executeQueue.length) return executeQueue.shift()!();
+    if (typeof sql === 'string') {
+      return [{ ok: true, sql, params }, undefined];
+    }
     return [{ ok: true, sql, params }, undefined];
   }
 

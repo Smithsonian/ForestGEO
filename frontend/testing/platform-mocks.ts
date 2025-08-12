@@ -1,7 +1,5 @@
 // test/platform-mocks.ts
 import { beforeEach, vi } from 'vitest';
-// import the helper directly from the mocked module
-import { __cookie } from 'next/headers';
 
 /* -------------------------------------------------
  * 1) Mock Next.js `cookies()` (server-only API)
@@ -30,6 +28,15 @@ function __cookieClear() {
   jar.clear();
 }
 
+// Export the cookie helpers
+export const __cookie = {
+  set: __cookieSet,
+  get: __cookieGet,
+  del: __cookieDelete,
+  all: __cookieAll,
+  clear: __cookieClear
+};
+
 vi.mock('next/headers', () => {
   // Minimal ‘RequestCookies’-like object with get/set/delete
   const cookieBag = {
@@ -43,15 +50,7 @@ vi.mock('next/headers', () => {
     // cookies() can be awaited in your code. Support both sync & await usage.
     cookies: async () => cookieBag,
     // optional: headers() stub if anything else imports it
-    headers: () => new Map<string, string>(),
-    // test helpers
-    __cookie: {
-      set: __cookieSet,
-      get: __cookieGet,
-      del: __cookieDelete,
-      all: __cookieAll,
-      clear: __cookieClear
-    }
+    headers: () => new Map<string, string>()
   };
 });
 
@@ -73,7 +72,7 @@ vi.mock('@/config/sqlrdsdefinitions/personnel', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/core', () => emptyModule);
 vi.mock('@/config/sqlrdsdefinitions/admin', () => emptyModule);
 // datamapper also imports a relative admin re-export:
-vi.mock('./sqlrdsdefinitions/admin', () => emptyModule, { virtual: true });
+vi.mock('./sqlrdsdefinitions/admin', () => emptyModule);
 
 /* -------------------------------------------------
  * 3) Nice-to-have: silent chalk + logger if referenced
