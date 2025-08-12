@@ -5,7 +5,8 @@ import { vi, beforeEach, describe, expect, it } from 'vitest';
 import '@/testing/platform-mocks';
 
 // 2) Pull in the mocked helpers directly from next/headers
-import { __cookie, cookies, headers } from 'next/headers';
+import { __cookie } from '@/testing/platform-mocks';
+import { cookies, headers } from 'next/headers';
 
 describe('platform-mocks wiring', () => {
   beforeEach(() => {
@@ -47,8 +48,8 @@ describe('platform-mocks wiring', () => {
     expect(a.get('x')).toBeUndefined();
   });
 
-  it('headers(): returns a Map-like object (stubbed)', () => {
-    const h = headers(); // from mock
+  it('headers(): returns a Map-like object (stubbed)', async () => {
+    const h = await headers(); // from mock
     expect(h).toBeInstanceOf(Map);
     expect(typeof h.get).toBe('function');
   });
@@ -67,7 +68,6 @@ describe('platform-mocks wiring', () => {
 
   it('chalk + logger are mocked quietly', async () => {
     const chalk = await import('chalk');
-    // @ts-expect-error: mock uses String passthroughs
     expect(chalk.default.red('hi')).toBe('hi');
 
     const logger = (await import('@/ailogger')).default as any;

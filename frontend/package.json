@@ -119,7 +119,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.10",
     "@vitejs/plugin-react": "^5.0.0",
-    "cypress": "^14.5.1",
+    "cypress": "^14.5.4",
     "eslint": "^9.30.1",
     "eslint-config-next": "^15.3.5",
     "eslint-config-prettier": "^10.1.5",

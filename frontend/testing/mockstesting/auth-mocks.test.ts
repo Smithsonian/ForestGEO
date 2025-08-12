@@ -30,8 +30,21 @@ describe('NextAuth route (App Router compliant)', () => {
     expect(cfg?.providers?.length ?? 0).toBeGreaterThan(0);
     expect(JSON.stringify(cfg?.providers)).toContain('microsoft-entra-id');
 
-    // Queue the fetch used by your session callback
-    __auth.pushFetchOk({ user: { id: 'abc', email: 'x@y.z' }, roles: ['admin'] });
+    // Queue the fetch used by your session callback with complete site data
+    __auth.pushFetchOk({ 
+      user: { id: 'abc', email: 'x@y.z' }, 
+      roles: ['admin'],
+      userStatus: 'active',
+      allowedSites: [
+        { siteName: 'Site A', siteID: 1, locationName: 'Location A' },
+        { siteName: 'Site B', siteID: 2, locationName: 'Location B' }
+      ],
+      allSites: [
+        { siteName: 'Site A', siteID: 1, locationName: 'Location A' },
+        { siteName: 'Site B', siteID: 2, locationName: 'Location B' },
+        { siteName: 'Site C', siteID: 3, locationName: 'Location C' }
+      ]
+    });
 
     // Exercise /session via params
     const req = new Request('http://localhost/api/auth/session', { method: 'GET' });

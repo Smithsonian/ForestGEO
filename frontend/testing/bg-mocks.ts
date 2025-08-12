@@ -26,7 +26,7 @@ vi.mock('@/ailogger', () => {
 // CSS import used by macros.ts
 // ---------------------------
 // Prevent runtime errors when importing CSS in Node test env
-vi.mock('@/styles/customtablesettings.css', () => ({}), { virtual: true });
+vi.mock('@/styles/customtablesettings.css', () => ({}));
 
 // ---------------------------
 // react-dropzone types import
