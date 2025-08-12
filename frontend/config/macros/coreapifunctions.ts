@@ -7,7 +7,9 @@ import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
+import { getCookie } from '@/app/actions/cookiemanager';
+import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
+import ailogger from '@/ailogger';
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -42,7 +44,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     else {
       if (dataType === 'measurementssummary') {
         const mappedOldRow = MapperFactory.getMapper<any, any>('measurementssummary').demapData([oldRow])[0];
-        console.log('demapped old row: ', mappedOldRow);
         const mappedUpdatedRow = MapperFactory.getMapper<any, any>('measurementssummary').demapData([
           {
             ...Object.fromEntries(Object.entries(oldRow).filter(([, val]) => val !== undefined && val !== null)),
@@ -163,57 +164,29 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
         }
 
-        /*
-        const fieldGroups = {
-          coremeasurements: ['measuredDBH', 'measuredHOM', 'measurementDate'],
-          quadrats: ['quadratName'],
-          trees: ['treeTag'],
-          stems: ['stemTag', 'stemLocalX', 'stemLocalY'],
-          species: ['speciesName', 'subspeciesName', 'speciesCode']
-        };
-
-        // Initialize a flag for changes
-        let changesFound = false;
-
-        // Helper function to handle updates
-        const handleUpdate = async (groupName: keyof typeof fieldGroups, tableName: string, idColumn: string, idValue: any) => {
-          console.log('updating: ', groupName);
-          const matchingFields = Object.keys(updatedFields).reduce(
-            (acc, key) => {
-              if (fieldGroups[groupName].includes(key)) {
-                acc[key] = updatedFields[key];
-              }
-              return acc;
-            },
-            {} as Partial<typeof updatedFields>
-          );
-
-          if (Object.keys(matchingFields).length > 0) {
-            changesFound = true;
-            if (groupName === 'stems') {
-              // need to correct for key matching
-              if (matchingFields.stemLocalX) {
-                matchingFields.localX = matchingFields.stemLocalX;
-                delete matchingFields.stemLocalX;
-              }
-              if (matchingFields.stemLocalY) {
-                matchingFields.localY = matchingFields.stemLocalY;
-                delete matchingFields.stemLocalY;
-              }
+        if (updatedFields.Attributes) {
+          const parsedCodes = updatedFields.Attributes.split(';')
+            .map((code: string) => code.trim())
+            .filter(Boolean);
+          // clear existing connections
+          await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID]);
+          if (parsedCodes.length === 0) {
+            ailogger.error('No valid attribute codes found:', updatedFields.Attributes);
+          } else {
+            for (const code of parsedCodes) {
+              await handleUpsert<CMAttributesResult>(
+                connectionManager,
+                schema,
+                'cmattributes',
+                {
+                  CoreMeasurementID: mappedOldRow.CoreMeasurementID,
+                  Code: code
+                },
+                'CMAID'
+              );
             }
-            const demappedData = MapperFactory.getMapper<any, any>(groupName).demapData([matchingFields])[0];
-            const query = format('UPDATE ?? SET ? WHERE ?? = ?', [`${schema}.${tableName}`, demappedData, idColumn, idValue]);
-            await connectionManager.executeQuery(query);
           }
-        };
-
-        // Process each group
-        await handleUpdate('coremeasurements', 'coremeasurements', 'CoreMeasurementID', coreMeasurementID);
-        await handleUpdate('quadrats', 'quadrats', 'QuadratID', quadratID);
-        await handleUpdate('trees', 'trees', 'TreeID', treeID);
-        await handleUpdate('stems', 'stems', 'StemID', stemID);
-        await handleUpdate('species', 'species', 'SpeciesID', speciesID);
-          */
+        }
 
         // Reset validation status and clear errors if changes were made
         if (changesFound) {
@@ -234,17 +207,26 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
-        let failedTrimmed, _ignored;
-        let plotTrimmed, _ignored2;
         let dataToUpdate;
+        const censusID = parseInt((await getCookie('censusID')) ?? '0');
 
         if (dataType === 'failedmeasurements') {
-          ({ Hash_ID: _ignored, ...failedTrimmed } = newRowData);
+          const { Hash_ID, ...failedTrimmed } = newRowData;
           failedTrimmed['FailureReasons'] = '';
           dataToUpdate = failedTrimmed;
         } else if (dataType === 'plots') {
-          ({ NumQuadrats: _ignored2, ...plotTrimmed } = newRowData);
+          const { NumQuadrats, ...plotTrimmed } = newRowData;
           dataToUpdate = plotTrimmed;
+        } else if (['attributes', 'quadrats', 'species'].includes(dataType)) {
+          const { CensusID, ...specTrimmed } = newRowData;
+          dataToUpdate = specTrimmed;
+        } else if (dataType === 'personnel') {
+          const { CensusActive, ...personnelTrimmed } = newRowData;
+          const query = CensusActive
+            ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
+            : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
+          await connectionManager.executeQuery(query, [censusID, gridIDKey]);
+          dataToUpdate = personnelTrimmed;
         } else dataToUpdate = remainingProperties;
 
         const updateQuery = format(
@@ -253,8 +235,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
            WHERE ?? = ?`,
           [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
-
-        // Execute the UPDATE query
+        // set session var in case, connect to original transaction ID
+        await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
         // For non-view tables, standardize the response format
@@ -314,7 +296,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       );
 
       // species handler
-      const { id: newSpeciesID } = await handleUpsert<SpeciesResult>(
+      await handleUpsert<SpeciesResult>(
         connectionManager,
         schema,
         'species',
@@ -332,50 +314,23 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
         },
         'SpeciesID'
       );
-
-      // associate with census:
-      await handleUpsert<CensusSpeciesResult>(
-        connectionManager,
-        schema,
-        'censusspecies',
-        {
-          CensusID: censusID,
-          SpeciesID: newSpeciesID
-        },
-        'CSID'
-      );
     } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
       if (params.dataType === 'attributes') {
-        const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
+        const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
         await connectionManager.executeQuery(insertQuery);
-        const caQuery = format(`INSERT IGNORE INTO ?? SET ?`, [
-          `${schema}.${params.dataType}`,
-          {
-            CensusID: censusID,
-            [demappedGridID]: newRowData[demappedGridID]
-          }
-        ]);
-        const results = await connectionManager.executeQuery(caQuery);
-        if (results.length === 0) throw new Error('Error inserting into censusattribute');
+      } else if (params.dataType === 'personnel') {
+        const insertQuery = `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`;
+        await connectionManager.executeQuery(insertQuery, [censusID ?? 0, newRowData.PersonnelID]);
       } else {
         const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData; // separate out PK
-        const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
-        const results = await connectionManager.executeQuery(insertQuery);
-        insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
-        const cqQuery = format(`INSERT IGNORE INTO ?? SET ?`, [
-          `${schema}.census${params.dataType}`,
-          {
-            CensusID: censusID,
-            [demappedGridID]: insertIDs[params.dataType]
-          }
-        ]);
-        const cqResults = await connectionManager.executeQuery(cqQuery);
-        if (cqResults.length === 0) throw new Error(`Error inserting into census junction table for ${params.dataType}`);
+        const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
+        await connectionManager.executeQuery(insertQuery);
       }
     } else {
       // Handle all other cases
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
+      if (params.dataType === 'personnel') delete newRowData.CensusActive;
       let insertQuery = '';
       if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
@@ -401,29 +356,24 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
+    const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
     // census-correlated tables need cleared first
-    if (['attributes', 'quadrats', 'species', 'personnel'].includes(params.dataType)) {
-      const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.census${params.dataType}`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(qDeleteQuery);
-      const softDelete = format(`UPDATE ?? SET IsActive = FALSE WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(softDelete);
-    } else if (params.dataType === 'alltaxonomiesview') {
+    if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
-      const softDelete = format(`UPDATE ?? SET IsActive = FALSE WHERE ?? = ?`, [`${schema}.${params.dataType}`, 'SpeciesID', SpeciesID]);
-      await connectionManager.executeQuery(softDelete);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
     } else if (params.dataType === 'measurementssummary') {
       // start with surrounding data
       await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
       await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
       // finally, perform core SOFT deletion
-      await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET IsActive = FALSE WHERE ${demappedGridID} = ${gridIDKey}`);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
     } else {
-      const softDelete = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, { IsActive: false }, demappedGridID, gridIDKey]);
+      const softDelete = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
       await connectionManager.executeQuery(softDelete);
     }
     await connectionManager.commitTransaction(transactionID ?? '');

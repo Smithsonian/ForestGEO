@@ -21,7 +21,23 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { usePathname, useRouter } from 'next/navigation';
-import { Badge, IconButton, Menu, MenuItem, SelectOption, Stack, Tooltip } from '@mui/joy';
+import {
+  Badge,
+  Button,
+  Chip,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  Menu,
+  MenuItem,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  SelectOption,
+  Stack,
+  Tooltip
+} from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -34,9 +50,6 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-
-import RolloverModal from './client/modals/rollovermodal';
-import RolloverStemsModal from './client/modals/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, MoreHoriz } from '@mui/icons-material';
@@ -148,9 +161,6 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
-  const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
-
   const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -161,6 +171,7 @@ export default function Sidebar(props: SidebarProps) {
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
+  const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
@@ -238,50 +249,6 @@ export default function Sidebar(props: SidebarProps) {
       resizeObserver.disconnect();
     };
   }, [currentSite, currentPlot, currentCensus]);
-  const handleOpenNewCensus = async () => {
-    if (currentSite === undefined || currentSite.schemaName === undefined || currentPlot === undefined || currentPlot.plotID === undefined)
-      throw new Error('new census start date was not set OR plot is undefined');
-    setIsRolloverModalOpen(true);
-  };
-
-  const handleConfirmRollover = async (rolledOverPersonnel: boolean, rolledOverQuadrats: boolean) => {
-    if (!rolledOverPersonnel && !rolledOverQuadrats) {
-      // didn't roll over anything, need to create a new census still:
-      // createdCensusID is undefined here
-      const highestPlotCensusNumber =
-        censusListContext && censusListContext.length > 0
-          ? censusListContext.reduce(
-              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-              censusListContext[0]?.plotCensusNumber ?? 0
-            )
-          : 0;
-
-      const mapper = new OrgCensusToCensusResultMapper();
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) throw new Error('census creation failure');
-      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
-    } else {
-      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
-      // if (rolledOverQuadrats) { // passing census list loading trigger to stems rollover function:
-      //   setIsRolloverStemsModalOpen(true);
-      // } else setCensusListLoaded(false);
-      // rollover of stems functionality created from testing component initially used to test personnel/quadrat rollover
-      // (seemed a shame to just delete it when I could just rename the references stems)
-      // will be added in the event that it is requested
-    }
-    setIsRolloverModalOpen(false);
-    setCensusListLoaded(false);
-  };
-
-  const handleConfirmStemsRollover = async (rolledOverStems: boolean) => {
-    // assumption: new census has already been created, BUT census list has not been reloaded
-    // stored in createdCensusID
-    // additional note: dialog handles actual rollover process. do not need to perform any API calls here.
-    // --> stem rollover will not be triggered if quadrats are NOT rolled over
-    setIsRolloverStemsModalOpen(false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    setCensusListLoaded(false);
-  };
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (siteDispatch) {
@@ -304,7 +271,6 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
-      console.log(`await census dispatch completed for ${selectedCensus}`);
     }
   };
 
@@ -318,16 +284,21 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedSite ? (
-          <Stack direction={'column'} alignItems={'start'}>
-            <Typography level="body-lg" className="sidebar-item" data-testid={'selected-site-name'}>{`Site: ${selectedSite?.siteName}`}</Typography>
-            <Stack direction={'column'} alignItems={'start'}>
+          <Stack direction={'column'} alignItems={'start'} aria-label={'site value render stack'}>
+            <Typography
+              id={'site-selected'}
+              level="body-lg"
+              className="sidebar-item"
+              data-testid={'selected-site-name'}
+            >{`Site: ${selectedSite?.siteName}`}</Typography>
+            <Stack direction={'column'} alignItems={'start'} aria-labelledby={'site-selected'}>
               <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
                 &mdash; Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
         ) : (
-          <Typography level="body-lg" className="sidebar-item" data-testid={'pending-site-select'}>
+          <Typography aria-label={'site select prompt'} level="body-lg" className="sidebar-item" data-testid={'pending-site-select'}>
             Select a Site
           </Typography>
         )}
@@ -346,16 +317,16 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedPlot ? (
-          <Stack direction="column" alignItems="start">
+          <Stack direction="column" alignItems="start" aria-label={'plot value render stack'}>
             <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
+            <Box aria-label={'selected plot information'} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
                 &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
         ) : (
-          <Typography className="sidebar-item" data-testid={'pending-plot-select'}>
+          <Typography aria-label={'select a plot'} className="sidebar-item" data-testid={'pending-plot-select'}>
             Select a Plot
           </Typography>
         )}
@@ -383,15 +354,15 @@ export default function Sidebar(props: SidebarProps) {
 
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
-      <>
+      <React.Fragment aria-label={'census record information'}>
         {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
         {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
-      </>
+      </React.Fragment>
     );
 
     return (
-      <Stack direction={'column'} alignItems={'start'}>
+      <Stack direction={'column'} alignItems={'start'} id={'selected-census-stack'}>
         <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
           {`Census: ${selectedCensus?.plotCensusNumber}`}
         </Typography>
@@ -423,7 +394,6 @@ export default function Sidebar(props: SidebarProps) {
       className="census-select sidebar-item"
       name="None"
       required
-      autoFocus
       size={'md'}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
@@ -443,11 +413,11 @@ export default function Sidebar(props: SidebarProps) {
         }
       }}
     >
-      <ListItem
-        onMouseDown={event => event.preventDefault()} // Prevents closing the dropdown
-        onClick={event => event.stopPropagation()} // Prevents any response
-      >
-        <Box
+      <ListItem>
+        <ListItemButton
+          aria-label="render census list item"
+          onMouseDown={e => e.preventDefault()} // still works
+          onClick={e => e.stopPropagation()} // still works
           sx={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -459,23 +429,54 @@ export default function Sidebar(props: SidebarProps) {
             Add New Census
           </Typography>
           <IconButton
+            aria-label={'add new census icon button'}
             size="sm"
             color="primary"
             data-testid={'add-new-census-button'}
-            onClick={event => {
+            onClick={async event => {
               event.stopPropagation();
-              handleOpenNewCensus();
+              const highestPlotCensusNumber =
+                censusListContext && censusListContext.length > 0
+                  ? censusListContext.reduce(
+                      (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
+                      censusListContext[0]?.plotCensusNumber ?? 0
+                    )
+                  : 0;
+
+              const mapper = new OrgCensusToCensusResultMapper();
+              const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+              if (!newCensusID) throw new Error('census creation failure');
+              await new Promise(resolve => setTimeout(resolve, 300)); // debounce
+
+              await Promise.all(
+                ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+                  await fetch(
+                    `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ incoming: {} })
+                    }
+                  );
+                })
+              );
+              setCensusListLoaded(false);
             }}
           >
             <AddIcon />
           </IconButton>
-        </Box>
+        </ListItemButton>
       </ListItem>
       <Divider orientation={'horizontal'} sx={{ my: 1 }} />
       {censusListContext
         ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
         .map(item => (
-          <Option data-testid={'census-selection-option'} key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
+          <Option
+            aria-label={'census list context item'}
+            data-testid={'census-selection-option'}
+            key={item?.plotCensusNumber}
+            value={item?.plotCensusNumber?.toString()}
+          >
             <Box
               sx={{
                 display: 'flex',
@@ -512,8 +513,7 @@ export default function Sidebar(props: SidebarProps) {
                 variant={'soft'}
                 color={'danger'}
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
-                  setManualReset(true);
+                  setIsClearDropdownOpen(true);
                 }}
                 disabled={(item?.plotCensusNumber ?? 0) < censusListContext?.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)}
               >
@@ -531,7 +531,6 @@ export default function Sidebar(props: SidebarProps) {
       className="plot-selection"
       name="None"
       required
-      autoFocus
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
@@ -551,7 +550,7 @@ export default function Sidebar(props: SidebarProps) {
       }}
     >
       {plotListContext?.map(item => (
-        <Option value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
+        <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
           <Box
             sx={{
               display: 'flex',
@@ -620,7 +619,6 @@ export default function Sidebar(props: SidebarProps) {
         placeholder="Select a Site"
         name="None"
         required
-        autoFocus
         sx={{ marginRight: '1em' }}
         size={'md'}
         renderValue={renderSiteValue}
@@ -753,7 +751,7 @@ export default function Sidebar(props: SidebarProps) {
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
-                <Avatar sx={{ marginRight: 1 }}>
+                <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
                 <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
@@ -761,7 +759,7 @@ export default function Sidebar(props: SidebarProps) {
               {currentSite !== undefined && (
                 <>
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
-                    <Avatar size={'sm'} sx={{ marginRight: 1 }}>
+                    <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
                       <PlotLogo />
                     </Avatar>
                     <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderPlotOptions()}</Box>
@@ -769,7 +767,7 @@ export default function Sidebar(props: SidebarProps) {
                   {currentPlot !== undefined && (
                     <>
                       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'census-selection-box'}>
-                        <Avatar size={'sm'} sx={{ marginRight: 1 }}>
+                        <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
                         <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderCensusOptions()}</Box>
@@ -812,7 +810,6 @@ export default function Sidebar(props: SidebarProps) {
                   {siteConfigNav.map((item, index: number) => {
                     const Icon = item.icon;
                     const { toggle, setToggle } = toggleArray[index];
-                    const delay = index * 200;
 
                     const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
                       if (isDataIncomplete) {
@@ -939,9 +936,8 @@ export default function Sidebar(props: SidebarProps) {
                               // isOpen
                             >
                               <List size={'md'}>
-                                {item.expanded.map((link, subIndex) => {
+                                {item.expanded.map((link, _subIndex) => {
                                   const SubIcon = link.icon;
-                                  const delay = (subIndex + 1) * 200;
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
@@ -1034,8 +1030,6 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </Box>
           </Box>
-          <RolloverModal open={isRolloverModalOpen} onClose={() => setIsRolloverModalOpen(false)} onConfirm={handleConfirmRollover} />
-          <RolloverStemsModal open={isRolloverStemsModalOpen} onClose={() => setIsRolloverStemsModalOpen(false)} onConfirm={handleConfirmStemsRollover} />
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
@@ -1064,6 +1058,48 @@ export default function Sidebar(props: SidebarProps) {
             setManualReset={setManualReset}
           />
         )}
+        <Modal open={isClearDropdownOpen} onClose={() => setIsClearDropdownOpen(!isClearDropdownOpen)}>
+          <ModalDialog role={'alertdialog'}>
+            <ModalClose />
+            <DialogTitle>Delete this census?</DialogTitle>
+            <DialogContent>
+              Please choose from the following options:
+              <Stack direction={'row'}>
+                a<Chip>Partial Deletion</Chip>
+                <Typography>
+                  : Delete <strong>only measurements</strong>
+                </Typography>
+              </Stack>
+              <Stack direction={'row'}>
+                <Chip>Full Deletion</Chip>
+                <Typography>
+                  : Delete <strong>measurements and fixed data</strong>
+                </Typography>
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={async () => {
+                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                  setIsClearDropdownOpen(!isClearDropdownOpen);
+                  setManualReset(true);
+                }}
+              >
+                Partial Deletion
+              </Button>
+              <Button
+                onClick={async () => {
+                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                  setIsClearDropdownOpen(!isClearDropdownOpen);
+                  setManualReset(true);
+                }}
+              >
+                Full Deletion
+              </Button>
+              <Button onClick={() => setIsClearDropdownOpen(false)}>Cancel</Button>
+            </DialogActions>
+          </ModalDialog>
+        </Modal>
       </Stack>
     </>
   );

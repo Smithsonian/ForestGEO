@@ -1,8 +1,9 @@
+// datagridelements.tsx
 'use client';
 
-import { EditToolbarCustomProps, RowControl } from '@/config/datagridhelpers';
+import { ExtendedGridFilterModel, RowControl, VisibleFilter } from '@/config/datagridhelpers';
 import {
-  Avatar,
+  Badge,
   Box,
   Button,
   Chip,
@@ -26,13 +27,11 @@ import {
   GridColDef,
   GridFilterModel,
   GridSlotProps,
-  GridToolbarProps,
   QuickFilter,
   QuickFilterClear,
   QuickFilterControl,
   Toolbar,
   ToolbarButton,
-  ToolbarPropsOverrides,
   useGridApiContext
 } from '@mui/x-data-grid';
 import { ClearIcon } from '@mui/x-date-pickers/icons';
@@ -45,11 +44,11 @@ import CheckIcon from '@mui/icons-material/Check';
 import CancelPresentationIcon from '@mui/icons-material/CancelPresentation';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import TableRowsIcons from '@mui/icons-material/TableRows';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { CallSplit, Forest, Grass, RuleOutlined, UnfoldLess, UnfoldMore } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -57,14 +56,6 @@ export function debounce<T extends (...args: any[]) => void>(fn: T, delay: numbe
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => fn(...args), delay);
   }) as T;
-}
-
-export type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
-
-export type VisibleFilter = 'valid' | 'errors' | 'pending';
-
-export interface ExtendedGridFilterModel extends GridFilterModel {
-  visible: VisibleFilter[];
 }
 
 declare module '@mui/x-data-grid' {
@@ -89,8 +80,12 @@ declare module '@mui/x-data-grid' {
     errorControls?: RowControl;
     validControls?: RowControl;
     pendingControls?: RowControl;
+    otControls?: RowControl;
+    msControls?: RowControl;
+    nrControls?: RowControl;
     hidingEmpty?: boolean;
     setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
+    failedControls?: { trigger: () => void; count: number };
   }
 }
 
@@ -118,8 +113,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     errorControls = defaultControl,
     validControls = defaultControl,
     pendingControls = defaultControl,
+    otControls = defaultControl,
+    msControls = defaultControl,
+    nrControls = defaultControl,
     hidingEmpty,
-    setHidingEmpty
+    setHidingEmpty,
+    failedControls = {
+      trigger: () => {},
+      count: 0
+    }
   } = props;
   const hasAnyExport = typeof handleExport === 'function' || typeof handleExportAll === 'function' || typeof handleExportCSV === 'function';
 
@@ -242,34 +244,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
           }}
         >
           <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
-            {gridType === 'measurements' && (
-              <>
-                <Stack direction={'row'} spacing={0.5} sx={{ flex: 0.25, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 1 }}>
-                  <Typography level={'body-md'}>Legend:</Typography>
-                  <Tooltip title={'New Recruit'} arrow>
-                    <Avatar size="sm" variant="soft" color="primary">
-                      NR
-                    </Avatar>
-                  </Tooltip>
-                  <Tooltip title={'Old Tree'} arrow>
-                    <Avatar size="sm" variant="soft" color="success">
-                      OT
-                    </Avatar>
-                  </Tooltip>
-                  <Tooltip title={'Multi Stem'} arrow>
-                    <Avatar size="sm" variant="soft" color="warning">
-                      MS
-                    </Avatar>
-                  </Tooltip>
-                  <Tooltip title={'No State Found'} arrow>
-                    <Avatar size={'sm'} variant={'soft'} color={'danger'}>
-                      NU
-                    </Avatar>
-                  </Tooltip>
-                </Stack>
-                <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
-              </>
-            )}
             <Box display={'flex'} alignItems={'center'} sx={{ flex: 0.75, display: 'flex', justifyContent: 'space-evenly' }}>
               <ColumnsPanelTrigger
                 style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
@@ -282,7 +256,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               />
               <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
               <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-                <QuickFilter style={{ flex: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <QuickFilter style={{ flex: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '-20px' }}>
                   <QuickFilterControl
                     style={{ flex: 1, display: 'flex', justifyContent: 'center' }}
                     placeholder={'Search All Fields...'}
@@ -305,10 +279,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 </QuickFilter>
               </Tooltip>
             </Box>
-
             <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
             <ToolbarButton
-              style={{ display: 'flex', flex: 0.25, maxWidth: '15%' }}
+              style={{ display: 'flex', flex: 0.15, maxWidth: '15%', marginRight: '0.75%' }}
               render={
                 <Button color={'primary'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
                   Refresh
@@ -316,41 +289,109 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               }
             />
             {gridType === 'measurements' && (
-              <Stack direction={'row'} spacing={1} sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center' }}>
-                <Tooltip title={`Rows failing validation (${errorControls.count})`}>
-                  <IconButton
-                    disabled={!errorControls.count}
-                    variant="soft"
-                    color={errorControls.show ? 'danger' : 'neutral'}
-                    onClick={() => errorControls.toggle(!errorControls.show)}
-                  >
-                    <CancelPresentationIcon />
-                  </IconButton>
+              <Stack direction={'row'} gap={1} spacing={1} sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center' }}>
+                <Tooltip title={`Invalid: (${errorControls.count})`}>
+                  <Badge badgeContent={errorControls.count} size={'sm'}>
+                    <IconButton
+                      disabled={!errorControls.count}
+                      variant="soft"
+                      color={errorControls.show ? 'danger' : 'neutral'}
+                      onClick={() => errorControls.toggle(!errorControls.show)}
+                    >
+                      <CancelPresentationIcon />
+                    </IconButton>
+                  </Badge>
                 </Tooltip>
-                <Tooltip title={`Rows passing validation (${validControls.count})`}>
-                  <IconButton
-                    variant="soft"
-                    disabled={!validControls.count}
-                    color={validControls.show ? 'success' : 'neutral'}
-                    onClick={() => validControls.toggle(!validControls.show)}
-                  >
-                    <VerifiedIcon />
-                  </IconButton>
+                <Tooltip title={`Valid: (${validControls.count})`}>
+                  <Badge badgeContent={validControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!validControls.count}
+                      color={validControls.show ? 'success' : 'neutral'}
+                      onClick={() => validControls.toggle(!validControls.show)}
+                    >
+                      <VerifiedIcon />
+                    </IconButton>
+                  </Badge>
                 </Tooltip>
-                <Tooltip title={`Rows pending validation (${pendingControls.count})`}>
-                  <IconButton
-                    variant="soft"
-                    disabled={!pendingControls.count}
-                    color={pendingControls.show ? 'primary' : 'neutral'}
-                    onClick={() => pendingControls.toggle(!errorControls.show)}
-                  >
-                    <ScheduleIcon />
-                  </IconButton>
+                <Tooltip title={`Pending: (${pendingControls.count})`}>
+                  <Badge badgeContent={pendingControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!pendingControls.count}
+                      color={pendingControls.show ? 'primary' : 'neutral'}
+                      onClick={() => pendingControls.toggle(!pendingControls.show)}
+                    >
+                      <ScheduleIcon />
+                    </IconButton>
+                  </Badge>
+                </Tooltip>
+                <Tooltip title={`Old Trees: ${otControls.count}`}>
+                  <Badge badgeContent={otControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!otControls.count}
+                      color={otControls.show ? 'primary' : 'neutral'}
+                      onClick={() => otControls.toggle(!otControls.show)}
+                    >
+                      <Forest />
+                    </IconButton>
+                  </Badge>
+                </Tooltip>
+                <Tooltip title={`Multi-Stems: ${msControls.count}`}>
+                  <Badge badgeContent={msControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!msControls.count}
+                      color={msControls.show ? 'primary' : 'neutral'}
+                      onClick={() => msControls.toggle(!msControls.show)}
+                    >
+                      <CallSplit />
+                    </IconButton>
+                  </Badge>
+                </Tooltip>
+                <Tooltip title={`New Recruits: ${nrControls.count}`}>
+                  <Badge badgeContent={nrControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!nrControls.count}
+                      color={nrControls.show ? 'primary' : 'neutral'}
+                      onClick={() => nrControls.toggle(!nrControls.show)}
+                    >
+                      <Grass />
+                    </IconButton>
+                  </Badge>
+                </Tooltip>
+                <Tooltip title={`Unsubmitted: ${failedControls.count}`}>
+                  <Badge badgeContent={failedControls.count} size={'sm'}>
+                    <IconButton
+                      variant="soft"
+                      disabled={!failedControls.count}
+                      color={failedControls.count ? 'primary' : 'neutral'}
+                      onClick={failedControls.trigger}
+                    >
+                      <RuleOutlined />
+                    </IconButton>
+                  </Badge>
                 </Tooltip>
               </Stack>
             )}
             <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
-            <Stack direction={'row'} spacing={1} sx={{ display: 'flex', flex: 0.5, alignItems: 'center', justifyContent: 'flex-start' }}>
+            <Stack
+              direction={'row'}
+              spacing={1}
+              sx={{
+                display: 'flex',
+                flex: 0.5,
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                '& > *': {
+                  flex: '1 1 0px',
+                  display: 'flex',
+                  justifyContent: 'center'
+                }
+              }}
+            >
               {hasAnyExport && (
                 <Tooltip title={'Export as CSV'} placement="top" arrow>
                   <IconButton
@@ -374,26 +415,54 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 (button: any, index: number) =>
                   button.tooltip && (
                     <Tooltip key={index} title={button.tooltip} placement="top" arrow color={'primary'} size={'lg'} variant={'solid'}>
-                      {button.icon ? (
-                        <IconButton
-                          onClick={button.onClick}
-                          variant="soft"
-                          color="primary"
-                          sx={theme => ({
-                            flex: 1,
-                            display: 'flex',
-                            justifyContent: 'center',
-                            width: theme.spacing(5),
-                            height: theme.spacing(5),
-                            padding: 0
-                          })}
-                        >
-                          {button.icon}
-                        </IconButton>
+                      {button.count ? (
+                        <Badge badgeContent={button.count}>
+                          {button.icon ? (
+                            <IconButton
+                              onClick={button.onClick}
+                              variant="soft"
+                              color="primary"
+                              sx={theme => ({
+                                flex: 1,
+                                display: 'flex',
+                                justifyContent: 'center',
+                                width: theme.spacing(5),
+                                height: theme.spacing(5),
+                                padding: 0
+                              })}
+                            >
+                              {button.icon}
+                            </IconButton>
+                          ) : (
+                            <Button onClick={button.onClick} variant="soft" color="primary">
+                              {button.label}
+                            </Button>
+                          )}
+                        </Badge>
                       ) : (
-                        <Button onClick={button.onClick} variant="soft" color="primary">
-                          {button.label}
-                        </Button>
+                        <Box>
+                          {button.icon ? (
+                            <IconButton
+                              onClick={button.onClick}
+                              variant="soft"
+                              color="primary"
+                              sx={theme => ({
+                                flex: 1,
+                                display: 'flex',
+                                justifyContent: 'center',
+                                width: theme.spacing(5),
+                                height: theme.spacing(5),
+                                padding: 0
+                              })}
+                            >
+                              {button.icon}
+                            </IconButton>
+                          ) : (
+                            <Button onClick={button.onClick} variant="soft" color="primary">
+                              {button.label}
+                            </Button>
+                          )}
+                        </Box>
                       )}
                     </Tooltip>
                   )
@@ -401,7 +470,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               <Tooltip title={hidingEmpty ? `Click to show empty columns!` : `Click to hide empty columns!`}>
                 <IconButton
                   variant="soft"
-                  color={hidingEmpty ? 'primary' : 'neutral'}
+                  color={'primary'}
                   onClick={() => (setHidingEmpty ? setHidingEmpty(!hidingEmpty) : undefined)}
                   sx={theme => ({
                     flex: 1,
@@ -412,7 +481,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     padding: 0
                   })}
                 >
-                  <TableRowsIcons />
+                  {hidingEmpty ? <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} /> : <UnfoldMore sx={{ transform: 'rotate(90deg)' }} />}
                 </IconButton>
               </Tooltip>
             </Stack>
@@ -438,9 +507,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 p: 3
               }}
             >
-              <DialogTitle>
-                <Typography level={'h3'}>Exporting Data</Typography>
-              </DialogTitle>
+              <DialogTitle id={'exporting-data'}>Exporting Data</DialogTitle>
               <DialogContent
                 sx={{
                   mt: 1,
@@ -464,6 +531,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </Stack>
                   </Stack>
                   <Switch
+                    aria-label={'toggle whether to export as a CSV or a form'}
                     size={'lg'}
                     checked={exportType === 'csv'}
                     onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
@@ -495,8 +563,11 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   />
                 </Stack>
                 <Divider sx={{ my: 1 }} />
-                <FormLabel>Export Headers:</FormLabel>
+                <FormLabel id={'export-headers'} htmlFor={'display-export-headers'}>
+                  Export Headers:
+                </FormLabel>
                 <Box
+                  id={'display-export-headers'}
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
@@ -530,6 +601,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   }}
                 >
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('valid');
+                      }
+                    }}
                     color={'success'}
                     size={'lg'}
                     aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
@@ -546,6 +626,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows passing validation
                   </Chip>
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('errors');
+                      }
+                    }}
                     color={'danger'}
                     size={'lg'}
                     variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
@@ -562,6 +651,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows failing validation
                   </Chip>
                   <Chip
+                    component={'div'}
+                    role={'button'}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChipToggle('pending');
+                      }
+                    }}
                     color={'primary'}
                     size={'lg'}
                     variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}

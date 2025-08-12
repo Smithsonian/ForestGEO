@@ -14,7 +14,6 @@ import {
   FormLabel,
   Input,
   LinearProgress,
-  List,
   ListItem,
   Modal,
   ModalClose,
@@ -75,18 +74,6 @@ interface GithubFeedbackModalProps {
 }
 
 type Issue = Record<string, any>;
-
-const formatHeaders = (headers: any) => {
-  const importantHeaders = ['content-type', 'etag', 'x-github-request-id'];
-  return importantHeaders.map(key => (
-    // <Typography key={key} level={"body-md"}>
-    //   <strong>{key}:</strong> {headers[key]}
-    // </Typography>
-    <Tooltip title={key} key={key}>
-      <Chip color="neutral">{headers[key]}</Chip>
-    </Tooltip>
-  ));
-};
 
 export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
   const { open, onClose } = props;
@@ -216,10 +203,13 @@ ${pathname}
                 </Grid>
                 <Divider orientation="horizontal" sx={{ mb: 2, mt: 1 }} />
                 <FormControl>
-                  <FormLabel>
-                    <Typography level="title-md">Name:</Typography>
+                  <FormLabel aria-label={'name field'} htmlFor={'name-typography'}>
+                    <Typography level="title-md" id={'name-typography'}>
+                      Name:
+                    </Typography>
                   </FormLabel>
                   <Input
+                    aria-label={'input for name of person reporting feedback'}
                     placeholder="Person Doe..."
                     onChange={event => setName(event.target.value)}
                     sx={{
@@ -263,8 +253,9 @@ ${pathname}
                       }}
                     >
                       {issueTypes.map(issue => (
-                        <Tooltip key={issue.value} title={issue.tooltip} color="primary" placement="top">
+                        <Tooltip key={issue.value} title={issue.tooltip} color="primary" placement="top" id="issue-selector-tooltip">
                           <Radio
+                            aria-labelledby={'issue-selector-tooltip'}
                             color="neutral"
                             value={issue.value}
                             disableIcon
@@ -298,6 +289,7 @@ ${pathname}
                     Can you describe the issue in more detail?
                   </Typography>
                   <Textarea
+                    aria-label={'description box'}
                     variant="outlined"
                     required
                     onChange={event => setDescription(event.target.value)}
@@ -385,7 +377,14 @@ ${pathname}
                         </Chip>
                       </Stack>
                     </Box>
-                    <Tooltip title="Submitted Issue Description" placement="left" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
+                    <Tooltip
+                      open={isBodyTooltipHovered}
+                      onOpen={() => handleMouseEnter()}
+                      onClose={() => handleMouseLeave()}
+                      disableInteractive={!isBodyTooltipHovered}
+                      title="Submitted Issue Description"
+                      placement="left"
+                    >
                       <Card variant="soft" sx={{ my: 1 }}>
                         <CardContent>
                           <ReactMarkdown
@@ -406,18 +405,8 @@ ${pathname}
                                   {children}
                                 </Typography>
                               ),
-                              h4: ({ children }) => (
-                                <Typography component="h4" level="title-lg">
-                                  {children}
-                                </Typography>
-                              ),
                               h5: ({ children }) => (
                                 <Typography component="h5" level="title-lg">
-                                  {children}
-                                </Typography>
-                              ),
-                              h6: ({ children }) => (
-                                <Typography component="h6" level="title-lg">
                                   {children}
                                 </Typography>
                               ),
@@ -426,18 +415,12 @@ ${pathname}
                                   {children}
                                 </Typography>
                               ),
-                              ul: ({ children }) => <List marker="disc">{children}</List>,
                               li: ({ children }) => (
                                 <ListItem>
                                   <Typography component="span" level="body-sm">
                                     {children}
                                   </Typography>
                                 </ListItem>
-                              ),
-                              strong: ({ children }) => (
-                                <Typography component="strong" level="body-md" fontWeight="bold">
-                                  {children}
-                                </Typography>
                               )
                             }}
                           >

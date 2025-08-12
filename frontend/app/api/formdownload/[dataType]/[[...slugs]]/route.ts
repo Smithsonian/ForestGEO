@@ -4,6 +4,7 @@ import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
@@ -34,7 +35,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
     columns = results.map((row: any) => row.COLUMN_NAME);
   } catch (e: any) {
-    console.log('error: ', e);
+    ailogger.error('error: ', e);
     throw new Error(e);
   }
   if (filterModel !== undefined && filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
@@ -42,8 +43,12 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
   try {
     switch (dataType) {
       case 'attributes':
-        query = `SELECT *
-                 FROM ${schema}.attributes ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        query = `SELECT 
+          a.Code         AS code,
+          a.Description  AS description,
+          a.Status       AS status
+        FROM ${schema}.attributes a
+        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query);
         mappedResults = MapperFactory.getMapper<any, any>('attributes').mapData(results);
         formMappedResults = mappedResults.map((row: AttributesRDS) => ({
@@ -53,13 +58,15 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'personnel':
-        query = `SELECT p.FirstName AS FirstName, p.LastName AS LastName, r.RoleName AS RoleName, r.RoleDescription AS RoleDescription
-                 FROM ${schema}.personnel p
-                        LEFT JOIN ${schema}.roles r ON p.RoleID = r.RoleID
-                        LEFT JOIN ${schema}.census c ON c.CensusID = p.CensusID
-                 WHERE c.PlotID = ?
-                   AND p.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [plotID, censusID]);
+        query = `SELECT 
+          p.FirstName        AS firstname,
+          p.LastName         AS lastname,
+          r.RoleName         AS role,
+          r.RoleDescription  AS roledescription
+        FROM ${schema}.personnel p
+        JOIN ${schema}.roles r ON p.RoleID = r.RoleID
+        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
           firstname: row.FirstName,
           lastname: row.LastName,
@@ -68,24 +75,22 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'species':
-        query = `SELECT DISTINCT s.SpeciesCode         AS SpeciesCode,
-                                 f.Family              AS Family,
-                                 g.Genus               AS Genus,
-                                 s.SpeciesName         AS SpeciesName,
-                                 s.SubspeciesName      AS SubspeciesName,
-                                 s.IDLevel             AS IDLevel,
-                                 s.SpeciesAuthority    AS SpeciesAuthority,
-                                 s.SubspeciesAuthority AS SubspeciesAuthority
-                 FROM ${schema}.species s
-                        JOIN ${schema}.genus g ON g.GenusID = s.GenusID
-                        JOIN ${schema}.family f ON f.FamilyID = g.FamilyID
-                        JOIN ${schema}.trees t ON t.SpeciesID = s.SpeciesID
-                        JOIN ${schema}.stems st ON st.TreeID = t.TreeID
-                        JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
-                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-                 WHERE q.PlotID = ?
-                   AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [plotID, censusID]);
+        query = `SELECT DISTINCT
+          sp.SpeciesCode         AS spcode,
+          f.Family               AS family,
+          g.Genus                AS genus,
+          sp.SpeciesName         AS species,
+          sp.SubspeciesName      AS subspecies,
+          sp.IDLevel             AS idlevel,
+          sp.SpeciesAuthority    AS authority,
+          sp.SubspeciesAuthority AS subspeciesauthority
+        FROM ${schema}.species sp
+        LEFT JOIN ${schema}.genus AS g
+          ON sp.GenusID = g.GenusID
+        LEFT JOIN ${schema}.family AS f
+          ON g.FamilyID = f.FamilyID
+        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
           spcode: row.SpeciesCode,
           family: row.Family,
@@ -98,12 +103,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'quadrats':
-        query = `SELECT *
-                 FROM ${schema}.quadrats q
-                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-                 WHERE q.PlotID = ? AND q.IsActive IS TRUE 
-                   AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [plotID, censusID]);
+        query = `SELECT 
+          q.QuadratName  AS quadrat,
+          q.StartX       AS startx,
+          q.StartY       AS starty,
+          q.DimensionX   AS dimx,
+          q.DimensionY   AS dimy,
+          q.Area         AS area,
+          q.QuadratShape AS quadratshape
+        FROM ${schema}.quadrats q
+        JOIN ${schema}.census c ON cq.CensusID = c.CensusID and c.IsActive IS TRUE
+        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
           quadrat: row.QuadratName,
           startx: row.StartX,
@@ -115,28 +126,35 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
-        query = `SELECT  st.StemTag                                   AS StemTag,
+        query = `SELECT
+                  st.StemID                                           AS StemID,
+                  t.TreeID                                            AS TreeID,
+                  st.StemTag                                          AS StemTag,
                   t.TreeTag                                           AS TreeTag,
-                  s.SpeciesCode                                       AS SpeciesCode,
+                  sp.SpeciesCode                                      AS SpeciesCode,
                   q.QuadratName                                       AS QuadratName,
                   st.LocalX                                           AS StartX,
                   st.LocalY                                           AS StartY,
                   cm.MeasuredDBH                                      AS MeasuredDBH,
                   cm.MeasuredHOM                                      AS MeasuredHOM,
                   cm.MeasurementDate                                  AS MeasurementDate,
-                  (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
-                   FROM ${schema}.cmattributes ca
-                   WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes,
-                  (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR ';')
+                  (
+                    SELECT GROUP_CONCAT(a.Code SEPARATOR '; ')
+                    FROM ${schema}.cmattributes ca
+                    JOIN ${schema}.attributes a ON ca.Code = a.Code
+                    WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
+                  ) as Codes,
+                  (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR '; ')
                    FROM ${schema}.sitespecificvalidations vp
                    JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
                    WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
               FROM ${schema}.coremeasurements cm
-              JOIN ${schema}.stems st ON st.StemID = cm.StemID
-              JOIN ${schema}.trees t ON t.TreeID = st.TreeID
-              JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
+              JOIN ${schema}.census c ON cm.CensusID = c.CensusID and c.IsActive IS TRUE
+              JOIN ${schema}.stems st ON st.StemID = cm.StemID and st.CensusID = c.CensusID and st.IsActive IS TRUE
+              JOIN ${schema}.trees t ON t.TreeID = st.TreeID and t.CensusID = c.CensusID and t.IsActive IS TRUE
+              JOIN ${schema}.quadrats q on q.QuadratID = st.QuadratID and q.IsActive is true
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
-              JOIN ${schema}.species s ON s.SpeciesID = t.SpeciesID
+              JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
               WHERE p.PlotID = ? AND cm.CensusID = ? ${
                 filterModel.visible.length > 0
                   ? ` AND (${filterModel.visible
@@ -155,9 +173,20 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                       .filter(Boolean)
                       .join(' OR ')})`
                   : ''
-              } ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [plotID, censusID]);
+              } 
+              ${
+                filterModel.tss.length > 0
+                  ? ` AND (${filterModel.tss
+                      .map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
+                      .filter(Boolean)
+                      .join(' OR ')})`
+                  : ``
+              } 
+              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query, [censusID, plotID]);
         formMappedResults = results.map((row: any) => ({
+          stemID: row.StemID,
+          treeID: row.TreeID,
           tag: row.TreeTag,
           stemtag: row.StemTag,
           spcode: row.SpeciesCode,

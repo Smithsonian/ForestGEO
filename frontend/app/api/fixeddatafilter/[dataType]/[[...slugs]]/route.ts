@@ -3,17 +3,12 @@ import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { GridFilterModel } from '@mui/x-data-grid';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
+import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
+import ailogger from '@/ailogger';
 
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-
-type VisibleFilter = 'valid' | 'errors' | 'pending';
-
-interface ExtendedGridFilterModel extends GridFilterModel {
-  visible: VisibleFilter[];
-}
 
 export async function POST(
   request: NextRequest,
@@ -53,7 +48,7 @@ export async function POST(
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
         columns = results.map((row: any) => row.COLUMN_NAME);
       } catch (e: any) {
-        console.error('error: ', e);
+        ailogger.error('error: ', e);
         throw new Error(e);
       }
       let searchStub = '';
@@ -82,7 +77,6 @@ export async function POST(
         case 'species':
         case 'stems':
         case 'alltaxonomiesview':
-        case 'quadratpersonnel':
         case 'roles':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
@@ -96,12 +90,14 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
 
           paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS p.*
+            SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS( 
+              SELECT 1 FROM ${schema}.censusactivepersonnel cap 
+                JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
+                WHERE cap.PersonnelID = p.PersonnelID 
+                  AND c.PlotCensusNumber = ? and c.PlotID = ? 
+              ) AS CensusActive 
             FROM ${schema}.${params.dataType} p
-                     JOIN ${schema}.census c ON p.CensusID = c.CensusID
-            WHERE c.PlotID = ?
-              AND c.PlotCensusNumber = ? 
-              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+            ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'unifiedchangelog':
@@ -124,35 +120,9 @@ export async function POST(
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.quadrats q
-                     JOIN ${schema}.censusquadrats cq ON q.QuadratID = cq.QuadratID
-                     JOIN ${schema}.census c ON cq.CensusID = c.CensusID
-            WHERE q.PlotID = ?
-              AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? AND q.IsActive IS TRUE  
+            WHERE q.PlotID = ? AND q.IsActive IS TRUE  
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-          queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
-          break;
-        case 'personnelrole':
-          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'p');
-          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
-
-          paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS 
-            p.PersonnelID,
-            p.CensusID,
-            p.FirstName,
-            p.LastName,
-            r.RoleName,
-            r.RoleDescription
-        FROM 
-            personnel p
-        LEFT JOIN 
-            roles r ON p.RoleID = r.RoleID
-            census c ON p.CensusID = c.CensusID
-        WHERE c.PlotID = ? 
-        AND c.PlotCensusNumber = ? 
-        ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          queryParams.push(plotID, page * pageSize, pageSize);
           break;
         case 'census':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
@@ -170,7 +140,6 @@ export async function POST(
         case 'measurementssummaryview':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
-
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS vft.*
             FROM ${schema}.${params.dataType} vft
@@ -196,6 +165,14 @@ export async function POST(
                       .filter(Boolean)
                       .join(' OR ')})`
                   : ''
+              }
+              ${
+                filterModel.tss.length > 0
+                  ? ` AND (${filterModel.tss
+                      .map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
+                      .filter(Boolean)
+                      .join(' OR ')})`
+                  : ``
               }
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
             ORDER BY vft.MeasurementDate ASC`;

@@ -10,6 +10,7 @@ import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
+import ailogger from '@/ailogger';
 
 const getClosestAreaUnit = (input: string): string | null => {
   const normalizedInput = input.trim().toLowerCase();
@@ -74,6 +75,7 @@ export const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: st
   return (
     <Tooltip title={error ? 'Invalid unit entered!' : `${isArea ? areaSelectionOptions.join(', ') : unitSelectionOptions.join(', ')}`} color={'primary'}>
       <Input
+        aria-label={'choice for area measurement unit'}
         ref={ref}
         fullWidth
         value={value}
@@ -262,7 +264,7 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
   const handleCommit = () => {
     const correctedValue = getClosestStatus(value);
 
-    console.log('handle commit: corrected value: ', correctedValue);
+    ailogger.info(`handle commit: corrected value: ${correctedValue}`);
 
     apiRef.current.setEditCellValue({
       id,
@@ -275,6 +277,7 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
 
   return (
     <Input
+      aria-label={'commit status cell changes'}
       ref={ref}
       fullWidth
       value={value}
@@ -293,7 +296,6 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
       onBlur={handleCommit}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === 'Tab') {
-          console.log('on key down: enter || tab');
           handleCommit();
         }
       }}
@@ -589,6 +591,12 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'codes',
     headerName: 'Codes',
+    flex: 0.75,
+    editable: true
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
     flex: 0.75,
     editable: true
   }

@@ -14,6 +14,7 @@ import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadup
 import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
+import ailogger from '@/ailogger';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -137,7 +138,6 @@ export default function UploadParent(props: UploadParentProps) {
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     const fileToReplace = acceptedFiles[fileIndex];
-    console.log('filetoreplace: ', fileToReplace);
     setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
 
     // Update headers after replacement
@@ -166,7 +166,7 @@ export default function UploadParent(props: UploadParentProps) {
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
   const renderStateContent = () => {
-    if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
+    if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(ailogger.error);
     switch (reviewState) {
       case ReviewStates.START:
         return (

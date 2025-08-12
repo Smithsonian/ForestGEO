@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
@@ -40,19 +41,20 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     })
       .then(r => r.json())
       .then(data => {
+        if (data.coreValidations.length === 0) onValidationComplete ? onValidationComplete() : undefined;
         setValidationMessages(data.coreValidations);
         setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
       })
-      .catch(err => {
+      .catch((err: any) => {
         if (err.name !== 'AbortError') {
-          console.error('Error fetching validation list:', err);
+          ailogger.error('Error fetching validation list:', err);
         }
       });
   }, [currentSite?.schemaName]);
 
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
-      performValidations().catch(console.error);
+      performValidations().catch(ailogger.error);
     }
   }, [validationMessages]);
 
@@ -90,10 +92,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           }));
         } catch (error: any) {
           if (error.name === 'AbortError') {
-            console.log(`Fetch aborted for ${procedureName}`);
+            ailogger.info(`Fetch aborted for ${procedureName}`);
             return; // Exit early if the request was aborted.
           }
-          console.error(`Error performing validation for ${procedureName}:`, error);
+          ailogger.error(`Error performing validation for ${procedureName}:`, error);
           if (isMounted.current) {
             setApiErrors(prev => [...prev, `Failed to execute ${procedureName}: ${error.message}`]);
             setValidationProgress(prevProgress => ({
@@ -114,10 +116,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
         );
       } catch (error: any) {
         if (error.name === 'AbortError') {
-          console.log('Update fetch aborted');
+          ailogger.info('Update fetch aborted');
           return;
         }
-        console.error('Error in updating validated rows:', error);
+        ailogger.error('Error in updating validated rows:', error);
         if (isMounted.current) {
           setApiErrors(prev => [...prev, `Failed to update validated rows: ${error.message}`]);
         }
@@ -127,8 +129,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           setIsValidationComplete(true);
         }
       }
-    } catch (error) {
-      console.error('Error during validation process:', error);
+    } catch (error: any) {
+      ailogger.error('Error during validation process:', error);
     } finally {
       setIsUpdatingRows(false);
       setIsValidationComplete(true);

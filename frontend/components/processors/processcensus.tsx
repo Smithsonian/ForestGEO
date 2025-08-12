@@ -1,35 +1,46 @@
 import moment from 'moment';
-import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
-import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { createError, handleUpsert } from '@/config/utils';
+import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialProcessingProps } from '@/config/macros';
+
+// import ailogger from '@/ailogger';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<void> {
   const { connectionManager, rowData, schema, plot, census } = props;
   if (!plot || !census) {
-    console.error('Missing required parameters: plotID or censusID');
+    // ailogger.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
-  console.log('rowData: ', rowData);
 
   try {
+    // prep for triggers:
+    await connectionManager.executeQuery('SET @CURRENT_CENSUS_ID = ?', [census.dateRanges[0].censusID]);
+
     // Fetch species
-    const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connectionManager, 'SpeciesID');
-    console.log('found speciesID: ', speciesID);
+    const [[{ SpeciesID: speciesID }]] = await connectionManager.executeQuery(
+      `SELECT s.SpeciesID FROM ${schema}.species s
+              WHERE s.SpeciesCode = ? LIMIT 1`,
+      [spcode]
+    );
+
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plot.plotID }, connectionManager, 'QuadratID');
-    console.log('found quadratID: ', quadratID);
+    const [[{ QuadratID: quadratID }]] = await connectionManager.executeQuery(
+      `SELECT q.QuadratID FROM ${schema}.quadrats q 
+             WHERE q.QuadratName = ? LIMIT 1`,
+      [quadrat]
+    );
 
     if (tag) {
       const tagSearch: Partial<TreeResult> = {
         TreeTag: tag,
-        SpeciesID: speciesID
+        SpeciesID: speciesID,
+        CensusID: census.dateRanges[0].censusID
       };
       // Handle Tree Upsert
       const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(connectionManager, schema, 'trees', tagSearch, 'TreeID');
-      console.log('upsert performed against ', tagSearch, ' with result: ', treeID, ' and operation ', treeOperation);
+      // ailogger.info(`upsert performed against ${tagSearch} with result:  ${treeID},  and operation , ${treeOperation}`);
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
@@ -38,11 +49,11 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           StemTag: stemtag,
           TreeID: treeID,
           QuadratID: quadratID,
+          CensusID: census.dateRanges[0].censusID,
           LocalX: lx,
           LocalY: ly
         };
         const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
-        console.log('upsert performed against ', stemSearch, ' with result: ', stemID, ' and operation ', stemOperation);
 
         if (stemOperation === 'inserted') {
           stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
@@ -73,7 +84,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           coreMeasurementSearch,
           'CoreMeasurementID'
         );
-        console.log('upsert performed against ', coreMeasurementSearch, ' with result: ', coreMeasurementID);
 
         // Handle CM Attributes Upsert
         if (codes) {
@@ -82,12 +92,12 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             .map(code => code.trim())
             .filter(Boolean);
           if (parsedCodes.length === 0) {
-            console.error('No valid attribute codes found:', codes);
+            // ailogger.error(`No valid attribute codes found: ${codes}`);
           } else {
             for (const code of parsedCodes) {
               const attributeRows = await connectionManager.executeQuery(
                 `SELECT COUNT(*) as count
-                 FROM ${schema}.attributes
+                 FROM ${schema}.attributes 
                  WHERE Code = ?`,
                 [code]
               );

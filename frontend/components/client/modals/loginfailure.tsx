@@ -3,6 +3,7 @@
 import { Button, Stack, Typography } from '@mui/joy';
 import { signOut } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
+import ailogger from '@/ailogger';
 
 const LoginFailed = () => {
   const searchParams = useSearchParams();
@@ -13,7 +14,7 @@ const LoginFailed = () => {
   const handleTryAgain = () => {
     sessionStorage.clear();
     localStorage.clear();
-    signOut({ redirectTo: '/login' }).catch(console.error);
+    signOut({ redirectTo: '/login' }).catch(ailogger.error);
   };
 
   return (

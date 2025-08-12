@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadUpdateValidationsProps } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const { setReviewState, schema } = props;
@@ -18,12 +19,11 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.dateRanges[0].censusID.toString()}`
     );
     const result = await response.json();
-    console.log('rows validated: ', result.rowsValidated);
     setIsUpdateValidationComplete(true);
   };
 
   useEffect(() => {
-    updateValidations().catch(console.error);
+    updateValidations().catch(ailogger.error);
   }, []);
 
   useEffect(() => {

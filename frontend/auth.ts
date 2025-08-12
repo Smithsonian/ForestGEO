@@ -3,7 +3,7 @@ import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
-import { cookies } from 'next/headers';
+import { submitCookie } from '@/app/actions/cookiemanager';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -33,14 +33,13 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           const response = await fetch(coreURL, {
             method: 'GET'
           });
-          // console.log('response: ', response);
           if (!response.ok) {
-            console.log('response not okay');
+            console.error('auth response not okay');
             throw new Error('API call FAILURE!');
           }
 
           const data = await response.json();
-          (await cookies()).set('user', token.email ?? ''); // save user email in server storage
+          await submitCookie('user', token.email ?? ''); // save user email in server storage
           session.user.userStatus = data.userStatus;
           session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
           session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);

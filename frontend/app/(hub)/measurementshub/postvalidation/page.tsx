@@ -1,3 +1,4 @@
+// postvalidation/page.tsx
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -8,6 +9,9 @@ import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import dynamic from 'next/dynamic';
+import ailogger from '@/ailogger';
+
+const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
 
 export default function PostValidationPage() {
   const currentSite = useSiteContext();
@@ -25,8 +29,6 @@ export default function PostValidationPage() {
   };
   const { setLoading } = useLoading();
 
-  const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
-
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
 
@@ -41,18 +43,21 @@ export default function PostValidationPage() {
         { method: 'GET' }
       );
     } catch (error: any) {
-      console.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
+      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
       throw new Error(error);
     }
   }
 
   async function loadPostValidations() {
     try {
-      const response = await fetch(`/api/fetchall/postvalidationqueries?schema=${currentSite?.schemaName}`, { method: 'GET' });
+      const response = await fetch(
+        `/api/fetchall/postvalidationqueries/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`,
+        { method: 'GET' }
+      );
       const data = await response.json();
       setPostValidations(data);
-    } catch (error) {
-      console.error('Error loading queries:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading queries:', error);
     }
   }
 
@@ -85,7 +90,7 @@ export default function PostValidationPage() {
   useEffect(() => {
     setLoading(true);
     loadPostValidations()
-      .catch(console.error)
+      .catch(ailogger.error)
       .then(() => setLoading(false));
   }, []);
 
@@ -97,13 +102,13 @@ export default function PostValidationPage() {
         if (data.schema) {
           setSchemaDetails(data.schema);
         }
-      } catch (error) {
-        console.error('Error fetching schema:', error);
+      } catch (error: any) {
+        ailogger.error('Error fetching schema:', error);
       }
     };
 
     if (postValidations.length > 0) {
-      fetchSchema().then(r => console.warn(r));
+      fetchSchema().then((r: any) => ailogger.warn(r));
     }
   }, [postValidations]);
 
@@ -177,6 +182,7 @@ export default function PostValidationPage() {
               <TableHead>
                 <TableRow>
                   <TableCell
+                    aria-label={'blank space here'}
                     sx={{
                       width: '50px',
                       textAlign: 'center',
@@ -184,6 +190,7 @@ export default function PostValidationPage() {
                     }}
                   />
                   <TableCell
+                    aria-label={isAllSelected ? 'selected cell' : 'unselected cell'}
                     sx={{
                       flex: 0.5,
                       display: 'flex',
@@ -194,6 +201,7 @@ export default function PostValidationPage() {
                     }}
                   >
                     <Checkbox
+                      aria-label={'toggle to select/deselect all'}
                       uncheckedIcon={<Done />}
                       label={isAllSelected ? 'Deselect All' : 'Select All'}
                       checked={isAllSelected}

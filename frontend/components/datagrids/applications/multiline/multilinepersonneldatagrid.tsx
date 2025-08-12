@@ -6,12 +6,13 @@ import { PersonnelFormGridColumns } from '@/components/client/formcolumns';
 import { DataGridSignals, FormType } from '@/config/macros/formdetails';
 import { Autocomplete, AutocompleteOption, Box, createFilterOptions, ListItemDecorator } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { Add } from '@mui/icons-material';
 import levenshtein from 'fast-levenshtein';
+import ailogger from '@/ailogger';
 
 export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   type ExtendedRoleRDS = RoleRDS & {
@@ -26,15 +27,20 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
     roledescription: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const currentSite = useSiteContext();
   const [storedRoles, setStoredRoles] = useState<RoleRDS[]>([]);
+
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
 
   useEffect(() => {
     async function getRoles() {
-      setStoredRoles(await (await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`)).json());
+      setStoredRoles(
+        await (await fetch(`/api/fetchall/roles/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`)).json()
+      );
     }
 
-    getRoles().catch(console.error);
+    getRoles().catch(ailogger.error);
   }, []);
 
   const filter = createFilterOptions<ExtendedRoleRDS>();
@@ -67,7 +73,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
               };
 
               let roleValue = '';
-              let roledescriptionValue = '';
+              let roledescriptionValue: string;
 
               if (typeof newValue === 'string') {
                 roleValue = autoCorrectRole(newValue);
@@ -138,7 +144,6 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
               </AutocompleteOption>
             )}
             sx={{ width: '100%' }}
-            autoFocus
           />
         );
       }

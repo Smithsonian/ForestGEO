@@ -6,27 +6,36 @@ export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingPr
   const { connectionManager, rowDataSet, schema, census } = props;
 
   const bulkSpeciesData = Object.values(rowDataSet).map(row => ({
-    Family: row.family,
-    Genus: row.genus,
-    SpeciesCode: row.spcode,
-    SpeciesName: row.species,
-    SubspeciesName: row.subspecies,
-    IDLevel: row.idlevel,
-    SpeciesAuthority: row.authority,
-    SubspeciesAuthority: row.subauthority
+    Family: row.family ?? '',
+    Genus: row.genus ?? '',
+    SpeciesCode: row.spcode ?? '',
+    SpeciesName: row.species ?? '',
+    SubspeciesName: row.subspecies ?? '',
+    IDLevel: row.idlevel ?? '',
+    SpeciesAuthority: row.authority ?? '',
+    SubspeciesAuthority: row.subauthority ?? ''
   }));
 
   await connectionManager.executeQuery(`
   CREATE TEMPORARY TABLE IF NOT EXISTS \`${schema}\`.stagingspecies (
     id                  INT AUTO_INCREMENT PRIMARY KEY,
-    Family              VARCHAR(255),
-    Genus               VARCHAR(255),
-    SpeciesCode         VARCHAR(255),
-    SpeciesName         VARCHAR(255),
-    SubspeciesName      VARCHAR(255),
-    IDLevel             VARCHAR(255),
-    SpeciesAuthority    VARCHAR(255),
-    SubspeciesAuthority VARCHAR(255)
+    Family              VARCHAR(255) not null default '',
+    Genus               VARCHAR(255) not null default '',
+    SpeciesCode         VARCHAR(255) not null default '',
+    SpeciesName         VARCHAR(255) not null default '',
+    SubspeciesName      VARCHAR(255) not null default '',
+    IDLevel             VARCHAR(255) not null default '',
+    SpeciesAuthority    VARCHAR(255) not null default '',
+    SubspeciesAuthority VARCHAR(255) not null default '',
+    UNIQUE KEY stsp_unique (
+    Family(40),
+    Genus(40),
+    SpeciesCode(40),
+    SpeciesName(40),
+    SubspeciesName(40),
+    IDLevel(20),
+    SpeciesAuthority(40),
+    SubspeciesAuthority(40))
   ) ENGINE=MEMORY;
 `);
   const { sql, params } = buildBulkUpsertQuery(schema, 'stagingspecies', bulkSpeciesData as any, 'id');
@@ -43,7 +52,14 @@ export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingPr
   ON DUPLICATE KEY UPDATE FamilyID = VALUES(FamilyID);`;
   const speciesSQL = `
   INSERT INTO ${schema}.species (SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, GenusID)
-  SELECT DISTINCT i.SpeciesCode, i.SpeciesName, i.SubspeciesName, i.IDLevel, i.SpeciesAuthority, i.SubspeciesAuthority, g.GenusID
+  SELECT DISTINCT 
+  nullif(i.SpeciesCode, ''), 
+  nullif(i.SpeciesName, ''), 
+  nullif(i.SubspeciesName, ''), 
+  nullif(i.IDLevel, ''), 
+  nullif(i.SpeciesAuthority, ''), 
+  nullif(i.SubspeciesAuthority, ''), 
+  nullif(g.GenusID, '') 
   FROM ${schema}.stagingspecies i 
   JOIN ${schema}.genus g ON i.Genus = g.Genus
   ON DUPLICATE KEY UPDATE 
@@ -56,10 +72,5 @@ export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingPr
   await connectionManager.executeQuery(familySQL);
   await connectionManager.executeQuery(genusSQL);
   await connectionManager.executeQuery(speciesSQL);
-  const csUpdate = `INSERT INTO ${schema}.censusspecies (CensusID, SpeciesID)
-  SELECT ?, s.SpeciesID FROM ${schema}.species s
-  LEFT JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID
-  WHERE cs.CSID IS NULL;`;
-  await connectionManager.executeQuery(csUpdate, [census?.dateRanges[0].censusID]);
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${schema}.stagingspecies;`);
 }

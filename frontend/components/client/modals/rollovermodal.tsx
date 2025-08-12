@@ -15,6 +15,7 @@ import { PersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import { SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
+import ailogger from '@/ailogger';
 
 interface RolloverModalProps {
   open: boolean;
@@ -103,7 +104,7 @@ export default function RolloverModal(props: RolloverModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [censusValidationStatus, setCensusValidationStatus] = useState<CensusValidationStatus[]>([]);
-  const [relatedData, setRelatedData] = useState<any[]>([]);
+  // const [relatedData, setRelatedData] = useState<any[]>([]);
   const [rowSelection, setRowSelection] = useState<Record<CategoryKey, GridRowSelectionModel>>(
     () => Object.fromEntries(CATEGORY_KEYS.map(k => [k, { type: 'include', ids: new Set<GridRowId>() }])) as Record<CategoryKey, GridRowSelectionModel>
   );
@@ -126,12 +127,13 @@ export default function RolloverModal(props: RolloverModalProps) {
         selected: cats[key].customize ? cats[key].selected : data
       });
       if (key === 'personnel') {
-        const rolesResponse = await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
-        setRelatedData(await rolesResponse.json());
+        await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
+        // const rolesResponse = await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
+        // setRelatedData(await rolesResponse.json());
       }
       setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch previous data', error);
+    } catch (error: any) {
+      ailogger.error('Failed to fetch previous data', error);
       setError('Failed to fetch previous data. Please try again.');
       setLoading(false);
     }
@@ -175,7 +177,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
   useEffect(() => {
     if (open) {
-      validationPrevCensus().catch(console.error);
+      validationPrevCensus().catch(ailogger.error);
     }
   }, [open]);
 
@@ -234,25 +236,25 @@ export default function RolloverModal(props: RolloverModalProps) {
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, maxPlot + 1);
       if (!newCensusID) throw new Error('Failed to create new census');
 
-      await Promise.all(
-        entries.map(async ([key, c]) => {
-          if (!c.rollover) return;
-
-          const list = c.customize ? c.selected : c.previous;
-          const ids = list.map(item => (item as any)[CATEGORY_MAP[key].idKey]).filter(Boolean);
-
-          await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${c.census.censusID}/${newCensusID}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ incoming: ids })
-          });
-        })
-      );
+      // await Promise.all(
+      //   entries.map(async ([key, c]) => {
+      //     if (!c.rollover) return;
+      //
+      //     const list = c.customize ? c.selected : c.previous;
+      //     const ids = list.map(item => (item as any)[CATEGORY_MAP[key].idKey]).filter(Boolean);
+      //
+      //     await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${c.census.censusID}/${newCensusID}`, {
+      //       method: 'POST',
+      //       headers: { 'Content-Type': 'application/json' },
+      //       body: JSON.stringify({ incoming: ids })
+      //     });
+      //   })
+      // );
 
       onConfirm(cats.personnel.rollover, cats.quadrats.rollover, cats.attributes.rollover, cats.species.rollover, newCensusID);
       resetState();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      ailogger.error(err);
       setError(`Rollover failed: ${err}`);
       onConfirm(false, false, false, false);
     } finally {
@@ -306,7 +308,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
           <Grid container spacing={2} sx={{ flex: 1, flexDirection: 'row', width: '100%', height: '100%' }}>
             {CATEGORY_KEYS.map(key => {
-              const { displayName, idKey } = CATEGORY_MAP[key];
+              const { displayName } = CATEGORY_MAP[key];
               const cat = cats[key];
               const flagKey = FLAG_KEY_MAP[key];
 
@@ -352,7 +354,12 @@ export default function RolloverModal(props: RolloverModalProps) {
                   ) : (
                     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
                       <Stack direction="row" spacing={2} alignItems="center">
-                        <Checkbox checked={cat.rollover} disabled={!cat.census[flagKey]} onChange={() => updateCat(key, { rollover: !cat.rollover })} />
+                        <Checkbox
+                          aria-label={'toggle rollover checkbox'}
+                          checked={cat.rollover}
+                          disabled={!cat.census[flagKey]}
+                          onChange={() => updateCat(key, { rollover: !cat.rollover })}
+                        />
                         <Typography>Roll over {displayName.toLowerCase()} data</Typography>
                       </Stack>
 

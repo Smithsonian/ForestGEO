@@ -1,71 +1,151 @@
-DROP TRIGGER IF EXISTS `after_insert_cleanup`;
-DROP TRIGGER IF EXISTS `after_insert_attributes`;
-DROP TRIGGER IF EXISTS `after_update_attributes`;
-DROP TRIGGER IF EXISTS `after_delete_attributes`;
-DROP TRIGGER IF EXISTS `after_insert_census`;
-DROP TRIGGER IF EXISTS `after_update_census`;
-DROP TRIGGER IF EXISTS `after_delete_census`;
-DROP TRIGGER IF EXISTS `after_insert_cmattributes`;
-DROP TRIGGER IF EXISTS `after_update_cmattributes`;
-DROP TRIGGER IF EXISTS `after_delete_cmattributes`;
-DROP TRIGGER IF EXISTS `after_insert_cmverrors`;
-DROP TRIGGER IF EXISTS `after_update_cmverrors`;
-DROP TRIGGER IF EXISTS `after_delete_cmverrors`;
-DROP TRIGGER IF EXISTS `after_insert_coremeasurements`;
-DROP TRIGGER IF EXISTS `after_update_coremeasurements`;
-DROP TRIGGER IF EXISTS `after_delete_coremeasurements`;
-DROP TRIGGER IF EXISTS `after_insert_family`;
-DROP TRIGGER IF EXISTS `after_update_family`;
-DROP TRIGGER IF EXISTS `after_delete_family`;
-DROP TRIGGER IF EXISTS `after_insert_genus`;
-DROP TRIGGER IF EXISTS `after_update_genus`;
-DROP TRIGGER IF EXISTS `after_delete_genus`;
-DROP TRIGGER IF EXISTS `after_insert_personnel`;
-DROP TRIGGER IF EXISTS `after_update_personnel`;
-DROP TRIGGER IF EXISTS `after_delete_personnel`;
-DROP TRIGGER IF EXISTS `after_insert_plots`;
-DROP TRIGGER IF EXISTS `after_update_plots`;
-DROP TRIGGER IF EXISTS `after_delete_plots`;
-DROP TRIGGER IF EXISTS `after_insert_quadratpersonnel`;
-DROP TRIGGER IF EXISTS `after_update_quadratpersonnel`;
-DROP TRIGGER IF EXISTS `after_delete_quadratpersonnel`;
-DROP TRIGGER IF EXISTS `after_insert_quadrats`;
-DROP TRIGGER IF EXISTS `after_update_quadrats`;
-DROP TRIGGER IF EXISTS `after_delete_quadrats`;
-DROP TRIGGER IF EXISTS `after_insert_reference`;
-DROP TRIGGER IF EXISTS `after_update_reference`;
-DROP TRIGGER IF EXISTS `after_delete_reference`;
-DROP TRIGGER IF EXISTS `after_insert_roles`;
-DROP TRIGGER IF EXISTS `after_update_roles`;
-DROP TRIGGER IF EXISTS `after_delete_roles`;
-DROP TRIGGER IF EXISTS `after_insert_species`;
-DROP TRIGGER IF EXISTS `after_update_species`;
-DROP TRIGGER IF EXISTS `after_delete_species`;
-DROP TRIGGER IF EXISTS `after_insert_specieslimits`;
-DROP TRIGGER IF EXISTS `after_update_specieslimits`;
-DROP TRIGGER IF EXISTS `after_delete_specieslimits`;
-DROP TRIGGER IF EXISTS `after_insert_specimens`;
-DROP TRIGGER IF EXISTS `after_update_specimens`;
-DROP TRIGGER IF EXISTS `after_delete_specimens`;
-DROP TRIGGER IF EXISTS `after_insert_stems`;
-DROP TRIGGER IF EXISTS `before_stem_update`;
-DROP TRIGGER IF EXISTS `after_update_stems`;
-DROP TRIGGER IF EXISTS `after_delete_stems`;
-DROP TRIGGER IF EXISTS `after_insert_subquadrats`;
-DROP TRIGGER IF EXISTS `after_update_subquadrats`;
-DROP TRIGGER IF EXISTS `after_delete_subquadrats`;
-DROP TRIGGER IF EXISTS `after_insert_trees`;
-DROP TRIGGER IF EXISTS `after_update_trees`;
-DROP TRIGGER IF EXISTS `after_delete_trees`;
-DROP TRIGGER IF EXISTS `after_insert_validationchangelog`;
-DROP TRIGGER IF EXISTS `after_update_validationchangelog`;
-DROP TRIGGER IF EXISTS `after_delete_validationchangelog`;
-DROP TRIGGER IF EXISTS trg_measurementssummary_coremeasurements_update;
-DROP TRIGGER IF EXISTS trg_measurementssummary_quadrats_update;
-DROP TRIGGER IF EXISTS trg_measurementssummary_trees_update;
-DROP TRIGGER IF EXISTS trg_measurementssummary_stems_update;
-DROP TRIGGER IF EXISTS trg_measurementssummary_species_update;
-DROP TRIGGER IF EXISTS trg_measurementssummary_attributes_update;
+# DROP TRIGGER IF EXISTS `after_insert_cleanup`;
+# DROP TRIGGER IF EXISTS `after_insert_attributes`;
+# DROP TRIGGER IF EXISTS `after_update_attributes`;
+# DROP TRIGGER IF EXISTS `after_delete_attributes`;
+# DROP TRIGGER IF EXISTS `after_insert_census`;
+# DROP TRIGGER IF EXISTS `after_update_census`;
+# DROP TRIGGER IF EXISTS `after_delete_census`;
+# DROP TRIGGER IF EXISTS `after_insert_cmattributes`;
+# DROP TRIGGER IF EXISTS `after_update_cmattributes`;
+# DROP TRIGGER IF EXISTS `after_delete_cmattributes`;
+# DROP TRIGGER IF EXISTS `after_insert_cmverrors`;
+# DROP TRIGGER IF EXISTS `after_update_cmverrors`;
+# DROP TRIGGER IF EXISTS `after_delete_cmverrors`;
+# DROP TRIGGER IF EXISTS `after_insert_coremeasurements`;
+# DROP TRIGGER IF EXISTS `after_update_coremeasurements`;
+# DROP TRIGGER IF EXISTS `after_delete_coremeasurements`;
+# DROP TRIGGER IF EXISTS `after_insert_family`;
+# DROP TRIGGER IF EXISTS `after_update_family`;
+# DROP TRIGGER IF EXISTS `after_delete_family`;
+# DROP TRIGGER IF EXISTS `after_insert_genus`;
+# DROP TRIGGER IF EXISTS `after_update_genus`;
+# DROP TRIGGER IF EXISTS `after_delete_genus`;
+# DROP TRIGGER IF EXISTS `after_insert_personnel`;
+# DROP TRIGGER IF EXISTS `after_update_personnel`;
+# DROP TRIGGER IF EXISTS `after_delete_personnel`;
+# DROP TRIGGER IF EXISTS `after_insert_plots`;
+# DROP TRIGGER IF EXISTS `after_update_plots`;
+# DROP TRIGGER IF EXISTS `after_delete_plots`;
+# DROP TRIGGER IF EXISTS `after_insert_quadratpersonnel`;
+# DROP TRIGGER IF EXISTS `after_update_quadratpersonnel`;
+# DROP TRIGGER IF EXISTS `after_delete_quadratpersonnel`;
+# DROP TRIGGER IF EXISTS `after_insert_quadrats`;
+# DROP TRIGGER IF EXISTS `after_update_quadrats`;
+# DROP TRIGGER IF EXISTS `after_delete_quadrats`;
+# DROP TRIGGER IF EXISTS `after_insert_reference`;
+# DROP TRIGGER IF EXISTS `after_update_reference`;
+# DROP TRIGGER IF EXISTS `after_delete_reference`;
+# DROP TRIGGER IF EXISTS `after_insert_roles`;
+# DROP TRIGGER IF EXISTS `after_update_roles`;
+# DROP TRIGGER IF EXISTS `after_delete_roles`;
+# DROP TRIGGER IF EXISTS `after_insert_species`;
+# DROP TRIGGER IF EXISTS `after_update_species`;
+# DROP TRIGGER IF EXISTS `after_delete_species`;
+# DROP TRIGGER IF EXISTS `after_insert_specieslimits`;
+# DROP TRIGGER IF EXISTS `after_update_specieslimits`;
+# DROP TRIGGER IF EXISTS `after_delete_specieslimits`;
+# DROP TRIGGER IF EXISTS `after_insert_specimens`;
+# DROP TRIGGER IF EXISTS `after_update_specimens`;
+# DROP TRIGGER IF EXISTS `after_delete_specimens`;
+# DROP TRIGGER IF EXISTS `after_insert_stems`;
+# DROP TRIGGER IF EXISTS `before_stem_update`;
+# DROP TRIGGER IF EXISTS `after_update_stems`;
+# DROP TRIGGER IF EXISTS `after_delete_stems`;
+# DROP TRIGGER IF EXISTS `after_insert_subquadrats`;
+# DROP TRIGGER IF EXISTS `after_update_subquadrats`;
+# DROP TRIGGER IF EXISTS `after_delete_subquadrats`;
+# DROP TRIGGER IF EXISTS `after_insert_trees`;
+# DROP TRIGGER IF EXISTS `after_update_trees`;
+# DROP TRIGGER IF EXISTS `after_delete_trees`;
+# DROP TRIGGER IF EXISTS `after_insert_validationchangelog`;
+# DROP TRIGGER IF EXISTS `after_update_validationchangelog`;
+# DROP TRIGGER IF EXISTS `after_delete_validationchangelog`;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_coremeasurements_update;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_quadrats_update;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_trees_update;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_stems_update;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_species_update;
+# DROP TRIGGER IF EXISTS trg_measurementssummary_attributes_update;
+
+-- new stuff
+
+drop trigger if exists trg_censuspersonnel_before_insert;
+drop trigger if exists trg_censusattributes_before_insert;
+drop trigger if exists trg_censusquadrats_before_insert;
+drop trigger if exists trg_censusspecies_before_insert;
+drop trigger if exists trg_censustrees_before_insert;
+drop trigger if exists trg_attributes_after_update;
+drop trigger if exists trg_personnel_after_update;
+drop trigger if exists trg_quadrats_after_update;
+drop trigger if exists trg_species_after_update;
+drop trigger if exists trg_trees_after_insert;
+drop trigger if exists trg_trees_after_update;
+
+# create trigger trg_censusspecies_before_insert
+#     before insert
+#     on censusspecies
+#     for each row
+# begin
+#     declare vVersionID int;
+#     select SpeciesVersioningID
+#     into vVersionID
+#     from speciesversioning
+#     where SpeciesID = NEW.SpeciesID
+#       and CensusID = NEW.CensusID
+#     limit 1;
+#
+#     if vVersionID is null then
+#         insert into speciesversioning (SpeciesID, CensusID, GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel,
+#                                        SpeciesAuthority, SubspeciesAuthority, FieldFamily, Description, ValidCode,
+#                                        ReferenceID)
+#         select s.SpeciesID,
+#                NEW.CensusID,
+#                s.GenusID,
+#                s.SpeciesCode,
+#                s.SpeciesName,
+#                s.SubspeciesName,
+#                s.IDLevel,
+#                s.SpeciesAuthority,
+#                s.SubspeciesAuthority,
+#                s.FieldFamily,
+#                s.Description,
+#                s.ValidCode,
+#                s.ReferenceID
+#         from species s
+#         where s.SpeciesID = NEW.SpeciesID;
+#
+#         set vVersionID = last_insert_id();
+#     end if;
+#     set NEW.SpeciesVersioningID = vVersionID;
+# end;
+
+# create trigger trg_trees_after_update
+#     after update
+#     on trees
+#     for each row
+# begin
+#     declare vChanged boolean;
+#
+#     set vChanged =
+#             not (OLD.TreeTag <=> NEW.TreeTag and OLD.SpeciesID <=> NEW.SpeciesID);
+#
+#     if vChanged then
+#         insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
+#         select NEW.TreeID,
+#                NEW.TreeTag,
+#                NEW.SpeciesID,
+#                ct.CensusID
+#         from censustrees ct
+#                  join census c on ct.CensusID = c.CensusID and c.IsActive is true
+#         where ct.TreeID = NEW.TreeID
+#           and c.CensusID = @CURRENT_CENSUS_ID
+#         limit 1
+#         on duplicate key update TreeTag   = values(TreeTag),
+#                                 SpeciesID = values(SpeciesID);
+#     end if;
+# end;
+
+-- if @disable_triggers is null or @disable_triggers = 0 then
 
 # -- MySQL dump 10.13  Distrib 8.3.0, for macos14.2 (x86_64)
 # --

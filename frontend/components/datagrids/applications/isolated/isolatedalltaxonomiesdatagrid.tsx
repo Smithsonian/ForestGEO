@@ -14,6 +14,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -52,7 +53,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       setAllSpeciesLimits(await response.json());
     }
 
-    if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(console.error); // get all of them asap
+    if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(ailogger.error);
   }, [refresh]);
 
   const handleOpenSpeciesLimitsModal = (speciesRow: SpeciesRDS) => {
@@ -64,10 +65,6 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     setIsSpeciesLimitsDialogOpen(false);
     setSelectedSpeciesRow(null);
   };
-
-  async function resetTables() {
-    await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
-  }
 
   const renderSpeciesLimitsCell = (params: GridRenderEditCellParams) => {
     const speciesLimits = allSpeciesLimits.find(limit => limit.speciesID === params.row.speciesID);
@@ -147,15 +144,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         }}
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          {
-            label: 'RESET Table',
-            onClick: async () => {
-              await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
-              setRefresh(true);
-            },
-            tooltip: 'Reset all species-related tables!'
-          }
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
         ]}
       />
       {selectedSpeciesRow && (

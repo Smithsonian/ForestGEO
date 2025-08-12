@@ -7,8 +7,11 @@ import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
 import dynamic from 'next/dynamic';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import ailogger from '@/ailogger';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
 
 export default function ValidationsPage() {
   const { data: session } = useSession();
@@ -37,8 +40,6 @@ export default function ValidationsPage() {
     [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
   );
 
-  const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
-
   const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
 
   useEffect(() => {
@@ -57,10 +58,10 @@ export default function ValidationsPage() {
       if (response.ok) {
         await updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
       } else {
-        console.error('Failed to update validation');
+        ailogger.error('Failed to update validation');
       }
-    } catch (error) {
-      console.error('Error updating validation:', error);
+    } catch (error: any) {
+      ailogger.error('Error updating validation:', error);
     }
   };
 
@@ -82,9 +83,9 @@ export default function ValidationsPage() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {globalValidations?.map((validation, index) => (
+          {globalValidations?.map(validation => (
             <ValidationRow
-              key={index}
+              key={validation.validationID}
               validation={validation}
               onSaveChanges={handleSaveChanges}
               schemaDetails={schemaData?.schema || []}

@@ -23,6 +23,7 @@ import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
+import ailogger from '@/ailogger';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -106,7 +107,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e: any) {
-      const allsites = await (await fetch(`/api/fetchall/sites?schema=${currentSite?.schemaName ?? ''}`)).json();
+      const allsites = await (
+        await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json();
       if (siteListDispatch) await siteListDispatch({ siteList: allsites });
     } finally {
       setLoading(false);
@@ -123,14 +126,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true, 'Loading plot data...');
       if (currentSite && !plotListLoaded) {
-        const response = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+        const response = await fetch(
+          `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+        );
         const plotsData = await response.json();
         if (!plotsData) throw new Error('Failed to load plots data');
         if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
         setPlotListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading plot data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading plot data:', error);
     } finally {
       setLoading(false);
     }
@@ -147,15 +152,17 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true, 'Loading census data...');
       if (currentSite && currentPlot && !censusListLoaded) {
-        const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite.schemaName}`);
+        const response = await fetch(
+          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+        );
         const censusRDSLoad = await response.json();
         if (!censusRDSLoad) throw new Error('Failed to load census data');
         const censusList = await createAndUpdateCensusList(censusRDSLoad);
         if (censusListDispatch) await censusListDispatch({ censusList });
         setCensusListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading census data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading census data:', error);
     } finally {
       setLoading(false);
     }
@@ -178,8 +185,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
         setQuadratListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading quadrat data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading quadrat data:', error);
     } finally {
       setLoading(false);
     }
@@ -189,28 +196,28 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Ensure session is ready before attempting to fetch site list
     if (session && !siteListLoaded) {
-      fetchSiteList().catch(console.error);
+      fetchSiteList().catch(ailogger.error);
     }
   }, [session, siteListLoaded, fetchSiteList]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
-      loadPlotData().catch(console.error);
+      loadPlotData().catch(ailogger.error);
     }
   }, [currentSite, plotListLoaded, loadPlotData]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
-      loadCensusData().catch(console.error);
+      loadCensusData().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, censusListLoaded, loadCensusData]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-      loadQuadratData().catch(console.error);
+      loadQuadratData().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus, quadratListLoaded, loadQuadratData]);
 
@@ -293,18 +300,18 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         loadPlotData()
           .then(() => loadCensusData())
           .then(() => loadQuadratData())
-          .catch(console.error);
+          .catch(ailogger.error);
       }, 300); // 300ms delay for UI reset
     };
 
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
-      clearLists().catch(console.error);
+      clearLists().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadPlotData, loadCensusData, loadQuadratData]);
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
   useEffect(() => {
-    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') {
+    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard' && !pathname.includes('admin')) {
       redirect('/dashboard');
     }
   }, [pathname, currentSite, currentPlot, currentCensus]);
@@ -324,7 +331,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
       import('@axe-core/react').then(axe => {
-        axe.default(React, ReactDOM, 1000);
+        axe.default(React, ReactDOM, 1000).then(() => {});
       });
     }
   }, []);

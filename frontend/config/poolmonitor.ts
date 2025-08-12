@@ -1,6 +1,7 @@
 // poolmonitor.ts
 import { createPool, Pool, PoolConnection, PoolOptions } from 'mysql2/promise';
 import chalk from 'chalk';
+import ailogger from '@/ailogger';
 
 export class PoolMonitor {
   public pool: Pool;
@@ -11,10 +12,23 @@ export class PoolMonitor {
 
   constructor(config: PoolOptions) {
     this.config = config;
-    this.pool = createPool(config);
+    this.pool = createPool({
+      ...config,
+      waitForConnections: true,
+      connectionLimit: config.connectionLimit ?? 10,
+      queueLimit: 0
+    });
     this.poolClosed = false;
+    ailogger.info(chalk.cyan('PoolMonitor initialized.'));
+    this.pool.on('connection', async (conn: PoolConnection) => {
+      try {
+        conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+      } catch (e: any) {
+        ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
+      }
+      this.resetInactivityTimer();
+    });
 
-    console.log(chalk.cyan('PoolMonitor initialized.'));
     this.monitorPoolHealth();
     this.resetInactivityTimer();
   }
@@ -22,19 +36,16 @@ export class PoolMonitor {
   public async getConnection(): Promise<PoolConnection> {
     try {
       if (this.poolClosed) {
-        // console.log(chalk.yellow('Reinitializing pool for new activity.'));
         await this.reinitializePool();
-        ``;
       }
 
-      // console.log(chalk.cyan('Requesting new connection...'));
       const connection = await this.pool.getConnection();
-      // console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
-      this.resetInactivityTimer(); // Reset inactivity timer on new activity
+      connection.on('query', () => this.resetInactivityTimer());
+      connection.on('release', () => this.resetInactivityTimer());
       return connection;
-    } catch (error) {
-      console.error(chalk.red('Error acquiring connection:', error));
-      console.warn(chalk.yellow('Reinitializing pool due to connection error.'));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error acquiring connection:', error));
+      ailogger.warn(chalk.yellow('Reinitializing pool due to connection error.'));
       await this.reinitializePool();
       throw error;
     }
@@ -43,15 +54,15 @@ export class PoolMonitor {
   public async closeAllConnections(): Promise<void> {
     try {
       if (this.poolClosed) {
-        console.log(chalk.yellow('Pool already closed.'));
+        ailogger.info(chalk.yellow('Pool already closed.'));
         return;
       }
-      console.log(chalk.yellow('Ending pool connections...'));
+      ailogger.info(chalk.yellow('Ending pool connections...'));
       await this.pool.end();
       this.poolClosed = true;
-      console.log(chalk.yellow('Pool connections ended.'));
-    } catch (error) {
-      console.error(chalk.red('Error closing connections:', error));
+      ailogger.info(chalk.yellow('Pool connections ended.'));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error closing connections:', error));
       throw error;
     }
   }
@@ -60,38 +71,45 @@ export class PoolMonitor {
     return this.poolClosed;
   }
 
+  public signalActivity() {
+    this.resetInactivityTimer();
+  }
+
   private async reinitializePool(): Promise<void> {
     if (this.reinitializing) return; // Prevent concurrent reinitialization
     this.reinitializing = true;
 
     try {
-      console.log(chalk.cyan('Reinitializing connection pool...'));
+      ailogger.info(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
       this.pool = createPool(this.config);
       this.poolClosed = false;
-      console.log(chalk.cyan('Connection pool reinitialized.'));
-    } catch (error) {
-      console.error(chalk.red('Error during reinitialization:', error));
+      this.pool.on('connection', async (conn: PoolConnection) => {
+        conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+        this.resetInactivityTimer();
+      });
+      ailogger.info(chalk.cyan('Connection pool reinitialized.'));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error during reinitialization:', error));
     } finally {
       this.reinitializing = false;
     }
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
-    const bufferTime = 180;
+    const bufferTime = 300;
     try {
       if (!this.isPoolClosed()) {
         // only log if pool is not closed
-        const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime} AND USER <> 'event_scheduler';`);
+        const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE INFO IS NULL AND USER <> 'event_scheduler';`);
         if (rows.length > 0) {
-          console.log(chalk.cyan('Active MySQL Processes:'));
-          console.table(rows);
+          ailogger.info(chalk.cyan(`Active MySQL Processes: ${rows.length}`));
 
           const { liveIds, sleepingIds } = rows.reduce(
             (acc: any, process: any) => {
               if (process.COMMAND !== 'Sleep') {
                 acc.liveIds.push(process.ID);
-              } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime * 2) {
+              } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime) {
                 acc.sleepingIds.push(process.ID);
               }
               return acc;
@@ -103,8 +121,8 @@ export class PoolMonitor {
         }
       }
       return { sleeping: [], live: [] };
-    } catch (error) {
-      console.error(chalk.red('Error fetching process list:', error));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error fetching process list:', error));
       return { sleeping: [], live: [] };
     }
   }
@@ -114,9 +132,9 @@ export class PoolMonitor {
     for (const id of sleeping) {
       try {
         await this.pool.query(`KILL ${id}`);
-        console.log(chalk.red(`Terminated sleeping connection: ${id}`));
-      } catch (error) {
-        console.error(chalk.red(`Error terminating connection ${id}:`, error));
+        ailogger.info(chalk.red(`Terminated sleeping connection: ${id}`));
+      } catch (error: any) {
+        ailogger.error(chalk.red(`Error terminating connection ${id}:`, error));
       }
     }
   }
@@ -129,9 +147,9 @@ export class PoolMonitor {
     this.inactivityTimer = setTimeout(async () => {
       const { live } = await this.logAndReturnConnections();
       if (live.length === 0) {
-        console.log(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
+        ailogger.info(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
         await this.closeAllConnections();
-        console.log(chalk.red('Graceful shutdown complete.'));
+        ailogger.info(chalk.red('Graceful shutdown complete.'));
       }
     }, 3600000); // 1 hour in milliseconds
   }
@@ -141,22 +159,22 @@ export class PoolMonitor {
       try {
         const { sleeping } = await this.logAndReturnConnections();
         if (sleeping.length > 0) {
-          console.log(chalk.cyan('Pool Health Check:'));
-          console.log(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
+          ailogger.info(chalk.cyan('Pool Health Check:'));
+          ailogger.info(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
 
           if (sleeping.length > 50) {
             // Example threshold for excessive sleeping connections
-            console.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
+            ailogger.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
             await this.reinitializePool();
           } else {
             await this.terminateSleepingConnections();
           }
         }
-      } catch (error) {
-        console.error(chalk.red('Error during pool health check:', error));
-        console.warn(chalk.yellow('Attempting to reinitialize pool.'));
+      } catch (error: any) {
+        ailogger.error(chalk.red('Error during pool health check:', error));
+        ailogger.warn(chalk.yellow('Attempting to reinitialize pool.'));
         await this.reinitializePool();
       }
-    }, 30000); // Poll every 10 seconds
+    }, 10000); // Poll every 10 seconds
   }
 }

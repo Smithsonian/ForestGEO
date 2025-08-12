@@ -1,6 +1,7 @@
 import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 interface ValidationProcedure {
   ValidationID: number;
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
-    console.error('Error in GET request:', error.message);
+    ailogger.error('Error in GET request:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

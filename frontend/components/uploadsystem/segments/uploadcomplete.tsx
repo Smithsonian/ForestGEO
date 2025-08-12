@@ -6,12 +6,13 @@ import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress,
 import React, { useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import moment from 'moment';
 import { FileRow, FormType } from '@/config/macros/formdetails';
 import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
+import ailogger from '@/ailogger';
 
 const ROWS_PER_BATCH = 10;
 
@@ -31,14 +32,17 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const currentCensus = useOrgCensusContext();
 
   const censusListDispatch = useOrgCensusListDispatch();
+  const censusDispatch = useOrgCensusDispatch();
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
 
   const loadCensusData = async () => {
-    if (!currentPlot) return;
+    if (!currentPlot || !censusDispatch) return;
 
     setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+    );
     const censusRDSLoad = await response.json();
 
     setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
@@ -46,6 +50,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     if (censusListDispatch) {
       await censusListDispatch({ censusList });
     }
+
+    const existingCensus = censusList.find(census => census.dateRanges[0].censusID === currentCensus?.dateRanges[0].censusID);
+    if (existingCensus) await censusDispatch({ census: existingCensus });
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
   };
@@ -130,7 +137,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             method: 'POST'
           });
           const flattened: FileRow[] = [];
-          console.log('error rows!! --> ', errorRows);
           for (const fileName in errorRows) {
             const fileRowSet = errorRows[fileName];
             Object.values(fileRowSet).forEach(row => flattened.push(row));
@@ -155,11 +161,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);
-      } catch (error) {
-        console.error(error);
+      } catch (error: any) {
+        ailogger.error(error);
       }
     };
-    runAsyncTasks().catch(console.error);
+    runAsyncTasks().catch(ailogger.error);
   }, []);
 
   return (

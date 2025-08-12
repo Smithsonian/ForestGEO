@@ -87,7 +87,6 @@ export function patchConnectionManager(cm: any) {
     const afterImages = (await orig(searchQuery, params, transactionId)) as any[];
 
     if (JSON.stringify(beforeImages) === JSON.stringify(afterImages)) {
-      console.log('old state and new state are the same, not logging');
       return result; // returning result since we've already executed the orig query
     }
 

@@ -10,6 +10,7 @@ import Box from '@mui/joy/Box';
 import Typography from '@mui/joy/Typography';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import ailogger from '@/ailogger';
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
@@ -84,7 +85,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       const data = await response.json();
       window.location.href = data.url; // Navigates to the pre-signed URL
     } catch (error: any) {
-      console.error('Download error:', error);
+      ailogger.error('Download error:', error);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }
@@ -100,7 +101,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       // Refresh the file list after successful deletion
       setRefreshFileList(true);
     } catch (error: any) {
-      console.error('Delete error:', error);
+      ailogger.error('Delete error:', error);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }
@@ -117,7 +118,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
       if (!response.ok) {
         const jsonOutput = await response.json();
-        console.error('response.statusText', jsonOutput.statusText);
+        ailogger.error('response.statusText', jsonOutput.statusText);
         setErrorMessage(`API response: ${jsonOutput.statusText}`);
       } else {
         const data = await response.json();
@@ -125,7 +126,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setIsLoaded(true);
       }
     } catch (error: any) {
-      console.log(error.message);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }

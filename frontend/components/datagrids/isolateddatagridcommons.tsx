@@ -28,7 +28,7 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
@@ -49,8 +49,18 @@ import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
+import ailogger from '@/ailogger';
 
-export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
+export type IsolatedDataGridCommonsHandle = {
+  updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
+  fetchPaginatedData: () => Promise<void>;
+  showSnackbar: (message: string, severity: 'success' | 'error') => void;
+};
+
+const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+  props: Readonly<IsolatedDataGridCommonProps>,
+  ref: ForwardedRef<IsolatedDataGridCommonsHandle>
+) {
   const {
     gridColumns,
     gridType,
@@ -61,7 +71,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     fieldToFocus,
     dynamicButtons = [],
     defaultHideEmpty = false,
-    apiRef = undefined
+    apiRef = undefined,
+    adminEmail = undefined
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -108,12 +119,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
 
   useEffect(() => {
-    console.log('updated rows: ', rows);
-  }, [rows]);
+    if (rowCount < paginationModel.pageSize) setHidingEmpty(false);
+  }, [rowCount]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
+      fetchPaginatedData(paginationModel.page).catch(ailogger.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page, filterModel]);
 
@@ -153,7 +164,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber
       );
-      console.log('temp query: ', tempQuery);
       const tempBody = await (
         await fetch(tempQuery, {
           method: 'POST',
@@ -161,12 +171,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           body: JSON.stringify({ filterModel })
         })
       ).json();
-      console.log('tempBody', tempBody);
       const tempFQuery = tempBody.finishedQuery
         .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
         .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
         .trim();
-      console.log('tempfquery: ', tempFQuery);
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
@@ -174,8 +182,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           body: JSON.stringify(tempFQuery)
         })
       ).json();
-      console.log('export results: ', results);
-
       const jsonData = JSON.stringify(results, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -186,8 +192,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       link.click();
 
       URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error fetching full data:', error);
+    } catch (error: any) {
+      ailogger.error('Error fetching full data:', error);
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -499,7 +505,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       const rowToDelete = rows.find(row => String(row.id) === String(id));
       if (!rowToDelete) return;
 
-      const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
+      let deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
+      if (adminEmail) deleteQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
 
       try {
         const response = await fetch(deleteQuery, {
@@ -623,7 +630,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   const fetchPaginatedData = async (pageToFetch: number) => {
     setLoading(true);
-    const paginatedQuery =
+    let paginatedQuery =
       (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
         ? createQFFetchQuery(
             currentSite?.schemaName ?? '',
@@ -643,6 +650,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             currentCensus?.plotCensusNumber,
             currentQuadrat?.quadratID
           );
+    if (adminEmail) paginatedQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
     try {
       const response = await fetch(paginatedQuery, {
         method:
@@ -660,10 +668,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setUsingQuery(data.finishedQuery);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
-        handleAddNewRow();
+        await handleAddNewRow();
       }
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    } catch (error: any) {
+      ailogger.error('Error fetching data:', error);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -683,11 +691,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
-    const fetchProcessQuery =
+    let fetchProcessQuery =
       gridType !== 'quadrats'
         ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
         : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
-
+    if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
     try {
       setLoading(true);
       const response = await fetch(fetchProcessQuery, {
@@ -698,8 +706,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       let responseJSON;
       try {
         responseJSON = await response.json();
-      } catch (e) {
-        console.error(e);
+      } catch (e: any) {
+        ailogger.error(e);
       }
 
       if (!response.ok) {
@@ -725,6 +733,26 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setLoading(false);
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      return await updateRow(
+        gridType,
+        currentSite?.schemaName,
+        newRow,
+        oldRow,
+        setSnackbar,
+        setIsNewRowAdded,
+        setShouldAddRowAfterFetch,
+        fetchPaginatedData,
+        paginationModel
+      );
+    },
+    fetchPaginatedData: async () => await fetchPaginatedData(paginationModel.page),
+    showSnackbar: (message: string, severity: 'success' | 'error') => {
+      setSnackbar({ children: message, severity });
+    }
+  }));
 
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
@@ -803,7 +831,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             mode: newRowModesModel[id]?.mode || updatedModel[id]?.mode || GridRowModes.View
           };
         } else {
-          console.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
+          ailogger.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
         }
       });
       return updatedModel;
@@ -992,14 +1020,14 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
               await waitForStateUpdates();
               try {
                 return await processRowUpdate(newRow, oldRow);
-              } catch (error) {
-                console.error('Error processing row update:', error);
+              } catch (error: any) {
+                ailogger.error('Error processing row update:', error);
                 setSnackbar({ children: 'Error updating row', severity: 'error' });
                 return Promise.reject(error);
               }
             }}
-            onProcessRowUpdateError={error => {
-              console.error('Row update error:', error);
+            onProcessRowUpdateError={(error: any) => {
+              ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',
                 severity: 'error'
@@ -1010,7 +1038,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
             rowCount={rowCount}
-            pageSizeOptions={[paginationModel.pageSize]}
+            pageSizeOptions={[paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10]}
             onFilterModelChange={newFilterModel => {
               setFilterModel(prevModel => ({
                 ...prevModel,
@@ -1066,4 +1094,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       </Box>
     );
   }
-}
+});
+
+export default IsolatedDataGridCommons;

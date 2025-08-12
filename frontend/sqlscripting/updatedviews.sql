@@ -1,9 +1,6 @@
-
 DROP VIEW IF EXISTS alltaxonomiesview;
-
 CREATE VIEW alltaxonomiesview AS
 SELECT s.SpeciesID           AS SpeciesID,
-       c.CensusID            AS CensusID,
        f.FamilyID            AS FamilyID,
        g.GenusID             AS GenusID,
        s.SpeciesCode         AS SpeciesCode,
@@ -18,15 +15,7 @@ SELECT s.SpeciesID           AS SpeciesID,
        s.ValidCode           AS ValidCode,
        s.FieldFamily         AS FieldFamily,
        s.Description         AS SpeciesDescription
-FROM family f
-         LEFT JOIN genus g
-                   ON f.FamilyID = g.FamilyID and g.IsActive IS TRUE
-         LEFT JOIN species s
-                   ON g.GenusID = s.GenusID
-                       AND s.IsActive <> 0
-         JOIN censusspecies cs
-              ON cs.SpeciesID = s.SpeciesID
-         LEFT JOIN census c
-                   ON c.CensusID = cs.CensusID
-                       AND c.IsActive <> 0
-WHERE f.IsActive IS TRUE;
+FROM species s
+         LEFT JOIN genus AS g ON s.GenusID = g.GenusID AND g.IsActive = 1
+         LEFT JOIN family AS f ON g.FamilyID = f.FamilyID AND f.IsActive = 1
+WHERE s.IsActive = 1;

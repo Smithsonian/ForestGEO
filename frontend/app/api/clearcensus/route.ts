@@ -5,6 +5,7 @@ import ConnectionManager from '@/config/connectionmanager';
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   const censusIDParam = request.nextUrl.searchParams.get('censusID');
+  const type = request.nextUrl.searchParams.get('type');
   if (!schema || !censusIDParam) {
     return new NextResponse('Missing required parameters', { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
   let transactionID = '';
   try {
     transactionID = await connectionManager.beginTransaction();
-    await connectionManager.executeQuery(`CALL ${schema}.clearcensus(?);`, [censusIDParam]);
+    await connectionManager.executeQuery(`CALL ${schema}.clearcensus${type}(?);`, [censusIDParam]);
     await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({ message: 'Census cleared successfully' }, { status: HTTPResponses.OK });
   } catch (e: any) {

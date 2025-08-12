@@ -153,7 +153,6 @@ export function getGridID(gridType: string): string {
     case 'census':
       return 'censusID';
     case 'personnel':
-    case 'personnelrole':
       return 'personnelID';
     case 'quadrats':
       return 'quadratID';
@@ -177,10 +176,12 @@ export function getGridID(gridType: string): string {
   }
 }
 
-type VisibleFilter = 'valid' | 'errors' | 'pending';
+export type VisibleFilter = 'valid' | 'errors' | 'pending';
+export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';
 
-interface ExtendedGridFilterModel extends GridFilterModel {
+export interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
+  tss: TSSFilter[];
 }
 
 export interface RowControl {
@@ -229,6 +230,7 @@ export interface IsolatedDataGridCommonProps {
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
+  adminEmail?: string; // need to distinguish between admin and non-admin users --> should ONLY be populated for admin datagrids
 }
 
 export interface DataGridCommonProps {
@@ -315,9 +317,10 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
+  dynamicButtons: any[];
+  failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
-  dynamicButtons: any[];
 }
 
 export const failureErrorMapping: Record<string, string[]> = {

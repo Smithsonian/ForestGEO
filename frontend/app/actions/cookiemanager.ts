@@ -7,8 +7,7 @@ export async function submitCookie(name: string, value: string) {
 }
 
 export async function getCookie(name: string) {
-  if ((await cookies()).has(name)) return (await cookies()).get(name);
-  else throw new Error(`Cookie ${name} not found`);
+  return (await cookies()).get(name)?.value ?? '';
 }
 
 export async function deleteCookie(name: string) {

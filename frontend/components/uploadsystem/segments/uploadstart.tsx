@@ -12,6 +12,7 @@ import { useOrgCensusContext, usePlotContext, useQuadratContext, useQuadratDispa
 
 import FinalizeSelectionsButton from '../../client/modals/finalizeselectionsbutton';
 import { Quadrat } from '@/config/sqlrdsdefinitions/zones';
+import ailogger from '@/ailogger';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const { uploadForm, personnelRecording, setPersonnelRecording, setReviewState } = props;
@@ -22,7 +23,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const currentSite = useSiteContext();
   const currentQuadrat = useQuadratContext();
   const currentPlot = usePlotContext();
-  console.log('current quadrat: ', currentQuadrat);
   const [quadrat, setQuadrat] = useState<Quadrat>(currentQuadrat);
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   const quadratDispatch = useQuadratDispatch();
@@ -70,7 +70,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         .then(() => {
           setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
         })
-        .catch(console.error);
+        .catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -160,7 +160,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               placeholder="Select a Quadrat"
               name={currentQuadrat?.quadratName ?? 'None'}
               required
-              autoFocus
               size={'md'}
               value={currentQuadrat?.quadratName ?? ''}
               renderValue={renderQuadratValue}
@@ -172,7 +171,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             >
               <Option value={''}>None</Option>
               {quadratList?.map(item => (
-                <Option value={item?.quadratName} key={item?.quadratName}>
+                <Option aria-label={`quadrat name option for ${item?.quadratName}`} value={item?.quadratName} key={item?.quadratName}>
                   <Box
                     sx={{
                       display: 'flex',

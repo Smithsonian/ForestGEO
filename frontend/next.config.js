@@ -12,6 +12,12 @@ const nextConfig = withBundleAnalyzer({
     if (!isServer) {
       config.resolve.fallback = { fs: false };
     }
+    config.resolve.mainFields = ['main', 'module', 'browser'];
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@mui/material/esm': '@mui/material',
+      '@mui/utils/esm': '@mui/utils'
+    };
     config.module.rules.push({
       test: /\.cy.(js|ts|tsx|jsx)$/,
       exclude: /node_modules/

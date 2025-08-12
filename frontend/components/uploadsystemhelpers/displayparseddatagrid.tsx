@@ -63,13 +63,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         field: header.label,
         headerName: header.label,
         flex: 1,
-        getCellClassName: (params: GridCellParams) => {
-          if (saveCorrections) return '';
-          const rowIndex = params.id.toString().split('-')[1];
-          const errorKey = `row-${rowIndex}`;
-          const cellError = errors[fileName]?.[errorKey]?.[header.label];
-          return cellError ? 'error-cell' : '';
-        },
         renderCell: (params: GridCellParams) => {
           if (header.label === 'date') {
             const formattedDate = params.value ? moment(params.value).format('dddd, MMMM Do YYYY, hh:mm:ss a') : '';
@@ -286,7 +279,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                     }
                   }
                 }}
-                autoHeight
                 getRowHeight={() => 'auto'}
               />
             </Box>
@@ -315,6 +307,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         </>
       )}
       <Checkbox
+        aria-label={'save autocorrected values to data checkbox'}
         sx={{ mt: 1 }}
         color={'primary'}
         variant={'soft'}

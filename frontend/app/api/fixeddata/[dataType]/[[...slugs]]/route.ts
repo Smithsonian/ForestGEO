@@ -19,7 +19,6 @@ function getGridID(gridType: string): string {
     case 'census':
       return 'censusID';
     case 'personnel':
-    case 'personnelrole':
       return 'personnelID';
     case 'quadrats':
       return 'quadratID';
@@ -65,7 +64,6 @@ export async function GET(
   const demappedGridID = pkRaw.charAt(0).toUpperCase() + pkRaw.substring(1);
 
   const connectionManager = ConnectionManager.getInstance();
-
   try {
     let paginatedQuery = ``;
     const queryParams: any[] = [];
@@ -103,45 +101,34 @@ export async function GET(
         break;
       case 'attributes':
       case 'species':
-      case 'personnel':
       case 'quadrats':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS q.*
-            FROM ${schema}.${params.dataType} q
-                     JOIN ${schema}.census${params.dataType} cx ON q.${demappedGridID} = cx.${demappedGridID}
-                     JOIN ${schema}.census c ON cx.CensusID = c.CensusID
-            WHERE c.PlotID = ? ${['quadrats', 'species'].includes(params.dataType) ? ` AND q.IsActive IS TRUE` : ''}
-              AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE ORDER BY q.${demappedGridID} ASC LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+            SELECT SQL_CALC_FOUND_ROWS dt.*
+              FROM ${schema}.${params.dataType} dt
+            ORDER BY dt.${demappedGridID} ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
+        break;
+      case 'personnel':
+        paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS( 
+              SELECT 1 FROM ${schema}.censusactivepersonnel cap 
+                JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
+                WHERE cap.PersonnelID = p.PersonnelID 
+                  AND c.PlotCensusNumber = ? and c.PlotID = ? 
+              ) AS CensusActive 
+            FROM ${schema}.${params.dataType} p
+            ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
+        queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
         break;
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
-            JOIN ${schema}.census c ON atv.CensusID = c.CensusID AND c.IsActive IS TRUE 
-            WHERE c.PlotID = ? AND c.PlotCensusNumber = ? ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+            ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
         break;
       case 'stems':
       case 'roles':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
-        break;
-      case 'personnelrole':
-        paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS 
-            p.PersonnelID,
-            c.CensusID,
-            p.FirstName,
-            p.LastName,
-            r.RoleName,
-            r.RoleDescription
-        FROM 
-            personnel p
-        LEFT JOIN 
-            roles r ON p.RoleID = r.RoleID
-        JOIN censuspersonnel cp ON cp.PersonnelID = p.PersonnelID
-        JOIN census c ON cp.CensusID = c.CensusID AND c.IsActive IS TRUE
-        WHERE c.PlotID = ? AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'census':
         paginatedQuery = `

@@ -60,7 +60,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
               key={'discard'}
               disabled={unsavedChangesRef.current.unsavedRows[id] === undefined}
               onClick={() => {
-                apiRef.current.updateRows([unsavedChangesRef.current.rowsBeforeChange[id]]);
+                apiRef.current?.updateRows([unsavedChangesRef.current.rowsBeforeChange[id]]);
                 delete unsavedChangesRef.current.rowsBeforeChange[id];
                 delete unsavedChangesRef.current.unsavedRows[id];
                 setHasUnsavedRows(Object.keys(unsavedChangesRef.current.unsavedRows).length > 0);
@@ -79,7 +79,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
                   unsavedChangesRef.current.rowsBeforeChange[id] = row;
                 }
                 setHasUnsavedRows(true);
-                apiRef.current.updateRows([row]);
+                apiRef.current?.updateRows([row]);
               }}
             />
           ];
@@ -108,7 +108,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   const discardChanges = useCallback(() => {
     setHasUnsavedRows(false);
     Object.values(unsavedChangesRef.current.rowsBeforeChange).forEach(row => {
-      apiRef.current.updateRows([row]);
+      apiRef.current?.updateRows([row]);
     });
     unsavedChangesRef.current = {
       unsavedRows: {},
@@ -177,10 +177,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       setRefresh(false);
     }
   }, [refresh, setRefresh]);
-
-  useEffect(() => {
-    console.log('updated rows: ', rows);
-  }, [rows]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -260,7 +256,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
         fileRowSet: fileRowSet
       })
     });
-    console.log('response: ', response);
     setChangesSubmitted(true);
   }
 

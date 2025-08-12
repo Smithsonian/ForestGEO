@@ -11,6 +11,7 @@ import { FileWithPath } from 'react-dropzone';
 import { FileList } from '@/components/uploadsystemhelpers/filelist';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
+import ailogger from '@/ailogger';
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
@@ -45,9 +46,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const requiredHeadersTrimmed = expectedHeaders.map(item => item.trim());
 
   useEffect(() => {
-    console.log('accepted files: ', acceptedFiles);
-    console.log('current file: ', acceptedFiles[dataViewActive - 1]);
-    console.log('current file headers: ', currentFileHeaders);
     const needsReupload = !(
       acceptedFiles[dataViewActive - 1].useStreaming ||
       (currentFileHeaders.length > 0 && !currentFileHeaders.some(header => header === ''))
@@ -58,7 +56,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const handleReUploadFileChange = async (newFiles: FileWithPath[]) => {
     setReuploadInProgress(true);
     const newFile = newFiles[0];
-    console.log('newFile: ', newFile);
+    ailogger.info('newFile: ', newFile);
     if (newFile.name !== currentFileName) {
       alert('Please upload a corrected version of the current file.');
       setIsReuploadDialogOpen(false);
@@ -107,12 +105,10 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
 
     setParsedData(updatedParsedData);
 
-    console.log('Updated parsedData:', updatedParsedData); // Debug log
-
     try {
       await handleApproval();
-    } catch (error) {
-      console.error('Error during approval:', error);
+    } catch (error: any) {
+      ailogger.error('Error during approval:', error);
       setUploadError(error);
       setReviewState(ReviewStates.ERRORS);
     }
@@ -123,7 +119,14 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       const isChecked = currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase());
       return (
         <Box key={header} sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
-          <Checkbox size={'lg'} disabled checked={isChecked} label={header} color={isChecked ? 'success' : 'danger'} />
+          <Checkbox
+            aria-label={'current file headers requirement checkbox'}
+            size={'lg'}
+            disabled
+            checked={isChecked}
+            label={header}
+            color={isChecked ? 'success' : 'danger'}
+          />
           <Divider orientation={'vertical'} sx={{ marginX: 2 }} />
         </Box>
       );
@@ -268,9 +271,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleConfirm} autoFocus>
-            Confirm
-          </Button>
+          <Button onClick={handleConfirm}>Confirm</Button>
         </DialogActions>
       </Dialog>
     </>

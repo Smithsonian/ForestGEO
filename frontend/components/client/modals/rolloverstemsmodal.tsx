@@ -1,6 +1,6 @@
 'use client';
 
-import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import {
   Alert,
   Box,
@@ -24,6 +24,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { StemGridColumns } from '../datagridcolumns';
 import { StemRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import ailogger from '@/ailogger';
 
 interface RolloverStemsModalProps {
   open: boolean;
@@ -57,6 +58,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   const fetchPreviousStemsData = async (plotCensusNumber: number) => {
     try {
@@ -65,15 +67,17 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
       const stemsData = await stemsResponse.json();
       setPreviousStems(stemsData);
       setLoading(false);
-    } catch (error) {
-      console.error('failed to fetch previous data: ', error);
+    } catch (error: any) {
+      ailogger.error('failed to fetch previous data: ', error);
       setLoading(false);
     }
   };
 
   const validatePreviousCensusData = async () => {
     // need to re-fetch the census list --> can't use list context here because it's outdated!
-    const response = await fetch(`/api/fetchall/census/${currentPlot?.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+    );
     const censusRDSLoad = await response.json();
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     setUpdatedCensusList(censusList);
@@ -108,7 +112,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   };
 
   useEffect(() => {
-    if (open) validatePreviousCensusData();
+    if (open) validatePreviousCensusData().catch(ailogger.error);
     else resetState();
   }, [open]);
 
@@ -117,7 +121,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
       const foundCensus = updatedCensusList?.find(census => census?.dateRanges.some(dateRange => dateRange.censusID === selectedStemsCensus.censusID));
       if (foundCensus) {
         const plotCensusNumber = foundCensus.plotCensusNumber;
-        fetchPreviousStemsData(plotCensusNumber);
+        fetchPreviousStemsData(plotCensusNumber).catch(ailogger.error);
       }
     }
   }, [selectedStemsCensus, updatedCensusList]);
@@ -161,7 +165,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         const newCensusID = await mapper.startNewCensus(currentSite?.schemaName, currentPlot?.plotID, highestPlotCensusNumber + 1);
         if (!newCensusID) throw new Error('census creation failure');
 
-        console.log('rollover personnel');
         await fetch(`/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedStemsCensus?.censusID}/${newCensusID}`, {
           method: 'POST',
           headers: {
@@ -171,8 +174,8 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         });
       }
       onConfirm(rolloverStems);
-    } catch (error) {
-      console.error('failed to perform stems rollover: ', error);
+    } catch (error: any) {
+      ailogger.error('failed to perform stems rollover: ', error);
       onConfirm(false);
     } finally {
       setLoading(false);
@@ -182,8 +185,8 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const handleRowSelection = <T extends { stemID?: number }>(selectionModel: GridRowSelectionModel, setSelection: Dispatch<SetStateAction<T[]>>) => {
     setSelection(
-      selectionModel
-        .map(id => {
+      (selectionModel as any)
+        .map((id: number) => {
           return previousStems.find(p => p.id === id) as T;
         })
         .filter(Boolean)
@@ -251,6 +254,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
               <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                 <Stack direction={'row'} spacing={2} alignItems={'center'}>
                   <Checkbox
+                    aria-label={'stems rollover checkbox'}
                     checked={rolloverStems}
                     onChange={() => setRolloverStems(!rolloverStems)}
                     disabled={!customizeStems && !selectedStemsCensus.hasStemsData}
@@ -272,7 +276,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
                             paginationModel: { pageSize: 5, page: 0 }
                           }
                         }}
-                        autoHeight
                       />
                     )}
                   </Box>

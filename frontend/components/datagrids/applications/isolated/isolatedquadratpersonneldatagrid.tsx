@@ -8,6 +8,7 @@ import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
 import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import ailogger from '@/ailogger';
 
 export default function IsolatedQuadratPersonnelDataGrid() {
   const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
@@ -42,7 +43,9 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         }))
       );
 
-      const personnelResponse = await fetch(`/api/fetchall/personnel?schema=${currentSite?.schemaName}`);
+      const personnelResponse = await fetch(
+        `/api/fetchall/personnel/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`
+      );
       const personnelData = await personnelResponse.json();
       if (personnelData.length === 0) throw new Error('personnelData fetchall is empty');
       setPersonnelOptions(
@@ -52,7 +55,7 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         }))
       );
     };
-    if (currentSite && currentPlot && currentCensus) fetchOptions().catch(console.error);
+    if (currentSite && currentPlot && currentCensus) fetchOptions().catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const QuadratPersonnelGridColumns: GridColDef[] = [

@@ -5,24 +5,25 @@ import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { capitalizeAndTransformField } from '@/config/utils';
 import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import ailogger from '@/ailogger';
 
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
+  let connection: PoolConnection | null = null;
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
     // Acquire the connection and ping to validate it
-    const connection = await getPoolMonitorInstance().getConnection();
+    connection = await getPoolMonitorInstance().getConnection();
     await connection.ping(); // Use ping to check the connection
-    // console.log('Connection successful');
     return connection; // Resolve the connection when successful
-  } catch (err) {
-    console.error(`Connection attempt ${tries + 1} failed:`, err);
-
+  } catch (err: any) {
+    ailogger.error(`Connection attempt ${tries + 1} failed:`, err);
+    connection?.release();
     if (tries === 5) {
-      console.error('!!! Cannot connect !!! Error:', err);
+      ailogger.error('!!! Cannot connect !!! Error:', err);
       throw err;
     } else {
-      console.log('Retrying connection...');
+      ailogger.info('Retrying connection...');
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
@@ -35,7 +36,7 @@ export async function getConn() {
     const i = 0;
     conn = await getSqlConnection(i);
   } catch (error: any) {
-    console.error('Error processing files:', error.message);
+    ailogger.error('Error processing files:', error.message);
     throw new Error(error.message);
   }
   if (!conn) {
@@ -45,25 +46,17 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 180000; // 180 seconds
+  const timeout = 360000; // 360 seconds
   const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
-  const startTime = Date.now();
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
     }
-    // Log query details
-    // console.log(chalk.cyan(`Executing query: ${query}`));
-    // if (params) {
-    //   console.log(chalk.gray(`Query params: ${JSON.stringify(params)}`));
-    // }
     if (query.trim().startsWith('CALL')) {
       const [rows] = await Promise.race([connection.query(query, params), timer]);
-      // console.log(chalk.magenta(`CALL Query completed in ${Date.now() - startTime}ms`));
       return rows;
     } else {
       const [rows, _fields] = await Promise.race([connection.execute(query, params), timer]);
-      // console.log(chalk.magenta(`STANDARD Query completed in ${Date.now() - startTime}ms`));
 
       if (query.trim().startsWith('INSERT') || query.trim().startsWith('UPDATE') || query.trim().startsWith('DELETE')) {
         return rows;
@@ -71,12 +64,11 @@ export async function runQuery(connection: PoolConnection, query: string, params
       return rows;
     }
   } catch (error: any) {
-    console.error(chalk.red(`Error executing query: ${query}`));
-    // if (params) {
-    //   console.error(chalk.red(`With params: ${JSON.stringify(params)}`));
-    // }
-    console.error(chalk.red('Error message:', error.message));
+    ailogger.error(chalk.red(`Error executing query: ${query}`));
+    ailogger.error(chalk.red('Error message:', error.message));
     throw error;
+  } finally {
+    getPoolMonitorInstance().signalActivity();
   }
 }
 
@@ -133,7 +125,7 @@ export function buildCondition({ operator, column, value }: { operator: Operator
     case 'doesNotEqual':
     case 'isNot':
     case '!=':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${column} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'startsWith':
       return `${column} LIKE '%${escapeSql(value as string)}'`;
     case 'endsWith':
@@ -175,9 +167,7 @@ export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: strin
       const { field, operator, value } = item;
       if (!field || !operator || !value) return '';
       const aliasedField = `${alias ? `${alias}.` : ''}${capitalizeAndTransformField(field)}`;
-      const condition = buildCondition({ operator: operator as Operator, column: aliasedField, value });
-      console.log('generated condition: ', condition);
-      return condition;
+      return buildCondition({ operator: operator as Operator, column: aliasedField, value });
     })
     .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
 };
