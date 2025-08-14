@@ -25,7 +25,8 @@ module.exports = defineConfig({
             '@/': path.resolve(__dirname, 'frontend/'),
             'next-auth/react': path.resolve(__dirname, 'cypress/mocks/nextauthmock.js'),
             'next/navigation': path.resolve(__dirname, 'cypress/mocks/nextNavMock.js'),
-            '@/ailogger': path.resolve(__dirname, 'cypress/mocks/ailoggerMock.js')
+            '@/ailogger': path.resolve(__dirname, 'cypress/mocks/ailoggerMock.js'),
+            '@/config/utils': path.resolve(__dirname, 'cypress/mocks/utilsMock.js')
           },
           fallback: {
             process: require.resolve('process/browser')
