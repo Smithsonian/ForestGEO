@@ -31,8 +31,8 @@ describe('NextAuth route (App Router compliant)', () => {
     expect(JSON.stringify(cfg?.providers)).toContain('microsoft-entra-id');
 
     // Queue the fetch used by your session callback with complete site data
-    __auth.pushFetchOk({ 
-      user: { id: 'abc', email: 'x@y.z' }, 
+    __auth.pushFetchOk({
+      user: { id: 'abc', email: 'x@y.z' },
       roles: ['admin'],
       userStatus: 'active',
       allowedSites: [
