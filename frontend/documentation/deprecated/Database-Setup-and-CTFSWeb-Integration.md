@@ -11,13 +11,13 @@ ensure your development environment is compatible with Unix systems before you p
 Before getting started, please ensure you have the following starting components:
 
 - A SQL flat file of an existing site
-  - This should be a very large (think 100s of MBs) SQL file that contains a direct SQL dump of a full site's census
-    history.
+    - This should be a very large (think 100s of MBs) SQL file that contains a direct SQL dump of a full site's census
+      history.
 - An empty data source to migrate the old schema into.
 - An empty data source to migrate the data into.
 - Time!
-  - A word to the wise, this takes a ridiculous amount of time, so make sure you have a couple hours to spare. I'd
-  - recommend making sure your machine is plugged in and has a steady internet connection.
+    - A word to the wise, this takes a ridiculous amount of time, so make sure you have a couple hours to spare. I'd
+    - recommend making sure your machine is plugged in and has a steady internet connection.
 
 ---
 

@@ -32,44 +32,6 @@ class Logger {
     this.ai = getAppInsights();
   }
 
-  private normalizeProps(props?: LogContext) {
-    return {
-      ...props,
-      timestamp: new Date().toISOString(),
-      logger: 'client' // you can customize per environment
-    };
-  }
-
-  private trackTrace(level: LogLevel, message: string, context?: LogContext) {
-    const normalized = this.normalizeProps(context);
-    if (this.ai) {
-      this.ai.trackTrace(
-        {
-          message,
-          severityLevel: levelToSeverityCode[level]
-        },
-        normalized
-      );
-    }
-
-    // Fallback to console (respecting level)
-    switch (level) {
-      case LogLevel.DEBUG:
-        console.debug(`[DEBUG] ${message}`, normalized);
-        break;
-      case LogLevel.INFO:
-        console.info(`[INFO] ${message}`, normalized);
-        break;
-      case LogLevel.WARN:
-        console.warn(`[WARN] ${message}`, normalized);
-        break;
-      case LogLevel.ERROR:
-      case LogLevel.CRITICAL:
-        console.error(`[${level.toUpperCase()}] ${message}`, normalized);
-        break;
-    }
-  }
-
   debug(message: string, context?: LogContext) {
     this.trackTrace(LogLevel.DEBUG, message, context);
   }
@@ -122,6 +84,44 @@ class Logger {
       this.ai.trackMetric({ name, average: value }, this.normalizeProps(properties));
     }
     console.log(`[METRIC] ${name}=${value}`, this.normalizeProps(properties));
+  }
+
+  private normalizeProps(props?: LogContext) {
+    return {
+      ...props,
+      timestamp: new Date().toISOString(),
+      logger: 'client' // you can customize per environment
+    };
+  }
+
+  private trackTrace(level: LogLevel, message: string, context?: LogContext) {
+    const normalized = this.normalizeProps(context);
+    if (this.ai) {
+      this.ai.trackTrace(
+        {
+          message,
+          severityLevel: levelToSeverityCode[level]
+        },
+        normalized
+      );
+    }
+
+    // Fallback to console (respecting level)
+    switch (level) {
+      case LogLevel.DEBUG:
+        console.debug(`[DEBUG] ${message}`, normalized);
+        break;
+      case LogLevel.INFO:
+        console.info(`[INFO] ${message}`, normalized);
+        break;
+      case LogLevel.WARN:
+        console.warn(`[WARN] ${message}`, normalized);
+        break;
+      case LogLevel.ERROR:
+      case LogLevel.CRITICAL:
+        console.error(`[${level.toUpperCase()}] ${message}`, normalized);
+        break;
+    }
   }
 }
 

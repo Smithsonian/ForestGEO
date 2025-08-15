@@ -148,24 +148,6 @@ class ConnectionManager {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
   }
 
-  // Helper method to detect deadlock errors.
-  private isDeadlockError(error: any): boolean {
-    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213);
-  }
-
-  // Acquire a connection for the current operation
-  private async acquireConnectionInternal(): Promise<PoolConnection> {
-    try {
-      const connection = await getConn(); // Reuse getConn from processormacros
-      await connection.ping(); // Validate connection
-      // console.log(chalk.green('Connection validated.'));
-      return connection;
-    } catch (error: any) {
-      ailogger.error(chalk.red('Error acquiring or validating connection:', error));
-      throw error;
-    }
-  }
-
   public async withTransaction<T>(fn: (transactionId: string) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
     const transactionId = await this.beginTransaction();
@@ -213,6 +195,24 @@ class ConnectionManager {
         }
         this.transactionMeta.delete(txId);
       }
+    }
+  }
+
+  // Helper method to detect deadlock errors.
+  private isDeadlockError(error: any): boolean {
+    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213);
+  }
+
+  // Acquire a connection for the current operation
+  private async acquireConnectionInternal(): Promise<PoolConnection> {
+    try {
+      const connection = await getConn(); // Reuse getConn from processormacros
+      await connection.ping(); // Validate connection
+      // console.log(chalk.green('Connection validated.'));
+      return connection;
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error acquiring or validating connection:', error));
+      throw error;
     }
   }
 }

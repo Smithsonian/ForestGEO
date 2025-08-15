@@ -5,12 +5,12 @@
 1. [Overview](#overview)
 2. [Test Architecture](#test-architecture)
 3. [API Route Tests](#api-route-tests)
-   - [Batch Processing](#batch-processing)
-   - [CRUD Operations](#crud-operations)
-   - [Data Retrieval](#data-retrieval)
-   - [File Management](#file-management)
-   - [Validation and Processing](#validation-and-processing)
-   - [System Management](#system-management)
+    - [Batch Processing](#batch-processing)
+    - [CRUD Operations](#crud-operations)
+    - [Data Retrieval](#data-retrieval)
+    - [File Management](#file-management)
+    - [Validation and Processing](#validation-and-processing)
+    - [System Management](#system-management)
 4. [Configuration Tests](#configuration-tests)
 5. [Mock Infrastructure Tests](#mock-infrastructure-tests)
 6. [Testing Patterns and Methodologies](#testing-patterns-and-methodologies)
@@ -20,7 +20,10 @@
 
 ## Overview
 
-The ForestGEO frontend test suite comprises 29 comprehensive unit test files that validate the entire API layer, configuration systems, and mocking infrastructure of the forest inventory management system. The test suite uses **Vitest** as the testing framework and implements sophisticated mocking strategies to ensure isolated, reliable testing of complex database-dependent operations.
+The ForestGEO frontend test suite comprises 29 comprehensive unit test files that validate the entire API layer,
+configuration systems, and mocking infrastructure of the forest inventory management system. The test suite uses *
+*Vitest** as the testing framework and implements sophisticated mocking strategies to ensure isolated, reliable testing
+of complex database-dependent operations.
 
 ### Key Statistics
 
@@ -96,24 +99,24 @@ vi.mock('@/config/connectionmanager', async () => {
 **Test Cases:**
 
 - **@test** `400s when requirements are missing: empty body`
-  - **@validates** Empty request body rejection
-  - **@expects** HTTP 400 with "Missing requirements" message
+    - **@validates** Empty request body rejection
+    - **@expects** HTTP 400 with "Missing requirements" message
 - **@test** `400s when schema is missing/empty`
-  - **@validates** Schema parameter validation
-  - **@expects** HTTP 400 for empty/undefined schema
+    - **@validates** Schema parameter validation
+    - **@expects** HTTP 400 for empty/undefined schema
 - **@test** `400s when slugs is not exactly length 2`
-  - **@validates** URL parameter count validation
-  - **@expects** HTTP 400 when plotID/censusID count incorrect
+    - **@validates** URL parameter count validation
+    - **@expects** HTTP 400 when plotID/censusID count incorrect
 - **@test** `400s when plotID or censusID are not numbers`
-  - **@validates** Numeric parameter validation
-  - **@expects** HTTP 400 for non-numeric plot/census IDs
+    - **@validates** Numeric parameter validation
+    - **@expects** HTTP 400 for non-numeric plot/census IDs
 - **@test** `200s and calls executeQuery on success`
-  - **@validates** Successful batch insertion workflow
-  - **@expects** HTTP 200, database execution, parameter mapping
-  - **@verifies** ID field exclusion, plotID/censusID addition
+    - **@validates** Successful batch insertion workflow
+    - **@expects** HTTP 200, database execution, parameter mapping
+    - **@verifies** ID field exclusion, plotID/censusID addition
 - **@test** `500s and logs on DB error`
-  - **@validates** Database error handling
-  - **@expects** HTTP 500, error logging, meaningful error response
+    - **@validates** Database error handling
+    - **@expects** HTTP 500, error logging, meaningful error response
 
 **Key Testing Patterns:**
 
@@ -130,22 +133,22 @@ vi.mock('@/config/connectionmanager', async () => {
 **Test Cases:**
 
 - **@test** `400 when dataType or plot or census missing`
-  - **@validates** Required parameter presence validation
-  - **@expects** HTTP 400 with "No dataType or SLUGS provided" message
+    - **@validates** Required parameter presence validation
+    - **@expects** HTTP 400 with "No dataType or SLUGS provided" message
 - **@test** `400 when rows missing`
-  - **@validates** Request body data validation
-  - **@expects** HTTP 400 with "No rows provided" message
+    - **@validates** Request body data validation
+    - **@expects** HTTP 400 with "No rows provided" message
 - **@test** `measurementssummary path: inserts temp rows, calls proc, commits, and closes`
-  - **@validates** Complete measurementssummary workflow
-  - **@expects** Transaction initiation, bulk insertion, stored procedure execution, commit, connection cleanup
-  - **@verifies** Correct parameter passing, SQL query construction
+    - **@validates** Complete measurementssummary workflow
+    - **@expects** Transaction initiation, bulk insertion, stored procedure execution, commit, connection cleanup
+    - **@verifies** Correct parameter passing, SQL query construction
 - **@test** `generic path: calls insertOrUpdate per row, commits, and closes`
-  - **@validates** Row-by-row processing for non-measurement data
-  - **@expects** Individual row processing, transaction management, parameter validation
+    - **@validates** Row-by-row processing for non-measurement data
+    - **@expects** Individual row processing, transaction management, parameter validation
 - **@test** `on error: rolls back with the transaction id, returns 500, and closes`
-  - **@validates** Error handling and transaction rollback behavior
-  - **@expects** Proper rollback with transaction ID, HTTP 500, connection cleanup
-  - **@critical** Essential for data integrity in production environments
+    - **@validates** Error handling and transaction rollback behavior
+    - **@expects** Proper rollback with transaction ID, HTTP 500, connection cleanup
+    - **@critical** Essential for data integrity in production environments
 
 **Architecture Features:**
 
@@ -165,18 +168,18 @@ vi.mock('@/config/connectionmanager', async () => {
 **Test Cases:**
 
 - **@test** `throws if firstName or lastName missing (pre-try/catch)`
-  - **@validates** Required parameter validation before processing
-  - **@expects** Thrown error for missing name parameters
+    - **@validates** Required parameter validation before processing
+    - **@expects** Thrown error for missing name parameters
 - **@test** `200 when user exists and returns the UserID`
-  - **@validates** Successful user lookup workflow
-  - **@expects** HTTP 200, correct SQL query construction, UserID return
-  - **@verifies** Parameter binding, connection closure
+    - **@validates** Successful user lookup workflow
+    - **@expects** HTTP 200, correct SQL query construction, UserID return
+    - **@verifies** Parameter binding, connection closure
 - **@test** `500 and logs when user not found`
-  - **@validates** No-results scenario handling
-  - **@expects** HTTP 500, error logging with endpoint metadata
+    - **@validates** No-results scenario handling
+    - **@expects** HTTP 500, error logging with endpoint metadata
 - **@test** `500 and logs when DB error occurs`
-  - **@validates** Database error propagation and logging
-  - **@expects** HTTP 500, error logging, connection cleanup
+    - **@validates** Database error propagation and logging
+    - **@expects** HTTP 500, error logging, connection cleanup
 
 **SQL Query Validation:**
 
@@ -197,33 +200,33 @@ WHERE FirstName = ? AND LastName = ?
 **Test Cases:**
 
 - **@test** `throws when schema missing/undefined`
-  - **@validates** Schema requirement validation
-  - **@expects** Error for missing/undefined schema parameters
+    - **@validates** Schema requirement validation
+    - **@expects** Error for missing/undefined schema parameters
 - **@test** `throws when slugs are missing/incomplete`
-  - **@validates** URL parameter structure validation
-  - **@expects** Error for insufficient slug parameters
+    - **@validates** URL parameter structure validation
+    - **@expects** Error for insufficient slug parameters
 - **@test** `stems: uses stored plotID/census from cookies and returns mapped results`
-  - **@validates** Cookie-based parameter retrieval and data mapping
-  - **@expects** HTTP 200, cookie parameter usage, data transformation
-  - **@verifies** SQL construction with JOIN operations
+    - **@validates** Cookie-based parameter retrieval and data mapping
+    - **@expects** HTTP 200, cookie parameter usage, data transformation
+    - **@verifies** SQL construction with JOIN operations
 - **@test** `trees: mirrors stems path and mapping`
-  - **@validates** Tree data retrieval with similar architecture
-  - **@expects** Consistent behavior with stems endpoint
+    - **@validates** Tree data retrieval with similar architecture
+    - **@expects** Consistent behavior with stems endpoint
 - **@test** `plots: selects plots with quadrat count; maps results; closes connection`
-  - **@validates** Plot data with aggregated quadrat information
-  - **@expects** GROUP BY query construction, aggregate field mapping
+    - **@validates** Plot data with aggregated quadrat information
+    - **@expects** GROUP BY query construction, aggregate field mapping
 - **@test** `personnel: passes stored PCN/plotID as params; maps results`
-  - **@validates** Personnel data retrieval with context parameters
-  - **@expects** Parameter passing from stored context
+    - **@validates** Personnel data retrieval with context parameters
+    - **@expects** Parameter passing from stored context
 - **@test** `census: runs UPDATE then SELECT by stored PlotID; maps results`
-  - **@validates** Two-phase census data processing
-  - **@expects** UPDATE followed by SELECT operations
+    - **@validates** Two-phase census data processing
+    - **@expects** UPDATE followed by SELECT operations
 - **@test** `default branch: generic SELECT * FROM schema.table; maps results`
-  - **@validates** Fallback generic table access
-  - **@expects** Simple table query with mapping
+    - **@validates** Fallback generic table access
+    - **@expects** Simple table query with mapping
 - **@test** `on DB error: logs via ailogger.error and throws "Call failed"`
-  - **@validates** Error handling with logging integration
-  - **@expects** Error logging, connection cleanup, proper error propagation
+    - **@validates** Error handling with logging integration
+    - **@expects** Error logging, connection cleanup, proper error propagation
 
 **Data Mapping Architecture:**
 
@@ -241,30 +244,30 @@ WHERE FirstName = ? AND LastName = ?
 **Test Cases:**
 
 - **@test** `throws if schema missing`
-  - **@validates** Schema parameter requirement
-  - **@expects** Error for missing schema in query parameters
+    - **@validates** Schema parameter requirement
+    - **@expects** Error for missing schema in query parameters
 - **@test** `throws if changelogType missing`
-  - **@validates** Changelog type parameter validation
-  - **@expects** Error for undefined changelog type
+    - **@validates** Changelog type parameter validation
+    - **@expects** Error for undefined changelog type
 - **@test** `throws if options missing`
-  - **@validates** Options parameter requirement
-  - **@expects** Error for missing options array
+    - **@validates** Options parameter requirement
+    - **@expects** Error for missing options array
 - **@test** `throws if options length !== 2`
-  - **@validates** Options array length validation
-  - **@expects** Error for incorrect options count
+    - **@validates** Options array length validation
+    - **@expects** Error for incorrect options count
 - **@test** `unifiedchangelog: 200 with mapped results; builds expected SQL; closes connection`
-  - **@validates** Unified changelog query construction and execution
-  - **@expects** HTTP 200, proper SQL with WHERE clauses, ORDER BY DESC, LIMIT
-  - **@verifies** Parameter binding, mapper usage, connection cleanup
+    - **@validates** Unified changelog query construction and execution
+    - **@expects** HTTP 200, proper SQL with WHERE clauses, ORDER BY DESC, LIMIT
+    - **@verifies** Parameter binding, mapper usage, connection cleanup
 - **@test** `unifiedchangelog: 200 with empty body when no rows; mapper not called`
-  - **@validates** No-results scenario handling
-  - **@expects** HTTP 200 with empty response, skipped mapping
+    - **@validates** No-results scenario handling
+    - **@expects** HTTP 200 with empty response, skipped mapping
 - **@test** `validationchangelog: 200 with mapped results; uses correct table`
-  - **@validates** Validation-specific changelog table access
-  - **@expects** Different table reference, consistent parameter handling
+    - **@validates** Validation-specific changelog table access
+    - **@expects** Different table reference, consistent parameter handling
 - **@test** `propagates SQL errors (rejects) and still closes connection`
-  - **@validates** Error propagation with resource cleanup
-  - **@expects** Error propagation, guaranteed connection closure
+    - **@validates** Error propagation with resource cleanup
+    - **@expects** Error propagation, guaranteed connection closure
 
 **SQL Patterns:**
 
@@ -294,19 +297,19 @@ LIMIT 5;
 **Test Cases:**
 
 - **@test** `400 when container or filename is missing`
-  - **@validates** Required parameter validation
-  - **@expects** HTTP 400 for missing container or filename
+    - **@validates** Required parameter validation
+    - **@expects** HTTP 400 for missing container or filename
 - **@test** `400 when getContainerClient returns falsy`
-  - **@validates** Container client creation validation
-  - **@expects** HTTP 400 when container client creation fails
-  - **@verifies** Container name lowercasing
+    - **@validates** Container client creation validation
+    - **@expects** HTTP 400 when container client creation fails
+    - **@verifies** Container name lowercasing
 - **@test** `200 on success: deletes blob and returns success text`
-  - **@validates** Successful file deletion workflow
-  - **@expects** HTTP 200, blob client creation, deletion execution
-  - **@verifies** Container name normalization, proper API calls
+    - **@validates** Successful file deletion workflow
+    - **@expects** HTTP 200, blob client creation, deletion execution
+    - **@verifies** Container name normalization, proper API calls
 - **@test** `500 when blob deletion throws and logs error`
-  - **@validates** Error handling with logging
-  - **@expects** HTTP 500, error logging, meaningful error response
+    - **@validates** Error handling with logging
+    - **@expects** HTTP 500, error logging, meaningful error response
 
 #### `/app/api/filehandlers/downloadallfiles/route.test.ts`
 
@@ -317,18 +320,18 @@ LIMIT 5;
 **Test Cases:**
 
 - **@test** `400 when plot or census is missing`
-  - **@validates** Required parameter validation
-  - **@expects** HTTP 400 for missing plot/census parameters
+    - **@validates** Required parameter validation
+    - **@expects** HTTP 400 for missing plot/census parameters
 - **@test** `400 when container client cannot be created`
-  - **@validates** Container client creation error handling
-  - **@expects** HTTP 400 with specific error message
+    - **@validates** Container client creation error handling
+    - **@expects** HTTP 400 with specific error message
 - **@test** `200 on success: lists blobs, maps fields, warns once`
-  - **@validates** Successful blob listing and metadata mapping
-  - **@expects** HTTP 200, blob enumeration, field transformation
-  - **@verifies** Container naming convention, metadata parsing, logging
+    - **@validates** Successful blob listing and metadata mapping
+    - **@expects** HTTP 200, blob enumeration, field transformation
+    - **@verifies** Container naming convention, metadata parsing, logging
 - **@test** `400 when listBlobsFlat iteration throws; logs error with endpoint`
-  - **@validates** Blob enumeration error handling
-  - **@expects** HTTP 400, error logging with endpoint context
+    - **@validates** Blob enumeration error handling
+    - **@expects** HTTP 400, error logging with endpoint context
 
 **Metadata Mapping:**
 
@@ -353,21 +356,21 @@ LIMIT 5;
 **Test Cases:**
 
 - **@test** `400 when container, filename, or connection string missing`
-  - **@validates** Required parameter and environment validation
-  - **@expects** HTTP 400 for missing required configuration
+    - **@validates** Required parameter and environment validation
+    - **@expects** HTTP 400 for missing required configuration
 - **@test** `400 when container client cannot be created`
-  - **@validates** Container client creation validation
-  - **@expects** HTTP 400 with specific error message
+    - **@validates** Container client creation validation
+    - **@expects** HTTP 400 with specific error message
 - **@test** `200 on success with SAS token`
-  - **@validates** Successful SAS token generation and URL construction
-  - **@expects** HTTP 200, SAS token creation, URL formatting
-  - **@verifies** Credential type validation, permission parsing
+    - **@validates** Successful SAS token generation and URL construction
+    - **@expects** HTTP 200, SAS token creation, URL formatting
+    - **@verifies** Credential type validation, permission parsing
 - **@test** `200 when credential is NOT StorageSharedKeyCredential (empty SAS)`
-  - **@validates** Alternative credential handling
-  - **@expects** HTTP 200 with empty SAS token
+    - **@validates** Alternative credential handling
+    - **@expects** HTTP 200 with empty SAS token
 - **@test** `500 when any error is thrown and logs via ailogger.error`
-  - **@validates** Comprehensive error handling
-  - **@expects** HTTP 500, error logging, meaningful error response
+    - **@validates** Comprehensive error handling
+    - **@expects** HTTP 500, error logging, meaningful error response
 
 #### `/app/api/filehandlers/storageload/route.test.ts`
 
@@ -378,27 +381,27 @@ LIMIT 5;
 **Test Cases:**
 
 - **@test** `400 when formData is missing/empty`
-  - **@validates** Form data requirement validation
-  - **@expects** HTTP 400 for missing or empty form data
+    - **@validates** Form data requirement validation
+    - **@expects** HTTP 400 for missing or empty form data
 - **@test** `400 when required query params are missing`
-  - **@validates** Query parameter validation
-  - **@expects** HTTP 400 for missing user/formType parameters
+    - **@validates** Query parameter validation
+    - **@expects** HTTP 400 for missing user/formType parameters
 - **@test** `500 when getContainerClient throws; logs via ailogger`
-  - **@validates** Container client error handling
-  - **@expects** HTTP 500, error logging, meaningful error response
+    - **@validates** Container client error handling
+    - **@expects** HTTP 500, error logging, meaningful error response
 - **@test** `500 when container client is falsy`
-  - **@validates** Container client validation
-  - **@expects** HTTP 500 with specific error message
+    - **@validates** Container client validation
+    - **@expects** HTTP 500 with specific error message
 - **@test** `500 when upload returns non-2xx status`
-  - **@validates** Upload response status validation
-  - **@expects** HTTP 500 for failed upload operations
+    - **@validates** Upload response status validation
+    - **@expects** HTTP 500 for failed upload operations
 - **@test** `500 when upload throws; logs error`
-  - **@validates** Upload exception handling
-  - **@expects** HTTP 500, error logging, error propagation
+    - **@validates** Upload exception handling
+    - **@expects** HTTP 500, error logging, error propagation
 - **@test** `200 on success; uses lower-cased container name and passes args to upload`
-  - **@validates** Successful upload workflow
-  - **@expects** HTTP 200, container name normalization, proper parameter passing
-  - **@verifies** File metadata handling, error data parsing
+    - **@validates** Successful upload workflow
+    - **@expects** HTTP 200, container name normalization, proper parameter passing
+    - **@verifies** File metadata handling, error data parsing
 
 **Upload Parameters:**
 
@@ -424,24 +427,24 @@ uploadValidFileAsBuffer(
 **Test Cases:**
 
 - **@test** `throws if slugs missing or length !== 3`
-  - **@validates** URL parameter structure validation
-  - **@expects** Error for incorrect slug count
+    - **@validates** URL parameter structure validation
+    - **@expects** Error for incorrect slug count
 - **@test** `throws if dataType missing or "undefined"`
-  - **@validates** Data type parameter validation
-  - **@expects** Error for missing/undefined data type
+    - **@validates** Data type parameter validation
+    - **@expects** Error for missing/undefined data type
 - **@test** `returns 404 when any of schema/columnName/value is falsy`
-  - **@validates** Required field validation
-  - **@expects** HTTP 404 for empty string parameters
+    - **@validates** Required field validation
+    - **@expects** HTTP 404 for empty string parameters
 - **@test** `404 when query returns no rows; closes connection; formats SQL with ?? and ?`
-  - **@validates** No-match scenario handling
-  - **@expects** HTTP 404, connection cleanup, proper SQL formatting
-  - **@verifies** Parameterized query construction
+    - **@validates** No-match scenario handling
+    - **@expects** HTTP 404, connection cleanup, proper SQL formatting
+    - **@verifies** Parameterized query construction
 - **@test** `200 when at least one row exists; closes connection`
-  - **@validates** Successful validation workflow
-  - **@expects** HTTP 200 for existing field values
+    - **@validates** Successful validation workflow
+    - **@expects** HTTP 200 for existing field values
 - **@test** `propagates DB errors and still closes connection`
-  - **@validates** Error handling with resource cleanup
-  - **@expects** Error propagation, guaranteed connection closure
+    - **@validates** Error handling with resource cleanup
+    - **@expects** Error propagation, guaranteed connection closure
 
 **SQL Pattern:**
 
@@ -460,32 +463,32 @@ SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1
 **Test Cases:**
 
 - **@test** `throws when slugs or dataType missing`
-  - **@validates** Required parameter validation
-  - **@expects** Error for missing slugs or data type
+    - **@validates** Required parameter validation
+    - **@expects** Error for missing slugs or data type
 - **@test** `throws when incorrect slugs (length not 3 or "undefined" values)`
-  - **@validates** Parameter structure and content validation
-  - **@expects** Error for malformed slug parameters
+    - **@validates** Parameter structure and content validation
+    - **@expects** Error for malformed slug parameters
 - **@test** `attributes: 200 when table has rows; 428 when empty; closes connection`
-  - **@validates** Attributes table validation workflow
-  - **@expects** HTTP 200/428 based on data presence, connection cleanup
+    - **@validates** Attributes table validation workflow
+    - **@expects** HTTP 200/428 based on data presence, connection cleanup
 - **@test** `species: mirrors attributes behavior`
-  - **@validates** Species table validation with consistent behavior
-  - **@expects** Same validation pattern as attributes
+    - **@validates** Species table validation with consistent behavior
+    - **@expects** Same validation pattern as attributes
 - **@test** `personnel: 200 when table has rows; 428 when empty`
-  - **@validates** Personnel table validation
-  - **@expects** Consistent validation behavior across entity types
+    - **@validates** Personnel table validation
+    - **@expects** Consistent validation behavior across entity types
 - **@test** `quadrats: uses PlotID in WHERE; 200 when rows; 428 when none`
-  - **@validates** Plot-specific quadrat validation
-  - **@expects** PlotID filtering in query construction
+    - **@validates** Plot-specific quadrat validation
+    - **@expects** PlotID filtering in query construction
 - **@test** `postvalidation: builds expected JOIN/Census filter`
-  - **@validates** Complex multi-table validation with joins
-  - **@expects** JOIN query construction with census filtering
+    - **@validates** Complex multi-table validation with joins
+    - **@expects** JOIN query construction with census filtering
 - **@test** `default (unknown dataType): returns 428 and closes connection (no DB call)`
-  - **@validates** Unknown data type handling
-  - **@expects** HTTP 428 without database interaction
+    - **@validates** Unknown data type handling
+    - **@expects** HTTP 428 without database interaction
 - **@test** `on DB error: logs via ailogger.error and returns 428`
-  - **@validates** Database error handling with logging
-  - **@expects** HTTP 428, error logging, connection cleanup
+    - **@validates** Database error handling with logging
+    - **@expects** HTTP 428, error logging, connection cleanup
 
 **Validation Queries by Type:**
 
@@ -518,17 +521,17 @@ WHERE p.PlotID = ? AND c.CensusID IN (
 **Test Cases:**
 
 - **@test** `throws if schema is missing`
-  - **@validates** Schema parameter requirement validation
-  - **@expects** Error for missing schema parameter
+    - **@validates** Schema parameter requirement validation
+    - **@expects** Error for missing schema parameter
 - **@test** `404 when no queries found; closes connection`
-  - **@validates** No-results scenario handling
-  - **@expects** HTTP 404 with "No queries found" message, connection cleanup
+    - **@validates** No-results scenario handling
+    - **@expects** HTTP 404 with "No queries found" message, connection cleanup
 - **@test** `200 with mapped results; closes connection`
-  - **@validates** Successful query retrieval and mapping
-  - **@expects** HTTP 200, field mapping transformation, connection cleanup
+    - **@validates** Successful query retrieval and mapping
+    - **@expects** HTTP 200, field mapping transformation, connection cleanup
 - **@test** `propagates DB errors and still closes connection`
-  - **@validates** Error handling with resource cleanup
-  - **@expects** Error propagation, guaranteed connection closure
+    - **@validates** Error handling with resource cleanup
+    - **@expects** Error propagation, guaranteed connection closure
 
 **Query and Mapping:**
 
@@ -557,21 +560,21 @@ WHERE IsEnabled IS TRUE;
 **Test Cases:**
 
 - **@test** `400 when any param is missing/falsy`
-  - **@validates** Required parameter validation including zero values
-  - **@expects** HTTP 400 for missing/falsy parameters
+    - **@validates** Required parameter validation including zero values
+    - **@expects** HTTP 400 for missing/falsy parameters
 - **@test** `404 when QueryID not found; closes connection`
-  - **@validates** Query existence validation
-  - **@expects** HTTP 404, connection cleanup for non-existent queries
+    - **@validates** Query existence validation
+    - **@expects** HTTP 404, connection cleanup for non-existent queries
 - **@test** `200 on success: replaces variables, runs update with timestamp+result, commits, closes`
-  - **@validates** Complete query execution workflow
-  - **@expects** Template variable substitution, execution, result logging, transaction commit
-  - **@verifies** Variable replacement: ${schema}, ${currentPlotID}, ${currentCensusID}
+    - **@validates** Complete query execution workflow
+    - **@expects** Template variable substitution, execution, result logging, transaction commit
+    - **@verifies** Variable replacement: ${schema}, ${currentPlotID}, ${currentCensusID}
 - **@test** `200 when query returns empty → marks 'failure', updates status, rolls back`
-  - **@validates** Empty result handling as failure condition
-  - **@expects** Failure status update, transaction rollback, timestamp logging
+    - **@validates** Empty result handling as failure condition
+    - **@expects** Failure status update, transaction rollback, timestamp logging
 - **@test** `500 on unexpected error; rolls back and closes`
-  - **@validates** Error handling with transaction management
-  - **@expects** HTTP 500, transaction rollback, connection cleanup
+    - **@validates** Error handling with transaction management
+    - **@expects** HTTP 500, transaction rollback, connection cleanup
 
 **Template Variables:**
 
@@ -609,12 +612,12 @@ WHERE QueryID = ?;
 **Test Cases:**
 
 - **@test** `deletes all expected cookies in order and returns 200 with { cleared: true }`
-  - **@validates** Complete cookie deletion workflow
-  - **@expects** HTTP 200, ordered cookie deletion, success response
-  - **@verifies** Cookie deletion order: censusID, plotID, schema, quadratID, user, censusList
+    - **@validates** Complete cookie deletion workflow
+    - **@expects** HTTP 200, ordered cookie deletion, success response
+    - **@verifies** Cookie deletion order: censusID, plotID, schema, quadratID, user, censusList
 - **@test** `propagates an error if a cookie deletion fails`
-  - **@validates** Error propagation without try/catch
-  - **@expects** Error propagation, partial deletion completion
+    - **@validates** Error propagation without try/catch
+    - **@expects** Error propagation, partial deletion completion
 
 **Cookie Deletion Order:**
 
@@ -632,18 +635,18 @@ WHERE QueryID = ?;
 **Test Cases:**
 
 - **@test** `503 when schema or censusID is missing`
-  - **@validates** Required parameter validation
-  - **@expects** HTTP 503 for missing required parameters
+    - **@validates** Required parameter validation
+    - **@expects** HTTP 503 for missing required parameters
 - **@test** `200 on success: begins tx, calls proc, commits`
-  - **@validates** Successful census clearing workflow
-  - **@expects** Transaction initiation, stored procedure execution, commit
-  - **@verifies** Procedure naming convention: clearcensus{type}
+    - **@validates** Successful census clearing workflow
+    - **@expects** Transaction initiation, stored procedure execution, commit
+    - **@verifies** Procedure naming convention: clearcensus{type}
 - **@test** `503 on DB error: rolls back with transaction id and returns error text`
-  - **@validates** Error handling with transaction rollback
-  - **@expects** HTTP 503, transaction rollback with ID, error propagation
+    - **@validates** Error handling with transaction rollback
+    - **@expects** HTTP 503, transaction rollback with ID, error propagation
 - **@test** `builds stored procedure name using 'type' param (smoke check)`
-  - **@validates** Dynamic procedure name construction
-  - **@expects** Correct procedure naming based on type parameter
+    - **@validates** Dynamic procedure name construction
+    - **@expects** Correct procedure naming based on type parameter
 
 **Stored Procedure Pattern:**
 
@@ -662,20 +665,20 @@ CALL {schema}.clearcensus{type}(?);
 **Test Cases:**
 
 - **@test** `throws if schema or view is missing/undefined`
-  - **@validates** Required parameter validation including "undefined" strings
-  - **@expects** Error for missing/undefined parameters
+    - **@validates** Required parameter validation including "undefined" strings
+    - **@expects** Error for missing/undefined parameters
 - **@test** `viewfulltable: calls RefreshViewFullTable(), commits, and closes`
-  - **@validates** Full table view refresh workflow
-  - **@expects** Specific stored procedure execution, transaction commit
+    - **@validates** Full table view refresh workflow
+    - **@expects** Specific stored procedure execution, transaction commit
 - **@test** `measurementssummary: calls RefreshMeasurementsSummary(), commits, and closes`
-  - **@validates** Measurements summary view refresh
-  - **@expects** Measurements-specific procedure execution
+    - **@validates** Measurements summary view refresh
+    - **@expects** Measurements-specific procedure execution
 - **@test** `unknown view: calls Refresh() (empty suffix), commits, and closes`
-  - **@validates** Default view refresh handling
-  - **@expects** Generic refresh procedure execution
+    - **@validates** Default view refresh handling
+    - **@expects** Generic refresh procedure execution
 - **@test** `on error: rolls back with the transaction id and closes`
-  - **@validates** Error handling with transaction management
-  - **@expects** Transaction rollback with ID, connection cleanup
+    - **@validates** Error handling with transaction management
+    - **@expects** Transaction rollback with ID, connection cleanup
 
 **View Refresh Procedures:**
 
@@ -697,15 +700,15 @@ CALL {schema}.Refresh();                    -- default/unknown
 **Test Cases:**
 
 - **@test** `throws if any of schema/plotID/censusID missing`
-  - **@validates** Required parameter validation
-  - **@expects** Error for missing core parameters
+    - **@validates** Required parameter validation
+    - **@expects** Error for missing core parameters
 - **@test** `happy path: truncates temp, shifts rows, deletes failed, calls proc`
-  - **@validates** Complete re-ingestion workflow
-  - **@expects** Four-step process: truncate, insert, delete, procedure call
-  - **@verifies** Transaction commit, response structure
+    - **@validates** Complete re-ingestion workflow
+    - **@expects** Four-step process: truncate, insert, delete, procedure call
+    - **@verifies** Transaction commit, response structure
 - **@test** `on error: rolls back with transaction id and returns 500 JSON { error }`
-  - **@validates** Error handling with transaction rollback
-  - **@expects** HTTP 500, transaction rollback with ID, error response
+    - **@validates** Error handling with transaction rollback
+    - **@expects** HTTP 500, transaction rollback with ID, error response
 
 **Re-ingestion Workflow:**
 
@@ -729,15 +732,15 @@ CALL {schema}.Refresh();                    -- default/unknown
 **Test Cases:**
 
 - **@test** `throws if core parameters not provided`
-  - **@validates** Parameter requirement validation
-  - **@expects** Error for missing schema/targetRowID
+    - **@validates** Parameter requirement validation
+    - **@expects** Error for missing schema/targetRowID
 - **@test** `happy path: moves single failed row, clears it, ingests`
-  - **@validates** Single row re-ingestion workflow
-  - **@expects** Three-step process: insert, delete, procedure call
-  - **@verifies** Transaction commit, success response
+    - **@validates** Single row re-ingestion workflow
+    - **@expects** Three-step process: insert, delete, procedure call
+    - **@verifies** Transaction commit, success response
 - **@test** `on error: rolls back with transaction id, calls reviewfailed(), and rethrows`
-  - **@validates** Error handling with review procedure
-  - **@expects** Transaction rollback, review procedure call, error propagation
+    - **@validates** Error handling with review procedure
+    - **@expects** Transaction rollback, review procedure call, error propagation
 
 **Single Row Workflow:**
 
@@ -761,15 +764,15 @@ CALL {schema}.Refresh();                    -- default/unknown
 **Test Cases:**
 
 - **@test** `formats the query with params, executes it, and returns 200 with JSON`
-  - **@validates** Complete query formatting and execution workflow
-  - **@expects** HTTP 200, JSON response, parameter formatting
-  - **@verifies** mysql2.format integration, query execution
+    - **@validates** Complete query formatting and execution workflow
+    - **@expects** HTTP 200, JSON response, parameter formatting
+    - **@verifies** mysql2.format integration, query execution
 - **@test** `works when params are omitted (undefined) and still formats deterministically`
-  - **@validates** Optional parameter handling
-  - **@expects** Deterministic formatting with empty parameter array
+    - **@validates** Optional parameter handling
+    - **@expects** Deterministic formatting with empty parameter array
 - **@test** `propagates DB errors (rejects) when executeQuery fails`
-  - **@validates** Database error propagation
-  - **@expects** Error propagation without modification
+    - **@validates** Database error propagation
+    - **@expects** Error propagation without modification
 
 **Query Formatting:**
 
@@ -790,29 +793,29 @@ mysql2.format(query: string, params?: any[]) => string
 **Test Cases:**
 
 - **@test** `throws when missing core slugs (including plot search param)`
-  - **@validates** Required parameter validation including query parameters
-  - **@expects** Error for missing metric/schema/plotID/plot parameters
+    - **@validates** Required parameter validation including query parameters
+    - **@expects** Error for missing metric/schema/plotID/plot parameters
 - **@test** `CountActiveUsers: returns 200 and proper JSON; builds expected SQL + params`
-  - **@validates** Active users metric calculation
-  - **@expects** HTTP 200, JOIN query construction, parameter binding
+    - **@validates** Active users metric calculation
+    - **@expects** HTTP 200, JOIN query construction, parameter binding
 - **@test** `ProgressTachometer: returns expected aggregate fields and 200`
-  - **@validates** Progress metrics with aggregation
-  - **@expects** Aggregate field mapping, percentage calculations
+    - **@validates** Progress metrics with aggregation
+    - **@expects** Aggregate field mapping, percentage calculations
 - **@test** `FilesUploaded: lists blobs, maps metadata, returns 200`
-  - **@validates** File listing and metadata processing
-  - **@expects** Blob enumeration, metadata parsing, field transformation
+    - **@validates** File listing and metadata processing
+    - **@expects** Blob enumeration, metadata parsing, field transformation
 - **@test** `CountTrees: 200 and proper JSON; SQL + params sanity`
-  - **@validates** Tree counting metric
-  - **@expects** JOIN query with census filtering
+    - **@validates** Tree counting metric
+    - **@expects** JOIN query with census filtering
 - **@test** `CountStems: 200 and proper JSON; SQL + params sanity`
-  - **@validates** Stem counting metric
-  - **@expects** Similar pattern to tree counting
+    - **@validates** Stem counting metric
+    - **@expects** Similar pattern to tree counting
 - **@test** `unknown metric: returns 200 with empty object`
-  - **@validates** Unknown metric handling
-  - **@expects** HTTP 200 with empty response
+    - **@validates** Unknown metric handling
+    - **@expects** HTTP 200 with empty response
 - **@test** `on DB error: returns 400 (INVALID_REQUEST)`
-  - **@validates** Database error handling
-  - **@expects** HTTP 400 with empty response
+    - **@validates** Database error handling
+    - **@expects** HTTP 400 with empty response
 
 **Metric Calculations:**
 
@@ -850,14 +853,14 @@ WHERE q.PlotID = ?;
 **Test Cases:**
 
 - **@test** `throws when schema is missing`
-  - **@validates** Schema parameter requirement
-  - **@expects** Error for missing schema parameter
+    - **@validates** Schema parameter requirement
+    - **@expects** Error for missing schema parameter
 - **@test** `200 with mapped results; builds expected SQL + params; closes connection`
-  - **@validates** Successful detail retrieval workflow
-  - **@expects** HTTP 200, field mapping, parameter binding, connection cleanup
+    - **@validates** Successful detail retrieval workflow
+    - **@expects** HTTP 200, field mapping, parameter binding, connection cleanup
 - **@test** `propagates SQL errors (rejects) and still closes connection`
-  - **@validates** Error handling with resource cleanup
-  - **@expects** Error propagation, guaranteed connection closure
+    - **@validates** Error handling with resource cleanup
+    - **@expects** Error propagation, guaranteed connection closure
 
 **Field Mapping:**
 
@@ -884,26 +887,26 @@ WHERE q.PlotID = ?;
 **Test Cases:**
 
 - **@test** `throws if slugs are missing or fewer than 5`
-  - **@validates** Slug count validation
-  - **@expects** Error for insufficient parameters
+    - **@validates** Slug count validation
+    - **@expects** Error for insufficient parameters
 - **@test** `throws if core slugs schema/page/pageSize are not valid`
-  - **@validates** Core parameter validation
-  - **@expects** Error for invalid schema/page/pageSize values
+    - **@validates** Core parameter validation
+    - **@expects** Error for invalid schema/page/pageSize values
 - **@test** `unifiedchangelog: 200 with mapped data, totalCount, finishedQuery`
-  - **@validates** Unified changelog with pagination
-  - **@expects** HTTP 200, data mapping, total count, formatted query response
+    - **@validates** Unified changelog with pagination
+    - **@expects** HTTP 200, data mapping, total count, formatted query response
 - **@test** `stems: parses UserDefinedFields before mapping`
-  - **@validates** JSON field parsing for stem data
-  - **@expects** UserDefinedFields JSON parsing and treestemstate extraction
+    - **@validates** JSON field parsing for stem data
+    - **@expects** UserDefinedFields JSON parsing and treestemstate extraction
 - **@test** `personnel: finishedQuery param order is correct`
-  - **@validates** Parameter ordering in personnel queries
-  - **@expects** Correct parameter sequence in formatted query
+    - **@validates** Parameter ordering in personnel queries
+    - **@expects** Correct parameter sequence in formatted query
 - **@test** `throws for unknown dataType`
-  - **@validates** Data type validation
-  - **@expects** Error for unsupported data types
+    - **@validates** Data type validation
+    - **@expects** Error for unsupported data types
 - **@test** `propagates DB errors and closes connection`
-  - **@validates** Error handling with cleanup
-  - **@expects** Error propagation, connection closure
+    - **@validates** Error handling with cleanup
+    - **@expects** Error propagation, connection closure
 
 **Pagination Pattern:**
 
@@ -938,26 +941,26 @@ SELECT FOUND_ROWS() as totalRows;
 **Test Cases:**
 
 - **@test** `delegates to SINGLEPOST if body.newRow is truthy`
-  - **@validates** Request delegation pattern
-  - **@expects** Forward to single post handler for new row creation
+    - **@validates** Request delegation pattern
+    - **@expects** Forward to single post handler for new row creation
 - **@test** `throws if slugs missing or fewer than 5`
-  - **@validates** Parameter structure validation
-  - **@expects** Error for insufficient slug parameters
+    - **@validates** Parameter structure validation
+    - **@expects** Error for insufficient slug parameters
 - **@test** `throws if core slugs schema/page/pageSize invalid`
-  - **@validates** Core parameter validation
-  - **@expects** Error for invalid core parameters
+    - **@validates** Core parameter validation
+    - **@expects** Error for invalid core parameters
 - **@test** `sitespecificvalidations: builds WHERE with search+filter, paginates, maps rows`
-  - **@validates** Site-specific validation filtering
-  - **@expects** Search/filter integration, pagination, mapping, transaction management
+    - **@validates** Site-specific validation filtering
+    - **@expects** Search/filter integration, pagination, mapping, transaction management
 - **@test** `measurementssummaryview: respects visible + tss filters`
-  - **@validates** Measurement summary with visibility and tree stem state filters
-  - **@expects** Complex WHERE clauses for validation status and JSON field filtering
+    - **@validates** Measurement summary with visibility and tree stem state filters
+    - **@expects** Complex WHERE clauses for validation status and JSON field filtering
 - **@test** `coremeasurements: when multiple census IDs, returns deprecated filtered subset`
-  - **@validates** Core measurements with deprecation logic
-  - **@expects** Deprecated row identification, complex census filtering
+    - **@validates** Core measurements with deprecation logic
+    - **@expects** Deprecated row identification, complex census filtering
 - **@test** `rolls back and rethrows if a DB error occurs during query`
-  - **@validates** Error handling with transaction rollback
-  - **@expects** Transaction rollback, error propagation, connection cleanup
+    - **@validates** Error handling with transaction rollback
+    - **@expects** Transaction rollback, error propagation, connection cleanup
 
 **Filter Integration:**
 
@@ -993,29 +996,29 @@ WHERE (IsValidated = TRUE OR IsValidated IS NULL) -- visible: ['valid', 'pending
 **Test Cases:**
 
 - **@test** `throws if data type or slugs not provided`
-  - **@validates** Required parameter validation
-  - **@expects** Error for missing data type or slugs
+    - **@validates** Required parameter validation
+    - **@expects** Error for missing data type or slugs
 - **@test** `throws if schema missing`
-  - **@validates** Schema parameter validation
-  - **@expects** Error for missing schema parameter
+    - **@validates** Schema parameter validation
+    - **@expects** Error for missing schema parameter
 - **@test** `attributes: 200 with mapped rows; uses search+filter stubs`
-  - **@validates** Attributes export with filtering
-  - **@expects** HTTP 200, search/filter integration, data mapping
+    - **@validates** Attributes export with filtering
+    - **@expects** HTTP 200, search/filter integration, data mapping
 - **@test** `personnel: 200 and maps expected fields; applies stubs`
-  - **@validates** Personnel export with role joins
-  - **@expects** JOIN with roles table, field transformation
+    - **@validates** Personnel export with role joins
+    - **@expects** JOIN with roles table, field transformation
 - **@test** `species: 200 and maps expected fields; applies stubs`
-  - **@validates** Species export with taxonomic joins
-  - **@expects** JOIN with genus table, comprehensive field mapping
+    - **@validates** Species export with taxonomic joins
+    - **@expects** JOIN with genus table, comprehensive field mapping
 - **@test** `quadrats: 200 and maps expected fields; applies stubs`
-  - **@validates** Quadrat export with spatial data
-  - **@expects** Spatial field transformation
+    - **@validates** Quadrat export with spatial data
+    - **@expects** Spatial field transformation
 - **@test** `measurements: 200, maps expected fields; respects visible/tss/search/filter`
-  - **@validates** Measurement export with complex filtering
-  - **@expects** Validation status filtering, tree stem state filtering, comprehensive joins
+    - **@validates** Measurement export with complex filtering
+    - **@expects** Validation status filtering, tree stem state filtering, comprehensive joins
 - **@test** `propagates errors thrown during columns discovery`
-  - **@validates** Column discovery error handling
-  - **@expects** Error propagation during metadata operations
+    - **@validates** Column discovery error handling
+    - **@expects** Error propagation during metadata operations
 
 **Field Mapping Examples:**
 
@@ -1104,14 +1107,15 @@ WHERE cm.CensusID = ? AND q.PlotID = ?
 **Test Cases:**
 
 - **@test** `should define correct HTTP status codes`
-  - **@validates** Standard HTTP status code definitions
-  - **@expects** Correct mapping for 200, 201, 400, 409, 500, 503
+    - **@validates** Standard HTTP status code definitions
+    - **@expects** Correct mapping for 200, 201, 400, 409, 500, 503
 - **@test** `should define custom status codes`
-  - **@validates** Application-specific error codes
-  - **@expects** Custom codes: 408 (SQL_CONNECTION_FAILURE), 412 (PRECONDITION_VALIDATION_FAILURE), 555 (FOREIGN_KEY_CONFLICT)
+    - **@validates** Application-specific error codes
+    - **@expects** Custom codes: 408 (SQL_CONNECTION_FAILURE), 412 (PRECONDITION_VALIDATION_FAILURE), 555 (
+      FOREIGN_KEY_CONFLICT)
 - **@test** `should handle NOT_FOUND status`
-  - **@validates** NOT_FOUND enumeration existence
-  - **@expects** Defined NOT_FOUND status for resource lookup failures
+    - **@validates** NOT_FOUND enumeration existence
+    - **@expects** Defined NOT_FOUND status for resource lookup failures
 
 **HTTP Response Codes:**
 
@@ -1143,15 +1147,15 @@ WHERE cm.CensusID = ? AND q.PlotID = ?
 **Test Cases:**
 
 - **@test** `initializes with Entra provider and calls poll URL in session callback`
-  - **@validates** Authentication system initialization and configuration
-  - **@expects** Entra ID provider setup, session callback execution, poll URL interaction
-  - **@verifies** User data retrieval, roles assignment, site permissions
+    - **@validates** Authentication system initialization and configuration
+    - **@expects** Entra ID provider setup, session callback execution, poll URL interaction
+    - **@verifies** User data retrieval, roles assignment, site permissions
 - **@test** `propagates failures from poll URL during session retrieval`
-  - **@validates** Error handling in authentication flow
-  - **@expects** Error propagation from downstream services
+    - **@validates** Error handling in authentication flow
+    - **@expects** Error propagation from downstream services
 - **@test** `handles signin POST`
-  - **@validates** Sign-in request processing
-  - **@expects** Proper request handling with callback URL
+    - **@validates** Sign-in request processing
+    - **@expects** Proper request handling with callback URL
 
 **Authentication Features:**
 
@@ -1178,29 +1182,29 @@ WHERE cm.CensusID = ? AND q.PlotID = ?
 **Test Cases:**
 
 - **@test** `captures SQL + params and returns queued results (FIFO)`
-  - **@validates** SQL execution tracking and result queue management
-  - **@expects** FIFO result delivery, SQL/parameter capture
+    - **@validates** SQL execution tracking and result queue management
+    - **@expects** FIFO result delivery, SQL/parameter capture
 - **@test** `returns a sensible default shape when no result is queued`
-  - **@validates** Default response handling
-  - **@expects** MySQL2-compatible response structure
+    - **@validates** Default response handling
+    - **@expects** MySQL2-compatible response structure
 - **@test** `propagates queued errors`
-  - **@validates** Error simulation and propagation
-  - **@expects** Queued error delivery, call tracking
+    - **@validates** Error simulation and propagation
+    - **@expects** Queued error delivery, call tracking
 - **@test** `queues are per-process (shared across instances) and resettable`
-  - **@validates** Queue state management
-  - **@expects** Shared state across instances, reset capability
+    - **@validates** Queue state management
+    - **@expects** Shared state across instances, reset capability
 - **@test** `stubs processors used by fileMappings`
-  - **@validates** File processor stubbing
-  - **@expects** Personnel, species, census processor stubs
+    - **@validates** File processor stubbing
+    - **@expects** Personnel, species, census processor stubs
 - **@test** `stubs react-dropzone runtime imports`
-  - **@validates** React component dependency mocking
-  - **@expects** Dropzone API stubbing, file rejection handling
+    - **@validates** React component dependency mocking
+    - **@expects** Dropzone API stubbing, file rejection handling
 - **@test** `mocks logger + chalk`
-  - **@validates** Logging infrastructure mocking
-  - **@expects** Logger method stubs, chalk color function passthrough
+    - **@validates** Logging infrastructure mocking
+    - **@expects** Logger method stubs, chalk color function passthrough
 - **@test** `provides safe environment defaults`
-  - **@validates** Environment variable setup
-  - **@expects** Database connection environment variables
+    - **@validates** Environment variable setup
+    - **@expects** Database connection environment variables
 
 ### Database Mocking (`/testing/mockstesting/db-mocks.test.ts`)
 
@@ -1211,32 +1215,32 @@ WHERE cm.CensusID = ? AND q.PlotID = ?
 **Test Cases:**
 
 - **@test** `returns a singleton PoolMonitor and provides a shared connection`
-  - **@validates** Singleton pattern implementation
-  - **@expects** Same instance across calls, shared connection objects
+    - **@validates** Singleton pattern implementation
+    - **@expects** Same instance across calls, shared connection objects
 - **@test** `query FIFO: returns queued results, then default echo`
-  - **@validates** Query result queue management
-  - **@expects** FIFO result delivery, fallback to echo response
+    - **@validates** Query result queue management
+    - **@expects** FIFO result delivery, fallback to echo response
 - **@test** `execute FIFO: returns queued results, then default echo`
-  - **@validates** Execute method queue management
-  - **@expects** Similar behavior to query with separate queue
+    - **@validates** Execute method queue management
+    - **@expects** Similar behavior to query with separate queue
 - **@test** `propagates queued errors for query/execute`
-  - **@validates** Error simulation for both query methods
-  - **@expects** Proper error propagation from queues
+    - **@validates** Error simulation for both query methods
+    - **@expects** Proper error propagation from queues
 - **@test** `supports ping() and release() with release listeners`
-  - **@validates** Connection lifecycle management
-  - **@expects** Ping functionality, release event handling
+    - **@validates** Connection lifecycle management
+    - **@expects** Ping functionality, release event handling
 - **@test** `PoolMonitor closeAllConnections / isPoolClosed toggles state`
-  - **@validates** Pool state management
-  - **@expects** Pool closure state tracking
+    - **@validates** Pool state management
+    - **@expects** Pool closure state tracking
 - **@test** `mysql2/promise.createPool is mocked and delegates to shared connection`
-  - **@validates** MySQL2 library mocking
-  - **@expects** Pool creation mocking, connection delegation
+    - **@validates** MySQL2 library mocking
+    - **@expects** Pool creation mocking, connection delegation
 - **@test** `chalk + logger are mocked quietly`
-  - **@validates** Supporting library mocking
-  - **@expects** Quiet operation without console output
+    - **@validates** Supporting library mocking
+    - **@expects** Quiet operation without console output
 - **@test** `env defaults are present for DB configuration`
-  - **@validates** Environment setup for testing
-  - **@expects** Required database environment variables
+    - **@validates** Environment setup for testing
+    - **@expects** Required database environment variables
 
 **Database Mock Architecture:**
 
@@ -1269,23 +1273,23 @@ WHERE cm.CensusID = ? AND q.PlotID = ?
 **Test Cases:**
 
 - **@test** `cookies(): returns an awaitable bag with get/set/delete/getAll`
-  - **@validates** Cookie API mocking functionality
-  - **@expects** Complete cookie manipulation API, shared state
+    - **@validates** Cookie API mocking functionality
+    - **@expects** Complete cookie manipulation API, shared state
 - **@test** `cookies(): separate awaits share the same underlying jar`
-  - **@validates** Shared state across async calls
-  - **@expects** Consistent cookie state across multiple awaits
+    - **@validates** Shared state across async calls
+    - **@expects** Consistent cookie state across multiple awaits
 - **@test** `headers(): returns a Map-like object (stubbed)`
-  - **@validates** Headers API mocking
-  - **@expects** Map-like interface for header access
+    - **@validates** Headers API mocking
+    - **@expects** Map-like interface for header access
 - **@test** `RDS definition modules are stubbed and importable`
-  - **@validates** SQL definition module stubs
-  - **@expects** Successful import of all RDS definition modules
+    - **@validates** SQL definition module stubs
+    - **@expects** Successful import of all RDS definition modules
 - **@test** `chalk + logger are mocked quietly`
-  - **@validates** Supporting library mocking
-  - **@expects** Quiet operation for logging utilities
+    - **@validates** Supporting library mocking
+    - **@expects** Quiet operation for logging utilities
 - **@test** `integrates with server action cookiemanager via mocked cookies()`
-  - **@validates** Integration with actual server action code
-  - **@expects** Cookie manager functionality through mocked cookies API
+    - **@validates** Integration with actual server action code
+    - **@expects** Cookie manager functionality through mocked cookies API
 
 **Platform Mock Features:**
 
@@ -1650,7 +1654,9 @@ it('integrates with server actions via mocked dependencies', async () => {
 
 ## Conclusion
 
-The ForestGEO frontend test suite represents a comprehensive, well-architected testing system that provides thorough coverage of a complex forest inventory management application. The test suite demonstrates advanced testing practices including sophisticated mocking strategies, transaction-aware testing, and comprehensive error scenario coverage.
+The ForestGEO frontend test suite represents a comprehensive, well-architected testing system that provides thorough
+coverage of a complex forest inventory management application. The test suite demonstrates advanced testing practices
+including sophisticated mocking strategies, transaction-aware testing, and comprehensive error scenario coverage.
 
 **Key Strengths:**
 
@@ -1667,4 +1673,5 @@ The ForestGEO frontend test suite represents a comprehensive, well-architected t
 - **Data Integrity**: Transaction rollback verification ensures data safety
 - **Performance**: Fast, reliable tests through comprehensive mocking
 
-This test suite serves as an excellent example of enterprise-level testing practices for complex database-driven applications, providing both comprehensive coverage and maintainable test infrastructure.
+This test suite serves as an excellent example of enterprise-level testing practices for complex database-driven
+applications, providing both comprehensive coverage and maintainable test infrastructure.

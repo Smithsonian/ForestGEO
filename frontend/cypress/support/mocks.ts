@@ -71,11 +71,11 @@ export function mockAilogger() {
     event: cy.stub().as('ailogger-event'),
     metric: cy.stub().as('ailogger-metric')
   };
-  
+
   // Add to window so it can be accessed by the component
-  cy.window().then((win) => {
+  cy.window().then(win => {
     (win as any).mockAilogger = mockLogger;
   });
-  
+
   return mockLogger;
 }

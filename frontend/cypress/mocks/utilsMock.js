@@ -6,7 +6,7 @@ export const openSidebar = () => {
 };
 
 export const closeSidebar = () => {
-  // Mock implementation  
+  // Mock implementation
   console.log('Mock: Closing sidebar');
 };
 
@@ -16,7 +16,7 @@ export const toggleSidebar = () => {
 };
 
 // Mock other utility functions as needed
-export const capitalizeFirstLetter = (str) => {
+export const capitalizeFirstLetter = str => {
   return str.charAt(0).toUpperCase() + str.slice(1);
 };
 

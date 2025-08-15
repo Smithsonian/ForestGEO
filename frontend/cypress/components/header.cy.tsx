@@ -9,7 +9,7 @@ describe('Header Component', () => {
   beforeEach(() => {
     // Create a spy on the toggleSidebar function
     toggleSidebarStub = cy.stub(utils, 'toggleSidebar').as('toggleSidebar');
-    
+
     // Set mobile viewport to ensure header is visible
     cy.viewport(375, 667);
   });
@@ -34,10 +34,7 @@ describe('Header Component', () => {
 
     it('has correct positioning and layout styles', () => {
       mount(<Header />);
-      cy.get('[role="banner"]')
-        .should('have.css', 'position', 'fixed')
-        .and('have.css', 'top', '0px')
-        .and('have.css', 'z-index', '9995');
+      cy.get('[role="banner"]').should('have.css', 'position', 'fixed').and('have.css', 'top', '0px').and('have.css', 'z-index', '9995');
     });
 
     it('contains global styles for header height', () => {
@@ -55,9 +52,7 @@ describe('Header Component', () => {
 
     it('has correct button styling', () => {
       mount(<Header />);
-      cy.get('button')
-        .should('have.attr', 'type', 'button')
-        .and('be.enabled');
+      cy.get('button').should('have.attr', 'type', 'button').and('be.enabled');
     });
 
     it('contains a menu icon', () => {
@@ -116,7 +111,7 @@ describe('Header Component', () => {
       it(`${shouldBeVisible ? 'shows' : 'hides'} header on ${name} (${width}x${height})`, () => {
         cy.viewport(width, height);
         mount(<Header />);
-        
+
         if (shouldBeVisible) {
           cy.get('[role="banner"]').should('exist');
         } else {
@@ -130,16 +125,12 @@ describe('Header Component', () => {
   describe('Visual Design', () => {
     it('has a bottom border and shadow', () => {
       mount(<Header />);
-      cy.get('[role="banner"]')
-        .should('have.css', 'border-bottom-width')
-        .and('not.equal', '0px');
+      cy.get('[role="banner"]').should('have.css', 'border-bottom-width').and('not.equal', '0px');
     });
 
     it('has proper spacing and padding', () => {
       mount(<Header />);
-      cy.get('[role="banner"]')
-        .should('have.css', 'padding')
-        .and('not.equal', '0px');
+      cy.get('[role="banner"]').should('have.css', 'padding').and('not.equal', '0px');
     });
 
     it('maintains proper width', () => {
@@ -162,28 +153,28 @@ describe('Header Component', () => {
     it('renders consistently across re-mounts', () => {
       mount(<Header />);
       cy.get('button').should('exist');
-      
+
       // Unmount and remount
       cy.then(() => {
         mount(<Header />);
       });
-      
+
       cy.get('button').should('exist');
     });
   });
-  
+
   describe('Error Handling', () => {
     it('handles missing toggle function gracefully', () => {
       // Create a version where toggleSidebar might fail
       const failingToggle = cy.stub().throws(new Error('Toggle failed'));
-      
+
       // Mock the utils import to return the failing function
-      cy.window().then((win) => {
+      cy.window().then(win => {
         (win as any).toggleSidebar = failingToggle;
       });
-      
+
       mount(<Header />);
-      
+
       // The component should still render even if toggle function has issues
       cy.get('[role="banner"]').should('exist');
       cy.get('button').should('exist');
