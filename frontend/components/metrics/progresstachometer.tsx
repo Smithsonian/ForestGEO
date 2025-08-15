@@ -1,7 +1,7 @@
 'use client';
 
 import { LabelList, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer } from 'recharts';
-import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { Box } from '@mui/joy';
 import { useEffect, useRef, useState } from 'react';
 import ailogger from '@/ailogger';
 

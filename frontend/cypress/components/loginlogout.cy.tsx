@@ -2,7 +2,6 @@ import React from 'react';
 import { mount } from '@cypress/react';
 import { LoginLogout } from '@/components/loginlogout';
 import { SessionProvider, setMockSession } from 'next-auth/react';
-import * as NextNav from 'next/navigation';
 
 describe('<LoginLogout />', () => {
   beforeEach(() => {
@@ -16,7 +15,7 @@ describe('<LoginLogout />', () => {
         data: null,
         status: 'unauthenticated'
       });
-      
+
       mount(
         <SessionProvider session={null}>
           <LoginLogout />
@@ -52,7 +51,7 @@ describe('<LoginLogout />', () => {
         data: fakeSession,
         status: 'authenticated'
       });
-      
+
       mount(
         <SessionProvider session={fakeSession as unknown as any}>
           <LoginLogout />
@@ -63,7 +62,7 @@ describe('<LoginLogout />', () => {
     it('displays the user name, email, and initials avatar', () => {
       cy.contains('Jane Q. Public');
       cy.contains('jane.public@example.com');
-      // avatar shows initials "JQP" 
+      // avatar shows initials "JQP"
       cy.get('button').first().should('contain', 'JQP');
     });
 

@@ -8,7 +8,7 @@
  *
  * @see /config/macros.ts
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { HTTPResponses } from './macros';
 
 describe('Macros', () => {

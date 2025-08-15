@@ -1,16 +1,6 @@
 import React from 'react';
 import { mount } from '@cypress/react';
-import {
-  CensusLogo,
-  PlotLogo,
-  Logo,
-  UserIconChecked,
-  UserIconXMarked,
-  DownloadIcon,
-  DeleteIcon,
-  EditIcon,
-  FileUploadIcon
-} from '@/components/icons';
+import { CensusLogo, DeleteIcon, DownloadIcon, EditIcon, FileUploadIcon, Logo, PlotLogo, UserIconChecked, UserIconXMarked } from '@/components/icons';
 
 describe('Icon Components', () => {
   describe('CensusLogo', () => {
@@ -26,16 +16,12 @@ describe('Icon Components', () => {
 
     it('renders with custom size', () => {
       mount(<CensusLogo size="2rem" />);
-      cy.get('svg')
-        .should('have.attr', 'height', '2rem')
-        .and('have.attr', 'width', '2rem');
+      cy.get('svg').should('have.attr', 'height', '2rem').and('have.attr', 'width', '2rem');
     });
 
     it('accepts additional SVG props', () => {
       mount(<CensusLogo className="test-class" data-testid="census-logo" />);
-      cy.get('svg')
-        .should('have.class', 'test-class')
-        .and('have.attr', 'data-testid', 'census-logo');
+      cy.get('svg').should('have.class', 'test-class').and('have.attr', 'data-testid', 'census-logo');
     });
 
     it('contains the correct path element', () => {
@@ -61,9 +47,7 @@ describe('Icon Components', () => {
 
     it('renders with custom size', () => {
       mount(<PlotLogo size="3rem" />);
-      cy.get('svg')
-        .should('have.attr', 'height', '3rem')
-        .and('have.attr', 'width', '3rem');
+      cy.get('svg').should('have.attr', 'height', '3rem').and('have.attr', 'width', '3rem');
     });
 
     it('contains the correct path element', () => {
@@ -85,9 +69,7 @@ describe('Icon Components', () => {
 
     it('renders with custom size', () => {
       mount(<Logo size="4rem" />);
-      cy.get('svg')
-        .should('have.attr', 'height', '4rem')
-        .and('have.attr', 'width', '4rem');
+      cy.get('svg').should('have.attr', 'height', '4rem').and('have.attr', 'width', '4rem');
     });
   });
 
@@ -112,9 +94,7 @@ describe('Icon Components', () => {
 
     it('accepts other SVG props', () => {
       mount(<UserIconChecked className="user-checked" data-testid="user-checked-icon" />);
-      cy.get('svg')
-        .should('have.class', 'user-checked')
-        .and('have.attr', 'data-testid', 'user-checked-icon');
+      cy.get('svg').should('have.class', 'user-checked').and('have.attr', 'data-testid', 'user-checked-icon');
     });
   });
 
@@ -170,10 +150,7 @@ describe('Icon Components', () => {
 
     it('has correct stroke properties', () => {
       mount(<DeleteIcon />);
-      cy.get('svg')
-        .should('have.attr', 'stroke-linecap', 'round')
-        .and('have.attr', 'stroke-linejoin', 'round')
-        .and('have.attr', 'stroke-width', '2');
+      cy.get('svg').should('have.attr', 'stroke-linecap', 'round').and('have.attr', 'stroke-linejoin', 'round').and('have.attr', 'stroke-width', '2');
     });
 
     it('contains path elements for delete icon', () => {
@@ -229,15 +206,13 @@ describe('Icon Components', () => {
           <Logo tabIndex={0} />
         </div>
       );
-      
+
       cy.get('svg[tabindex="0"]').should('have.length', 3);
     });
 
     it('icons can receive aria labels for accessibility', () => {
       mount(<CensusLogo aria-label="Census timeline icon" role="img" />);
-      cy.get('svg')
-        .should('have.attr', 'aria-label', 'Census timeline icon')
-        .and('have.attr', 'role', 'img');
+      cy.get('svg').should('have.attr', 'aria-label', 'Census timeline icon').and('have.attr', 'role', 'img');
     });
   });
 
@@ -248,9 +223,8 @@ describe('Icon Components', () => {
           <CensusLogo />
         </div>
       );
-      
-      cy.get('svg')
-        .should('have.attr', 'fill', 'currentColor');
+
+      cy.get('svg').should('have.attr', 'fill', 'currentColor');
     });
 
     it('stroke-based icons inherit stroke color', () => {
@@ -259,9 +233,8 @@ describe('Icon Components', () => {
           <DeleteIcon />
         </div>
       );
-      
-      cy.get('svg')
-        .should('have.attr', 'stroke', 'currentColor');
+
+      cy.get('svg').should('have.attr', 'stroke', 'currentColor');
     });
   });
 });

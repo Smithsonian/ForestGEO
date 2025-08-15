@@ -1,6 +1,5 @@
 // test/auth-mocks.ts
 import { beforeEach, vi } from 'vitest';
-import { RouteHandler } from '@/testing/supportstruts';
 
 // ------------------------------------
 // 1) Mock Microsoft Entra ID provider

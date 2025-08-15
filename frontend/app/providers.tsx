@@ -1,10 +1,10 @@
 'use client';
 import * as React from 'react';
+import { useEffect } from 'react';
 import { SessionProvider } from 'next-auth/react';
 import ThemeRegistry from '@/components/themeregistry/themeregistry';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
-import { useEffect } from 'react';
 import { initializeAppInsights } from '@/applicationinsights';
 
 export interface ProvidersProps {
