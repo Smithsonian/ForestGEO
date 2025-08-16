@@ -58,6 +58,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
   const [dataReingested, setDataReingested] = useState(false);
+  const [measurementsUploadCompleted, setMeasurementsUploadCompleted] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -134,6 +135,8 @@ export default function MeasurementsSummaryViewDataGrid() {
           });
         }}
         formType={FormType.measurements}
+        msmtsUploadCompleted={measurementsUploadCompleted}
+        setMsmstsUploadCompleted={setMeasurementsUploadCompleted}
       />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}

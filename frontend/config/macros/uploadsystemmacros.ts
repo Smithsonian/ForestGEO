@@ -122,6 +122,7 @@ export interface UploadCompleteProps {
   errorRows: FileCollectionRowSet;
   // state setters
   handleCloseUploadModal: () => void;
+  setMsmtsUploadCompleted?: Dispatch<SetStateAction<boolean>>;
 }
 
 export interface ProgressStepperProps {

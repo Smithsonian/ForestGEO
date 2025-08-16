@@ -42,7 +42,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096 * 16;
+  const chunkSize = 4096;
   const connectionLimit = 20;
   const queue = new PQueue({ concurrency: connectionLimit });
   // refs
@@ -56,17 +56,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     `row-${Object.values(row)
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
-
-  const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  };
   // Usage:
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -519,27 +508,32 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setProcessed(true);
       }
 
-      runProcessBatches().catch(error => {
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
-      });
+      // runProcessBatches().catch(error => {
+      //   setUploadError(error);
+      //   setReviewState(ReviewStates.ERRORS);
+      // });
     }
   }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
 
   useEffect(() => {
-    if (uploadForm === FormType.measurements) {
-      if (uploaded && processed) {
-        hasUploaded.current = true;
-        setReviewState(ReviewStates.VALIDATE);
-        setIsDataUnsaved(false);
-      }
-    } else {
-      if (uploaded) {
-        hasUploaded.current = true;
-        setReviewState(ReviewStates.UPLOAD_AZURE);
-        setIsDataUnsaved(false);
-      }
+    if (uploaded) {
+      hasUploaded.current = true;
+      setReviewState(ReviewStates.UPLOAD_AZURE);
+      setIsDataUnsaved(false);
     }
+    // if (uploadForm === FormType.measurements) {
+    //   if (uploaded && processed) {
+    //     hasUploaded.current = true;
+    //     setReviewState(ReviewStates.VALIDATE);
+    //     setIsDataUnsaved(false);
+    //   }
+    // } else {
+    //   if (uploaded) {
+    //     hasUploaded.current = true;
+    //     setReviewState(ReviewStates.UPLOAD_AZURE);
+    //     setIsDataUnsaved(false);
+    //   }
+    // }
   }, [uploaded, processed, uploadForm, setReviewState, setIsDataUnsaved]);
 
   const { palette } = useTheme();

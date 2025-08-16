@@ -17,7 +17,7 @@ import ailogger from '@/ailogger';
 const ROWS_PER_BATCH = 10;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const { handleCloseUploadModal, errorRows, uploadForm } = props;
+  const { handleCloseUploadModal, errorRows, uploadForm, setMsmtsUploadCompleted } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
@@ -161,6 +161,30 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);
+
+        // Set measurements upload completion to true for measurements form
+        if (uploadForm === FormType.measurements && setMsmtsUploadCompleted) {
+          setMsmtsUploadCompleted(true);
+          
+          // Trigger sample API call on successful measurements upload
+          try {
+            await fetch('/api/sample-upload-completion', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                uploadType: 'measurements',
+                plotID: currentPlot?.plotID,
+                censusID: currentCensus?.dateRanges[0].censusID,
+                schemaName: currentSite?.schemaName,
+                timestamp: new Date().toISOString()
+              })
+            });
+          } catch (error) {
+            ailogger.error('Sample API call failed:', error);
+          }
+        }
       } catch (error: any) {
         ailogger.error(error);
       }

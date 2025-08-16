@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { FileWithStream, ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
@@ -32,10 +32,11 @@ export interface DetailedCMIDRow extends CMIDRow {
 interface UploadParentProps {
   onReset: () => void; // closes the modal
   overrideUploadForm?: FormType;
+  setMsmtsUploadCompleted?: Dispatch<SetStateAction<boolean>>;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const { onReset, overrideUploadForm } = props;
+  const { onReset, overrideUploadForm, setMsmtsUploadCompleted } = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -229,7 +230,7 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} setMsmtsUploadCompleted={setMsmtsUploadCompleted} />;
       default:
         return (
           <UploadError

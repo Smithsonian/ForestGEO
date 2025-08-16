@@ -39,6 +39,9 @@ def polluserstate(req: func.HttpRequest) -> func.HttpResponse:
             "Please provide an email in the query string or request body.",
             status_code=400)
 
+    cnx = None
+    cursor = None
+    
     try:
         cnx = mysql.connector.connect(
             user=os.environ['AZURE_SQL_USER'],
@@ -46,7 +49,7 @@ def polluserstate(req: func.HttpRequest) -> func.HttpResponse:
             host=os.environ['AZURE_SQL_SERVER'],
             port=os.environ['AZURE_SQL_PORT'],
             database=os.environ['AZURE_SQL_CATALOG_SCHEMA'])
-        cursor = cnx.cursor(dictionary=True)
+        cursor = cnx.cursor(dictionary=True)  # type: ignore
 
         allsites_query = 'SELECT * FROM sites'
         cursor.execute(allsites_query)
@@ -57,10 +60,10 @@ def polluserstate(req: func.HttpRequest) -> func.HttpResponse:
         result = cursor.fetchone()
 
         if result:
-            user_id = result['UserID']
-            user_status = result['UserStatus']
+            user_id: int = result['UserID']  # type: ignore
+            user_status: str = result['UserStatus']  # type: ignore
             site_query = 'SELECT s.* FROM sites AS s JOIN usersiterelations AS usr ON s.SiteID = usr.SiteID WHERE usr.UserID = %s'
-            cursor.execute(site_query, (user_id, ))
+            cursor.execute(site_query, (user_id,))
             allowed_sites = convert_decimals(cursor.fetchall())
             response_body = {
                 "userStatus": user_status,
@@ -78,7 +81,7 @@ def polluserstate(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(f"Internal server error with error {e}.",
                                  status_code=500)
     finally:
-        if 'cursor' in locals() and cursor:
+        if cursor is not None:
             cursor.close()
-        if 'cnx' in locals() and cnx:
+        if cnx is not None:
             cnx.close()
