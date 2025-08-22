@@ -494,7 +494,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         for (const fileID in grouped) {
           ailogger.info(`Processing FileID: ${fileID}`);
           // Map each batchID to a queued task.
-          const batchTasks = grouped[fileID].map(
+          grouped[fileID].map(
             async batchID => {
               await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
               setProcessedChunks(prev => prev + 1);
@@ -512,10 +512,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           );
 
           // Optionally, queue a follow-up task that updates file-level completion once all its batches are done.
-          await queue.add(async () => {
-            await Promise.all(batchTasks);
-            setCompletedOperations(prev => prev + 1);
-          });
+          // await queue.add(async () => {
+          //   await Promise.all(batchTasks);
+          //   setCompletedOperations(prev => prev + 1);
+          // });
+          setCompletedOperations(prev => prev + 1);
         }
         await queue.onEmpty();
         // trigger collapser ONCE
