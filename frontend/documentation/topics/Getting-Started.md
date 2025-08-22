@@ -16,14 +16,14 @@ The app is intended to be used as follows:
 2. You must **edit** or **request upload** of plots within that site.
 3. Create a census through the dropdown
 4. Populate your fixed data:
-    - Stem Codes
-    - Personnel
-    - Quadrats
-    - Species List
+   - Stem Codes
+   - Personnel
+   - Quadrats
+   - Species List
 5. Once you've completed this, the **View Data** link should become available to use
 6. Upload or Enter **measurements** information within the **View Data** page
 7. Validate and edit (if needed) your measurements information
-    - If you **upload** measurements, they will automatically be validated!
+   - If you **upload** measurements, they will automatically be validated!
 8. Once you've entered measurements, the **Post-Census Statistics** link should become available to use
 9. Use this to perform **analyses** on your data to derive conclusions on your census
 10. If you have permissions, use the **Validations** page to enable, disable, or edit validations

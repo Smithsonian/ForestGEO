@@ -16,7 +16,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   }
 
   const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
-  if (!dataType || !plotIDParam || !pcnParam) {
+  if (!dataType) {
     throw new Error('slugs were not correctly provided');
   }
 
