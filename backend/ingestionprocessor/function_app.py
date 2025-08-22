@@ -25,85 +25,96 @@ def ingestionprocessor(req: func.HttpRequest) -> func.HttpResponse:
             plotID = req_body.get('plotID')
             plotCensusNumber = req_body.get('plotCensusNumber')
 
-    def generate_sse_stream():
-        cnx = None
-        cursor = None
-        try: 
-            cnx = mysql.connector.connect(
-                user = os.environ['AZURE_SQL_USER'],
-                password=os.environ['AZURE_SQL_PASSWORD'],
-                port=os.environ['AZURE_SQL_PORT'],
-                database=schema)
-            cursor = cnx.cursor(dictionary=True)
+    if not schema or not plotID or not plotCensusNumber:
+        return func.HttpResponse(
+            json.dumps({"error": "Missing required parameters: schema, plotID, plotCensusNumber"}),
+            status_code=400,
+            headers={'Content-Type': 'application/json'}
+        )
 
-            file_batch_query = 'SELECT distinct tm.FileID, tm.BatchID from temporarymeasurements tm join census c on tm.CensusID = c.CensusID and tm.PlotID = c.PlotID where c.PlotID = %s and c.PlotCensusNumber = %s'
-            cursor.execute(file_batch_query, (plotID, plotCensusNumber,))
-            file_batch_set = cursor.fetchall()
+    cnx = None
+    cursor = None
+    try: 
+        cnx = mysql.connector.connect(
+            host=os.environ['AZURE_SQL_SERVER'],
+            user = os.environ['AZURE_SQL_USER'],
+            password=os.environ['AZURE_SQL_PASSWORD'],
+            port=os.environ['AZURE_SQL_PORT'],
+            database=schema)
+        cursor = cnx.cursor(dictionary=True)
 
-            # Send initial count
-            initial_data = {
-                "type": "start",
-                "total_batches": len(file_batch_set),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            yield f"data: {json.dumps(initial_data)}\n\n"
+        file_batch_query = 'SELECT distinct tm.FileID, tm.BatchID from temporarymeasurements tm join census c on tm.CensusID = c.CensusID and tm.PlotID = c.PlotID where c.PlotID = %s and c.PlotCensusNumber = %s'
+        cursor.execute(file_batch_query, (plotID, plotCensusNumber,))
+        file_batch_set = cursor.fetchall()
 
-            for row in file_batch_set:
-                FileID = None
-                BatchID = None
-                if isinstance(row, dict):
-                    FileID, BatchID = row['FileID'], row['BatchID']
-                else:
-                    FileID, BatchID = row[0], row[1]
+        # Log initial collection results
+        total_batches = len(file_batch_set)
+        unique_files = len(set(row['FileID'] if isinstance(row, dict) else row[0] for row in file_batch_set))
+        logging.info(f"Found {total_batches} batches across {unique_files} unique files for PlotID {plotID}, Census {plotCensusNumber}")
+        
+        if total_batches == 0:
+            logging.warning(f"No batches found for PlotID {plotID}, Census {plotCensusNumber}")
+        
+        processed_batches = []
+        failed_batches = []
+        
+        for i, row in enumerate(file_batch_set, 1):
+            FileID = None
+            BatchID = None
+            if isinstance(row, dict):
+                FileID, BatchID = row['FileID'], row['BatchID']
+            else:
+                FileID, BatchID = row[0], row[1]
+            
+            try:
+                logging.info(f"Processing batch {i}/{total_batches}: FileID={FileID}, BatchID={BatchID}")
                 
                 # Call stored procedure with FileID and BatchID
                 cursor.callproc('bulkingestionprocessor', [FileID, BatchID])
                 
-                # Send completion event immediately
-                completion_data = {
-                    "type": "completed",
-                    "FileID": FileID,
-                    "BatchID": BatchID,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                yield f"data: {json.dumps(completion_data)}\n\n"
+                # Consume any results from the stored procedure to avoid "Unread result found" errors
+                for result in cursor.stored_results():
+                    result.fetchall()
                 
-            # Send final completion
-            final_data = {
-                "type": "finished",
-                "message": f"Successfully processed {len(file_batch_set)} file batches",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            yield f"data: {json.dumps(final_data)}\n\n"
+                processed_batches.append({"FileID": FileID, "BatchID": BatchID})
+                logging.info(f"Successfully processed batch {i}/{total_batches}: FileID={FileID}, BatchID={BatchID}")
+                
+            except Exception as batch_error:
+                error_msg = f"Failed to process batch {i}/{total_batches}: FileID={FileID}, BatchID={BatchID} - Error: {str(batch_error)}"
+                logging.error(error_msg)
+                failed_batches.append({"FileID": FileID, "BatchID": BatchID, "error": str(batch_error)})
+            
+        # Log final processing summary
+        successful_count = len(processed_batches)
+        failed_count = len(failed_batches)
+        logging.info(f"Processing complete: {successful_count} successful, {failed_count} failed out of {total_batches} total batches")
+        
+        response_data = {
+            "message": f"Processing complete: {successful_count} successful, {failed_count} failed out of {total_batches} total batches",
+            "processed_batches": processed_batches,
+            "failed_batches": failed_batches,
+            "total_batches": total_batches,
+            "successful_count": successful_count,
+            "failed_count": failed_count,
+            "unique_files": unique_files,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
-        except Error as e:
-            logging.error(f"Database error: {e}")
-            error_data = {
-                "type": "error",
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            yield f"data: {json.dumps(error_data)}\n\n"
-        finally:
-            if 'cursor' in locals() and cursor:
-                cursor.close()
-            if 'cnx' in locals() and cnx:
-                cnx.close()
+        return func.HttpResponse(
+            json.dumps(response_data),
+            status_code=200,
+            headers={'Content-Type': 'application/json'}
+        )
 
-    # Generate all SSE events
-    response_body = ""
-    for chunk in generate_sse_stream():
-        response_body += chunk
-    
-    return func.HttpResponse(
-        response_body,
-        status_code=200,
-        headers={
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Cache-Control'
-        },
-        mimetype='text/event-stream'
-    )
+    except Error as e:
+        logging.error(f"Database error: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            headers={'Content-Type': 'application/json'}
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if cnx:
+            cnx.close()
