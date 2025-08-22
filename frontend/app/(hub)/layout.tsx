@@ -4,7 +4,7 @@ import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
+import { Box, IconButton, LinearProgress, Snackbar, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import {
@@ -22,6 +22,7 @@ import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
+import { useMeasurementsUploadCompletion } from '@/app/contexts/uploadcompletionprovider';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 
@@ -77,6 +78,25 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '';
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
+  /**
+   * MEASUREMENTS UPLOAD COMPLETION CONTEXT INTEGRATION
+   *
+   * This section integrates with the measurements upload completion context to:
+   * 1. Detect when measurements uploads complete successfully
+   * 2. Track real-time backend processing progress via SSE
+   * 3. Manage UI state for progress bars and completion notifications
+   *
+   * The context provides both upload completion signals and processing progress state
+   */
+  const {
+    measurementsUploadCompleted, // Flag indicating upload completed successfully
+    measurementsUploadData, // Upload data (plot, census, schema info)
+    processingProgress, // Real-time processing progress from SSE
+    processingCompleted, // Flag indicating backend processing finished
+    resetMeasurementsUploadCompletion, // Function to reset all state
+    updateProcessingProgress, // Function to update processing progress
+    setProcessingCompleted // Function to mark processing as complete
+  } = useMeasurementsUploadCompletion();
 
   const lastExecutedRef = useRef<number | null>(null);
   // Refs for debouncing
@@ -336,6 +356,134 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  /**
+   * MEASUREMENTS BACKEND PROCESSING HANDLER
+   *
+   * This useEffect is the core of the measurements processing system. It:
+   * 1. Listens for measurements upload completion signals from the context
+   * 2. Starts an SSE connection to the ingestionprocessor function app
+   * 3. Handles real-time progress updates via SSE events
+   * 4. Manages error states and cleanup
+   *
+   * SSE EVENT TYPES FROM INGESTIONPROCESSOR:
+   * - 'start': Processing begins, provides total batch count
+   * - 'completed': Each batch completes, provides FileID/BatchID
+   * - 'finished': All processing complete
+   * - 'error': Processing failed with error message
+   *
+   * FLOW:
+   * Upload completes → Context triggered → SSE connection starts →
+   * Progress updates via events → Processing completes → UI notifications
+   */
+  useEffect(() => {
+    if (measurementsUploadCompleted && measurementsUploadData) {
+      const startIngestionProcessing = async () => {
+        try {
+          // Initialize processing state when starting
+          // Reset any previous state and mark processing as active
+          updateProcessingProgress({
+            isProcessing: true,
+            totalBatches: 0,
+            completedBatches: 0,
+            error: undefined
+          });
+          setProcessingCompleted(false);
+
+          // Construct the API URL for the ingestionprocessor function app
+          // These parameters match what the Azure function expects
+          const params = new URLSearchParams({
+            schema: measurementsUploadData.schemaName || '', // Database schema name
+            plotID: measurementsUploadData.plotID?.toString() || '', // Plot identifier
+            plotCensusNumber: measurementsUploadData.plotCensusNumber?.toString() || '' // Census number
+          });
+
+          // Establish SSE connection to the ingestionprocessor
+          // This provides real-time updates as batches are processed
+          const eventSource = new EventSource(`/api/ingestionprocessor?${params}`);
+
+          /**
+           * SSE MESSAGE HANDLER
+           * Processes real-time events from the ingestionprocessor function app
+           * Each event updates the UI to show current processing status
+           */
+          eventSource.onmessage = event => {
+            try {
+              const data = JSON.parse(event.data);
+
+              switch (data.type) {
+                case 'start':
+                  // Processing begins - update total batch count
+                  updateProcessingProgress({
+                    isProcessing: true,
+                    totalBatches: data.total_batches,
+                    completedBatches: 0
+                  });
+                  break;
+
+                case 'completed':
+                  // Individual batch completed - increment progress
+                  updateProcessingProgress({
+                    completedBatches: processingProgress.completedBatches + 1,
+                    currentFileID: data.FileID,
+                    currentBatchID: data.BatchID
+                  });
+                  break;
+
+                case 'finished':
+                  // All processing complete - mark as finished
+                  updateProcessingProgress({
+                    isProcessing: false
+                  });
+                  setProcessingCompleted(true);
+                  eventSource.close();
+                  // Note: Don't reset context here - let success snackbar handle it
+                  break;
+
+                case 'error':
+                  // Processing failed - show error and cleanup
+                  updateProcessingProgress({
+                    isProcessing: false,
+                    error: data.error
+                  });
+                  eventSource.close();
+                  // Auto-reset after delay to clear error state
+                  setTimeout(() => resetMeasurementsUploadCompletion(), 5000);
+                  break;
+              }
+            } catch (parseError: any) {
+              ailogger.error('Error parsing SSE data:', parseError);
+            }
+          };
+
+          /**
+           * SSE ERROR HANDLER
+           * Handles connection failures and other SSE-related errors
+           */
+          eventSource.onerror = (error: any) => {
+            ailogger.error('SSE connection error:', error);
+            updateProcessingProgress({
+              isProcessing: false,
+              error: 'Connection error occurred'
+            });
+            eventSource.close();
+            // Auto-reset after delay to clear error state
+            setTimeout(() => resetMeasurementsUploadCompletion(), 5000);
+          };
+        } catch (error: any) {
+          // Handle any errors in setting up the SSE connection
+          ailogger.error('Failed to start ingestion processing:', error);
+          updateProcessingProgress({
+            isProcessing: false,
+            error: 'Failed to start processing'
+          });
+          setTimeout(() => resetMeasurementsUploadCompletion(), 5000);
+        }
+      };
+
+      startIngestionProcessing().catch(ailogger.error);
+    }
+  }, [measurementsUploadCompleted, measurementsUploadData, updateProcessingProgress, setProcessingCompleted, resetMeasurementsUploadCompletion]);
+
   return (
     <>
       <Box
@@ -396,6 +544,56 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           {session && <>{children}</>}
         </Box>
         <Divider orientation="horizontal" />
+
+        {/**
+         * MEASUREMENTS PROCESSING PROGRESS BAR
+         *
+         * This component appears at the bottom of the layout when measurements
+         * are being processed by the backend ingestionprocessor. It provides:
+         *
+         * 1. Real-time progress indication (X/Y batches completed)
+         * 2. Current file being processed (if available)
+         * 3. Visual progress bar with percentage completion
+         *
+         * DISPLAY CONDITIONS:
+         * - Only shown when processingProgress.isProcessing === true
+         * - Automatically hidden when processing completes or errors
+         *
+         * PROGRESS CALCULATION:
+         * - Uses completedBatches / totalBatches * 100 for percentage
+         * - Shows 0% if totalBatches is 0 (prevents division by zero)
+         *
+         * STYLING:
+         * - Positioned at bottom of main content area
+         * - Uses theme background colors for integration
+         * - Bordered to separate from main content
+         */}
+        {processingProgress.isProcessing && (
+          <Box
+            sx={{
+              width: '100%',
+              px: 2,
+              py: 1,
+              backgroundColor: 'background.level1', // Subtle background to distinguish from main content
+              borderTop: 1,
+              borderColor: 'divider'
+            }}
+          >
+            {/* Progress text with batch count and current file info */}
+            <Typography level="body-sm" sx={{ mb: 1 }}>
+              Processing measurements data... ({processingProgress.completedBatches}/{processingProgress.totalBatches})
+              {processingProgress.currentFileID && ` - File: ${processingProgress.currentFileID}`}
+            </Typography>
+
+            {/* Visual progress bar */}
+            <LinearProgress
+              determinate
+              value={processingProgress.totalBatches > 0 ? (processingProgress.completedBatches / processingProgress.totalBatches) * 100 : 0}
+              sx={{ width: '100%' }}
+            />
+          </Box>
+        )}
+
         <Box
           sx={{
             display: 'flex',
@@ -457,6 +655,66 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />
+
+      {/**
+       * MEASUREMENTS PROCESSING SUCCESS NOTIFICATION
+       *
+       * This snackbar appears when measurements processing completes successfully.
+       * It provides user feedback that their uploaded data has been fully processed.
+       *
+       * DISPLAY CONDITIONS:
+       * - Shows when processingCompleted === true
+       * - Auto-hides after 6 seconds
+       * - Can be manually dismissed by clicking
+       *
+       * BEHAVIOR:
+       * - Positioned at bottom-center of screen
+       * - Green success styling with checkmark emoji
+       * - When closed (auto or manual), resets the entire context state
+       * - This cleanup ensures the flow can start fresh for next upload
+       */}
+      <Snackbar
+        open={processingCompleted}
+        autoHideDuration={6000}
+        onClose={() => {
+          setProcessingCompleted(false);
+          resetMeasurementsUploadCompletion(); // Full state reset when dismissed
+        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        variant="solid"
+        color="success"
+      >
+        <Typography>✅ Measurements processing completed successfully!</Typography>
+      </Snackbar>
+
+      {/**
+       * MEASUREMENTS PROCESSING ERROR NOTIFICATION
+       *
+       * This snackbar appears when measurements processing encounters errors.
+       * It shows the specific error message from the backend processing.
+       *
+       * DISPLAY CONDITIONS:
+       * - Shows when processingProgress.error is truthy
+       * - Auto-hides after 8 seconds (longer than success to allow reading)
+       * - Can be manually dismissed by clicking
+       *
+       * BEHAVIOR:
+       * - Positioned at bottom-center of screen
+       * - Red danger styling with X emoji
+       * - Shows specific error message from backend
+       * - When closed, resets the entire context state
+       * - Note: Auto-reset also happens after 5 seconds via useEffect timeout
+       */}
+      <Snackbar
+        open={!!processingProgress.error}
+        autoHideDuration={8000}
+        onClose={() => resetMeasurementsUploadCompletion()} // Full state reset when dismissed
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        variant="solid"
+        color="danger"
+      >
+        <Typography>❌ Processing failed: {processingProgress.error}</Typography>
+      </Snackbar>
     </>
   );
 }

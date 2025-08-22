@@ -230,7 +230,9 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} setMsmtsUploadCompleted={setMsmtsUploadCompleted} />;
+        return (
+          <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} setMsmtsUploadCompleted={setMsmtsUploadCompleted} />
+        );
       default:
         return (
           <UploadError

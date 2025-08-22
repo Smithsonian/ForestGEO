@@ -12,12 +12,14 @@ import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 import moment from 'moment';
 import { FileRow, FormType } from '@/config/macros/formdetails';
 import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
+import { useMeasurementsUploadCompletion } from '@/app/contexts/uploadcompletionprovider';
 import ailogger from '@/ailogger';
 
 const ROWS_PER_BATCH = 10;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, errorRows, uploadForm, setMsmtsUploadCompleted } = props;
+  const { triggerMeasurementsUploadCompletion } = useMeasurementsUploadCompletion();
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
@@ -162,29 +164,36 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);
 
-        // Set measurements upload completion to true for measurements form
-        if (uploadForm === FormType.measurements && setMsmtsUploadCompleted) {
-          setMsmtsUploadCompleted(true);
-          
-          // Trigger sample API call on successful measurements upload
-          try {
-            await fetch('/api/sample-upload-completion', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                uploadType: 'measurements',
-                plotID: currentPlot?.plotID,
-                censusID: currentCensus?.dateRanges[0].censusID,
-                schemaName: currentSite?.schemaName,
-                timestamp: new Date().toISOString()
-              })
-            });
-          } catch (error) {
-            ailogger.error('Sample API call failed:', error);
-          }
-        }
+        /**
+         * MEASUREMENTS UPLOAD COMPLETION TRIGGER
+         *
+         * This section handles the completion of measurements uploads specifically.
+         * When a measurements form upload finishes successfully:
+         *
+         * 1. Sets the local msvdatagrid state to true (for backward compatibility)
+         * 2. Triggers the global measurements upload completion context
+         * 3. Provides all necessary data for backend processing
+         *
+         * The context trigger will cause the hub layout to start backend processing
+         * via SSE connection to the ingestionprocessor function app.
+         *
+         * NOTE: This only runs for FormType.measurements - other form types are ignored
+         */
+        // if (uploadForm === FormType.measurements && setMsmtsUploadCompleted) {
+        //   // Set the local state for the MSV data grid component
+        //   // This maintains compatibility with existing msvdatagrid functionality
+        //   setMsmtsUploadCompleted(true);
+        //
+        //   // Trigger the global context with upload completion data
+        //   // This data will be used by the hub layout to start backend processing
+        //   triggerMeasurementsUploadCompletion({
+        //     plotID: currentPlot?.plotID, // Required for ingestionprocessor API
+        //     censusID: currentCensus?.dateRanges[0].censusID, // For context/logging
+        //     plotCensusNumber: currentCensus?.plotCensusNumber, // Required for ingestionprocessor API
+        //     schemaName: currentSite?.schemaName, // Required for ingestionprocessor API
+        //     timestamp: new Date().toISOString() // For tracking/logging purposes
+        //   });
+        // }
       } catch (error: any) {
         ailogger.error(error);
       }

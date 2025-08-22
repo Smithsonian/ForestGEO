@@ -42,8 +42,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096;
-  const connectionLimit = 20;
+  const chunkSize = 4096 * 16;
+  const connectionLimit = 10;
   const queue = new PQueue({ concurrency: connectionLimit });
   // refs
   const hasUploaded = useRef(false);
@@ -508,10 +508,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setProcessed(true);
       }
 
-      // runProcessBatches().catch(error => {
-      //   setUploadError(error);
-      //   setReviewState(ReviewStates.ERRORS);
-      // });
+      runProcessBatches().catch(error => {
+        setUploadError(error);
+        setReviewState(ReviewStates.ERRORS);
+      });
     }
   }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
 
@@ -521,19 +521,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setReviewState(ReviewStates.UPLOAD_AZURE);
       setIsDataUnsaved(false);
     }
-    // if (uploadForm === FormType.measurements) {
-    //   if (uploaded && processed) {
-    //     hasUploaded.current = true;
-    //     setReviewState(ReviewStates.VALIDATE);
-    //     setIsDataUnsaved(false);
-    //   }
-    // } else {
-    //   if (uploaded) {
-    //     hasUploaded.current = true;
-    //     setReviewState(ReviewStates.UPLOAD_AZURE);
-    //     setIsDataUnsaved(false);
-    //   }
-    // }
+    if (uploadForm === FormType.measurements) {
+      if (uploaded && processed) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.VALIDATE);
+        setIsDataUnsaved(false);
+      }
+    } else {
+      if (uploaded) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.UPLOAD_AZURE);
+        setIsDataUnsaved(false);
+      }
+    }
   }, [uploaded, processed, uploadForm, setReviewState, setIsDataUnsaved]);
 
   const { palette } = useTheme();

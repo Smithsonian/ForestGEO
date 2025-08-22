@@ -16,13 +16,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   }
 
   const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
-  if (!dataType || !plotIDParam || !pcnParam) {
+  if (!dataType) {
     throw new Error('slugs were not correctly provided');
   }
 
   let storedCensusList: OrgCensus[];
-  let storedPlotID: number = parseInt(plotIDParam);
-  let storedPCN: number = parseInt(pcnParam);
+  let storedPlotID: number = parseInt(plotIDParam) ?? 0;
+  let storedPCN: number = parseInt(pcnParam) ?? 0;
 
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
