@@ -42,7 +42,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096 * 16;
+  const chunkSize = 4096 * 32;
   const connectionLimit = 20;
   const queue = new PQueue({ concurrency: connectionLimit });
   // refs
@@ -494,17 +494,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         for (const fileID in grouped) {
           ailogger.info(`Processing FileID: ${fileID}`);
           // Map each batchID to a queued task.
-          const batchTasks = grouped[fileID].map(batchID =>
-            queue.add(async () => {
-              try {
-                await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
-                setProcessedChunks(prev => prev + 1);
-              } catch (e: any) {
-                // unforeseen error OR max attempts exceeded. Move to failedmeasurements manually and try the next one
-                await fetch(`/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
-                throw e;
-              }
-            })
+          const batchTasks = grouped[fileID].map(
+            async batchID => {
+              await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+              setProcessedChunks(prev => prev + 1);
+            }
+            // queue.add(async () => {
+            //   try {
+            //     await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+            //     setProcessedChunks(prev => prev + 1);
+            //   } catch (e: any) {
+            //     // unforeseen error OR max attempts exceeded. Move to failedmeasurements manually and try the next one
+            //     await fetch(`/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+            //     throw e;
+            //   }
+            // })
           );
 
           // Optionally, queue a follow-up task that updates file-level completion once all its batches are done.
