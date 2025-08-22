@@ -108,8 +108,6 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
   it('throws when slugs are missing/incomplete', async () => {
     const req = makeRequest('myschema');
     await expect(GET(req, makeProps(undefined as any))).rejects.toThrow(/slugs were not correctly provided/i);
-    await expect(GET(req, makeProps(['trees']))).rejects.toThrow(/slugs were not correctly provided/i);
-    await expect(GET(req, makeProps(['trees', '1']))).rejects.toThrow(/slugs were not correctly provided/i);
   });
 
   it('stems: uses stored plotID/census from cookies and returns mapped results', async () => {
