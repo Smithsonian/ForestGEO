@@ -118,11 +118,11 @@
 
 1. FixedData cases' queries updated to correctly work with updated schemas
 2. New tables/cases added:
-    1. `personnelrole`
-    2. `sitespecificvalidations`
-    3. `roles`
-    4. `measurementssummary`
-    5. `viewfulltable`
+   1. `personnelrole`
+   2. `sitespecificvalidations`
+   3. `roles`
+   4. `measurementssummary`
+   5. `viewfulltable`
 
 ###### POST
 
@@ -142,18 +142,18 @@
 
 1. Postvalidation summary statistics calculation endpoint
 2. Statistics queries:
-    1. `number of records by quadrat`
-    2. `all stem records by quadrat (count only)`
-    3. `live stem records by quadrat (count only)`
-    4. `tree records by quadrat (count only)`
-    5. `number of dead or missing stems by census`
-    6. `trees outside of plot limits`
-    7. `stems with largest DBH/HOM measurements by species`
-    8. `all trees that were recorded in last census that are NOT in current census`
-    9. `number of new stems per quadrat per census`
-    10. `quadrats with most and least new stems per census`
-    11. `number of dead stems per quadrat per census`
-    12. `number of dead stems per species per census`
+   1. `number of records by quadrat`
+   2. `all stem records by quadrat (count only)`
+   3. `live stem records by quadrat (count only)`
+   4. `tree records by quadrat (count only)`
+   5. `number of dead or missing stems by census`
+   6. `trees outside of plot limits`
+   7. `stems with largest DBH/HOM measurements by species`
+   8. `all trees that were recorded in last census that are NOT in current census`
+   9. `number of new stems per quadrat per census`
+   10. `quadrats with most and least new stems per census`
+   11. `number of dead stems per quadrat per census`
+   12. `number of dead stems per species per census`
 
 #### frontend/app/api/refreshviews/[view]/[schema]/route.ts
 
@@ -220,7 +220,7 @@
 3. customized cell and edit cell rendering added
 4. some exceptions exist -- for instances where specific additional handling is needed, column states are directly
    defined in the datagrid components themselves.
-    1. `alltaxonomiesview` -- specieslimits column customized addition
+   1. `alltaxonomiesview` -- specieslimits column customized addition
 
 #### GitHub Feedback Modal
 
@@ -250,18 +250,18 @@
 1. The DataGridCommons generic datagrid instance has been replaced by the IsolatedDataGridCommons instance, which
    isolates as much information as possible to the generic instance rather than the existing DataGridCommons, which
    requires parameter drilling of all MUI X DataGrid parameters. Current datagrids using this new implementation are:
-    - `alltaxonomiesview`
-    - `attributes`
-    - `personnel`
-    - `quadratpersonnel`
-    - `quadrats`
-    - `roles`
-    - `stemtaxonomiesview`
+   - `alltaxonomiesview`
+   - `attributes`
+   - `personnel`
+   - `quadratpersonnel`
+   - `quadrats`
+   - `roles`
+   - `stemtaxonomiesview`
 2. found that attempting to use typescript runtime utilities to create "default" initial states for each RDS type was
    causing cascading failures. Due to the way that runtime utility functions work, no data was actually reaching the
    datagrids importing those initial states
-    1. replaced with manual definition of initial states -- planning on centralizing this to another place, similar to
-       the `datagridcolumns.tsx` file
+   1. replaced with manual definition of initial states -- planning on centralizing this to another place, similar to
+      the `datagridcolumns.tsx` file
 3. `measurementssummaryview` datagrid instance added as a replacement to the previously defined summary page
 
 #### Re-Entry Data Modal
@@ -312,12 +312,12 @@
 ### SQL Updates
 
 1. Schema has been been updated -- new tables added:
-    1. `roles` - outlines user roles
-    2. `specieslimits` - allows setting min/max bounds on measurements
-    3. `specimens` - recording specimen data (added on request by ForestGEO)
-    4. `unifiedchangelog` - partitioned table that tracks all changes to all tables in schema. All tables have triggers
-       that automatically update the `unifiedchangelog` on every change
-    5. `sitespecificvalidations` - for specific validations applicable only to the host site
+   1. `roles` - outlines user roles
+   2. `specieslimits` - allows setting min/max bounds on measurements
+   3. `specimens` - recording specimen data (added on request by ForestGEO)
+   4. `unifiedchangelog` - partitioned table that tracks all changes to all tables in schema. All tables have triggers
+      that automatically update the `unifiedchangelog` on every change
+   5. `sitespecificvalidations` - for specific validations applicable only to the host site
 2. validation stored procedures have been deprecated and removed, replaced with `validationprocedures` and
    `sitespecificvalidations` tables
 3. migration script set has been completed and tested

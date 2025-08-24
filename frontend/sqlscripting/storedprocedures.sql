@@ -1273,65 +1273,43 @@ end;
 create
     definer = azureroot@`%` procedure reviewfailed()
 begin
-    -- 1) clear out old failure reasons
-    UPDATE failedmeasurements
-    SET FailureReasons = '';
-
-    -- 2) now re-populate, using versioned lookups
-    UPDATE failedmeasurements AS fm2
-        -- species version snapshot
-        LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          s.SpeciesID
-                   FROM failedmeasurements fm
-                            LEFT JOIN species s
-                                      ON s.SpeciesCode = fm.SpCode) AS ssub
-        ON ssub.FailedMeasurementID = fm2.FailedMeasurementID
-
-        -- quadrat version snapshot
-        LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          q.QuadratID
-                   FROM failedmeasurements fm
-                            LEFT JOIN quadrats q
-                                      ON q.QuadratName = fm.Quadrat
-                                          AND q.PlotID = fm.PlotID) AS qsub
-        ON qsub.FailedMeasurementID = fm2.FailedMeasurementID
-
-        -- invalid‐codes count via censusattributes → attributesversioning
-        LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          IFNULL((SELECT SUM(IF(a.Code IS NULL, 1, 0))
-                                  FROM JSON_TABLE(
-                                               IF(fm.Codes IS NULL OR TRIM(fm.Codes) = '',
-                                                  '[]',
-                                                  CONCAT('["', REPLACE(TRIM(fm.Codes), ';', '","'), '"]')
-                                               ),
-                                               '$[*]' COLUMNS (code VARCHAR(10) PATH '$')
-                                       ) AS jt
-                                           LEFT JOIN attributes a
-                                                     ON a.Code = jt.code),
-                                 0) AS invalid_codes
-                   FROM failedmeasurements fm) AS csub
-        ON csub.FailedMeasurementID = fm2.FailedMeasurementID
-
-    -- assemble the FailureReasons string
-    SET fm2.FailureReasons = TRIM(BOTH '|' FROM CONCAT_WS('|',
-                                                          IF(fm2.SpCode IS NULL OR fm2.SpCode = '', 'SpCode missing', NULL),
-                                                          IF(fm2.SpCode IS NOT NULL AND
-                                                             ssub.SpeciesID IS NULL,
-                                                             'SpCode invalid', NULL),
-                                                          IF(fm2.Quadrat IS NULL OR fm2.Quadrat = '', 'Quadrat missing', NULL),
-                                                          IF(fm2.Quadrat IS NOT NULL AND
-                                                             qsub.QuadratID IS NULL,
-                                                             'Quadrat invalid', NULL),
-                                                          IF(fm2.X IS NULL OR fm2.X IN (0, -1), 'Missing X', NULL),
-                                                          IF(fm2.Y IS NULL OR fm2.Y IN (0, -1), 'Missing Y', NULL),
-                                                          IF((fm2.Codes IS NULL OR TRIM(fm2.Codes) = '')
-                                                                 AND (fm2.DBH IS NULL OR fm2.DBH IN (0, -1)),
-                                                             'Missing Codes and DBH', NULL),
-                                                          IF((fm2.Codes IS NULL OR TRIM(fm2.Codes) = '')
-                                                                 AND (fm2.HOM IS NULL OR fm2.HOM IN (0, -1)),
-                                                             'Missing Codes and HOM', NULL),
-                                                          IF(fm2.Date IS NULL OR fm2.Date = '1900-01-01', 'Missing Date', NULL),
-                                                          IF(csub.invalid_codes > 0, 'Invalid Codes', NULL)
-                                                ));
+    -- Simple, reliable failure detection
+    UPDATE failedmeasurements fm
+    SET FailureReasons = TRIM(BOTH '|' FROM CONCAT_WS('|',
+        -- SpCode validation
+        CASE 
+            WHEN fm.SpCode IS NULL OR fm.SpCode = '' THEN 'SpCode missing'
+            WHEN NOT EXISTS(SELECT 1 FROM species s WHERE s.SpeciesCode = fm.SpCode) THEN 'SpCode invalid'
+            ELSE NULL
+        END,
+        
+        -- Quadrat validation  
+        CASE 
+            WHEN fm.Quadrat IS NULL OR fm.Quadrat = '' THEN 'Quadrat missing'
+            WHEN NOT EXISTS(SELECT 1 FROM quadrats q WHERE q.QuadratName = fm.Quadrat AND q.PlotID = fm.PlotID) THEN 'Quadrat invalid'
+            ELSE NULL
+        END,
+        
+        -- Coordinate validation
+        IF(fm.X IS NULL OR fm.X IN (0, -1), 'Missing X', NULL),
+        IF(fm.Y IS NULL OR fm.Y IN (0, -1), 'Missing Y', NULL),
+        
+        -- DBH and Codes validation (need at least one)
+        IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND (fm.DBH IS NULL OR fm.DBH IN (0, -1)), 'Missing Codes and DBH', NULL),
+        IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND (fm.HOM IS NULL OR fm.HOM IN (0, -1)), 'Missing Codes and HOM', NULL),
+        
+        -- Date validation
+        IF(fm.Date IS NULL OR fm.Date = '1900-01-01', 'Missing Date', NULL),
+        
+        -- Tag validation (required fields)
+        IF(fm.Tag IS NULL OR fm.Tag = '', 'Missing Tag', NULL),
+        IF(fm.StemTag IS NULL OR fm.StemTag = '', 'Missing StemTag', NULL)
+    ));
+    
+    -- Mark rows with empty failure reasons as ready for reingestion
+    UPDATE failedmeasurements 
+    SET FailureReasons = 'Ready for reingestion'
+    WHERE FailureReasons IS NULL OR FailureReasons = '';
+    
 end;
 

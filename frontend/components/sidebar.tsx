@@ -390,6 +390,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderCensusOptions = () => (
     <Select
+      suppressHydrationWarning
       placeholder="Select a Census"
       className="census-select sidebar-item"
       name="None"
