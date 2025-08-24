@@ -13,9 +13,9 @@ When files are modified, the system automatically:
 
 - Identifies changed files using git diff
 - Searches for associated test files using common naming patterns:
-    - `{filename}.test.{ts,tsx,js,jsx}`
-    - `{filename}.spec.{ts,tsx,js,jsx}`
-    - Tests in `__tests__/` subdirectories
+  - `{filename}.test.{ts,tsx,js,jsx}`
+  - `{filename}.spec.{ts,tsx,js,jsx}`
+  - Tests in `__tests__/` subdirectories
 - Maps source files to their corresponding test files
 
 ### 2. Running the Auto Test Check

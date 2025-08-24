@@ -867,123 +867,101 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             mt: 4
           }}
         >
-          <Stack direction={'column'} sx={{ width: '100%' }}>
-            <Typography level={'title-md'} gutterBottom>{`Total Operations: ${totalOperations}, Total Chunks: ${totalChunks}`}</Typography>
-
-            <Box sx={{ width: '100%', mb: 2 }}>
-              <Typography level={'title-md'} gutterBottom>
-                Total File Progress - Completed: {completedOperations}
+          <Stack direction="column" spacing={3} sx={{ width: '100%' }}>
+            <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography level="title-lg">Upload Progress</Typography>
+              <Typography level="body-sm" color="neutral">
+                {totalOperations} operations, {totalChunks} chunks total
               </Typography>
-              <LinearProgress size={'lg'} variant="soft" color="primary">
-                <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+            </Stack>
+
+            <Box sx={{ width: '100%' }}>
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+                <Typography level="body-sm">File Progress</Typography>
+                <Typography level="body-sm" color="primary">
                   {completedOperations}/{totalOperations}
                 </Typography>
-              </LinearProgress>
+              </Stack>
+              <LinearProgress
+                size="lg"
+                variant="soft"
+                color="primary"
+                value={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
+                determinate
+              />
             </Box>
 
             {totalChunks !== 0 && (
-              <Box sx={{ width: '100%', mb: 2 }}>
-                <Typography level={'title-md'} gutterBottom>
-                  Total Parsing Progress - Completed: {completedChunks}
-                </Typography>
-                <LinearProgress
-                  determinate
-                  variant="plain"
-                  color="primary"
-                  thickness={48}
-                  value={(completedChunks / totalChunks) * 100}
-                  sx={{
-                    '--LinearProgress-radius': '0px',
-                    '--LinearProgress-progressThickness': '36px'
-                  }}
-                >
-                  {completedChunks < totalChunks ? (
-                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                      LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
-                      {totalChunks - completedChunks} remaining
-                      <br />
-                      Estimated time to completion: {etc}
-                    </Typography>
-                  ) : (
-                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                      COMPLETED
-                    </Typography>
-                  )}
-                </LinearProgress>
-                <Divider sx={{ my: 1 }} />
-                {uploadForm === 'measurements' && totalBatches !== 0 && (
-                  <>
-                    <Typography level={'title-md'} gutterBottom>
-                      Total Processing Progress - Completed: {processedChunks}
-                    </Typography>
-                    <LinearProgress
-                      determinate
-                      variant="plain"
-                      color="primary"
-                      thickness={48}
-                      value={(processedChunks / totalBatches) * 100}
-                      sx={{
-                        '--LinearProgress-radius': '0px',
-                        '--LinearProgress-progressThickness': '36px'
-                      }}
-                    >
-                      {processedChunks < totalBatches ? (
-                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                          LOADING: {`${((processedChunks / totalBatches) * 100).toFixed(2)}%`} {' | '} {processedChunks} completed out of {totalBatches} {' | '}
-                          {totalBatches - processedChunks} remaining
-                          <br />
-                          Estimated time to completion: {processETC}
-                        </Typography>
-                      ) : (
-                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                          PROCESSING COMPLETED
-                        </Typography>
-                      )}
-                    </LinearProgress>
-                  </>
-                )}
-                <Divider sx={{ my: 2 }} />
-                <Box
-                  sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '100%',
-                    height: '100%',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
-                    Please do not exit this page! The upload will take some time to complete.
+              <Box sx={{ width: '100%' }}>
+                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+                  <Typography level="body-sm">Data Processing</Typography>
+                  <Typography level="body-sm" color="primary">
+                    {completedChunks}/{totalChunks} chunks
                   </Typography>
-                  {!uploaded && !processed && (
-                    <DotLottieReact
-                      src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-                      loop
-                      autoplay
-                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                      style={{
-                        width: '40%',
-                        height: '40%'
-                      }}
-                    />
-                  )}
-                  {uploaded && !processed && (
-                    <DotLottieReact
-                      src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
-                      loop
-                      autoplay
-                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                      style={{
-                        width: '40%',
-                        height: '40%'
-                      }}
-                    />
-                  )}
-                </Box>
+                </Stack>
+                <LinearProgress determinate variant="soft" color="primary" size="lg" value={(completedChunks / totalChunks) * 100} />
+                {completedChunks < totalChunks && etc !== 'Calculating...' && (
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center' }} color="neutral">
+                    {((completedChunks / totalChunks) * 100).toFixed(1)}% complete • {etc}
+                  </Typography>
+                )}
               </Box>
             )}
+
+            {uploadForm === 'measurements' && totalBatches !== 0 && (
+              <Box sx={{ width: '100%' }}>
+                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+                  <Typography level="body-sm">Batch Processing</Typography>
+                  <Typography level="body-sm" color="primary">
+                    {processedChunks}/{totalBatches} batches
+                  </Typography>
+                </Stack>
+                <LinearProgress determinate variant="soft" color="success" size="lg" value={(processedChunks / totalBatches) * 100} />
+                {processedChunks < totalBatches && processETC !== 'Calculating...' && (
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center' }} color="neutral">
+                    {((processedChunks / totalBatches) * 100).toFixed(1)}% complete • {processETC}
+                  </Typography>
+                )}
+              </Box>
+            )}
+
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                mt: 4
+              }}
+            >
+              <Typography level="body-sm" color="neutral" sx={{ mb: 2 }}>
+                Please do not exit this page while upload is in progress
+              </Typography>
+              {!uploaded && !processed && (
+                <DotLottieReact
+                  src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                  loop
+                  autoplay
+                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                  style={{
+                    width: '200px',
+                    height: '200px'
+                  }}
+                />
+              )}
+              {uploaded && !processed && (
+                <DotLottieReact
+                  src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
+                  loop
+                  autoplay
+                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                  style={{
+                    width: '200px',
+                    height: '200px'
+                  }}
+                />
+              )}
+            </Box>
           </Stack>
         </Box>
       ) : (

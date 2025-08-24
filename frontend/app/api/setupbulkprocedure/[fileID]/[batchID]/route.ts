@@ -26,7 +26,6 @@ export async function GET(
     try {
       attempt++;
       transactionID = await connectionManager.beginTransaction();
-      await connectionManager.executeQuery('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', [], transactionID);
       await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID], transactionID);
       await connectionManager.commitTransaction(transactionID);
       return new NextResponse(JSON.stringify({ attemptsNeeded: attempt }), { status: HTTPResponses.OK });
