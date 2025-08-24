@@ -26,7 +26,8 @@ export async function GET(
     try {
       attempt++;
       transactionID = await connectionManager.beginTransaction();
-      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
+      await connectionManager.executeQuery('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', [], transactionID);
+      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID], transactionID);
       await connectionManager.commitTransaction(transactionID);
       return new NextResponse(JSON.stringify({ attemptsNeeded: attempt }), { status: HTTPResponses.OK });
     } catch (e: any) {
@@ -39,15 +40,17 @@ export async function GET(
       // Wait for an exponentially increasing delay before retrying
       await new Promise(resolve => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, 5000); // ceiling at 5 s
-      // if (isDeadlockError(e)) {
-      // } else {
-      //   try {
-      //     await connectionManager.rollbackTransaction(transactionID);
-      //   } catch (rollbackError) {
-      //     console.error('Rollback error:', rollbackError);
-      //   }
-      //   return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
-      // }
     }
   }
+
+  // CRITICAL FIX: If we reach here, all attempts have been exhausted
+  ailogger.error(`All ${maxAttempts} attempts exhausted for ${fileID}-${batchID}`);
+  return new NextResponse(
+    JSON.stringify({
+      error: `Failed after ${maxAttempts} attempts`,
+      fileID,
+      batchID
+    }),
+    { status: HTTPResponses.SERVICE_UNAVAILABLE }
+  );
 }

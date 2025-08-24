@@ -16,7 +16,7 @@ better understanding of what each validation check means, and what its query loo
 The following is a brief summation of the current validations and their default enabling status.
 
 | Name                                                          | Description                                                                                                             | Default State |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------- |
+|---------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|---------------|
 | ValidateDBHGrowthExceedsMax                                   | For a given stem, flag all DBH measurements that show more than a 65 mm growth from the previous census.                | Enabled       |
 | ValidateDBHShrinkageExceedsMax                                | For a given stem, flag all DBH measurements that show more than a 5% **decrease** from the previous census.             | Enabled       |
 | ValidateFindAllInvalidSpeciesCodes                            | Flag all stems with a species code not already defined in the **species** table.                                        | Enabled       |

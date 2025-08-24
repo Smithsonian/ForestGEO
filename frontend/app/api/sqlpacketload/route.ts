@@ -40,6 +40,13 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
+
+  // CRITICAL: Ensure cleanup of stale transactions before processing
+  try {
+    await connectionManager.cleanupStaleTransactions(30000); // 30 second threshold
+  } catch (cleanupError: any) {
+    ailogger.warn('Failed to cleanup stale transactions:', cleanupError);
+  }
   if (formType === 'measurements') {
     const batchID = v4();
     const placeholders = Object.values(fileRowSet ?? [])

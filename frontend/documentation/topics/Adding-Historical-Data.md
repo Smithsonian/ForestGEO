@@ -18,7 +18,7 @@ Each form accepts a set of headers. Some headers are required, and some are opti
 minimum) the required headers when uploading a file. **Headers in bold are required!**
 
 | Form Type    | H1            | H2           | H3         | H4              | H5         | H6       | H7           | H8                  | H9       | H10   | H11      |
-| ------------ | ------------- | ------------ | ---------- | --------------- | ---------- | -------- | ------------ | ------------------- | -------- | ----- | -------- |
+|--------------|---------------|--------------|------------|-----------------|------------|----------|--------------|---------------------|----------|-------|----------|
 | attributes   | **code**      | description  | status     |                 |            |          |              |                     |          |       |          |
 | personnel    | **firstname** | **lastname** | **role**   | roledescription |            |          |              |                     |          |       |          |
 | quadrats     | **quadrat**   | **startx**   | **starty** | **dimx**        | **dimy**   | **area** | quadratshape |                     |          |       |          |

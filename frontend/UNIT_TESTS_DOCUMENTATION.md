@@ -12,11 +12,11 @@
 - [Test Architecture](#test-architecture)
 - [Core Configuration Tests](#core-configuration-tests)
 - [API Route Tests](#api-route-tests)
-  - [Authentication & Authorization](#authentication--authorization)
-  - [Data Management](#data-management)
-  - [File Operations](#file-operations)
-  - [Validation & Processing](#validation--processing)
-  - [System Operations](#system-operations)
+    - [Authentication & Authorization](#authentication--authorization)
+    - [Data Management](#data-management)
+    - [File Operations](#file-operations)
+    - [Validation & Processing](#validation--processing)
+    - [System Operations](#system-operations)
 - [Mock Infrastructure Tests](#mock-infrastructure-tests)
 - [Testing Patterns](#testing-patterns)
 - [Coverage Summary](#coverage-summary)
@@ -92,9 +92,9 @@ ForestGEO application.
 - **Purpose:** Verifies ForestGEO-specific error codes
 - **Scope:** Application-specific business logic errors
 - **Codes Tested:**
-  - 408: SQL_CONNECTION_FAILURE (database connectivity)
-  - 412: PRECONDITION_VALIDATION_FAILURE (business rules)
-  - 555: FOREIGN_KEY_CONFLICT (referential integrity)
+    - 408: SQL_CONNECTION_FAILURE (database connectivity)
+    - 412: PRECONDITION_VALIDATION_FAILURE (business rules)
+    - 555: FOREIGN_KEY_CONFLICT (referential integrity)
 
 **@test** `should handle NOT_FOUND status`
 
@@ -1345,7 +1345,7 @@ Database mocks use FIFO queuing for:
 ### Test Coverage by Category
 
 | Category                           | Files | Tests | Coverage |
-| ---------------------------------- | ----- | ----- | -------- |
+|------------------------------------|-------|-------|----------|
 | **Authentication & Authorization** | 2     | 7     | 100%     |
 | **Data Management**                | 3     | 23    | 100%     |
 | **File Operations**                | 4     | 27    | 100%     |
