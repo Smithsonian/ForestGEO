@@ -16,7 +16,7 @@ truncate measurementssummary;
 # truncate sitespecificvalidations;
 # truncate species;
 truncate specieslimits;
-# truncate specimens;
+truncate specimens;
 truncate stems;
 truncate trees;
 truncate temporarymeasurements;

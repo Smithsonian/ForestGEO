@@ -7,7 +7,7 @@ create table if not exists attributes
     DeletedAt   datetime                                                                                        null,
     unique_sig  varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`Code`, _utf8mb4''),
                                            coalesce(`Description`, _utf8mb4''), coalesce(`Status`, _utf8mb4''),
-                                           coalesce(`IsActive`, _utf8mb4''))) stored,
+                                           coalesce(`IsActive`, _utf8mb4''))) stored invisible,
     primary key (Code, IsActive),
     constraint uq_attributes_full
         unique (unique_sig)
@@ -41,7 +41,8 @@ create table if not exists failedmeasurements
     Comments            varchar(255)   null,
     FailureReasons      text           null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
-                                                      `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`, `Codes`))) stored,
+                                                      `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`,
+                                                      `Codes`))) stored invisible,
     constraint unique_required_hash
         unique (hash_id)
 );
@@ -293,7 +294,7 @@ create table if not exists quadrats
                                             coalesce(`StartX`, _utf8mb4''), coalesce(`StartY`, _utf8mb4''),
                                             coalesce(`DimensionX`, _utf8mb4''), coalesce(`DimensionY`, _utf8mb4''),
                                             coalesce(`Area`, _utf8mb4''), coalesce(`QuadratShape`, _utf8mb4''),
-                                            coalesce(`IsActive`, _utf8mb4''))) stored,
+                                            coalesce(`IsActive`, _utf8mb4''))) stored invisible,
     constraint unique_full_quadrat
         unique (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive),
     constraint uq_quadrats_full
@@ -424,7 +425,8 @@ create table if not exists personnel
     IsActive    tinyint(1) default 1 not null,
     DeletedAt   datetime             null,
     unique_sig  varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`FirstName`, _utf8mb4''),
-                                           coalesce(`LastName`, _utf8mb4''), coalesce(`IsActive`, _utf8mb4''))) stored,
+                                           coalesce(`LastName`, _utf8mb4''),
+                                           coalesce(`IsActive`, _utf8mb4''))) stored invisible,
     constraint personnel_FirstName_LastName_RoleID__uindex
         unique (FirstName, LastName, IsActive),
     constraint uq_personnel_full
@@ -432,6 +434,22 @@ create table if not exists personnel
     constraint personnel_roles_RoleID_fk
         foreign key (RoleID) references roles (RoleID)
             on delete cascade
+);
+
+create table if not exists censusactivepersonnel
+(
+    CAPID       int auto_increment
+        primary key,
+    PersonnelID int null,
+    CensusID    int null,
+    constraint censusactivepersonnel_PersonnelID_CensusID_uindex
+        unique (PersonnelID, CensusID),
+    constraint censusactivepersonnel_census_CensusID_fk
+        foreign key (CensusID) references census (CensusID)
+            on update cascade on delete cascade,
+    constraint censusactivepersonnel_personnel_PersonnelID_fk
+        foreign key (PersonnelID) references personnel (PersonnelID)
+            on update cascade on delete cascade
 );
 
 create index idx_firstname
@@ -489,7 +507,7 @@ create table if not exists species
                                                    coalesce(`SpeciesAuthority`, _utf8mb4''),
                                                    coalesce(`SubspeciesAuthority`, _utf8mb4''),
                                                    coalesce(`FieldFamily`, _utf8mb4''),
-                                                   coalesce(`Description`, _utf8mb4''))) stored,
+                                                   coalesce(`Description`, _utf8mb4''))) stored invisible,
     constraint uq_species_sig
         unique (unique_sig),
     constraint Species_Genus_GenusID_fk

@@ -12,6 +12,7 @@
     "build": "rm -rf build && next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
     "start": "node build/standalone/server.js -p 3000",
     "test": "vitest",
+    "test:auto": "node scripts/auto-test-check.js",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",

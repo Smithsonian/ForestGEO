@@ -19,8 +19,10 @@ export interface UploadParseFilesProps {
   uploadForm: FormType | undefined;
   acceptedFiles: FileWithStream[];
   dataViewActive: number;
+  selectedDelimiters: Record<string, string>;
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
+  setSelectedDelimiters: Dispatch<SetStateAction<Record<string, string>>>;
   // centralized functions
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -68,6 +70,7 @@ export interface UploadFireProps {
   parsedData: FileCollectionRowSet;
   errorRows: FileCollectionRowSet;
   uploadCompleteMessage: string;
+  selectedDelimiters: Record<string, string>;
   // state setters
   setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;

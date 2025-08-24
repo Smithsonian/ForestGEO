@@ -247,12 +247,12 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             <Box display={'flex'} alignItems={'center'} sx={{ flex: 0.75, display: 'flex', justifyContent: 'space-evenly' }}>
               <ColumnsPanelTrigger
                 style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
-                render={<ToolbarButton render={<Button>Columns</Button>} />}
+                render={<ToolbarButton>Columns</ToolbarButton>}
               />
               <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
               <FilterPanelTrigger
                 style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
-                render={<ToolbarButton render={<Button>Filter</Button>} />}
+                render={<ToolbarButton>Filter</ToolbarButton>}
               />
               <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
               <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
@@ -280,14 +280,14 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </Tooltip>
             </Box>
             <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
-            <ToolbarButton
+            <Button
               style={{ display: 'flex', flex: 0.15, maxWidth: '15%', marginRight: '0.75%' }}
-              render={
-                <Button color={'primary'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
-                  Refresh
-                </Button>
-              }
-            />
+              color={'primary'}
+              startDecorator={<RefreshIcon />}
+              onClick={async () => await handleRefresh()}
+            >
+              Refresh
+            </Button>
             {gridType === 'measurements' && (
               <Stack direction={'row'} gap={1} spacing={1} sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center' }}>
                 <Tooltip title={`Invalid: (${errorControls.count})`}>

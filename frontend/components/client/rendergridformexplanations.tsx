@@ -139,8 +139,10 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                     {/* Date format alert */}
                     {getFormHeaderForGridHeader(datagridType, header.label)?.label.includes('date') && (
                       <Alert role="alert" startDecorator={<WarningIcon fontSize="large" aria-hidden="true" />} variant="soft" color="danger" sx={{ mt: 2 }}>
-                        <Typography component="div" level="body-sm">
-                          Please note: For date fields, accepted formats are
+                        <Box>
+                          <Typography level="body-sm" component="p">
+                            Please note: For date fields, accepted formats are:
+                          </Typography>
                           <List marker="decimal" aria-label="Date format list">
                             <ListItem>
                               <Tooltip describeChild title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
@@ -158,7 +160,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                             <br />
                             Please ensure your dates follow one of these formats.
                           </Typography>
-                        </Typography>
+                        </Box>
                       </Alert>
                     )}
                   </CardContent>
