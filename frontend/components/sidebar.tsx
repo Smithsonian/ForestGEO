@@ -382,10 +382,10 @@ export default function Sidebar(props: SidebarProps) {
 
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    { toggle: undefined, setToggle: undefinead },
+    { toggle: undefined, setToggle: undefined },
     { toggle: measurementsToggle, setToggle: setMeasurementsToggle },
     { toggle: propertiesToggle, setToggle: setPropertiesToggle },
-    { toggle: formsToggle, setToggle: setFormsTaoggle }
+    { toggle: formsToggle, setToggle: setFormsToggle }
   ];
 
   const renderCensusOptions = () => (
