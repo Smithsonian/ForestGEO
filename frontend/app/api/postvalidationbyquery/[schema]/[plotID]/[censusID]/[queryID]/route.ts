@@ -55,7 +55,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     ailogger.error('Error in postvalidation query:', e.message, {
-      endpoint: _request.nextUrl.pathname,
+      endpoint: _request.nextUrl?.pathname || 'postvalidationbyquery',
       schema,
       plotID,
       censusID,
