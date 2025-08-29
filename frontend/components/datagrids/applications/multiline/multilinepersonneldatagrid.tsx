@@ -131,7 +131,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
                 return option.inputValue;
               }
               // Regular option
-              return option.roleName;
+              return option.roleName || 'Unknown Role';
             }}
             renderOption={(props, option) => (
               <AutocompleteOption key={option.roleName} {...props}>
@@ -140,7 +140,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
                     <Add />
                   </ListItemDecorator>
                 )}
-                {option.roleName}
+                {option.roleName || 'Unknown Role'}
               </AutocompleteOption>
             )}
             sx={{ width: '100%' }}

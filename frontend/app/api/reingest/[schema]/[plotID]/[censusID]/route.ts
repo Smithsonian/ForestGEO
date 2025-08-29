@@ -10,12 +10,14 @@ export async function GET(
   }
 ) {
   const { schema, plotID, censusID } = await props.params;
-  if (!schema || !plotID || !censusID) throw new Error('schema or plotID or censusID not provided');
 
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
   try {
+    if (!schema || !plotID || !censusID) {
+      throw new Error('schema or plotID or censusID not provided');
+    }
     // Clean up stale transactions first
     await connectionManager.cleanupStaleTransactions();
 

@@ -50,7 +50,7 @@ export default function IsolatedQuadratPersonnelDataGrid() {
       if (personnelData.length === 0) throw new Error('personnelData fetchall is empty');
       setPersonnelOptions(
         personnelData.map((person: any) => ({
-          label: `${person.firstName} ${person.lastName}`, // Adjust based on your data structure
+          label: `${person.firstName || 'Unknown'} ${person.lastName || 'Person'}`, // Adjust based on your data structure
           value: person.personnelID
         }))
       );

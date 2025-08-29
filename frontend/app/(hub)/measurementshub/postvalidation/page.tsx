@@ -82,9 +82,13 @@ export default function PostValidationPage() {
     }
     const printContent = selectedResults.map(result => JSON.stringify(result, null, 2)).join('\n\n');
     const printWindow = window.open('', '', 'width=600,height=400');
-    printWindow?.document.write(`<pre>${printContent}</pre>`);
-    printWindow?.document.close();
-    printWindow?.print();
+    if (printWindow) {
+      const preElement = printWindow.document.createElement('pre');
+      preElement.textContent = printContent;
+      printWindow.document.body.appendChild(preElement);
+      printWindow.document.close();
+      printWindow.print();
+    }
   }
 
   useEffect(() => {

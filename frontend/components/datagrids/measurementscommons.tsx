@@ -1008,7 +1008,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 freeSolo={['treeTag', 'stemTag'].includes(column.field)}
                 clearOnBlur={false}
                 isOptionEqualToValue={(option, value) => option === value}
-                options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
+                options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
                 value={
                   column.field === 'attributes'
                     ? params.value
