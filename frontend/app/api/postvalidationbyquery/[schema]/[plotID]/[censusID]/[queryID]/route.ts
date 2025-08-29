@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import moment from 'moment';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
   const params = await props.params;
