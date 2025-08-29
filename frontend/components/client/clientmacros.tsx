@@ -130,7 +130,7 @@ export function selectableAutocomplete(params: any, column: GridColDef, selectab
       freeSolo={column.field !== 'codes'}
       clearOnBlur={false}
       isOptionEqualToValue={(option, value) => option === value}
-      options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
+      options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
       value={
         column.field === 'codes' ? (params.value ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0) : []) : (params.value ?? '')
       }

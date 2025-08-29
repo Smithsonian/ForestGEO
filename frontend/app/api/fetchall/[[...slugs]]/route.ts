@@ -10,15 +10,7 @@ import ailogger from '@/ailogger';
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
-
-  if (!schema || schema === 'undefined') {
-    throw new Error('Schema selection was not provided to API endpoint');
-  }
-
   const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
-  if (!dataType) {
-    throw new Error('slugs were not correctly provided');
-  }
 
   let storedCensusList: OrgCensus[];
   let storedPlotID: number = parseInt(plotIDParam);
@@ -35,6 +27,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
 
   const connectionManager = ConnectionManager.getInstance();
   try {
+    if (!schema || schema === 'undefined') {
+      throw new Error('Schema selection was not provided to API endpoint');
+    }
+
+    if (!dataType) {
+      throw new Error('slugs were not correctly provided');
+    }
     let results: any;
     if (dataType === 'stems' || dataType === 'trees') {
       const query = `SELECT st.* FROM ${schema}.${dataType} st 
