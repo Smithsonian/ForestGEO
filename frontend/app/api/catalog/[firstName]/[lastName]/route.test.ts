@@ -54,12 +54,23 @@ describe('GET /api/catalog/[firstName]/[lastName]', () => {
     vi.clearAllMocks();
   });
 
-  it('throws if firstName or lastName missing (pre-try/catch)', async () => {
+  it('returns 500 error when firstName or lastName missing', async () => {
     const req = makeRequest();
+    const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValueOnce(undefined);
+
     // Missing lastName
-    await expect(GET(req, makeParams('Ada', undefined as any))).rejects.toThrow(/no first or last name provided/i);
+    const res1 = await GET(req, makeParams('Ada', undefined as any));
+    expect(res1.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body1 = await res1.json();
+    expect(body1.error).toMatch(/no first or last name provided/i);
+
     // Missing firstName
-    await expect(GET(req, makeParams(undefined as any, 'Lovelace'))).rejects.toThrow(/no first or last name provided/i);
+    const res2 = await GET(req, makeParams(undefined as any, 'Lovelace'));
+    expect(res2.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body2 = await res2.json();
+    expect(body2.error).toMatch(/no first or last name provided/i);
+
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it('200 when user exists and returns the UserID', async () => {

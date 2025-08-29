@@ -97,17 +97,33 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     primeCookies();
   });
 
-  it('throws when schema missing/undefined', async () => {
+  it('returns 500 error when schema missing/undefined', async () => {
+    const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
+
     // No ?schema
-    await expect(GET(makeRequest(undefined), makeProps(['trees', '1', '1']))).rejects.toThrow(/Schema selection was not provided/i);
+    const res1 = await GET(makeRequest(undefined), makeProps(['trees', '1', '1']));
+    expect(res1.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body1 = await res1.json();
+    expect(body1.error).toMatch(/Schema selection was not provided/i);
+
     // schema=undefined
     const req = makeRequest('undefined');
-    await expect(GET(req, makeProps(['trees', '1', '1']))).rejects.toThrow(/Schema selection was not provided/i);
+    const res2 = await GET(req, makeProps(['trees', '1', '1']));
+    expect(res2.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body2 = await res2.json();
+    expect(body2.error).toMatch(/Schema selection was not provided/i);
+
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
-  it('throws when slugs are missing/incomplete', async () => {
+  it('returns 500 error when slugs are missing/incomplete', async () => {
+    const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
     const req = makeRequest('myschema');
-    await expect(GET(req, makeProps(undefined as any))).rejects.toThrow(/slugs were not correctly provided/i);
+    const res = await GET(req, makeProps(undefined as any));
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/slugs were not correctly provided/i);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('stems: uses stored plotID/census from cookies and returns mapped results', async () => {
@@ -224,14 +240,17 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(getMapperSpy).toHaveBeenCalledWith('randomtable');
   });
 
-  it('on DB error: logs via ailogger.error and throws "Call failed"; always closes connection', async () => {
+  it('on DB error: logs via ailogger.error and returns 500 error; always closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('kaboom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('myschema');
-    await expect(GET(req, makeProps(['plots', '1', '2']))).rejects.toThrow(/Call failed/i);
+    const res = await GET(req, makeProps(['plots', '1', '2']));
 
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toBe('kaboom');
     expect(loggerErr).toHaveBeenCalled(); // ailogger.error('Error:', error)
     expect(close).toHaveBeenCalledTimes(1);
   });

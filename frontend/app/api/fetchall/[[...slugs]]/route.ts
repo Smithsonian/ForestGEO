@@ -77,7 +77,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    throw new Error('Call failed');
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }
