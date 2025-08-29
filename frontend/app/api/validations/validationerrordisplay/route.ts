@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest) {
   const conn = ConnectionManager.getInstance();
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error: any) {
+    ailogger.error('Error in validation error display:', error.message, { endpoint: request.nextUrl.pathname });
     await conn.rollbackTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500

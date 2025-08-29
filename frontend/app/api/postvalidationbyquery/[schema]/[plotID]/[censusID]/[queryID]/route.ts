@@ -53,7 +53,16 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
       await connectionManager.executeQuery(failureUpdate, [currentTime]);
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
-    return new NextResponse('Internal Server Error', { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    ailogger.error('Error in postvalidation query:', e.message, {
+      endpoint: _request.nextUrl.pathname,
+      schema,
+      plotID,
+      censusID,
+      queryID
+    });
+    return new NextResponse(JSON.stringify({ error: 'Failed to execute validation query' }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     await connectionManager.closeConnection();
   }
