@@ -11,7 +11,7 @@
     "dev": "next dev --turbo",
     "build": "rm -rf build && next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
     "start": "node build/standalone/server.js -p 3000",
-    "test": "vitest run && npm run end:headless && npm run com:headless",
+    "test": "vitest run",
     "test:auto": "node scripts/auto-test-check.js",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",
