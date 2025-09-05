@@ -25,7 +25,7 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   quadratID: 0,
   plotID: 0,
   treeID: 0,
-  stemID: 0,
+  stemGUID: 0,
   speciesID: 0,
   quadratName: '',
   speciesName: '',

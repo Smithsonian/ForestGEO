@@ -1,5 +1,4 @@
 drop procedure if exists bulkingestioncollapser;
-drop procedure if exists bulkingestionprocess;
 drop procedure if exists clearcensusfull;
 drop procedure if exists clearcensusmsmts;
 drop procedure if exists RefreshMeasurementsSummary;
@@ -9,14 +8,13 @@ drop procedure if exists reviewfailed;
 drop procedure if exists reinsertdefaultvalidations;
 drop procedure if exists reinsertdefaultpostvalidations;
 
-
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
     SET foreign_key_checks = 0;
     TRUNCATE measurementssummary;
     INSERT IGNORE INTO measurementssummary (CoreMeasurementID,
-                                            StemID,
+                                            StemGUID,
                                             TreeID,
                                             SpeciesID,
                                             QuadratID,
@@ -39,7 +37,7 @@ BEGIN
                                             UserDefinedFields,
                                             Errors)
     SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
-           st.StemID                                            AS StemID,
+           st.StemGUID                                          AS StemGUID,
            t.TreeID                                             AS TreeID,
            sp.SpeciesID                                         AS SpeciesID,
            q.QuadratID                                          AS QuadratID,
@@ -69,7 +67,7 @@ BEGIN
             WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
     FROM coremeasurements cm
              join census c ON cm.CensusID = c.CensusID
-             join stems st ON cm.StemID = st.StemID and st.CensusID = c.CensusID
+             join stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
              join trees t on t.CensusID = c.CensusID and t.TreeID = st.TreeID
              join species sp on t.SpeciesID = sp.SpeciesID
              join quadrats q on q.QuadratID = st.QuadratID;
@@ -123,7 +121,7 @@ BEGIN
                                       QuadratShape,
                                       TreeID,
                                       TreeTag,
-                                      StemID,
+                                      StemGUID,
                                       StemTag,
                                       StemLocalX,
                                       StemLocalY,
@@ -178,7 +176,7 @@ BEGIN
            q.QuadratShape                                      AS QuadratShape,
            t.TreeID                                            AS TreeID,
            t.TreeTag                                           AS TreeTag,
-           s.StemID                                            AS StemID,
+           s.StemGUID                                          AS StemGUID,
            s.StemTag                                           AS StemTag,
            s.LocalX                                            AS StemLocalX,
            s.LocalY                                            AS StemLocalY,
@@ -198,7 +196,7 @@ BEGIN
             WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
            cm.UserDefinedFields                                AS UserDefinedFields
     FROM coremeasurements cm
-             LEFT JOIN stems s ON cm.StemID = s.StemID
+             LEFT JOIN stems s ON cm.StemGUID = s.StemGUID
              LEFT JOIN trees t ON s.TreeID = t.TreeID
              LEFT JOIN species sp ON t.SpeciesID = sp.SpeciesID
              LEFT JOIN genus g ON sp.GenusID = g.GenusID
@@ -231,384 +229,9 @@ begin
     FROM coremeasurements cm1
              INNER JOIN coremeasurements cm2
     WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
-      AND cm1.StemID = cm2.StemID
+      AND cm1.StemGUID = cm2.StemGUID
       AND cm1.MeasurementDate = cm2.MeasurementDate
       AND cm1.CensusID = vCensusID;
-end;
-
-create
-    definer = azureroot@`%` procedure bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
-begin
-    declare vCurrentCensusID int;
-    set @disable_triggers = 0;
-
-    select CensusID
-    into vCurrentCensusID
-    from temporarymeasurements
-    where FileID = vFileID
-      and BatchID = vBatchID
-    limit 1;
-
-    -- Clean up temporary tables including new ones for deduplication
-    drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
-        stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
-        preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
-        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert;
-
-    -- FIXED: More aggressive deduplication based on key business fields only
-    create temporary table initial_dup_filter engine = memory as
-    select min(id)                                                                        as id,
-           FileID,
-           BatchID,
-           PlotID,
-           CensusID,
-           TreeTag,
-           StemTag,
-           SpeciesCode,
-           QuadratName,
-           LocalX,
-           LocalY,
-           DBH,
-           HOM,
-           MeasurementDate,
-           -- Take first non-empty values for variable fields
-           max(case when Codes is not null and trim(Codes) != '' then Codes end)          as Codes,
-           max(case when Comments is not null and trim(Comments) != '' then Comments end) as Comments
-    from temporarymeasurements
-    where FileID = vFileID
-      and BatchID = vBatchID
-      and CensusID = vCurrentCensusID
-    group by FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
-             QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
-
-    create temporary table filter_validity engine = memory as
-    select distinct i.id,
-                    i.FileID,
-                    i.BatchID,
-                    i.PlotID,
-                    i.CensusID,
-                    i.TreeTag                                                  as TreeTag,
-                    ifnull(i.StemTag, '')                                      as StemTag,
-                    i.SpeciesCode                                              as SpeciesCode,
-                    i.QuadratName                                              as QuadratName,
-                    ifnull(i.LocalX, 0)                                        as LocalX,
-                    ifnull(i.LocalY, 0)                                        as LocalY,
-                    ifnull(i.DBH, 0)                                           as DBH,
-                    ifnull(i.HOM, 0)                                           as HOM,
-                    i.MeasurementDate                                          as MeasurementDate,
-                    i.Codes                                                    as Codes,
-                    i.Comments                                                 as Comments,
-                    if((((i.DBH = 0) or (i.HOM = 0)) and
-                        (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
-                    ifnull(
-                            (select sum(if(a.Code is null, 1, 0))
-                             from json_table(
-                                          if(i.Codes is null or trim(i.Codes) = '', '[]',
-                                             concat('[\"', replace(trim(i.Codes), ';', '\",\"'), '\"]')
-                                          ),
-                                          '$[*]' columns ( code varchar(10) path '$')
-                                  ) jt
-                                      left join attributes a
-                                                on a.Code = jt.code),
-                            0
-                    )                                                          as invalid_count
-    from initial_dup_filter i
-             left join quadrats tq on tq.QuadratName = i.QuadratName
-             left join species ts on ts.SpeciesCode = i.SpeciesCode
-    where i.TreeTag is not null
-      and (tq.QuadratID is not null and ts.SpeciesID is not null)
-      and i.MeasurementDate is not null;
-
-    create temporary table filter_validity_dup engine = memory as
-    select * from filter_validity;
-
-    create temporary table if not exists filtered engine = memory as
-    select distinct fv.*
-    from filter_validity fv
-    where invalid_count = 0;
-
-    -- Insert failed measurements (unchanged)
-    insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
-                                           Comments)
-    select distinct PlotID,
-                    CensusID,
-                    nullif(TreeTag, '')                   as Tag,
-                    nullif(StemTag, '')                   as StemTag,
-                    nullif(SpeciesCode, '')               as SpCode,
-                    nullif(QuadratName, '')               as Quadrat,
-                    nullif(LocalX, 0)                     as X,
-                    nullif(LocalY, 0)                     as Y,
-                    nullif(DBH, 0)                        as DBH,
-                    nullif(HOM, 0)                        as HOM,
-                    nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
-                    nullif(Codes, '')                     as Codes,
-                    nullif(Comments, '')                  as Comments
-    from (
-             -- Condition 1: Rows that appear in filter_validity with invalid codes.
-             select fv.PlotID,
-                    fv.CensusID,
-                    fv.TreeTag,
-                    fv.StemTag,
-                    fv.SpeciesCode,
-                    fv.QuadratName,
-                    fv.LocalX,
-                    fv.LocalY,
-                    fv.DBH,
-                    fv.HOM,
-                    fv.MeasurementDate,
-                    fv.Codes,
-                    fv.Comments
-             from (select * from filter_validity) fv
-             where fv.invalid_count > 0
-             union
-             -- Condition 2: Rows from temporarymeasurements that are missing from filter_validity
-             select tm.PlotID,
-                    tm.CensusID,
-                    coalesce(tm.TreeTag, ''),
-                    coalesce(tm.StemTag, ''),
-                    coalesce(tm.SpeciesCode, ''),
-                    coalesce(tm.QuadratName, ''),
-                    coalesce(tm.LocalX, -1),
-                    coalesce(tm.LocalY, -1),
-                    coalesce(tm.DBH, -1),
-                    coalesce(tm.HOM, -1),
-                    coalesce(tm.MeasurementDate, '1900-01-01'),
-                    coalesce(tm.Codes, ''),
-                    coalesce(tm.Comments, '')
-             from temporarymeasurements tm
-             where tm.BatchID = vBatchID
-               and tm.FileID = vFileID
-               and not exists (select 1
-                               from filter_validity_dup f
-                               where f.id = tm.id)) as combined;
-
-    -- FIXED: Improved categorization logic using EXISTS clauses to prevent multiple matching
-    create temporary table old_trees engine = memory as
-    select distinct f.*
-    from filtered f
-    where exists (select 1
-                  from trees t
-                           join stems s on s.TreeID = t.TreeID and s.CensusID = t.CensusID
-                  where t.TreeTag = f.TreeTag
-                    and s.StemTag = f.StemTag
-                    and t.CensusID < f.CensusID
-                    and t.IsActive = 1
-                    and s.IsActive = 1);
-
-    create temporary table multi_stems engine = memory as
-    select distinct f.*
-    from filtered f
-    where exists (select 1
-                  from trees t
-                  where t.TreeTag = f.TreeTag
-                    and t.CensusID < f.CensusID
-                    and t.IsActive = 1)
-      and exists (select 1
-                  from trees t2
-                           join stems s on s.TreeID = t2.TreeID and s.CensusID = t2.CensusID
-                  where t2.TreeTag = f.TreeTag
-                    and s.StemTag <> f.StemTag
-                    and t2.CensusID < f.CensusID
-                    and t2.IsActive = 1
-                    and s.IsActive = 1)
-      and not exists (select 1
-                      from old_trees ot
-                      where ot.id = f.id);
-
-    create temporary table new_recruits engine = memory as
-    select distinct f.*
-    from filtered f
-    where not exists (select 1
-                      from old_trees ot
-                      where ot.id = f.id)
-      and not exists (select 1
-                      from multi_stems ms
-                      where ms.id = f.id);
-
-    -- FIXED: Create a deduplicated table for tree insertions using UNION instead of UNION ALL
-    create temporary table unique_trees_to_insert engine = memory as
-    select distinct TreeTag, SpeciesCode, CensusID
-    from (select ot.TreeTag, ot.SpeciesCode, ot.CensusID
-          from old_trees ot
-          union
-          select ms.TreeTag, ms.SpeciesCode, ms.CensusID
-          from multi_stems ms
-          union
-          select nr.TreeTag, nr.SpeciesCode, nr.CensusID
-          from new_recruits nr) combined
-    where CensusID = vCurrentCensusID;
-
-    -- FIXED: Remove any existing duplicates in trees table for this census before insertion
-    delete t1
-    from trees t1
-             inner join trees t2
-    where t1.TreeID > t2.TreeID
-      and t1.TreeTag = t2.TreeTag
-      and t1.CensusID = t2.CensusID
-      and t1.CensusID = vCurrentCensusID;
-
-    -- FIXED: Use INSERT IGNORE with deduplicated source
-    INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
-    SELECT binary uti.TreeTag, ts.SpeciesID, uti.CensusID
-    FROM unique_trees_to_insert uti
-             JOIN species ts on ts.SpeciesCode = uti.SpeciesCode and ts.IsActive = 1
-    WHERE NOT EXISTS (SELECT 1
-                      FROM trees t
-                      WHERE t.TreeTag = uti.TreeTag
-                        AND t.CensusID = uti.CensusID
-                        AND t.SpeciesID = ts.SpeciesID
-                          FOR
-                      UPDATE);
-
-    -- FIXED: Create deduplicated table for stems insertions
-    create temporary table unique_stems_to_insert engine = memory as
-    select distinct TreeTag, QuadratName, StemTag, LocalX, LocalY, CensusID, SpeciesCode
-    from (select ot.TreeTag, ot.QuadratName, ot.StemTag, ot.LocalX, ot.LocalY, ot.CensusID, ot.SpeciesCode
-          from old_trees ot
-          union
-          select ms.TreeTag, ms.QuadratName, ms.StemTag, ms.LocalX, ms.LocalY, ms.CensusID, ms.SpeciesCode
-          from multi_stems ms
-          union
-          select nr.TreeTag, nr.QuadratName, nr.StemTag, nr.LocalX, nr.LocalY, nr.CensusID, nr.SpeciesCode
-          from new_recruits nr) combined
-    where CensusID = vCurrentCensusID;
-
-    -- FIXED: Remove existing stem duplicates before insertion
-    delete s1
-    from stems s1
-             inner join stems s2
-    where s1.StemID > s2.StemID
-      and s1.StemTag = s2.StemTag
-      and s1.TreeID = s2.TreeID
-      and s1.CensusID = s2.CensusID
-      and s1.CensusID = vCurrentCensusID;
-
-    -- FIXED: Use INSERT IGNORE with deduplicated stems
-    insert ignore into stems (TreeID, QuadratID, CensusID, StemNumber, StemTag, LocalX, LocalY, Moved, StemDescription,
-                              IsActive)
-    select distinct t.TreeID,
-                    tq.QuadratID,
-                    vCurrentCensusID          as CensusID,
-                    -1                        as StemNumber,
-                    coalesce(usi.StemTag, '') as StemTag,
-                    coalesce(usi.LocalX, -1)  as LocalX,
-                    coalesce(usi.LocalY, -1)  as LocalY,
-                    false                     as Moved,
-                    ''                        as StemDescription,
-                    1                         as IsActive
-    from unique_stems_to_insert usi
-             join quadrats tq on tq.QuadratName = usi.QuadratName and tq.IsActive = 1
-             join species ts on ts.SpeciesCode = usi.SpeciesCode and ts.IsActive = 1
-             join trees t
-                  on t.TreeTag = usi.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = vCurrentCensusID and
-                     t.IsActive = 1;
-
-    update stems
-    set StemTag         = nullif(StemTag, ' '),
-        LocalX          = nullif(LocalX, -1),
-        LocalY          = nullif(LocalY, -1),
-        StemDescription = nullif(StemDescription, ' ')
-    where CensusID = vCurrentCensusID;
-
-    -- Handle core measurements insertion (using deduplicated source)
-    insert ignore into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                         Description,
-                                         UserDefinedFields, IsActive)
-    select distinct f.CensusID,
-                    s.StemID,
-                    null                                      as IsValidated,
-                    coalesce(f.MeasurementDate, '1900-01-01') as MeasurementDate,
-                    coalesce(f.DBH, -1)                       as MeasuredDBH,
-                    coalesce(f.HOM, -1)                       as MeasuredHOM,
-                    coalesce(f.Comments, ' ')                 as Description,
-                    json_object('treestemstate', f.state)     as UserDefinedFields,
-                    1                                         as IsActive
-    from (select ot.id              as id,
-                 ot.CensusID        as CensusID,
-                 ot.TreeTag         as TreeTag,
-                 ot.StemTag         as StemTag,
-                 ot.QuadratName     as QuadratName,
-                 ot.MeasurementDate as MeasurementDate,
-                 ot.DBH             as DBH,
-                 ot.HOM             as HOM,
-                 ot.Comments        as Comments,
-                 'old tree'         as state,
-                 ot.SpeciesCode     as SpeciesCode
-          from old_trees ot
-          union
-          select ms.id              as id,
-                 ms.CensusID        as CensusID,
-                 ms.TreeTag         as TreeTag,
-                 ms.StemTag         as StemTag,
-                 ms.QuadratName     as QuadratName,
-                 ms.MeasurementDate as MeasurementDate,
-                 ms.DBH             as DBH,
-                 ms.HOM             as HOM,
-                 ms.Comments        as Comments,
-                 'multi stem'       as state,
-                 ms.SpeciesCode     as SpeciesCode
-          from multi_stems ms
-          union
-          select nr.id              as id,
-                 nr.CensusID        as CensusID,
-                 nr.TreeTag         as TreeTag,
-                 nr.StemTag         as StemTag,
-                 nr.QuadratName     as QuadratName,
-                 nr.MeasurementDate as MeasurementDate,
-                 nr.DBH             as DBH,
-                 nr.HOM             as HOM,
-                 nr.Comments        as Comments,
-                 'new recruit'      as state,
-                 nr.SpeciesCode     as SpeciesCode
-          from new_recruits nr) as f
-             join quadrats tq on tq.QuadratName = f.QuadratName and tq.IsActive = 1
-             join species ts on ts.SpeciesCode = f.SpeciesCode and ts.IsActive = 1
-             join trees t
-                  on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = f.CensusID and t.IsActive = 1
-             join stems s on s.StemTag = f.StemTag and s.QuadratID = tq.QuadratID and s.TreeID = t.TreeID and
-                             s.CensusID = f.CensusID and s.IsActive = 1;
-
-    update coremeasurements
-    set MeasurementDate = nullif(MeasurementDate, '1900-01-01'),
-        MeasuredDBH     = nullif(MeasuredDBH, -1),
-        MeasuredHOM     = nullif(MeasuredHOM, -1),
-        Description     = nullif(Description, ' ')
-    where CensusID = vCurrentCensusID;
-
-    -- Handle attribute codes (unchanged)
-    -- FIXED: Remove problematic exact value matching - use StemID/CensusID only
-    create temporary table tempcodes engine = memory as
-    select cm.CoreMeasurementID,
-           trim(jt.code) as Code
-    from filtered f
-             join quadrats tq on tq.QuadratName = f.QuadratName and tq.IsActive = 1
-             join species ts on ts.SpeciesCode = f.SpeciesCode and ts.IsActive = 1
-             join trees t
-                  on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = f.CensusID and t.IsActive = 1
-             join stems s
-                  on s.StemTag = f.StemTag and s.TreeID = t.TreeID and s.QuadratID = tq.QuadratID and
-                     s.CensusID = f.CensusID and s.IsActive = 1
-             join coremeasurements cm
-                  on cm.StemID = s.StemID and cm.CensusID = f.CensusID and cm.IsActive = 1,
-         json_table(
-                 if(f.Codes = '' or trim(f.Codes) = '', '[]',
-                    concat('[\"', replace(trim(f.Codes), ';', '\",\"'), '\"]')),
-                 '$[*]' columns ( code varchar(10) path '$')
-         ) jt
-    where f.Codes is not null
-      and trim(f.Codes) != '';
-
-    insert ignore into cmattributes (CoreMeasurementID, Code)
-    select tc.CoreMeasurementID, tc.Code
-    from tempcodes tc;
-
-    -- Clean up temporary tables
-    drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
-        stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
-        preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
-        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert;
-
-    set @disable_triggers = 0;
 end;
 
 create
@@ -770,16 +393,16 @@ begin
             'select q.QuadratName, count(distinct cm.CoreMeasurementID) as MeasurementCount
                 from ${schema}.coremeasurements cm
                 join ${schema}.census c on c.CensusID = cm.CensusID and c.IsActive is true
-                join ${schema}.stems s on s.StemID = cm.StemID and s.CensusID = c.CensusID and s.IsActive is true
+                join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.CensusID = c.CensusID and s.IsActive is true
                 join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
                 where cm.CensusID = ${currentCensusID} and q.PlotID = ${currentPlotID}
                 group by q.QuadratName;',
             'Calculating the number of total records, organized by quadrat',
             true),
            ('Number of ALL Stem Records',
-            'SELECT COUNT(s.StemID) AS TotalStems
+            'SELECT COUNT(s.StemGUID) AS TotalStems
                FROM ${schema}.stems s
-               JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID and cm.IsActive is true
+               JOIN ${schema}.coremeasurements cm ON cm.StemGUID = s.StemGUID and cm.IsActive is true
                JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
                JOIN ${schema}.attributes a ON cma.Code = a.Code and a.IsActive is true
                JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID and q.IsActive is true
@@ -787,9 +410,9 @@ begin
             'Calculating the number of total stem records for the current site, plot, and census',
             true),
            ('Number of all LIVE stem records',
-            'SELECT COUNT(s.StemID) AS LiveStems
+            'SELECT COUNT(s.StemGUID) AS LiveStems
     FROM ${schema}.stems s
-             JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID and cm.IsActive is true
+             JOIN ${schema}.coremeasurements cm ON cm.StemGUID = s.StemGUID and cm.IsActive is true
              JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
              JOIN ${schema}.attributes a ON cma.Code = a.Code
              JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID and q.IsActive is true
@@ -801,7 +424,7 @@ begin
            ('Number of all trees',
             'select count(t.TreeID) as TotalTrees
     from ${schema}.coremeasurements cm
-    join ${schema}.stems s on s.StemID = cm.StemID and s.IsActive is true
+    join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.IsActive is true
     join ${schema}.census c on c.CensusID = cm.CensusID and c.IsActive is true
     join ${schema}.trees t on t.CensusID = c.CensusID and t.IsActive is true
     join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
@@ -809,10 +432,10 @@ begin
             'Calculating the total number of all trees for the current site, plot, and census', true),
            ('All dead or missing stems and count by census',
             'SELECT cm.CensusID,
-               COUNT(s.StemID) AS DeadOrMissingStems,
+               COUNT(s.StemGUID) AS DeadOrMissingStems,
                GROUP_CONCAT(s.StemTag ORDER BY s.StemTag) AS DeadOrMissingStemList
                FROM ${schema}.stems s
-               JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID and cm.IsActive is true
+               JOIN ${schema}.coremeasurements cm ON cm.StemGUID = s.StemGUID and cm.IsActive is true
                JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
                JOIN ${schema}.attributes a ON a.Code = cma.Code and a.IsActive is true
                WHERE a.Status IN (''dead'', ''missing'') and s.IsActive is true
@@ -823,7 +446,7 @@ begin
            (s.LocalX + q.StartX + p.GlobalX) as GlobalStemX,
            (s.LocalY + q.StartY + p.GlobalY) as GlobalStemY
     from ${schema}.coremeasurements cm
-             join ${schema}.stems s on s.StemID = cm.StemID
+             join ${schema}.stems s on s.StemGUID = cm.StemGUID
              join ${schema}.census c on c.CensusID = cm.CensusID
              join ${schema}.plots p on p.PlotID = c.PlotID
              join ${schema}.trees t on t.CensusID = c.CensusID and t.TreeID = s.TreeID and t.IsActive is true
@@ -838,7 +461,7 @@ begin
             'select sp.SpeciesCode, sp.SpeciesName, max(cm.MeasuredDBH) as LargestDBH, max(cm.MeasuredHOM) as LargestHOM
     from ${schema}.coremeasurements cm
              join ${schema}.census c on c.CensusID = cm.CensusID
-             join ${schema}.stems s on s.StemID = cm.StemID and s.CensusID = c.CensusID and s.IsActive is true
+             join ${schema}.stems s on s.StemGUID = cm.StemGUID and s.CensusID = c.CensusID and s.IsActive is true
              join ${schema}.trees t on t.CensusID = c.CensusID and t.TreeID = s.TreeID and t.IsActive is true
              join ${schema}.quadrats q on q.QuadratID = s.QuadratID and q.IsActive is true
              join ${schema}.species sp on sp.SpeciesID = t.SpeciesID and sp.IsActive is true
@@ -896,14 +519,14 @@ begin
              JOIN ${schema}.trees t
                   ON t.TreeID = s_current.TreeID and t.CensusID = c_current.CensusID
              JOIN ${schema}.coremeasurements cm_current
-                  ON cm_current.StemID = s_current.StemID
+                  ON cm_current.StemGUID = s_current.StemGUID
                       AND cm_current.CensusID = s_current.CensusID
                       AND cm_current.IsActive = 1
     WHERE c_current.IsActive = 1
       AND c_current.PlotID = ${currentPlotID}
       AND NOT EXISTS (SELECT 1
                       FROM ${schema}.coremeasurements AS cm_last
-                      WHERE cm_last.StemID = s_current.StemID
+                      WHERE cm_last.StemGUID = s_current.StemGUID
                         AND cm_last.CensusID = (SELECT CensusID FROM previous_census)
                         AND cm_last.IsActive = 1)
     ORDER BY q.QuadratName, s_current.StemTag;',
@@ -923,20 +546,20 @@ begin
                                                AND c2.PlotCensusNumber = cc.PlotCensusNumber - 1
                                                AND c2.IsActive = 1),
          NewStems AS (SELECT s_current.QuadratID,
-                             s_current.StemID
+                             s_current.StemGUID
                       FROM ${schema}.stems AS s_current
                                JOIN ${schema}.coremeasurements AS cm_current
-                                    ON cm_current.StemID = s_current.StemID
+                                    ON cm_current.StemGUID = s_current.StemGUID
                                         AND cm_current.CensusID = (SELECT currentID FROM current_census)
                                         AND cm_current.IsActive = 1
                       WHERE s_current.IsActive = 1
                         AND NOT EXISTS (SELECT 1
                                         FROM ${schema}.coremeasurements AS cm_last
-                                        WHERE cm_last.StemID = s_current.StemID
+                                        WHERE cm_last.StemGUID = s_current.StemGUID
                                           AND cm_last.CensusID = (SELECT previousID FROM previous_census)
                                           AND cm_last.IsActive = 1)),
          NewStemCounts AS (SELECT q.QuadratName,
-                                  COUNT(ns.StemID) AS NewStemCount
+                                  COUNT(ns.StemGUID) AS NewStemCount
                            FROM ${schema}.stems s
                                     JOIN NewStems AS ns
                                          ON ns.QuadratID = s.QuadratID
@@ -980,7 +603,7 @@ begin
              JOIN ${schema}.quadrats q on q.QuadratID = s.QuadratID
              JOIN ${schema}.trees t on t.TreeID = s.TreeID and t.CensusID = cc.CensusID
              JOIN ${schema}.coremeasurements AS cm
-                  ON cm.StemID = s.StemID
+                  ON cm.StemGUID = s.StemGUID
                       AND cm.CensusID = cc.CensusID
                       AND cm.IsActive = 1
              JOIN ${schema}.cmattributes AS cma
@@ -1010,7 +633,7 @@ begin
              JOIN ${schema}.quadrats q on q.QuadratID = s.QuadratID
              JOIN ${schema}.trees t on t.TreeID = s.TreeID and t.CensusID = cc.CensusID
              JOIN ${schema}.coremeasurements AS cm
-                  ON cm.StemID = s.StemID
+                  ON cm.StemGUID = s.StemGUID
                       AND cm.CensusID = cc.CensusID
                       AND cm.IsActive = 1
              JOIN ${schema}.cmattributes AS cma
@@ -1019,14 +642,15 @@ begin
              JOIN ${schema}.species sp on sp.SpeciesID = t.SpeciesID
     WHERE cc.PlotID = ${currentCensusID}
       AND a.Status = ''dead''
-    ORDER BY sp.SpeciesName, s.StemID;',
+    ORDER BY sp.SpeciesName, s.StemGUID;',
             'dead stems by species, organized to determine which species (if any) are struggling', true);
 end;
 
 create
     definer = azureroot@`%` procedure reinsertdefaultvalidations()
 begin
-    truncate sitespecificvalidations;
+    set foreign_key_checks = 0;
+
     truncate sitespecificvalidations;
 
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
@@ -1036,7 +660,7 @@ insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
          join coremeasurements cm_past
-              on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID and
+              on cm_present.StemGUID = cm_past.StemGUID and cm_present.CensusID <> cm_past.CensusID and
                  cm_past.IsActive IS TRUE
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive is true
          join census c_past on cm_past.CensusID = c_past.CensusID and c_past.IsActive is true
@@ -1072,24 +696,28 @@ where c_past.PlotCensusNumber >= 1
 insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
-         join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID and cm_past.IsActive IS TRUE
-         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive is true
-         join census c_past on cm_past.CensusID = c_past.CensusID and c_past.IsActive is true
+         join coremeasurements cm_past on cm_present.StemGUID = cm_past.StemGUID
+              and cm_present.CensusID <> cm_past.CensusID
+              and cm_past.IsActive = 1
+         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
+         join census c_past on cm_past.CensusID = c_past.CensusID and c_past.IsActive = 1
          join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
          join attributes a_present on a_present.Code = cma_present.Code
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
-         left join cmverrors e on e.CoreMeasurementID = cm_present.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
+         left join cmverrors e on e.CoreMeasurementID = cm_present.CoreMeasurementID
+              and e.ValidationErrorID = @validationProcedureID
 where c_past.PlotCensusNumber >= 1
   and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-  and cm_present.IsActive is true
-  and a_present.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
-  and a_past.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
-  and (cm_present.IsValidated is null and cm_past.IsValidated is true)
+  and cm_present.IsActive = 1
+  and a_present.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
+  and a_past.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
+  and (cm_present.IsValidated is null and cm_past.IsValidated = 1)  -- FIXED: Use 1 instead of true
   and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
   and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
-  and e.CoreMeasurementID is null and cm_past.MeasuredDBH > 0
+  and e.CoreMeasurementID is null
+  and cm_past.MeasuredDBH > 0
   and (cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95));', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
@@ -1098,7 +726,7 @@ where c_past.PlotCensusNumber >= 1
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive = TRUE
-         join stems s on cm.StemID = s.StemID and c.CensusID = s.CensusID and s.IsActive = TRUE
+         join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive = TRUE
          join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive = TRUE
          left join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive = TRUE
          left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
@@ -1111,42 +739,56 @@ where cm.IsValidated is null and cm.IsActive is true
                                          ChangelogDefinition, IsEnabled)
     VALUES (4, 'ValidateFindDuplicatedQuadratsByName',
             'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)',
-            'quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
-from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s on cm.StemID = s.StemID and c.CensusID = s.CensusID and s.IsActive is true
-         join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
-         join (select s2.CensusID, q2.QuadratName
-               from quadrats q2
-                    join stems s2 on q2.QuadratID = s2.QuadratID
-               group by s2.CensusID, q2.QuadratName
-               having count(distinct q2.QuadratID) > 1) as ambiguous
-         left join cmverrors e
-                   on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
-  and cm.IsActive is true
-  and (@p_CensusID is null or c.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID)
-  and e.CoreMeasurementID is null;', '', true);
+            'quadratName',
+            'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+    from coremeasurements cm
+             join census c on cm.CensusID = c.CensusID and c.IsActive is true
+             join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
+             join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
+             join (select s2.CensusID, q2.QuadratName
+                   from quadrats q2
+                        join stems s2 on q2.QuadratID = s2.QuadratID
+                   group by s2.CensusID, q2.QuadratName
+                   having count(distinct q2.QuadratID) > 1) as ambiguous
+                  ON q.QuadratName = ambiguous.QuadratName AND c.CensusID = ambiguous.CensusID
+             left join cmverrors e
+                       on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
+    where cm.IsValidated is null
+      and cm.IsActive is true
+      and (@p_CensusID is null or c.CensusID = @p_CensusID)
+      and (@p_PlotID is null or c.PlotID = @p_PlotID)
+      and e.CoreMeasurementID is null;',
+            '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus',
             'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census',
-            'stemTag;treeTag', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
-from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         left join cmverrors e
-                   on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-         join (select StemID, CensusID, count(*) AS MeasurementCount
-               from coremeasurements
-               group by StemID, CensusID
-               having COUNT(*) > 1) dup on cm.StemID = dup.StemID and cm.CensusID = dup.CensusID
-where cm.IsValidated is null and cm.IsActive is true
-  and e.CoreMeasurementID is null
-  and (@p_CensusID is null or c.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+            'stemTag;treeTag',
+            'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+    from coremeasurements cm
+             join census c on cm.CensusID = c.CensusID and c.IsActive is true
+             join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
+             join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive is true
+             join (
+                 -- Find duplicate TreeTag+StemTag combinations within same census
+                 select t2.CensusID, t2.TreeTag, s2.StemTag
+                 from trees t2
+                 join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
+                 where t2.IsActive = true and s2.IsActive = true
+                 group by t2.CensusID, t2.TreeTag, s2.StemTag
+                 having count(distinct s2.StemGUID) > 1
+             ) as duplicates ON t.CensusID = duplicates.CensusID
+                            AND t.TreeTag = duplicates.TreeTag
+                            AND s.StemTag = duplicates.StemTag
+             left join cmverrors e
+                       on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
+    where cm.IsValidated is null and cm.IsActive is true
+      and e.CoreMeasurementID is null
+      and (@p_CensusID is null or c.CensusID = @p_CensusID)
+      and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+            '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds',
@@ -1163,21 +805,33 @@ where cm.IsValidated is null and cm.IsActive is true
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies', 'Flagged;Different species', 'stemTag;speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
-select min(cm.CoreMeasurementID), @validationProcedureID as ValidationErrorID
-from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s on cm.StemID = s.StemID and c.CensusID = s.CensusID and s.IsActive is true
-         join trees t on t.TreeID = s.TreeID and t.CensusID = c.CensusID and t.IsActive is true
-         join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive is true
-         left join cmverrors e
-                   on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
-   or e.CoreMeasurementID is null and cm.IsActive is true
-    and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-    and (@p_PlotID is null or c.PlotID = @p_PlotID)
-group by t.TreeTag
-having count(distinct sp.SpeciesCode) > 1;', '', true);
+    VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies',
+            'Flagged;Different species',
+            'stemTag;speciesCode',
+            'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+    from coremeasurements cm
+             join census c on cm.CensusID = c.CensusID and c.IsActive is true
+             join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
+             join trees t on t.TreeID = s.TreeID and t.CensusID = c.CensusID and t.IsActive is true
+             join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive is true
+             join (
+                 -- Find trees that have stems with different species
+                 select t2.TreeTag, t2.CensusID
+                 from trees t2
+                 join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
+                 join species sp2 on t2.SpeciesID = sp2.SpeciesID
+                 where t2.IsActive = true and s2.IsActive = true and sp2.IsActive = true
+                 group by t2.TreeTag, t2.CensusID
+                 having count(distinct sp2.SpeciesCode) > 1
+             ) as problematic_trees ON t.TreeTag = problematic_trees.TreeTag AND t.CensusID = problematic_trees.CensusID
+             left join cmverrors e
+                       on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
+    where cm.IsValidated is null and cm.IsActive is true
+        and e.CoreMeasurementID is null
+        and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+        and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+            '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (8, 'ValidateFindStemsOutsidePlots', 'Flagged;X outside plot OR;Y outside plot',
@@ -1185,7 +839,7 @@ having count(distinct sp.SpeciesCode) > 1;', '', true);
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
-join stems s on cm.StemID = s.StemID and c.CensusID = s.CensusID and s.IsActive is true
+join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
 join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
 join plots p on c.PlotID = p.PlotID
 left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
@@ -1199,21 +853,31 @@ and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats', 'Flagged;Flagged;Different quadrats',
-            'stemTag;treeTag;quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
-from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s1 on cm.StemID = s1.StemID and c.CensusID = s1.CensusID and s1.IsActive is true
-         join trees t on s1.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive is true
-         join stems s2 on t.TreeID = s2.TreeID and s1.StemID <> s2.StemID and s2.IsActive is true
-         left join cmverrors e
-                   on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null and cm.IsActive is true
-  and e.CoreMeasurementID is null
-  and s1.QuadratID <> s2.QuadratID
-  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+    VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats',
+            'Flagged;Flagged;Different quadrats',
+            'stemTag;treeTag;quadratName',
+            'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+    from coremeasurements cm
+             join census c on cm.CensusID = c.CensusID and c.IsActive is true
+             join stems s1 on cm.StemGUID = s1.StemGUID and c.CensusID = s1.CensusID and s1.IsActive is true
+             join trees t on s1.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive is true
+             join (
+                 -- Find trees that have stems in different quadrats
+                 select t2.TreeID, t2.CensusID
+                 from trees t2
+                 join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
+                 where t2.IsActive = true and s2.IsActive = true
+                 group by t2.TreeID, t2.CensusID
+                 having count(distinct s2.QuadratID) > 1
+             ) as cross_quadrat_trees ON t.TreeID = cross_quadrat_trees.TreeID AND t.CensusID = cross_quadrat_trees.CensusID
+             left join cmverrors e
+                       on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
+    where cm.IsValidated is null and cm.IsActive is true
+      and e.CoreMeasurementID is null
+      and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+      and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+            '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds',
@@ -1221,7 +885,7 @@ where cm.IsValidated is null and cm.IsActive is true
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s on cm.StemID = s.StemID and c.CensusID = s.CensusID and s.IsActive is true
+         join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
          left join cmverrors e
                    on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true
@@ -1268,6 +932,7 @@ where cm.IsValidated is null and cm.IsActive is true
     or (cm.MeasuredHOM is null or cm.MeasuredHOM = 0))
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
+    set foreign_key_checks = 1;
 end;
 
 create
@@ -1277,39 +942,50 @@ begin
     UPDATE failedmeasurements fm
     SET FailureReasons = TRIM(BOTH '|' FROM CONCAT_WS('|',
         -- SpCode validation
-        CASE 
-            WHEN fm.SpCode IS NULL OR fm.SpCode = '' THEN 'SpCode missing'
-            WHEN NOT EXISTS(SELECT 1 FROM species s WHERE s.SpeciesCode = fm.SpCode) THEN 'SpCode invalid'
-            ELSE NULL
-        END,
-        
-        -- Quadrat validation  
-        CASE 
-            WHEN fm.Quadrat IS NULL OR fm.Quadrat = '' THEN 'Quadrat missing'
-            WHEN NOT EXISTS(SELECT 1 FROM quadrats q WHERE q.QuadratName = fm.Quadrat AND q.PlotID = fm.PlotID) THEN 'Quadrat invalid'
-            ELSE NULL
-        END,
-        
+                                                      CASE
+                                                          WHEN fm.SpCode IS NULL OR fm.SpCode = '' THEN 'SpCode missing'
+                                                          WHEN NOT EXISTS(SELECT 1 FROM species s WHERE s.SpeciesCode = fm.SpCode)
+                                                              THEN 'SpCode invalid'
+                                                          ELSE NULL
+                                                          END,
+
+        -- Quadrat validation
+                                                      CASE
+                                                          WHEN fm.Quadrat IS NULL OR fm.Quadrat = ''
+                                                              THEN 'Quadrat missing'
+                                                          WHEN NOT EXISTS(SELECT 1
+                                                                          FROM quadrats q
+                                                                          WHERE q.QuadratName = fm.Quadrat
+                                                                            AND q.PlotID = fm.PlotID)
+                                                              THEN 'Quadrat invalid'
+                                                          ELSE NULL
+                                                          END,
+
         -- Coordinate validation
-        IF(fm.X IS NULL OR fm.X IN (0, -1), 'Missing X', NULL),
-        IF(fm.Y IS NULL OR fm.Y IN (0, -1), 'Missing Y', NULL),
-        
+                                                      IF(fm.X IS NULL OR fm.X IN (0, -1), 'Missing X', NULL),
+                                                      IF(fm.Y IS NULL OR fm.Y IN (0, -1), 'Missing Y', NULL),
+
         -- DBH and Codes validation (need at least one)
-        IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND (fm.DBH IS NULL OR fm.DBH IN (0, -1)), 'Missing Codes and DBH', NULL),
-        IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND (fm.HOM IS NULL OR fm.HOM IN (0, -1)), 'Missing Codes and HOM', NULL),
-        
+                                                      IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND
+                                                         (fm.DBH IS NULL OR fm.DBH IN (0, -1)), 'Missing Codes and DBH',
+                                                         NULL),
+                                                      IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND
+                                                         (fm.HOM IS NULL OR fm.HOM IN (0, -1)), 'Missing Codes and HOM',
+                                                         NULL),
+
         -- Date validation
-        IF(fm.Date IS NULL OR fm.Date = '1900-01-01', 'Missing Date', NULL),
-        
+                                                      IF(fm.Date IS NULL OR fm.Date = '1900-01-01', 'Missing Date', NULL),
+
         -- Tag validation (required fields)
-        IF(fm.Tag IS NULL OR fm.Tag = '', 'Missing Tag', NULL),
-        IF(fm.StemTag IS NULL OR fm.StemTag = '', 'Missing StemTag', NULL)
-    ));
-    
+                                                      IF(fm.Tag IS NULL OR fm.Tag = '', 'Missing Tag', NULL),
+                                                      IF(fm.StemTag IS NULL OR fm.StemTag = '', 'Missing StemTag', NULL)
+                                            ));
+
     -- Mark rows with empty failure reasons as ready for reingestion
-    UPDATE failedmeasurements 
+    UPDATE failedmeasurements
     SET FailureReasons = 'Ready for reingestion'
-    WHERE FailureReasons IS NULL OR FailureReasons = '';
-    
+    WHERE FailureReasons IS NULL
+       OR FailureReasons = '';
+
 end;
 

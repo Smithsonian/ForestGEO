@@ -111,11 +111,11 @@ export type ReferenceResult = ResultType<ReferenceRDS>;
 
 export interface StemRDS {
   id?: number;
-  stemID?: number;
+  stemGUID?: number;
   treeID?: number;
   quadratID?: number;
   censusID?: number;
-  stemNumber?: number;
+  stemCrossID?: number;
   stemTag?: string;
   localX?: number;
   localY?: number;
@@ -138,7 +138,7 @@ export type TreeResult = ResultType<TreeRDS>;
 export interface SpecimensRDS {
   id?: number;
   specimenID?: number;
-  stemID?: number;
+  stemGUID?: number;
   personnelID?: number;
   specimenNumber?: number;
   speciesID?: number;

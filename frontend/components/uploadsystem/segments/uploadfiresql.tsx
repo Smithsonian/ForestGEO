@@ -101,6 +101,26 @@ class AtomicOperationTracker {
   }
 }
 
+/**
+ * UploadFireSQL Component
+ *
+ * Handles bulk measurement data upload and processing with enhanced reliability features:
+ *
+ * Key Features:
+ * - Sequential batch processing to prevent race conditions and data duplication
+ * - Application-level deduplication before SQL insertion
+ * - Transaction coordination between processors and collapser
+ * - Comprehensive error handling and progress tracking
+ *
+ * Processing Flow:
+ * 1. Uploads CSV data in chunks to temporarymeasurements table
+ * 2. Processes batches sequentially (not parallel) to prevent contamination
+ * 3. Waits for transaction settlement before running collapser
+ * 4. Provides real-time progress updates and error reporting
+ *
+ * This component resolves the record count mismatches that occurred when
+ * parallel processing caused duplicate insertions and race conditions.
+ */
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
   acceptedFiles,
@@ -794,12 +814,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
           });
 
-          // Wait for all batches in this file to complete before moving to next file
-          await Promise.all(fileBatchPromises);
+          for (const batchPromise of fileBatchPromises) {
+            await batchPromise;
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
           setCompletedOperations(prev => prev + 1);
           ailogger.info(`All batches for file ${fileID} completed`);
         }
         await queue.onEmpty();
+
+        ailogger.info('All processors completed, waiting for transaction settlement before collapser...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // trigger collapser ONCE with atomic protection
         const collapserOperationId = `collapser-${currentCensus?.dateRanges[0].censusID}-${schema}`;

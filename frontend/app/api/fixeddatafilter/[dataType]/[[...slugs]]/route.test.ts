@@ -229,10 +229,10 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     // 3) paginated results (mix of current & past census rows, with overlapping keys)
     exec.mockResolvedValueOnce([
       // Current census (100)
-      { PlotID: 7, QuadratID: 1, TreeID: 11, StemID: 111, CensusID: 100 },
+      { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 100 },
       // Past census rows (should be deprecated if same key combo)
-      { PlotID: 7, QuadratID: 1, TreeID: 11, StemID: 111, CensusID: 90 }, // same key -> deprecated
-      { PlotID: 7, QuadratID: 2, TreeID: 12, StemID: 112, CensusID: 80 } // different key -> filtered out
+      { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 }, // same key -> deprecated
+      { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 } // different key -> filtered out
     ]);
     // 4) FOUND_ROWS
     exec.mockResolvedValueOnce([{ totalRows: 3 }]);
@@ -243,14 +243,14 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     const body = await res.json();
     expect(body.output).toEqual([
-      { PlotID: 7, QuadratID: 1, TreeID: 11, StemID: 111, CensusID: 100 },
-      { PlotID: 7, QuadratID: 1, TreeID: 11, StemID: 111, CensusID: 90 },
-      { PlotID: 7, QuadratID: 2, TreeID: 12, StemID: 112, CensusID: 80 }
+      { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 100 },
+      { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 },
+      { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 }
     ]);
     // Only deprecated rows that match an output key combo
     expect(body.deprecated).toEqual([
-      { PlotID: 7, QuadratID: 1, TreeID: 11, StemID: 111, CensusID: 90 },
-      { PlotID: 7, QuadratID: 2, TreeID: 12, StemID: 112, CensusID: 80 }
+      { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 },
+      { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 }
     ]);
     expect(body.totalCount).toBe(3);
 

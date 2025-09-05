@@ -11,7 +11,7 @@ export function patchConnectionManager(cm: any) {
     coremeasurements: { pk: 'CoreMeasurementID' },
     cmattributes: { pk: 'CMAID', fk: 'CoreMeasurementID' },
     cmverrors: { pk: 'CMVErrorID', fk: 'CoreMeasurementID' },
-    stems: { pk: 'StemID' },
+    stems: { pk: 'StemGUID' },
     trees: { pk: 'TreeID' },
     quadrats: { pk: 'QuadratID' },
     failedmeasurements: { pk: 'FailedMeasurementID' },
