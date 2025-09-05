@@ -50,7 +50,7 @@ create table if not exists failedmeasurements
 create table if not exists measurementssummary
 (
     CoreMeasurementID int              not null,
-    StemID            int              not null,
+    StemGUID          int              not null,
     TreeID            int              not null,
     SpeciesID         int              not null,
     QuadratID         int              not null,
@@ -72,7 +72,7 @@ create table if not exists measurementssummary
     Attributes        varchar(255)     null,
     UserDefinedFields json             null,
     Errors            text             null,
-    primary key (CoreMeasurementID, StemID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
+    primary key (CoreMeasurementID, StemGUID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
 );
 
 create index idx_attributes
@@ -100,7 +100,7 @@ create index idx_measurementdate
     on measurementssummary (MeasurementDate);
 
 create index idx_mss_dup_detect
-    on measurementssummary (CensusID, QuadratName, StemID, MeasurementDate, MeasuredDBH, MeasuredHOM, Attributes);
+    on measurementssummary (CensusID, QuadratName, StemGUID, MeasurementDate, MeasuredDBH, MeasuredHOM, Attributes);
 
 create index idx_plotid
     on measurementssummary (PlotID);
@@ -121,7 +121,7 @@ create index idx_speciesname
     on measurementssummary (SpeciesName);
 
 create index idx_stemid
-    on measurementssummary (StemID);
+    on measurementssummary (StemGUID);
 
 create index idx_stemlocalx
     on measurementssummary (StemLocalX);
@@ -674,12 +674,12 @@ create table if not exists trees
 
 create table if not exists stems
 (
-    StemID          int auto_increment
+    StemGUID        int auto_increment
         primary key,
     TreeID          int                  null,
     QuadratID       int                  null,
     CensusID        int                  null,
-    StemNumber      int                  null,
+    StemCrossID     int                  null,
     StemTag         varchar(10)          null,
     LocalX          decimal(12, 6)       null,
     LocalY          decimal(12, 6)       null,
@@ -707,7 +707,7 @@ create table if not exists coremeasurements
     CoreMeasurementID int auto_increment
         primary key,
     CensusID          int                     null,
-    StemID            int                     null,
+    StemGUID          int                     null,
     IsValidated       bit        default b'0' null,
     MeasurementDate   date                    null,
     MeasuredDBH       decimal(12, 6)          null,
@@ -717,9 +717,9 @@ create table if not exists coremeasurements
     IsActive          tinyint(1) default 1    not null,
     DeletedAt         datetime                null,
     constraint ux_measure_unique
-        unique (StemID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM),
+        unique (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM),
     constraint FK_CoreMeasurements_Stems
-        foreign key (StemID) references stems (StemID)
+        foreign key (StemGUID) references stems (StemGUID)
             on delete cascade,
     constraint coremeasurements_census_CensusID_fk
         foreign key (CensusID) references census (CensusID)
@@ -762,7 +762,7 @@ create index idx_censusid
     on coremeasurements (CensusID);
 
 create index idx_cm_stem_cid_date_dbh_hom
-    on coremeasurements (StemID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
+    on coremeasurements (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
 
 create index idx_description
     on coremeasurements (Description);
@@ -780,7 +780,7 @@ create index idx_measurementdate
     on coremeasurements (MeasurementDate);
 
 create index idx_stemid
-    on coremeasurements (StemID);
+    on coremeasurements (StemGUID);
 
 create index ix_cm_cid_date_dbh_hom
     on coremeasurements (CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
@@ -804,7 +804,7 @@ create table if not exists specimens
         foreign key (PersonnelID) references personnel (PersonnelID)
             on delete cascade,
     constraint specimens_stems_StemID_fk
-        foreign key (StemID) references stems (StemID)
+        foreign key (StemID) references stems (StemGUID)
             on delete cascade
 );
 
@@ -827,7 +827,7 @@ create index idx_stemdescription
     on stems (StemDescription);
 
 create index idx_stemnumber
-    on stems (StemNumber);
+    on stems (StemCrossID);
 
 create index idx_stems_stemtag_quadratid
     on stems (StemTag, QuadratID);
@@ -940,7 +940,7 @@ create table if not exists viewfulltable
     QuadratShape               varchar(255)                                                        null,
     TreeID                     int                                                                 null,
     TreeTag                    varchar(20)                                                         null,
-    StemID                     int                                                                 null,
+    StemGUID                   int                                                                 null,
     StemTag                    varchar(10)                                                         null,
     StemLocalX                 decimal(10, 6)                                                      null,
     StemLocalY                 decimal(10, 6)                                                      null,

@@ -223,7 +223,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       .mockResolvedValueOnce([{ COLUMN_NAME: 'MeasuredDBH' }])
       .mockResolvedValueOnce([
         {
-          StemID: 11,
+          StemGUID: 11,
           TreeID: 1,
           StemTag: 'S-1',
           TreeTag: 'T-1',

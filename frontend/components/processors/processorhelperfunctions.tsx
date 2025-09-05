@@ -239,7 +239,7 @@ export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
     quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
     species: { range: [1, 4], primaryKey: 'SpeciesID' },
     trees: { range: [4, 5], primaryKey: 'TreeID' },
-    stems: { range: [5, 9], primaryKey: 'StemID' },
+    stems: { range: [5, 9], primaryKey: 'StemGUID' },
     coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
     cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
   }
@@ -264,7 +264,7 @@ export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
       primaryKey: 'SpeciesID'
     },
     trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID' }
+    stems: { range: [1, 2], primaryKey: 'StemGUID' }
   }
 };
 
@@ -334,7 +334,7 @@ export async function runValidation(
                JOIN
              ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
                JOIN
-             ${schema}.coremeasurements cm ON cm.StemID = st.StemID
+             ${schema}.coremeasurements cm ON cm.StemGUID = st.StemGUID
         WHERE cm.IsValidated IS NULL
           AND (${params.p_CensusID !== null ? `sl.CensusID = ${params.p_CensusID}` : '1 = 1'})
           AND (${params.p_PlotID !== null ? `sl.PlotID = ${params.p_PlotID}` : '1 = 1'})

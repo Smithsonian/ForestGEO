@@ -42,7 +42,6 @@ export async function GET(
     }
   }
 
-  // CRITICAL FIX: If we reach here, all attempts have been exhausted
   ailogger.error(`All ${maxAttempts} attempts exhausted for ${fileID}-${batchID}`);
   return new NextResponse(
     JSON.stringify({

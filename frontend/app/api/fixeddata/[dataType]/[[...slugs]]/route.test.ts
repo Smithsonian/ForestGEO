@@ -113,8 +113,8 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
 
     exec
       .mockResolvedValueOnce([
-        { StemID: 5, UserDefinedFields: JSON.stringify({ treestemstate: { foo: 1 } }) },
-        { StemID: 6, UserDefinedFields: { treestemstate: { bar: 2 } } }
+        { StemGUID: 5, UserDefinedFields: JSON.stringify({ treestemstate: { foo: 1 } }) },
+        { StemGUID: 6, UserDefinedFields: { treestemstate: { bar: 2 } } }
       ])
       .mockResolvedValueOnce([{ totalRows: 2 }]);
 
@@ -123,8 +123,8 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     const body = await res.json();
 
     expect(body.output).toEqual([
-      { StemID: 5, UserDefinedFields: { foo: 1 } },
-      { StemID: 6, UserDefinedFields: { bar: 2 } }
+      { StemGUID: 5, UserDefinedFields: { foo: 1 } },
+      { StemGUID: 6, UserDefinedFields: { bar: 2 } }
     ]);
     expect(body.totalCount).toBe(2);
     expect(getMapperSpy).toHaveBeenCalledWith('stems');

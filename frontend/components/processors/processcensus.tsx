@@ -44,16 +44,42 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
-        // Handle Stem Upsert
-        const stemSearch: Partial<StemResult> = {
-          StemTag: stemtag,
-          TreeID: treeID,
-          QuadratID: quadratID,
-          CensusID: census.dateRanges[0].censusID,
-          LocalX: lx,
-          LocalY: ly
-        };
-        const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
+
+        // Handle Stem with Cross-Census Tracking
+        // Step 1: Check if this stem exists in any previous census
+        // Compare by tag, tree tag, and coordinates to identify same physical stem
+        const existingStemQuery = `
+          SELECT StemCrossID FROM ${schema}.stems 
+          WHERE TreeID = ? AND StemTag = ? AND QuadratID = ? AND LocalX = ? AND LocalY = ?
+          ORDER BY CensusID DESC LIMIT 1
+        `;
+        const existingStems = await connectionManager.executeQuery(existingStemQuery, [treeID, stemtag, quadratID, lx, ly]);
+
+        let stemCrossID = null;
+        let stemOperation: 'inserted' | 'updated';
+
+        if (existingStems.length > 0) {
+          // Stem exists in previous census - reuse StemCrossID
+          stemCrossID = existingStems[0].StemCrossID;
+          stemOperation = 'updated'; // It's an existing stem in new census
+          stemStatus = 'old tree';
+        } else {
+          // New stem - generate new StemCrossID using MAX + 1
+          const maxCrossIDQuery = `SELECT COALESCE(MAX(StemCrossID), 0) + 1 as nextCrossID FROM ${schema}.stems`;
+          const maxResult = await connectionManager.executeQuery(maxCrossIDQuery);
+          stemCrossID = maxResult[0].nextCrossID;
+          stemOperation = 'inserted';
+          stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
+        }
+
+        // Step 2: Insert new stem record with unique StemGUID and tracked StemCrossID
+        const stemResult = await connectionManager.executeQuery(
+          `INSERT INTO ${schema}.stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [treeID, quadratID, census.dateRanges[0].censusID, stemCrossID, stemtag, lx, ly]
+        );
+
+        const stemID = stemResult.insertId; // This is the unique StemGUID
 
         if (stemOperation === 'inserted') {
           stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
@@ -69,7 +95,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
         // Handle Core Measurement Upsert
         const coreMeasurementSearch: Partial<CoreMeasurementsResult> = {
           CensusID: census.dateRanges[0].censusID,
-          StemID: stemID,
+          StemGUID: stemID,
           IsValidated: null,
           MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
           MeasuredDBH: dbh ? parseFloat(dbh) : null,

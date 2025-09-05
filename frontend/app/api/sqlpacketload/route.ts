@@ -13,6 +13,20 @@ import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 
+/**
+ * Handles bulk measurement data upload and processing.
+ *
+ * This endpoint processes CSV measurement data by:
+ * 1. Cleaning existing temporarymeasurements data for the file/plot/census combination
+ * 2. Performing application-level deduplication based on TreeTag, StemTag, QuadratName, and MeasurementDate
+ * 3. Inserting unique records into temporarymeasurements table for subsequent stored procedure processing
+ *
+ * The deduplication and cleanup logic prevents the race conditions and data accumulation issues
+ * that previously caused record count mismatches during bulk uploads.
+ *
+ * @param request - NextRequest containing fileRowSet, fileName, schema, plot, and censusCookie
+ * @returns NextResponse with success/error status and processing statistics
+ */
 export async function POST(request: NextRequest) {
   let body;
 
@@ -52,25 +66,39 @@ export async function POST(request: NextRequest) {
     const placeholders = Object.values(fileRowSet ?? [])
       .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .join(', ');
-    const values = Object.values(fileRowSet ?? []).flatMap(row => {
-      // const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+    const values = Object.values(fileRowSet ?? []).map(row => {
       const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
       const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
       return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, formattedDate, codes, comments];
     });
+
+    const uniqueValues = values.filter((value, index, array) => {
+      return array.findIndex(v => v[4] === value[4] && v[5] === value[5] && v[7] === value[7] && v[12] === value[12]) === index;
+    });
+
     transactionID = await connectionManager.beginTransaction();
     try {
-      const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
+      const cleanupQuery = `
+        DELETE FROM ${schema}.temporarymeasurements 
+        WHERE FileID = ? AND PlotID = ? AND CensusID = ?
+      `;
+      await connectionManager.executeQuery(cleanupQuery, [fileName, plot?.plotID ?? -1, censusCookie]);
+
+      const uniquePlaceholders = uniqueValues.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const flatUniqueValues = uniqueValues.flat();
+
+      const insertSQL = `INSERT INTO ${schema}.temporarymeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments) 
-      VALUES ${placeholders}`;
-      await connectionManager.executeQuery(insertSQL, values);
+      VALUES ${uniquePlaceholders}`;
+      await connectionManager.executeQuery(insertSQL, flatUniqueValues);
       await connectionManager.commitTransaction(transactionID);
       ailogger.info(
         await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
       );
       return new NextResponse(
         JSON.stringify({
-          responseMessage: `Bulk insert to SQL completed`,
+          responseMessage: `Bulk insert completed: ${uniqueValues.length} unique records inserted`,
+          duplicatesRemoved: values.length - uniqueValues.length,
           failingRows: Array.from(failingRows)
         }),
         { status: HTTPResponses.OK }

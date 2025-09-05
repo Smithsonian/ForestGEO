@@ -415,7 +415,7 @@ async function processStemInsertions(
     TreeID: treeMap.get(ts.TreeTag),
     QuadratID: quadratMap.get(ts.QuadratName),
     CensusID: currentCensusID,
-    StemNumber: -1,
+    StemCrossID: -1,
     StemTag: ts.StemTag || '',
     LocalX: ts.LocalX || -1,
     LocalY: ts.LocalY || -1,
@@ -425,7 +425,7 @@ async function processStemInsertions(
   }));
 
   if (stemData.length > 0) {
-    const { sql, params } = buildBulkUpsertQuery(schema, 'stems', stemData, 'StemID');
+    const { sql, params } = buildBulkUpsertQuery(schema, 'stems', stemData, 'StemGUID');
     await connectionManager.executeQuery(sql, params);
 
     // Clean up null values
@@ -451,21 +451,21 @@ async function processCoreMeasurementInsertions(
 ): Promise<void> {
   // Get stem IDs
   const stemQuery = `
-    SELECT s.StemID, s.StemTag, t.TreeTag, q.QuadratName
+    SELECT s.StemGUID, s.StemTag, t.TreeTag, q.QuadratName
     FROM ${schema}.stems s
     JOIN ${schema}.trees t ON s.TreeID = t.TreeID
     JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
     WHERE s.CensusID = ?
   `;
   const stemResults = await connectionManager.executeQuery(stemQuery, [currentCensusID]);
-  const stemMap = new Map(stemResults.map((s: any) => [`${s.TreeTag}-${s.StemTag}-${s.QuadratName}`, s.StemID]));
+  const stemMap = new Map(stemResults.map((s: any) => [`${s.TreeTag}-${s.StemTag}-${s.QuadratName}`, s.StemGUID]));
 
   // Prepare core measurement data - CORRECTED to match stored procedure format
   const cmData: Partial<CoreMeasurementsResult>[] = treeStates.map(ts => {
     const stemKey = `${ts.TreeTag}-${ts.StemTag}-${ts.QuadratName}`;
     return {
       CensusID: currentCensusID,
-      StemID: stemMap.get(stemKey),
+      StemGUID: stemMap.get(stemKey),
       IsValidated: null,
       MeasurementDate: moment.utc(ts.MeasurementDate).format('YYYY-MM-DD'),
       MeasuredDBH: ts.DBH || -1,
@@ -500,7 +500,7 @@ async function processCMAttributeInsertions(connectionManager: ConnectionManager
   const cmQuery = `
     SELECT cm.CoreMeasurementID, s.StemTag, t.TreeTag, q.QuadratName, cm.MeasurementDate, cm.MeasuredDBH, cm.MeasuredHOM
     FROM ${schema}.coremeasurements cm
-    JOIN ${schema}.stems s ON cm.StemID = s.StemID
+    JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
     JOIN ${schema}.trees t ON s.TreeID = t.TreeID
     JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
     WHERE cm.CensusID = ?

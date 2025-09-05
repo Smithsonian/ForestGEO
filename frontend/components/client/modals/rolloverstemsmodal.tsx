@@ -170,7 +170,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ incoming: customizeStems ? selectedStems.map(stem => stem.stemID) : previousStems.map(stem => stem.stemID) })
+          body: JSON.stringify({ incoming: customizeStems ? selectedStems.map(stem => stem.stemGUID) : previousStems.map(stem => stem.stemGUID) })
         });
       }
       onConfirm(rolloverStems);
@@ -183,7 +183,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
     }
   };
 
-  const handleRowSelection = <T extends { stemID?: number }>(selectionModel: GridRowSelectionModel, setSelection: Dispatch<SetStateAction<T[]>>) => {
+  const handleRowSelection = <T extends { stemGUID?: number }>(selectionModel: GridRowSelectionModel, setSelection: Dispatch<SetStateAction<T[]>>) => {
     setSelection(
       (selectionModel as any)
         .map((id: number) => {

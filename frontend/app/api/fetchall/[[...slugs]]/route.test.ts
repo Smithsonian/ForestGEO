@@ -128,7 +128,7 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
 
   it('stems: uses stored plotID/census from cookies and returns mapped results', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ StemID: 1 }, { StemID: 2 }]);
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ StemGUID: 1 }, { StemGUID: 2 }]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('myschema');
@@ -137,8 +137,8 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     const body = await res.json();
     expect(body).toEqual([
-      { StemID: 1, mapped: true },
-      { StemID: 2, mapped: true }
+      { StemGUID: 1, mapped: true },
+      { StemGUID: 2, mapped: true }
     ]);
 
     // SQL + params sanity: uses stored 42,7

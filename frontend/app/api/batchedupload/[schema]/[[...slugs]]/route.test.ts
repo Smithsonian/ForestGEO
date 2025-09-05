@@ -51,7 +51,7 @@ describe('batchedupload POST route', () => {
   });
 
   it('400s when schema is missing/empty', async () => {
-    const payload = [{ treeID: 1, stemID: 1, reason: 'bad' }];
+    const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('', ['1', '2']));
     expect(res.status).toBe(400);
@@ -60,7 +60,7 @@ describe('batchedupload POST route', () => {
   });
 
   it('400s when slugs is not exactly length 2', async () => {
-    const payload = [{ treeID: 1, stemID: 1, reason: 'bad' }];
+    const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('myschema', ['1']));
     expect(res.status).toBe(400);
@@ -69,7 +69,7 @@ describe('batchedupload POST route', () => {
   });
 
   it('400s when plotID or censusID are not numbers', async () => {
-    const payload = [{ treeID: 1, stemID: 1, reason: 'bad' }];
+    const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('myschema', ['NaN', '2']));
     expect(res.status).toBe(400);
@@ -79,8 +79,8 @@ describe('batchedupload POST route', () => {
 
   it('200s and calls executeQuery on success; adds plotID/censusID and excludes id fields', async () => {
     const payload = [
-      { id: 999, failedMeasurementID: 123, treeID: 10, stemID: 20, reason: 'bad diameter' },
-      { treeID: 11, stemID: 21, reason: 'missing height' }
+      { id: 999, failedMeasurementID: 123, treeID: 10, stemGUID: 20, reason: 'bad diameter' },
+      { treeID: 11, stemGUID: 21, reason: 'missing height' }
     ];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('myschema', ['42', '7']));
@@ -114,7 +114,7 @@ describe('batchedupload POST route', () => {
     const exec = connectionmanager.getInstance().executeQuery as ReturnType<typeof vi.fn>;
     exec.mockRejectedValueOnce(new Error('boom'));
 
-    const payload = [{ treeID: 1, stemID: 2, reason: 'oops' }];
+    const payload = [{ treeID: 1, stemGUID: 2, reason: 'oops' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('myschema', ['1', '2']));
 
