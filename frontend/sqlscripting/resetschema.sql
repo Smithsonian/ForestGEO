@@ -14,7 +14,7 @@ truncate postvalidationqueries;
 # truncate quadrats;
 truncate reference;
 # truncate roles;
-truncate sitespecificvalidations;
+# truncate sitespecificvalidations;
 # truncate species;
 truncate specieslimits;
 truncate specimens;

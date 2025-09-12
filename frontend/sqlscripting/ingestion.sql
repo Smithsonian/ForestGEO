@@ -44,7 +44,8 @@ main_proc: begin
     drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
         stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
-        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert;
+        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert,
+        stem_cross_updates;
 
     create temporary table initial_dup_filter engine = memory as
     select min(id)                                                                        as id,
@@ -228,14 +229,7 @@ main_proc: begin
           from new_recruits nr) combined
     where CensusID = vCurrentCensusID;
 
-    -- FIXED: Remove any existing duplicates in trees table for this census before insertion
-    delete t1
-    from trees t1
-             inner join trees t2
-    where t1.TreeID > t2.TreeID
-      and t1.TreeTag = t2.TreeTag
-      and t1.CensusID = t2.CensusID
-      and t1.CensusID = vCurrentCensusID;
+    -- REMOVED: Dangerous deletion operation that was causing data loss
 
     -- FIXED: Use INSERT IGNORE with deduplicated source
     INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
@@ -263,15 +257,7 @@ main_proc: begin
           from new_recruits nr) combined
     where CensusID = vCurrentCensusID;
 
-    -- FIXED: Remove existing stem duplicates before insertion
-    delete s1
-    from stems s1
-             inner join stems s2
-    where s1.StemGUID > s2.StemGUID
-      and s1.StemTag = s2.StemTag
-      and s1.TreeID = s2.TreeID
-      and s1.CensusID = s2.CensusID
-      and s1.CensusID = vCurrentCensusID;
+    -- REMOVED: Dangerous deletion operation that was causing data loss
 
     -- FIXED: Use INSERT IGNORE with deduplicated stems
     insert ignore into stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription,
@@ -300,16 +286,18 @@ main_proc: begin
         StemDescription = nullif(StemDescription, ' ')
     where CensusID = vCurrentCensusID;
 
-    UPDATE stems s1
-    SET s1.StemCrossID = (
-        SELECT MIN(s2.StemGUID) 
-        FROM stems s2 
-        WHERE s2.TreeID = s1.TreeID 
-          AND s2.StemTag = s1.StemTag 
-          AND s2.QuadratID = s1.QuadratID 
-          AND s2.LocalX = s1.LocalX 
-          AND s2.LocalY = s1.LocalY
-    )
+    -- Create temporary table with StemCrossID values to avoid self-reference in UPDATE
+    CREATE TEMPORARY TABLE stem_cross_updates AS
+    SELECT s1.StemGUID,
+           (SELECT MIN(s2.StemGUID) 
+            FROM stems s2 
+            WHERE s2.TreeID = s1.TreeID 
+              AND s2.StemTag = s1.StemTag 
+              AND s2.QuadratID = s1.QuadratID 
+              AND s2.LocalX = s1.LocalX 
+              AND s2.LocalY = s1.LocalY
+           ) as NewStemCrossID
+    FROM stems s1
     WHERE s1.CensusID = vCurrentCensusID 
       AND s1.StemCrossID IS NULL
       AND EXISTS (
@@ -318,6 +306,12 @@ main_proc: begin
           WHERE t.TreeID = s1.TreeID 
             AND ot.StemTag = s1.StemTag
       );
+
+    UPDATE stems s1
+    JOIN stem_cross_updates scu ON s1.StemGUID = scu.StemGUID
+    SET s1.StemCrossID = scu.NewStemCrossID;
+    
+    DROP TEMPORARY TABLE stem_cross_updates;
 
     UPDATE stems s1
     SET s1.StemCrossID = s1.StemGUID
@@ -420,7 +414,8 @@ main_proc: begin
     drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
         stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
-        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert;
+        tmp_trees, tmp_quads, tmp_species, tmp_existing_stems, unique_trees_to_insert, unique_stems_to_insert,
+        stem_cross_updates;
 
     set @disable_triggers = 0;
 end;

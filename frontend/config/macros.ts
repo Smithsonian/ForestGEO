@@ -9,7 +9,6 @@ import ConnectionManager from '@/config/connectionmanager';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
-import { processCensus } from '@/components/processors/processcensus';
 import { processBulkIngestion } from '@/components/processors/processbulkingestion';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -200,7 +199,7 @@ export const fileMappings: Record<string, FileMapping> = {
   measurements: {
     tableName: '', // Multiple tables involved
     columnMappings: {},
-    specialProcessing: processCensus,
+    specialProcessing: undefined, // Individual record processing removed - using bulk processing only
     bulkProcessing: processBulkIngestion
   }
 };

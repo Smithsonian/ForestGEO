@@ -78,15 +78,13 @@ describe('bg-mocks wiring', () => {
   it('stubs processors used by fileMappings', async () => {
     const p1 = await import('@/components/processors/processpersonnel');
     const p2 = await import('@/components/processors/processspecies');
-    const p3 = await import('@/components/processors/processcensus');
+    // processcensus removed - individual measurements processing no longer supported
 
     expect(typeof p1.processPersonnel).toBe('function');
     expect(typeof p2.processSpecies).toBe('function');
-    expect(typeof p3.processCensus).toBe('function');
 
     await expect(p1.processPersonnel({} as any)).resolves.toBeUndefined();
     await expect(p2.processSpecies({} as any)).resolves.toBeUndefined();
-    await expect(p3.processCensus({} as any)).resolves.toBeUndefined();
   });
 
   it('stubs react-dropzone runtime imports', async () => {

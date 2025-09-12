@@ -1,4 +1,3 @@
-import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
@@ -16,7 +15,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   if (formType === 'measurements') {
-    return await processCensus({ ...subProps, schema });
+    throw new Error('Individual measurements processing is no longer supported. Use bulk processing instead.');
   } else {
     if (mapping.specialProcessing) {
       await mapping.specialProcessing({ ...subProps, schema });

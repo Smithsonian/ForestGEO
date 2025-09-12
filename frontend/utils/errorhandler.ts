@@ -9,7 +9,7 @@ export async function handleError(error: any, conn: ConnectionManager, row: any,
     try {
       await conn.rollbackTransaction(transactionID);
     } catch (rollbackError) {
-      ailogger.error('Failed to rollback transaction:', rollbackError);
+      ailogger.error('Failed to rollback transaction:', rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError)));
     }
     return new Response(
       JSON.stringify({

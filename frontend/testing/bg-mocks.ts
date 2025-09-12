@@ -55,9 +55,7 @@ vi.mock('@/components/processors/processpersonnel', () => ({
 vi.mock('@/components/processors/processspecies', () => ({
   processSpecies: vi.fn(async () => {})
 }));
-vi.mock('@/components/processors/processcensus', () => ({
-  processCensus: vi.fn(async () => {})
-}));
+// processcensus.tsx removed - individual measurements processing no longer supported
 
 // --------------------------------------
 // Mock ConnectionManager (class default)

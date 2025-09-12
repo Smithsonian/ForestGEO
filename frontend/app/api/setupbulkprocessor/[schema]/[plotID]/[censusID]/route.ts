@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function GET(
   _request: NextRequest,
@@ -21,6 +22,6 @@ export async function GET(
     fileID: row.FileID,
     batchID: row.BatchID
   }));
-
+  ailogger.debug(`output: ${JSON.stringify(output)}`);
   return new NextResponse(JSON.stringify(output), { status: HTTPResponses.OK });
 }

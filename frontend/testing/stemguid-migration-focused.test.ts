@@ -342,8 +342,8 @@ describe('StemGUID Migration - Focused Edge Case Validation', () => {
     it('validates stem rollover logic maintains StemGUID relationships', () => {
       // Test stem rollover between censuses
       const previousCensusStems = [
-        { stemGUID: 100, stemTag: 'S001', treeID: 200, censusID: 1 },
-        { stemGUID: 101, stemTag: 'S002', treeID: 201, censusID: 1 }
+        { stemGUID: 100, stemTag: 'S001', treeID: 200, censusID: 1, localX: 10.5, localY: 15.2 },
+        { stemGUID: 101, stemTag: 'S002', treeID: 201, censusID: 1, localX: 20.3, localY: 25.7 }
       ];
 
       const newCensusStems = previousCensusStems.map(stem => ({
@@ -471,7 +471,8 @@ describe('StemGUID Migration - Focused Edge Case Validation', () => {
       };
 
       Object.values(configurations).forEach(config => {
-        const primaryKey = config.stems?.pk || config.stems?.primaryKey;
+        const stemConfig = config.stems;
+        const primaryKey = 'pk' in stemConfig ? stemConfig.pk : stemConfig.primaryKey;
         expect(primaryKey).toBe('StemGUID');
       });
     });
