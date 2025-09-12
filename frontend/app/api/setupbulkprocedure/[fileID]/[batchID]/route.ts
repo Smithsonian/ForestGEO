@@ -24,6 +24,7 @@ export async function GET(
     try {
       attempt++;
       const startTime = Date.now();
+      ailogger.info(`Attempting bulk procedure for ${fileID}-${batchID} (attempt ${attempt}/${maxAttempts})`);
 
       const result = await connectionManager.withTransaction(
         async (transactionID: string) => {

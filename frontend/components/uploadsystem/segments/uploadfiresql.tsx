@@ -608,8 +608,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       async function runProcessBatches() {
         setProcessedChunks(0);
         chunkProcessStartTime.current = performance.now();
+        ailogger.info(
+          `Setting up bulk processor for schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges[0].censusID}`
+        );
         const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
+        if (!response.ok) {
+          throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
+        }
         const output: { fileID: string; batchID: string }[] = await response.json();
+        ailogger.info(`Received ${output.length} batches to process:`, output);
         const grouped: Record<string, string[]> = output.reduce(
           (acc, { fileID, batchID }) => {
             if (!acc[fileID]) {
@@ -633,6 +640,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 480000 // 8 minute timeout to match backend enhancement
               )
                 .then(async response => {
+                  if (!response.ok) {
+                    throw new Error(`API returned status ${response.status} for batch ${fileID}-${batchID}`);
+                  }
                   const result = await response.json();
 
                   // Check if batch was handled internally (moved to failedmeasurements by the procedure)
@@ -640,28 +650,49 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     ailogger.info(`Batch ${fileID}-${batchID} was handled internally: ${result.message}`);
                   }
 
-                  setProcessedChunks(prev => prev + 1);
+                  ailogger.info(`Successfully processed batch ${fileID}-${batchID}`);
+                  setProcessedChunks(prev => {
+                    const newValue = prev + 1;
+                    ailogger.info(`Batch progress: ${newValue}/${totalBatches} batches completed`);
+                    return newValue;
+                  });
                 })
                 .catch(async (e: any) => {
+                  ailogger.error(`Error processing batch ${fileID}-${batchID}:`, e);
                   // Only move to failedmeasurements if not already handled internally
                   // This prevents duplicate entries in failedmeasurements
                   if (!e.message?.includes('handled internally')) {
                     try {
-                      ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error`);
-                      await fetch(`/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+                      ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error: ${e.message}`);
+                      const failureResponse = await fetch(
+                        `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
+                      );
+                      if (!failureResponse.ok) {
+                        throw new Error(`Failed to move batch to failed measurements: ${failureResponse.status}`);
+                      }
                     } catch (failureError: any) {
                       ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
                     }
                   }
+
+                  // Still increment progress even for failed batches so UI doesn't hang
+                  setProcessedChunks(prev => {
+                    const newValue = prev + 1;
+                    ailogger.info(`Batch progress (with failure): ${newValue}/${totalBatches} batches completed`);
+                    return newValue;
+                  });
+
                   // Don't re-throw for internally handled batches - they're already processed
                   if (!e.message?.includes('handled internally')) {
-                    throw e;
+                    // Log but don't re-throw to prevent stopping other batches
+                    ailogger.error(`Batch ${fileID}-${batchID} failed but continuing with other batches`);
                   }
                 })
           );
 
           // Process batches for this file sequentially to maintain data integrity
           try {
+            ailogger.info(`Starting batch processing for ${fileID} with ${batchTasks.length} batches`);
             for (const batchTask of batchTasks) {
               queue.add(async () => {
                 await batchTask();
