@@ -1,7 +1,8 @@
 import React from 'react';
 import { mount } from '@cypress/react';
 import { LoginLogout } from '@/components/loginlogout';
-import { SessionProvider, setMockSession } from 'next-auth/react';
+import { SessionProvider } from 'next-auth/react';
+import { setMockSession } from '../mocks/nextauthmock';
 
 describe('<LoginLogout />', () => {
   beforeEach(() => {

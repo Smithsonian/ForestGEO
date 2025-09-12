@@ -1,7 +1,6 @@
 // Database Query Validation Tests for StemID -> StemGUID Migration
 // Ensures all SQL queries use correct column names and relationships
 import { describe, expect, it, vi } from 'vitest';
-import ConnectionManager from '@/config/connectionmanager';
 
 // Mock ConnectionManager
 const mockExecuteQuery = vi.fn();

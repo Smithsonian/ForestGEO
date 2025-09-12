@@ -15,14 +15,14 @@ export class PoolMonitor {
     this.pool = createPool({
       ...config,
       waitForConnections: true,
-      connectionLimit: config.connectionLimit ?? 10,
+      connectionLimit: config.connectionLimit ?? 30,
       queueLimit: 0
     });
     this.poolClosed = false;
     ailogger.info(chalk.cyan('PoolMonitor initialized.'));
     this.pool.on('connection', async (conn: PoolConnection) => {
       try {
-        conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
       } catch (e: any) {
         ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
       }
@@ -85,7 +85,7 @@ export class PoolMonitor {
       this.pool = createPool(this.config);
       this.poolClosed = false;
       this.pool.on('connection', async (conn: PoolConnection) => {
-        conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
         this.resetInactivityTimer();
       });
       ailogger.info(chalk.cyan('Connection pool reinitialized.'));
@@ -97,7 +97,7 @@ export class PoolMonitor {
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
-    const bufferTime = 300;
+    const bufferTime = 800;
     try {
       if (!this.isPoolClosed()) {
         // only log if pool is not closed
@@ -175,6 +175,6 @@ export class PoolMonitor {
         ailogger.warn(chalk.yellow('Attempting to reinitialize pool.'));
         await this.reinitializePool();
       }
-    }, 10000); // Poll every 10 seconds
+    }, 30000); // Poll every 30 seconds
   }
 }

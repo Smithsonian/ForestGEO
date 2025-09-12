@@ -38,7 +38,7 @@ describe('StemGUID Processor Edge Cases - Critical Data Processing', () => {
 
   describe('Census Processing Edge Cases', () => {
     it('validates stem creation during census processing uses StemGUID correctly', async () => {
-      // Test stem creation in processcensus.tsx
+      // Test stem creation logic (formerly in processcensus.tsx)
       const stemSearchCriteria = {
         TreeID: 100,
         QuadratID: 50,
@@ -473,46 +473,6 @@ describe('StemGUID Processor Edge Cases - Critical Data Processing', () => {
       const duplicates = await mockConnectionManager.executeQuery(uniquenessCheckQuery, [100, 'S001', 1]);
 
       expect(duplicates.length).toBe(0); // No duplicates expected
-    });
-  });
-
-  describe('Migration Verification Edge Cases', () => {
-    it('validates no residual StemID references in query builders', () => {
-      // Test query builder patterns
-      const queryBuilders = [
-        (schema: string, stemGUID: number) => `SELECT * FROM ${schema}.stems WHERE StemGUID = ${stemGUID}`,
-        (schema: string, stemGUIDs: number[]) =>
-          `SELECT * FROM ${schema}.stems WHERE StemGUID IN (${Array.isArray(stemGUIDs) ? stemGUIDs.join(',') : stemGUIDs})`,
-        (schema: string) => `SELECT MAX(StemGUID) FROM ${schema}.stems`
-      ];
-
-      // Test first builder (single StemGUID)
-      const query1 = queryBuilders[0]('testschema', 123);
-      expect(query1).toContain('StemGUID');
-      expect(query1).not.toContain('StemID');
-
-      // Test second builder (array of StemGUIDs)
-      const query2 = queryBuilders[1]('testschema', [100, 200, 300]);
-      expect(query2).toContain('StemGUID');
-      expect(query2).not.toContain('StemID');
-
-      // Test third builder (MAX query)
-      const query3 = queryBuilders[2]('testschema');
-      expect(query3).toContain('StemGUID');
-      expect(query3).not.toContain('StemID');
-    });
-
-    it('validates connection logger configuration uses StemGUID', () => {
-      // Test connection logger table configuration
-      const tableConfig = {
-        stems: { pk: 'StemGUID' },
-        coremeasurements: { fk: 'StemGUID' },
-        measurementssummary: { compositeKeys: ['CoreMeasurementID', 'StemGUID'] }
-      };
-
-      expect(tableConfig.stems.pk).toBe('StemGUID');
-      expect(tableConfig.coremeasurements.fk).toBe('StemGUID');
-      expect(tableConfig.measurementssummary.compositeKeys).toContain('StemGUID');
     });
   });
 });

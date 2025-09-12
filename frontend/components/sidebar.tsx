@@ -172,6 +172,7 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
+  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
@@ -415,15 +416,13 @@ export default function Sidebar(props: SidebarProps) {
       }}
     >
       <ListItem>
-        <ListItemButton
-          aria-label="render census list item"
-          onMouseDown={e => e.preventDefault()} // still works
-          onClick={e => e.stopPropagation()} // still works
+        <Box
           sx={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            width: '100%'
+            width: '100%',
+            padding: '8px 12px'
           }}
         >
           <Typography level="body-sm" color="primary">
@@ -434,39 +433,74 @@ export default function Sidebar(props: SidebarProps) {
             size="sm"
             color="primary"
             data-testid={'add-new-census-button'}
+            disabled={
+              isCreatingCensus ||
+              // Prevent creation if current census has no measurements
+              (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) ||
+              // Prevent creation if any census in the list has no measurements
+              censusListContext?.some(census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate)
+            }
             onClick={async event => {
               event.stopPropagation();
-              const highestPlotCensusNumber =
-                censusListContext && censusListContext.length > 0
-                  ? censusListContext.reduce(
-                      (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-                      censusListContext[0]?.plotCensusNumber ?? 0
-                    )
-                  : 0;
 
-              const mapper = new OrgCensusToCensusResultMapper();
-              const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-              if (!newCensusID) throw new Error('census creation failure');
-              await new Promise(resolve => setTimeout(resolve, 300)); // debounce
+              if (isCreatingCensus) return; // Prevent multiple clicks
 
-              await Promise.all(
-                ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-                  await fetch(
-                    `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
-                    {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ incoming: {} })
-                    }
-                  );
-                })
+              // Check if current census has measurements
+              if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
+                alert('Cannot create a new census: Current census has no measurements.');
+                return;
+              }
+
+              // Check if any existing census has no measurements
+              const censusWithoutMeasurements = censusListContext?.find(
+                census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate
               );
-              setCensusListLoaded(false);
+
+              if (censusWithoutMeasurements) {
+                alert(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
+                return;
+              }
+
+              setIsCreatingCensus(true);
+
+              try {
+                const highestPlotCensusNumber =
+                  censusListContext && censusListContext.length > 0
+                    ? censusListContext.reduce(
+                        (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
+                        censusListContext[0]?.plotCensusNumber ?? 0
+                      )
+                    : 0;
+
+                const mapper = new OrgCensusToCensusResultMapper();
+                const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+                if (!newCensusID) throw new Error('census creation failure');
+
+                await Promise.all(
+                  ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+                    await fetch(
+                      `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
+                      {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ incoming: {} })
+                      }
+                    );
+                  })
+                );
+                setCensusListLoaded(false);
+              } catch (error) {
+                console.error('Error creating census:', error);
+                alert('Failed to create census. Please try again.');
+              } finally {
+                // Debounce: prevent rapid successive clicks
+                setTimeout(() => setIsCreatingCensus(false), 1000);
+              }
             }}
           >
             <AddIcon />
           </IconButton>
-        </ListItemButton>
+        </Box>
       </ListItem>
       <Divider orientation={'horizontal'} sx={{ my: 1 }} />
       {censusListContext

@@ -6,100 +6,14 @@ import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
-import PQueue from 'p-queue';
-import Divider from '@mui/joy/Divider';
+// Note: TransactionAwarePQueue moved to server-side to avoid client-side MySQL imports
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { useSession } from 'next-auth/react';
 import { v4 } from 'uuid';
 import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
-
-// Semaphore class for controlling concurrent operations
-class Semaphore {
-  private permits: number;
-  private waitingQueue: Array<() => void> = [];
-
-  constructor(permits: number) {
-    this.permits = permits;
-  }
-
-  async acquire(): Promise<void> {
-    return new Promise(resolve => {
-      if (this.permits > 0) {
-        this.permits--;
-        resolve();
-      } else {
-        this.waitingQueue.push(resolve);
-      }
-    });
-  }
-
-  release(): void {
-    if (this.waitingQueue.length > 0) {
-      const nextWaiting = this.waitingQueue.shift();
-      if (nextWaiting) {
-        nextWaiting();
-      }
-    } else {
-      this.permits++;
-    }
-  }
-
-  getAvailablePermits(): number {
-    return this.permits;
-  }
-}
-
-// Atomic operation tracker to prevent duplicate operations
-class AtomicOperationTracker {
-  private processedOperations: Set<string> = new Set();
-  private inProgressOperations: Set<string> = new Set();
-
-  async executeAtomically<T>(operationId: string, operation: () => Promise<T>): Promise<T> {
-    if (this.processedOperations.has(operationId)) {
-      throw new Error(`Operation ${operationId} already completed`);
-    }
-
-    if (this.inProgressOperations.has(operationId)) {
-      throw new Error(`Operation ${operationId} already in progress`);
-    }
-
-    this.inProgressOperations.add(operationId);
-
-    try {
-      const result = await operation();
-      // Move from in-progress to completed atomically
-      this.inProgressOperations.delete(operationId);
-      this.processedOperations.add(operationId);
-      return result;
-    } catch (error) {
-      // Remove from in-progress on failure, but don't mark as completed
-      this.inProgressOperations.delete(operationId);
-      throw error;
-    }
-  }
-
-  isProcessed(operationId: string): boolean {
-    return this.processedOperations.has(operationId);
-  }
-
-  isInProgress(operationId: string): boolean {
-    return this.inProgressOperations.has(operationId);
-  }
-
-  reset(): void {
-    this.processedOperations.clear();
-    this.inProgressOperations.clear();
-  }
-
-  getStats(): { processed: number; inProgress: number } {
-    return {
-      processed: this.processedOperations.size,
-      inProgress: this.inProgressOperations.size
-    };
-  }
-}
+// TransactionMonitor disabled due to architectural changes
 
 /**
  * UploadFireSQL Component
@@ -142,25 +56,71 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalBatches, setTotalBatches] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [processedChunks, setProcessedChunks] = useState<number>(0);
-  const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
   const [etc, setETC] = useState('');
   const [processETC, setProcessETC] = useState('');
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 1024 * 32;
-  const connectionLimit = 8; // PQueue handles upload concurrency
-  const queue = new PQueue({ concurrency: connectionLimit });
+  const chunkSize = 1024 * 16;
+  const connectionLimit = 12; // Concurrency limit for API calls
 
-  // Race condition protection
-  // Note: uploadSemaphore removed - PQueue handles upload concurrency
-  const processSemaphore = useRef(new Semaphore(3)).current; // More restrictive for resource-intensive stored procedures
-  const operationTracker = useRef(new AtomicOperationTracker()).current;
+  // Simple client-side queue implementation to replace TransactionAwarePQueue
+  const createSimpleQueue = (concurrency: number) => {
+    let running = 0;
+    let pending: (() => Promise<void>)[] = [];
+    let isEmpty = true;
+    let emptyResolvers: (() => void)[] = [];
 
-  // Connection monitoring
-  const [activeConnections, setActiveConnections] = useState(0);
-  const maxActiveConnections = 15; // Prevent server overload
+    const processNext = async () => {
+      if (pending.length === 0) {
+        if (running === 0) {
+          isEmpty = true;
+          emptyResolvers.forEach(resolve => resolve());
+          emptyResolvers = [];
+        }
+        return;
+      }
+
+      const task = pending.shift()!;
+      running++;
+      isEmpty = false;
+
+      try {
+        await task();
+      } catch (error) {
+        console.error('Task failed:', error);
+      } finally {
+        running--;
+        processNext();
+      }
+    };
+
+    return {
+      add: (task: () => Promise<void>) => {
+        pending.push(task);
+        if (running < concurrency) {
+          processNext();
+        }
+      },
+      clear: () => {
+        pending = [];
+      },
+      onEmpty: () => {
+        if (isEmpty && running === 0) {
+          return Promise.resolve();
+        }
+        return new Promise<void>(resolve => {
+          emptyResolvers.push(resolve);
+        });
+      },
+      get size() {
+        return pending.length;
+      }
+    };
+  };
+
+  const queue = createSimpleQueue(connectionLimit);
 
   // refs
   const hasUploaded = useRef(false);
@@ -201,6 +161,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       clearTimeout(timer);
     }
   };
+
   // Usage:
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -367,7 +328,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       if (value === 'NA' || value === 'NULL' || value === '') return null;
 
       if (uploadForm === FormType.measurements && field === 'date') {
-        const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+        const match = value.match(/(\d{4})[\/.\\-](\d{1,2})[\/.\\-](\d{1,2})|(\d{1,2})[\/.\\-](\d{1,2})[\/.\\-](\d{2,4})/);
 
         if (match) {
           let normalizedDate;
@@ -449,39 +410,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [file.name]: fileRowSet
             };
 
-            // Generate unique operation ID for this chunk
-            const chunkOperationId = `upload-${file.name}-${v4()}`;
-
-            await queue.add(async () => {
-              // PQueue handles concurrency, we only need atomic operation protection
-              try {
-                await operationTracker.executeAtomically(chunkOperationId, async () => {
-                  await uploadToSql(fileCollectionRowSet, file.name);
-                  return true;
-                });
-                setCompletedChunks(prev => prev + 1);
-              } catch (error: any) {
-                if (error.message.includes('already completed') || error.message.includes('already in progress')) {
-                  ailogger.warn(`Chunk operation ${chunkOperationId} skipped - already processed`);
-                  return;
-                }
-
-                ailogger.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                ailogger.info('starting retry...');
-
-                // Single retry with new operation ID to prevent duplicate detection
-                const retryOperationId = `retry-${chunkOperationId}`;
-                try {
-                  await operationTracker.executeAtomically(retryOperationId, async () => {
-                    await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
-                    return true;
-                  });
-                  setCompletedChunks(prev => prev + 1);
-                } catch (retryError: any) {
-                  ailogger.error('Catastrophic error on retry:', retryError);
-                  throw retryError; // Re-throw to fail the entire operation
-                }
-              }
+            queue.add(async () => {
+              await uploadToSql(fileCollectionRowSet, file.name);
+              setCompletedChunks(prev => prev + 1);
             });
           } catch (err: any) {
             ailogger.error('Error processing chunk:', err);
@@ -554,55 +485,37 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
-      // Connection monitoring - prevent server overload
-      if (activeConnections >= maxActiveConnections) {
-        ailogger.warn(`Connection limit reached (${activeConnections}/${maxActiveConnections}), waiting...`);
-        // Wait briefly before retrying to prevent server overload
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      setActiveConnections(prev => prev + 1);
       try {
-        const response = await fetchWithTimeout(
-          `/api/sqlpacketload`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              schema,
-              formType: uploadForm,
-              fileName,
-              plot: currentPlot,
-              census: currentCensus,
-              user: userID,
-              fileRowSet: fileData[fileName]
-            })
-          },
-          90000 // 90 second timeout for chunk uploads
-        );
+        const response = await fetch(`/api/sqlpacketload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schema,
+            formType: uploadForm,
+            fileName,
+            plot: currentPlot,
+            census: currentCensus,
+            user: userID,
+            fileRowSet: fileData[fileName]
+          })
+        });
 
         if (!response.ok) {
           throw new Error(`API returned status ${response.status}`);
         }
         try {
           const data = await response.json();
+          // Failing rows are now handled via enhanced error reporting in error rows
           if (data.failingRows) {
-            const failingRows: Set<FileRow> = data.failingRows;
-            setFailedRows(prev => ({
-              ...prev,
-              [fileName]: new Set([...(prev[fileName] ?? []), ...failingRows])
-            }));
+            ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
           }
         } catch (e: any) {
-          ailogger.error('no failing rows returned. unforeseen error');
+          ailogger.error('Error parsing response data:', e);
           throw e;
         }
       } catch (error: any) {
         ailogger.error('Network or API error:', error);
         throw error;
-      } finally {
-        // CRITICAL: Always decrement connection counter to prevent leaks
-        setActiveConnections(prev => Math.max(0, prev - 1));
       }
     },
     [
@@ -623,10 +536,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     async function runUploads() {
       try {
-        // Reset operation tracker for new upload session
-        operationTracker.reset();
-        ailogger.info('Starting new upload session with race condition protection enabled');
-
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
         setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
@@ -671,30 +580,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
 
           await parseFileInChunks(file as File, delimiter);
-
-          // If measurements, handle failed rows for this file.
-          // if (uploadForm === FormType.measurements && Object.values(failedRows[file.name] || {}).length > 0) {
-          //   const batchID = v4();
-          //   const rows = Object.values(failedRows[file.name] || []);
-          //   const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-          //   const values = rows.flatMap(row => {
-          //     const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-          //     return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
-          //   });
-          //   const insertSQL = `INSERT INTO ${schema}.failedmeasurements
-          //     (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
-          //     VALUES ${placeholders}`;
-          //   await fetch(`/api/formatrunquery`, {
-          //     method: 'POST',
-          //     headers: { 'Content-Type': 'application/json' },
-          //     body: JSON.stringify({ query: insertSQL, params: values })
-          //   });
-          //   // Remove submitted rows.
-          //   setFailedRows(prev => {
-          //     const { [file.name]: removed, ...rest } = prev;
-          //     return rest;
-          //   });
-          // }
           setCompletedOperations(prev => prev + 1);
         }
         await queue.onEmpty();
@@ -713,21 +598,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     });
     return () => {
       isMounted = false;
-      // Clear queues and reset trackers on cleanup
-      queue.clear();
-      const stats = operationTracker.getStats();
-      ailogger.info(`Component unmounting - operation stats: ${stats.processed} processed, ${stats.inProgress} in progress`);
-
-      // Reset connection counter to prevent accumulation across uploads
-      setActiveConnections(0);
-      ailogger.info('Upload component unmounted - connection counter reset');
     };
   }, [acceptedFiles, uploadForm, currentPlot, currentCensus, schema]);
 
   useEffect(() => {
     if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
-      // Don't clear queue here - it may cancel upload operations
-      // The queue should naturally be empty since all chunks are completed
+      queue.clear();
 
       async function runProcessBatches() {
         setProcessedChunks(0);
@@ -745,113 +621,64 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           {} as Record<string, string[]>
         );
         setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
-
-        // Process each file's batches sequentially to prevent race conditions
         for (const fileID in grouped) {
-          ailogger.info(`Processing FileID: ${fileID} with ${grouped[fileID].length} batches`);
+          ailogger.info(`Processing FileID: ${fileID}`);
 
-          // Process batches for this file with controlled concurrency
-          const fileBatchPromises = grouped[fileID].map(async batchID => {
-            const batchOperationId = `process-${fileID}-${batchID}`;
+          // Create batch tasks for transaction-aware processing
+          const batchTasks = grouped[fileID].map(
+            batchID => () =>
+              fetchWithTimeout(
+                `/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`,
+                { method: 'GET' },
+                480000 // 8 minute timeout to match backend enhancement
+              )
+                .then(async response => {
+                  const result = await response.json();
 
-            return queue.add(async () => {
-              await processSemaphore.acquire();
-              try {
-                await operationTracker.executeAtomically(batchOperationId, async () => {
-                  const response = await fetchWithTimeout(
-                    `/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`,
-                    { method: 'GET' },
-                    120000 // 2 minute timeout for stored procedures
-                  );
-
-                  if (!response.ok) {
-                    throw new Error(`Batch processing failed with status ${response.status} for ${fileID}-${batchID}`);
+                  // Check if batch was handled internally (moved to failedmeasurements by the procedure)
+                  if (result.batchFailedButHandled) {
+                    ailogger.info(`Batch ${fileID}-${batchID} was handled internally: ${result.message}`);
                   }
 
-                  return true;
-                });
-
-                setProcessedChunks(prev => {
-                  const newValue = prev + 1;
-                  ailogger.info(`Batch ${batchID} for file ${fileID} completed. Progress: ${newValue}`);
-                  return newValue;
-                });
-              } catch (error: any) {
-                if (error.message.includes('already completed') || error.message.includes('already in progress')) {
-                  ailogger.warn(`Batch operation ${batchOperationId} skipped - already processed`);
-                  return;
-                }
-
-                ailogger.error(`Error processing batch ${batchID} for file ${fileID}:`, error);
-
-                // Attempt to move failed batch to failedmeasurements table
-                // Note: This runs within the same semaphore context, no additional acquire needed
-                try {
-                  const failureOperationId = `failure-${batchOperationId}`;
-                  await operationTracker.executeAtomically(failureOperationId, async () => {
-                    const failureResponse = await fetchWithTimeout(
-                      `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`,
-                      { method: 'GET' },
-                      60000
-                    );
-
-                    if (!failureResponse.ok) {
-                      throw new Error(`Failure handling failed with status ${failureResponse.status}`);
+                  setProcessedChunks(prev => prev + 1);
+                })
+                .catch(async (e: any) => {
+                  // Only move to failedmeasurements if not already handled internally
+                  // This prevents duplicate entries in failedmeasurements
+                  if (!e.message?.includes('handled internally')) {
+                    try {
+                      ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error`);
+                      await fetch(`/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+                    } catch (failureError: any) {
+                      ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
                     }
+                  }
+                  // Don't re-throw for internally handled batches - they're already processed
+                  if (!e.message?.includes('handled internally')) {
+                    throw e;
+                  }
+                })
+          );
 
-                    return true;
-                  });
-                  ailogger.info(`Batch ${batchID} moved to failed measurements table`);
-                } catch (failureError: any) {
-                  ailogger.error(`Failed to handle batch failure for ${fileID}-${batchID}:`, failureError);
-                  // Continue - we don't want failure handling to block the entire process
-                }
-
-                // Don't re-throw - we handled the failure, continue with other batches
-              } finally {
-                processSemaphore.release();
-              }
-            });
-          });
-
-          for (const batchPromise of fileBatchPromises) {
-            await batchPromise;
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          setCompletedOperations(prev => prev + 1);
-          ailogger.info(`All batches for file ${fileID} completed`);
-        }
-        await queue.onEmpty();
-
-        ailogger.info('All processors completed, waiting for transaction settlement before collapser...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // trigger collapser ONCE with atomic protection
-        const collapserOperationId = `collapser-${currentCensus?.dateRanges[0].censusID}-${schema}`;
-        try {
-          await operationTracker.executeAtomically(collapserOperationId, async () => {
-            const response = await fetchWithTimeout(
-              `/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`,
-              { method: 'GET' },
-              300000 // 5 minute timeout for collapser
-            );
-
-            if (!response.ok) {
-              throw new Error(`Collapser operation failed with status ${response.status}`);
+          // Process batches for this file sequentially to maintain data integrity
+          try {
+            for (const batchTask of batchTasks) {
+              queue.add(async () => {
+                await batchTask();
+              });
             }
-
-            ailogger.info(`Collapser operation completed successfully for census ${currentCensus?.dateRanges[0].censusID}`);
-            return true;
-          });
-        } catch (error: any) {
-          if (error.message.includes('already completed')) {
-            ailogger.info(`Collapser operation already completed for census ${currentCensus?.dateRanges[0].censusID}`);
-          } else {
-            ailogger.error('Collapser operation failed:', error);
-            throw error;
+            // Don't increment here - wait for all batches to complete
+          } catch (fileError: any) {
+            ailogger.error(`File processing failed for ${fileID}:`, fileError);
+            // Continue with other files even if one fails
           }
         }
 
+        // Wait for all batch processing to complete, then increment completedOperations once
+        await queue.onEmpty();
+        setCompletedOperations(prev => prev + 1);
+        // trigger collapser ONCE
+        await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`);
         setProcessed(true);
       }
 
@@ -882,6 +709,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   return (
     <>
+      {/* TransactionMonitor disabled due to architectural changes */}
       {!hasUploaded.current ? (
         <Box
           sx={{
