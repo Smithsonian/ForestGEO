@@ -49,6 +49,7 @@ const nextConfig = withBundleAnalyzer({
     AZURE_SQL_CATALOG_SCHEMA: process.env.AZURE_SQL_CATALOG_SCHEMA,
     AZURE_STORAGE_CONNECTION_STRING: process.env.AZURE_STORAGE_CONNECTION_STRING,
     APP_INSIGHTS_CONNECTION_STRING: process.env.APP_INSIGHTS_CONNECTION_STRING,
+    DEVELOPER_EMAIL: process.env.DEVELOPER_EMAIL,
     FG_PAT: process.env.FG_PAT,
     OWNER: process.env.OWNER,
     REPO: process.env.REPO
