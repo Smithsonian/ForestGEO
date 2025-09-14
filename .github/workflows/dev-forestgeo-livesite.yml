@@ -45,6 +45,9 @@ jobs:
           echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
+          echo NEXT_RUNTIME=nodejs >> frontend/.env
+          echo OTEL_LOG_LEVEL=debug >> frontend/.env
+          echo REACT_EDITOR=code >> frontend/.env
           echo PORT=3000 >> frontend/.env
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
