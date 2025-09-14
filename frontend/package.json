@@ -25,10 +25,7 @@
     "end": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "end:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "com": "cypress open --component",
-    "com:headless": "cypress run --component",
-    "dep:orphans": "madge --extensions ts,tsx --exclude '^(pages|__tests__|cypress|scripts|sqlscripting|sampledata)' --orphans components lib utils config types",
-    "clean:orphans": "npm run dep:orphans --silent | sed '1d' | xargs -I {} git rm \"{}\"",
-    "dep:cycles": "madge --extensions ts,tsx --circular app components lib utils config types"
+    "com:headless": "cypress run --component"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",

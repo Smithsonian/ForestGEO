@@ -82,12 +82,17 @@ function __clearAll() {
 }
 
 class MockConnectionManager {
-  executeQuery = vi.fn(async (sql: string, params?: any[]) => {
+  executeQuery = vi.fn(async (sql: string, params?: any[], transactionId?: string) => {
     calls.push({ sql, params, kind: 'execute' });
     if (executeQueue.length) return executeQueue.shift()!();
     // Default shape similar to mysql2 execute return for INSERT (has insertId)
     return { insertId: 0, affectedRows: 0, rows: [] };
   });
+
+  // Mock transaction methods for testing
+  beginTransaction = vi.fn(async () => 'mock-transaction-id');
+  commitTransaction = vi.fn(async (transactionId: string) => {});
+  rollbackTransaction = vi.fn(async (transactionId: string) => {});
 }
 
 vi.mock('@/config/connectionmanager', () => {

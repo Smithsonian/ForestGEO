@@ -169,7 +169,7 @@ from coremeasurements cm
              where t2.IsActive = true and s2.IsActive = true and sp2.IsActive = true
              group by t2.TreeTag, t2.CensusID
              having count(distinct sp2.SpeciesCode) > 1
-         ) as problematic_trees ON t.TreeTag = problematic_trees.TreeTag AND t.CensusID = problematic_trees.CensusID
+         ) as problematic_tree_data ON t.TreeTag = problematic_tree_data.TreeTag AND t.CensusID = problematic_tree_data.CensusID
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true
@@ -213,7 +213,7 @@ from coremeasurements cm
              where t2.IsActive = true and s2.IsActive = true
              group by t2.TreeID, t2.CensusID
              having count(distinct s2.QuadratID) > 1
-         ) as cross_quadrat_trees ON t.TreeID = cross_quadrat_trees.TreeID AND t.CensusID = cross_quadrat_trees.CensusID
+         ) as cross_quadrat_data ON t.TreeID = cross_quadrat_data.TreeID AND t.CensusID = cross_quadrat_data.CensusID
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true
@@ -373,8 +373,8 @@ SELECT t.TreeTag,
 FROM previous_census pc
          JOIN ${schema}.trees t
               ON t.CensusID = pc.CensusID
-         JOIN ${schema}.species s
-              ON s.SpeciesID = t.SpeciesID
+         JOIN ${schema}.species sp
+              ON sp.SpeciesID = t.SpeciesID
          LEFT JOIN ${schema}.trees t_cur
                    ON t_cur.TreeTag = t.TreeTag and t_cur.CensusID = (SELECT CensusID FROM current_census)
 WHERE t_cur.TreeID IS NULL;',
@@ -528,7 +528,7 @@ FROM current_census AS cc
               ON cma.CoreMeasurementID = cm.CoreMeasurementID
          JOIN ${schema}.attributes a on a.Code = cma.Code
          JOIN ${schema}.species sp on sp.SpeciesID = t.SpeciesID
-WHERE cc.PlotID = ${currentCensusID}
+WHERE cc.PlotID = ${currentPlotID}
   AND a.Status = ''dead''
 ORDER BY sp.SpeciesName, s.StemGUID;',
         'dead stems by species, organized to determine which species (if any) are struggling', true);

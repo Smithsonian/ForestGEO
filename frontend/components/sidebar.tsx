@@ -355,11 +355,11 @@ export default function Sidebar(props: SidebarProps) {
 
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
-      <div aria-label={'census record information'}>
+      <span aria-label={'census record information'} style={{ display: 'block' }}>
         {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
         {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
-      </div>
+      </span>
     );
 
     return (

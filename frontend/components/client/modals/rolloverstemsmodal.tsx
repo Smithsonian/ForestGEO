@@ -24,6 +24,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import { StemGridColumns } from '../datagridcolumns';
 import { StemRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import { useAsyncOperation } from '@/hooks/useAsyncOperation';
+import { useApiWrapper } from '@/utils/apiWrapper';
 import ailogger from '@/ailogger';
 
 interface RolloverStemsModalProps {
@@ -49,7 +51,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   const [rolloverStems, setRolloverStems] = useState(false);
   const [selectedStems, setSelectedStems] = useState<StemRDS[]>([]);
   const [previousStems, setPreviousStems] = useState<StemRDS[]>([]);
-  const [loading, setLoading] = useState(false);
   const [customizeStems, setCustomizeStems] = useState(false);
   const [censusValidationStatus, setCensusValidationStatus] = useState<CensusValidationStatus[]>([]);
   const [selectedStemsCensus, setSelectedStemsCensus] = useState<CensusValidationStatus>(defaultCVS);
@@ -60,18 +61,77 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  const fetchPreviousStemsData = async (plotCensusNumber: number) => {
-    try {
-      setLoading(true);
-      const stemsResponse = await fetch(`/api/fetchall/stems/${currentPlot?.plotID}/${plotCensusNumber}?schema=${currentSite?.schemaName}`);
-      const stemsData = await stemsResponse.json();
+  // Initialize API wrapper
+  const ApiWrapper = useApiWrapper();
+
+  // Use async operation hook for fetching previous stems data
+  const { execute: fetchPreviousStemsData } = useAsyncOperation(
+    async (plotCensusNumber: number) => {
+      const response = await ApiWrapper.get(`/api/fetchall/stems/${currentPlot?.plotID}/${plotCensusNumber}?schema=${currentSite?.schemaName}`, {
+        loadingMessage: 'Loading previous stems data...',
+        category: 'api'
+      });
+      const stemsData = await response.json();
       setPreviousStems(stemsData);
-      setLoading(false);
-    } catch (error: any) {
-      ailogger.error('failed to fetch previous data: ', error);
-      setLoading(false);
+      return stemsData;
+    },
+    {
+      onError: error => {
+        ailogger.error('failed to fetch previous data: ', error);
+        alert(`Failed to fetch previous stems data: ${error.message}`);
+      }
     }
-  };
+  );
+
+  // Use async operation hook for census validation
+  const { execute: validatePreviousCensusDataNew } = useAsyncOperation(
+    async () => {
+      // need to re-fetch the census list --> can't use list context here because it's outdated!
+      const response = await ApiWrapper.get(
+        `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`,
+        {
+          loadingMessage: 'Loading census data...',
+          category: 'api'
+        }
+      );
+      const censusRDSLoad = await response.json();
+      const censusList = await createAndUpdateCensusList(censusRDSLoad);
+      setUpdatedCensusList(censusList);
+
+      const validationStatusPromises = censusList.map(async census => {
+        const { schemaName } = currentSite || {};
+        const { plotID } = currentPlot || {};
+        const { plotCensusNumber } = census || {};
+
+        if (!schemaName || !plotID || !plotCensusNumber) return null;
+
+        try {
+          const stemsCheck = await ApiWrapper.get(`/api/cmprevalidation/stems/${schemaName}/${plotID}/${plotCensusNumber}`, { showErrorAlert: false });
+
+          return {
+            censusID: census?.dateRanges[0].censusID,
+            plotCensusNumber: census?.plotCensusNumber,
+            hasStemsData: stemsCheck.status === 200
+          };
+        } catch {
+          return {
+            censusID: census?.dateRanges[0].censusID,
+            plotCensusNumber: census?.plotCensusNumber,
+            hasStemsData: false
+          };
+        }
+      });
+
+      const validationStatuses = await Promise.all(validationStatusPromises);
+      setCensusValidationStatus(validationStatuses.filter(status => status !== null) as CensusValidationStatus[]);
+
+      return validationStatuses;
+    },
+    {
+      loadingMessage: 'Validating census data...',
+      category: 'processing'
+    }
+  );
 
   const validatePreviousCensusData = async () => {
     // need to re-fetch the census list --> can't use list context here because it's outdated!
@@ -98,13 +158,11 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
     });
     const validationStatuses = await Promise.all(validationStatusPromises);
     setCensusValidationStatus(validationStatuses.filter(status => status !== null) as CensusValidationStatus[]);
-    setLoading(false);
   };
   const resetState = () => {
     setRolloverStems(false);
     setSelectedStems([]);
     setPreviousStems([]);
-    setLoading(false);
     setCustomizeStems(false);
     setSelectedStems([]);
     setSelectedStemsCensus(defaultCVS);
@@ -130,27 +188,27 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
     if (!customizeStems && previousStems.length > 0 && selectedStemsCensus.censusID !== 0) setSelectedStems(previousStems);
   }, [customizeStems, selectedStemsCensus, previousStems]);
 
-  const handleConfirm = async () => {
-    if (confirmNoStemsRollover && selectedStemsCensus.censusID === 0) {
-      onConfirm(false);
-      resetState();
-      return;
-    } else if (selectedStemsCensus.censusID === 0 && !confirmNoStemsRollover) {
-      alert('Please confirm that you do not wish to rollover stems to proceed');
-    }
+  // Use async operation for confirm handling
+  const { execute: handleConfirm } = useAsyncOperation(
+    async () => {
+      if (confirmNoStemsRollover && selectedStemsCensus.censusID === 0) {
+        onConfirm(false);
+        resetState();
+        return;
+      } else if (selectedStemsCensus.censusID === 0 && !confirmNoStemsRollover) {
+        alert('Please confirm that you do not wish to rollover stems to proceed');
+        return;
+      }
 
-    if (!rolloverStems) {
-      alert('You must select at least one option to roll over or confirm no rollover.');
-      return;
-    } else if (rolloverStems && selectedStems.length === 0 && customizeStems) {
-      alert('You must select at least one stem to roll over');
-      return;
-    }
+      if (!rolloverStems) {
+        alert('You must select at least one option to roll over or confirm no rollover.');
+        return;
+      } else if (rolloverStems && selectedStems.length === 0 && customizeStems) {
+        alert('You must select at least one stem to roll over');
+        return;
+      }
 
-    if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error('site context OR plot context are undefined');
-
-    setLoading(true);
-    try {
+      if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error('site context OR plot context are undefined');
       if (rolloverStems) {
         const highestPlotCensusNumber =
           updatedCensusList.length > 0
@@ -165,23 +223,28 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         const newCensusID = await mapper.startNewCensus(currentSite?.schemaName, currentPlot?.plotID, highestPlotCensusNumber + 1);
         if (!newCensusID) throw new Error('census creation failure');
 
-        await fetch(`/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedStemsCensus?.censusID}/${newCensusID}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ incoming: customizeStems ? selectedStems.map(stem => stem.stemGUID) : previousStems.map(stem => stem.stemGUID) })
-        });
+        await ApiWrapper.post(
+          `/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedStemsCensus?.censusID}/${newCensusID}`,
+          { incoming: customizeStems ? selectedStems.map(stem => stem.stemGUID) : previousStems.map(stem => stem.stemGUID) },
+          {
+            loadingMessage: 'Rolling over stems...',
+            category: 'processing'
+          }
+        );
       }
       onConfirm(rolloverStems);
-    } catch (error: any) {
-      ailogger.error('failed to perform stems rollover: ', error);
-      onConfirm(false);
-    } finally {
-      setLoading(false);
       resetState();
+    },
+    {
+      loadingMessage: 'Processing rollover...',
+      category: 'processing',
+      onError: error => {
+        ailogger.error('failed to perform stems rollover: ', error);
+        onConfirm(false);
+        resetState();
+      }
     }
-  };
+  );
 
   const handleRowSelection = <T extends { stemGUID?: number }>(selectionModel: GridRowSelectionModel, setSelection: Dispatch<SetStateAction<T[]>>) => {
     setSelection(
@@ -192,16 +255,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         .filter(Boolean)
     );
   };
-
-  if (loading) {
-    return (
-      <Modal open={open} onClose={onClose}>
-        <ModalDialog>
-          <Typography>Loading...</Typography>
-        </ModalDialog>
-      </Modal>
-    );
-  }
 
   return (
     <Modal open={open} onClose={undefined} data-testid={'rollover-stems-modal'}>

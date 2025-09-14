@@ -98,18 +98,30 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                       {formatFileSize(file.size)}
                     </Typography>
                   </Stack>
-                  <IconButton
-                    size="sm"
-                    variant="soft"
-                    color="danger"
+                  <Button
+                    component="span"
                     onClick={e => {
                       e.stopPropagation();
                       onRemoveFile(index);
                     }}
-                    sx={{ ml: 'auto' }}
+                    sx={{
+                      ml: 'auto',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 24,
+                      borderRadius: '50%',
+                      bgcolor: 'danger.softBg',
+                      color: 'danger.softColor',
+                      '&:hover': {
+                        bgcolor: 'danger.softHoverBg'
+                      }
+                    }}
                   >
                     <DeleteIcon fontSize="small" />
-                  </IconButton>
+                  </Button>
                 </Stack>
               </Tab>
             ))}

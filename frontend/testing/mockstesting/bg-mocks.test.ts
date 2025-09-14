@@ -5,7 +5,12 @@ import '@/testing/bg-mocks';
 describe('bg-mocks wiring', () => {
   // Pull the class that’s been mocked and the helper API
   // NOTE: keep these imports *after* the mock import above.
-  type CM = new () => { executeQuery: (sql: string, params?: any[]) => Promise<any> };
+  type CM = new () => {
+    executeQuery: (sql: string, params?: any[], transactionId?: string) => Promise<any>;
+    beginTransaction: () => Promise<string>;
+    commitTransaction: (transactionId: string) => Promise<void>;
+    rollbackTransaction: (transactionId: string) => Promise<void>;
+  };
 
   let ConnectionManager!: CM;
   let __BgMocks!: {
@@ -47,6 +52,38 @@ describe('bg-mocks wiring', () => {
     // Default shape from the mock: similar to mysql2
     expect(r).toMatchObject({ insertId: 0, affectedRows: 0 });
     expect(Array.isArray(r.rows)).toBe(true);
+  });
+
+  it('accepts transactionID parameter and properly manages transactions', async () => {
+    const cm = new ConnectionManager();
+
+    // Test transaction begin
+    const transactionId = await cm.beginTransaction();
+    expect(transactionId).toBe('mock-transaction-id');
+
+    // Test executeQuery with transactionID
+    __BgMocks.pushResult({ rows: [{ id: 42 }] });
+    const r = await cm.executeQuery('SELECT * FROM t WHERE id=?', [42], transactionId);
+    expect(r).toEqual({ rows: [{ id: 42 }] });
+
+    // Verify the call was captured correctly
+    const calls = __BgMocks.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      sql: 'SELECT * FROM t WHERE id=?',
+      params: [42],
+      kind: 'execute'
+    });
+
+    // Test transaction commit
+    await expect(cm.commitTransaction(transactionId)).resolves.toBeUndefined();
+  });
+
+  it('handles transaction rollback properly', async () => {
+    const cm = new ConnectionManager();
+    const transactionId = await cm.beginTransaction();
+
+    await expect(cm.rollbackTransaction(transactionId)).resolves.toBeUndefined();
   });
 
   it('propagates queued errors', async () => {

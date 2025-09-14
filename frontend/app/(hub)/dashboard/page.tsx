@@ -204,40 +204,86 @@ export default function DashboardPage() {
               {toggleSwitch ? 'Tachometer View' : 'Pie Chart View'}
             </Typography>
 
-            <Box
-              role="button"
-              tabIndex={0}
-              aria-pressed={toggleSwitch}
-              aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-              sx={{ height: '50%', width: '100%' }}
-              onClick={() => setToggleSwitch(!toggleSwitch)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setToggleSwitch(!toggleSwitch);
-                }
-              }}
-            >
-              {toggleSwitch ? (
-                <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
-              ) : (
-                <ProgressPieChart {...progressTacho} aria-label="Quadrat population pie chart" />
-              )}
-            </Box>
+            {/* Only show chart and quadrat list if there are measurements */}
+            {progressTacho.PopulatedQuadrats > 0 || countStems > 0 ? (
+              <>
+                <Box
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={toggleSwitch}
+                  aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
+                  sx={{ height: '50%', width: '100%' }}
+                  onClick={() => setToggleSwitch(!toggleSwitch)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setToggleSwitch(!toggleSwitch);
+                    }
+                  }}
+                >
+                  {toggleSwitch ? (
+                    <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
+                  ) : (
+                    <ProgressPieChart {...progressTacho} aria-label="Quadrat population pie chart" />
+                  )}
+                </Box>
 
-            {/* List of unpopulated quadrats */}
-            <Box role="group" aria-labelledby="missing-quadrats-heading" sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
-              <Typography id="missing-quadrats-heading" level="body-lg">
-                The following quadrat names do not have any recorded data for this census:
-              </Typography>
-              <Stack direction="row" alignItems="center" role="list" aria-label="List of unpopulated quadrats">
-                {progressTacho.UnpopulatedQuadrats.map(uq => (
-                  <Chip key={uq} color="primary" role="listitem" aria-label={`Unpopulated quadrat named ${uq}`}>
-                    {uq}
-                  </Chip>
-                ))}
-              </Stack>
-            </Box>
+                {/* List of unpopulated quadrats with overflow handling */}
+                {progressTacho.UnpopulatedQuadrats.length > 0 && (
+                  <Box role="group" aria-labelledby="missing-quadrats-heading" sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
+                    <Typography id="missing-quadrats-heading" level="body-lg">
+                      The following quadrat names do not have any recorded data for this census:
+                    </Typography>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      role="list"
+                      aria-label="List of unpopulated quadrats"
+                      sx={{
+                        flexWrap: 'wrap',
+                        gap: 0.5,
+                        maxHeight: '120px',
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}
+                    >
+                      {(() => {
+                        const maxVisible = 20; // Maximum number of chips to show before overflow
+                        const visibleQuadrats = progressTacho.UnpopulatedQuadrats.slice(0, maxVisible);
+                        const remainingCount = progressTacho.UnpopulatedQuadrats.length - maxVisible;
+
+                        return (
+                          <>
+                            {visibleQuadrats.map(uq => (
+                              <Chip key={uq} color="primary" role="listitem" aria-label={`Unpopulated quadrat named ${uq}`}>
+                                {uq}
+                              </Chip>
+                            ))}
+                            {remainingCount > 0 && (
+                              <Chip
+                                key="overflow"
+                                color="neutral"
+                                variant="soft"
+                                role="listitem"
+                                aria-label={`And ${remainingCount} more unpopulated quadrats`}
+                              >
+                                +{remainingCount} more
+                              </Chip>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </Stack>
+                  </Box>
+                )}
+              </>
+            ) : (
+              <Box sx={{ height: '50%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography level="body-lg" color="neutral" textAlign="center">
+                  No measurements recorded for this census yet.
+                </Typography>
+              </Box>
+            )}
 
             <Divider orientation="horizontal" sx={{ my: 1 }} />
 

@@ -627,7 +627,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           },
           {} as Record<string, string[]>
         );
-        setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
+        const totalBatchCount = Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0);
+        setTotalBatches(totalBatchCount);
         for (const fileID in grouped) {
           ailogger.info(`Processing FileID: ${fileID}`);
 
@@ -653,37 +654,51 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   ailogger.info(`Successfully processed batch ${fileID}-${batchID}`);
                   setProcessedChunks(prev => {
                     const newValue = prev + 1;
-                    ailogger.info(`Batch progress: ${newValue}/${totalBatches} batches completed`);
+                    ailogger.info(`Batch progress: ${newValue}/${totalBatchCount} batches completed`);
                     return newValue;
                   });
                 })
                 .catch(async (e: any) => {
-                  ailogger.error(`Error processing batch ${fileID}-${batchID}:`, e);
-                  // Only move to failedmeasurements if not already handled internally
-                  // This prevents duplicate entries in failedmeasurements
-                  if (!e.message?.includes('handled internally')) {
-                    try {
-                      ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error: ${e.message}`);
-                      const failureResponse = await fetch(
-                        `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
-                      );
-                      if (!failureResponse.ok) {
-                        throw new Error(`Failed to move batch to failed measurements: ${failureResponse.status}`);
+                  const errorMessage = e?.message || e?.toString() || 'Unknown error';
+
+                  // Check if this is an Application Insights monitoring error, not a data processing error
+                  const isMonitoringError =
+                    errorMessage.includes('Maximum ajax per page view limit') ||
+                    errorMessage.includes('AI (Internal)') ||
+                    errorMessage.includes('Failed to calculate the duration of the fetch call');
+
+                  if (isMonitoringError) {
+                    ailogger.warn(`Batch ${fileID}-${batchID} encountered monitoring system error (not data error): ${errorMessage}`);
+                    // Don't try to move to failedmeasurements for monitoring errors
+                  } else {
+                    ailogger.error(`Error processing batch ${fileID}-${batchID}:`, e);
+                    // Only move to failedmeasurements if not already handled internally and it's a real processing error
+                    if (!errorMessage.includes('handled internally')) {
+                      try {
+                        ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error: ${errorMessage}`);
+                        const failureResponse = await fetch(
+                          `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
+                        );
+                        if (!failureResponse.ok) {
+                          throw new Error(`Failed to move batch to failed measurements: ${failureResponse.status}`);
+                        }
+                      } catch (failureError: any) {
+                        ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
                       }
-                    } catch (failureError: any) {
-                      ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
                     }
                   }
 
                   // Still increment progress even for failed batches so UI doesn't hang
                   setProcessedChunks(prev => {
                     const newValue = prev + 1;
-                    ailogger.info(`Batch progress (with failure): ${newValue}/${totalBatches} batches completed`);
+                    ailogger.info(
+                      `Batch progress (with ${isMonitoringError ? 'monitoring issue' : 'failure'}): ${newValue}/${totalBatchCount} batches completed`
+                    );
                     return newValue;
                   });
 
-                  // Don't re-throw for internally handled batches - they're already processed
-                  if (!e.message?.includes('handled internally')) {
+                  // Don't re-throw for monitoring errors or internally handled batches
+                  if (!isMonitoringError && !errorMessage.includes('handled internally')) {
                     // Log but don't re-throw to prevent stopping other batches
                     ailogger.error(`Batch ${fileID}-${batchID} failed but continuing with other batches`);
                   }
