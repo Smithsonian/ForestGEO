@@ -28,6 +28,8 @@ import {
 } from '@mui/joy';
 import { ChangeEvent, useState } from 'react';
 import { AccessibilityNew, BugReport, Build, Error as ErrorIcon, Event, GitHub, Info, Person } from '@mui/icons-material';
+import { useFormSubmission } from '@/hooks/useAsyncOperation';
+import { useApiWrapper } from '@/utils/apiWrapper';
 import { Octokit } from 'octokit';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { usePathname } from 'next/navigation';
@@ -81,7 +83,6 @@ export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
   const [issueType, setIssueType] = useState<IssueType | null>(null);
   const [description, setDescription] = useState('');
   const [createdIssue, setCreatedIssue] = useState<Issue | null>(null);
-  const [loading, setLoading] = useState(false);
   const [isBodyTooltipHovered, setIsBodyTooltipHovered] = useState(false);
   const pat = process.env.FG_PAT;
   const owner = process.env.OWNER;
@@ -102,12 +103,14 @@ export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
     setIsBodyTooltipHovered(false);
   };
 
-  async function handleSubmitIssue() {
-    setLoading(true);
-    const octokit = new Octokit({
-      auth: pat
-    });
-    const issueBody = `
+  // Use form submission hook for GitHub issue creation
+  const { submitForm: handleSubmitIssue, isSubmitting } = useFormSubmission(
+    async () => {
+      const octokit = new Octokit({
+        auth: pat
+      });
+
+      const issueBody = `
 ### Description
 ${description}  
 
@@ -133,28 +136,44 @@ ${pathname}
 - **Location**: ${currentPlot ? currentPlot.locationName : 'Not selected'}
 - **Census**: ${currentCensus ? currentCensus.plotCensusNumber : 'Not selected'}  
 `;
-    // handle the issue submission logic here
-    const response = await octokit.request(`POST /repos/${owner}/${repo}/issues`, {
-      owner,
-      repo,
-      title: `APP-USER-GENERATED: Feedback Ticket: ${issueType}`,
-      body: issueBody,
-      labels: ['useridentifiedbug'],
-      assignees: ['siddheshraze']
-    });
-    if (response.status !== 201) {
-      throw new Error('Failed to create GitHub issue');
+
+      // handle the issue submission logic here
+      const response = await octokit.request(`POST /repos/${owner}/${repo}/issues`, {
+        owner,
+        repo,
+        title: `APP-USER-GENERATED: Feedback Ticket: ${issueType}`,
+        body: issueBody,
+        labels: ['useridentifiedbug'],
+        assignees: ['siddheshraze']
+      });
+
+      if (response.status !== 201) {
+        throw new Error('Failed to create GitHub issue');
+      }
+
+      setCreatedIssue(response.data);
+
+      // Reset form after success
+      setName('');
+      setIssueType(null);
+      setDescription('');
+    },
+    {
+      loadingMessage: 'Creating GitHub issue...',
+      onError: error => {
+        alert(`Failed to create GitHub issue: ${error.message}`);
+      },
+      onSuccess: () => {
+        alert('GitHub issue created successfully!');
+      }
     }
-    setCreatedIssue(response.data);
-    setLoading(false);
-  }
+  );
 
   function handleCancel() {
     setName('');
     setIssueType(null);
     setDescription('');
     setCreatedIssue(null);
-    setLoading(false);
     onClose();
   }
 
@@ -163,7 +182,7 @@ ${pathname}
       <ModalOverflow>
         <ModalDialog role="alertdialog">
           <ModalClose variant="outlined" onClick={handleCancel} />
-          {!createdIssue && !loading && (
+          {!createdIssue && !isSubmitting && (
             <>
               <DialogTitle>GitHub Feedback Form</DialogTitle>
               <DialogContent sx={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
@@ -321,7 +340,7 @@ ${pathname}
               </DialogActions>
             </>
           )}
-          {!createdIssue && loading && (
+          {!createdIssue && isSubmitting && (
             <Box>
               <DialogTitle sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>Submitting issue...</DialogTitle>
               <DialogContent>

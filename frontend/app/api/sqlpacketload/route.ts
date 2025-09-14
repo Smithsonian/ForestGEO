@@ -56,10 +56,14 @@ export async function POST(request: NextRequest) {
       const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments) 
       VALUES ${placeholders}`;
-      await connectionManager.executeQuery(insertSQL, values);
+      await connectionManager.executeQuery(insertSQL, values, transactionID);
       await connectionManager.commitTransaction(transactionID);
       ailogger.info(
-        await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
+        await connectionManager.executeQuery(
+          `SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`,
+          [fileName, batchID],
+          transactionID
+        )
       );
       return new NextResponse(
         JSON.stringify({
@@ -98,7 +102,7 @@ export async function POST(request: NextRequest) {
             }) as Partial<QuadratResult>
         );
         const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
-        await connectionManager.executeQuery(sql, params);
+        await connectionManager.executeQuery(sql, params, transactionID);
       } else if (formType === 'attributes') {
         const bulkAttributes = Object.values(fileRowSet).map(
           row =>
@@ -109,7 +113,7 @@ export async function POST(request: NextRequest) {
             }) as Partial<AttributesResult>
         );
         const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
-        await connectionManager.executeQuery(sql, params);
+        await connectionManager.executeQuery(sql, params, transactionID);
       } else if (formType === 'species') {
         const bulkProps: SpecialBulkProcessingProps = {
           schema,

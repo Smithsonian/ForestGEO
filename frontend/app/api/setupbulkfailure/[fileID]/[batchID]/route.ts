@@ -36,9 +36,9 @@ export async function GET(
                     nullif(Comments, '')                  as Comments
     from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?
     `;
-    await connectionManager.executeQuery(query, [fileID, batchID]);
+    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
     query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
-    await connectionManager.executeQuery(query, [fileID, batchID]);
+    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
     await connectionManager.commitTransaction(transactionID);
   } catch (e) {
     await connectionManager.rollbackTransaction(transactionID ?? '');

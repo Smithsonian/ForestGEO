@@ -97,7 +97,7 @@ export class PoolMonitor {
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
-    const bufferTime = 800;
+    const bufferTime = 120; // 2 minutes - reasonable time after transaction completion
     try {
       if (!this.isPoolClosed()) {
         // only log if pool is not closed
@@ -162,11 +162,11 @@ export class PoolMonitor {
           ailogger.info(chalk.cyan('Pool Health Check:'));
           ailogger.info(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
 
-          if (sleeping.length > 50) {
-            // Example threshold for excessive sleeping connections
+          if (sleeping.length > 10) {
+            // Lowered threshold from 50 to 10 for more aggressive cleanup
             ailogger.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
             await this.reinitializePool();
-          } else {
+          } else if (sleeping.length > 0) {
             await this.terminateSleepingConnections();
           }
         }
