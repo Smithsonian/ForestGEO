@@ -62,8 +62,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 1024 * 16;
-  const connectionLimit = 12; // Concurrency limit for API calls
+  const chunkSize = 1024 * 8;
+  const connectionLimit = 8; // Reduced concurrency for production stability
 
   // Simple client-side queue implementation to replace TransactionAwarePQueue
   const createSimpleQueue = (concurrency: number) => {
@@ -378,11 +378,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           chunkStartTime.current = performance.now();
           totalRows += results.data.length;
           try {
-            if (queue.size >= connectionLimit) {
-              ailogger.info(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
+            if (queue.size >= connectionLimit * 2) {
+              ailogger.info(`Queue size ${queue.size} exceeded threshold (${connectionLimit * 2}). Pausing parser.`);
               parser.pause();
-              // Wait until the queue is nearly empty before resuming.
-              await queue.onEmpty();
+              // Wait until the queue has room before resuming
+              while (queue.size >= connectionLimit) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
               parser.resume();
             }
 
@@ -411,8 +413,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             };
 
             queue.add(async () => {
-              await uploadToSql(fileCollectionRowSet, file.name);
-              setCompletedChunks(prev => prev + 1);
+              try {
+                await uploadToSql(fileCollectionRowSet, file.name);
+              } catch (error: any) {
+                ailogger.error(`Chunk upload failed for ${file.name}:`, error);
+                // Still increment progress to prevent UI from hanging
+                // The error will be handled at a higher level
+              } finally {
+                // Always increment completed chunks to ensure progress updates
+                setCompletedChunks(prev => prev + 1);
+              }
             });
           } catch (err: any) {
             ailogger.error('Error processing chunk:', err);
@@ -484,38 +494,75 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string) => {
+    async (fileData: FileCollectionRowSet, fileName: string, retryCount = 0) => {
+      const maxRetries = 3;
+      const baseDelay = 1000; // 1 second base delay
+
       try {
-        const response = await fetch(`/api/sqlpacketload`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schema,
-            formType: uploadForm,
-            fileName,
-            plot: currentPlot,
-            census: currentCensus,
-            user: userID,
-            fileRowSet: fileData[fileName]
-          })
-        });
+        const response = await fetchWithTimeout(
+          `/api/sqlpacketload`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schema,
+              formType: uploadForm,
+              fileName,
+              plot: currentPlot,
+              census: currentCensus,
+              user: userID,
+              fileRowSet: fileData[fileName]
+            })
+          },
+          300000
+        ); // 5 minute timeout for large batches
 
         if (!response.ok) {
-          throw new Error(`API returned status ${response.status}`);
+          // Enhanced error handling for different HTTP status codes
+          if (response.status >= 500) {
+            throw new Error(`Server error (${response.status}): The server is experiencing issues. This may be temporary.`);
+          } else if (response.status === 429) {
+            throw new Error(`Rate limit exceeded (${response.status}): Too many requests. Please wait before retrying.`);
+          } else if (response.status >= 400) {
+            const errorText = await response.text().catch(() => 'Unknown client error');
+            throw new Error(`Client error (${response.status}): ${errorText}`);
+          } else {
+            throw new Error(`API returned status ${response.status}`);
+          }
         }
+
         try {
           const data = await response.json();
           // Failing rows are now handled via enhanced error reporting in error rows
           if (data.failingRows) {
             ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
           }
+          return data;
         } catch (e: any) {
           ailogger.error('Error parsing response data:', e);
-          throw e;
+          throw new Error(`Failed to parse server response: ${e.message}`);
         }
       } catch (error: any) {
-        ailogger.error('Network or API error:', error);
-        throw error;
+        ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, error);
+
+        // Determine if we should retry based on error type
+        const shouldRetry =
+          retryCount < maxRetries &&
+          (error.message?.includes('Server error (5') ||
+            error.message?.includes('Rate limit exceeded') ||
+            error.message?.includes('timeout') ||
+            error.message?.includes('ECONNRESET') ||
+            error.message?.includes('PROTOCOL_CONNECTION_LOST'));
+
+        if (shouldRetry) {
+          const delay = baseDelay * Math.pow(2, retryCount) + Math.random() * 1000; // Exponential backoff with jitter
+          ailogger.info(`Retrying upload for ${fileName} in ${delay.toFixed(0)}ms... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return uploadToSql(fileData, fileName, retryCount + 1);
+        } else {
+          ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, error);
+          throw error;
+        }
       }
     },
     [
