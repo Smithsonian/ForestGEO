@@ -3,7 +3,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { Box, TableCell, TableRow } from '@mui/material';
-import { Cancel, Edit, Save } from '@mui/icons-material';
+import { Cancel, Edit, Save, Download } from '@mui/icons-material';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Chip, IconButton, List, ListItem, Switch, Textarea, Tooltip } from '@mui/joy';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -62,6 +62,21 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
     const updatedValidation = { ...validation, definition: scriptContent };
     await onSaveChanges(updatedValidation);
     setIsEditing(false);
+  };
+
+  const handleDownloadQuery = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const processedQuery = (scriptContent ?? '').replace(/\${(.*?)}/g, (_match, p1: string) => String(replacements[p1 as keyof typeof replacements] ?? ''));
+
+    const blob = new Blob([processedQuery], { type: 'text/sql' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${validation.procedureName?.replace(/\s+/g, '_') || 'validation'}_query.sql`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const formattedDescription = validation.description?.replace(/(DBH|HOM)([A-Z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -140,6 +155,8 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
                 schemaDetails={memoizedSchemaDetails}
                 isDarkMode={isDarkMode}
                 readOnly={!isEditing}
+                schema={replacements.schema}
+                enableValidation={isEditing}
                 aria-label="Validation script editor"
               />
             </Box>
@@ -175,26 +192,35 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
 
       {/* Action Buttons */}
       <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', width: '10%' }}>
-        {isEditing ? (
-          <>
-            <Tooltip describeChild title="Save changes">
-              <IconButton variant="solid" onClick={handleSaveChanges} aria-label="Save validation changes">
-                <Save />
-              </IconButton>
-            </Tooltip>
-            <Tooltip describeChild title="Cancel changes">
-              <IconButton variant="solid" onClick={handleCancelChanges} aria-label="Cancel validation changes">
-                <Cancel />
-              </IconButton>
-            </Tooltip>
-          </>
-        ) : (
-          <Tooltip describeChild title="Edit validation">
-            <IconButton variant="solid" onClick={handleEditClick} aria-label="Edit validation">
-              <Edit />
-            </IconButton>
-          </Tooltip>
-        )}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {isEditing ? (
+            <>
+              <Tooltip describeChild title="Save changes">
+                <IconButton variant="solid" onClick={handleSaveChanges} aria-label="Save validation changes">
+                  <Save />
+                </IconButton>
+              </Tooltip>
+              <Tooltip describeChild title="Cancel changes">
+                <IconButton variant="solid" onClick={handleCancelChanges} aria-label="Cancel validation changes">
+                  <Cancel />
+                </IconButton>
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              <Tooltip describeChild title="Edit validation">
+                <IconButton variant="solid" onClick={handleEditClick} aria-label="Edit validation">
+                  <Edit />
+                </IconButton>
+              </Tooltip>
+              <Tooltip describeChild title="Download validation query">
+                <IconButton variant="outlined" onClick={handleDownloadQuery} aria-label="Download validation query">
+                  <Download />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+        </Box>
       </TableCell>
     </TableRow>
   );

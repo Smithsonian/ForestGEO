@@ -30,12 +30,20 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
-    delete validationProcedure['validationID'];
+    // Get the next available ValidationID
+    const maxIdQuery = format('SELECT COALESCE(MAX(ValidationID), 0) + 1 as nextValidationID FROM ??', [`${schema}.sitespecificvalidations`]);
+    const maxIdResult = await connectionManager.executeQuery(maxIdQuery);
+    const nextValidationID = maxIdResult[0].nextValidationID;
+
+    // Set the ValidationID for the new procedure
+    validationProcedure.validationID = nextValidationID;
+    delete validationProcedure['id']; // Remove any 'id' field if present
+
     const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, validationProcedure]);
     const results = await connectionManager.executeQuery(insertQuery);
     const insertID = results.insertId;
     await connectionManager.commitTransaction(transactionID ?? '');
-    return NextResponse.json({ insertID }, { status: HTTPResponses.OK });
+    return NextResponse.json({ insertID, validationID: nextValidationID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
     await connectionManager.rollbackTransaction(transactionID ?? '');

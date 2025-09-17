@@ -810,11 +810,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             flex: 1,
             width: '100%',
             alignItems: 'center',
+            justifyContent: 'center',
             mt: 4
           }}
         >
-          <Stack direction="column" spacing={3} sx={{ width: '100%' }}>
-            <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="column" spacing={3} sx={{ width: '100%', maxWidth: '600px', alignItems: 'center' }}>
+            <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <Typography level="title-lg">Upload Progress</Typography>
               <Typography level="body-sm" color="neutral">
                 {totalOperations} operations, {totalChunks} chunks total
@@ -822,7 +823,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             </Stack>
 
             <Box sx={{ width: '100%' }}>
-              <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+              <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
                 <Typography level="body-sm">File Progress</Typography>
                 <Typography level="body-sm" color="primary">
                   {completedOperations}/{totalOperations}
@@ -834,20 +835,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 color="primary"
                 value={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
                 determinate
+                sx={{ width: '100%' }}
               />
             </Box>
 
             {totalChunks !== 0 && (
               <Box sx={{ width: '100%' }}>
-                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
                   <Typography level="body-sm">Data Processing</Typography>
                   <Typography level="body-sm" color="primary">
                     {completedChunks}/{totalChunks} chunks
                   </Typography>
                 </Stack>
-                <LinearProgress determinate variant="soft" color="primary" size="lg" value={(completedChunks / totalChunks) * 100} />
+                <LinearProgress determinate variant="soft" color="primary" size="lg" value={(completedChunks / totalChunks) * 100} sx={{ width: '100%' }} />
                 {completedChunks < totalChunks && etc !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center' }} color="neutral">
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
                     {((completedChunks / totalChunks) * 100).toFixed(1)}% complete • {etc}
                   </Typography>
                 )}
@@ -856,15 +858,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             {uploadForm === 'measurements' && totalBatches !== 0 && (
               <Box sx={{ width: '100%' }}>
-                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1 }}>
+                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
                   <Typography level="body-sm">Batch Processing</Typography>
                   <Typography level="body-sm" color="primary">
                     {processedChunks}/{totalBatches} batches
                   </Typography>
                 </Stack>
-                <LinearProgress determinate variant="soft" color="success" size="lg" value={(processedChunks / totalBatches) * 100} />
+                <LinearProgress determinate variant="soft" color="success" size="lg" value={(processedChunks / totalBatches) * 100} sx={{ width: '100%' }} />
                 {processedChunks < totalBatches && processETC !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center' }} color="neutral">
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
                     {((processedChunks / totalBatches) * 100).toFixed(1)}% complete • {processETC}
                   </Typography>
                 )}
@@ -917,10 +919,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             flex: 1,
             width: '100%',
             alignItems: 'center',
+            justifyContent: 'center',
             mt: 4
           }}
         >
-          <Stack direction={'column'} sx={{ display: 'inherit' }}>
+          <Stack direction={'column'} sx={{ alignItems: 'center', textAlign: 'center' }}>
             <Typography level={'title-md'} gutterBottom>
               SQL Upload Complete
             </Typography>
