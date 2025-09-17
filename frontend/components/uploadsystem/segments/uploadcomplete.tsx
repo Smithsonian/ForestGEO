@@ -16,6 +16,11 @@ import ailogger from '@/ailogger';
 
 const ROWS_PER_BATCH = 10;
 
+// Helper function to check if there are any actual error rows
+const hasErrorRows = (errorRows: FileCollectionRowSet): boolean => {
+  return Object.values(errorRows).some(fileRowSet => Object.keys(fileRowSet).length > 0);
+};
+
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, errorRows, uploadForm } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
@@ -191,62 +196,84 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         </>
       ) : (
         <>
-          <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
-            The following rows were captured during pre-processing and were not uploaded:
-          </Typography>
-          <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
-            <Button variant="plain" onClick={downloadCSV}>
-              Download All Errors as CSV
-            </Button>
-          </Box>
-          <Box>
-            {Object.entries(errorRows).map(([filename, rowSet]) => {
-              const headers = rowSet ? Object.keys(Object.values(rowSet)[0] || {}) : [];
-              const totalRows = Object.keys(rowSet).length;
-              const rowsToShow = visibleRows[filename] || ROWS_PER_BATCH;
+          {hasErrorRows(errorRows) ? (
+            <>
+              <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
+                The following rows were captured during pre-processing and were not uploaded:
+              </Typography>
+              <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
+                <Button variant="plain" onClick={downloadCSV}>
+                  Download All Errors as CSV
+                </Button>
+              </Box>
+              <Box>
+                {Object.entries(errorRows).map(([filename, rowSet]) => {
+                  const headers = rowSet ? Object.keys(Object.values(rowSet)[0] || {}) : [];
+                  const totalRows = Object.keys(rowSet).length;
+                  const rowsToShow = visibleRows[filename] || ROWS_PER_BATCH;
 
-              return (
-                <Box key={filename} mb={4}>
-                  <Typography level="h3" gutterBottom>
-                    File: {filename} (Showing {Math.min(rowsToShow, totalRows)} of {totalRows} rows)
-                  </Typography>
-                  <TableContainer component={Paper}>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Row</TableCell>
-                          {headers.map(header => (
-                            <TableCell key={header}>{header}</TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {Object.entries(rowSet)
-                          .slice(0, rowsToShow)
-                          .map(([rowKey, row]) => (
-                            <TableRow key={rowKey}>
-                              <TableCell>{rowKey}</TableCell>
+                  return (
+                    <Box key={filename} mb={4}>
+                      <Typography level="h3" gutterBottom>
+                        File: {filename} (Showing {Math.min(rowsToShow, totalRows)} of {totalRows} rows)
+                      </Typography>
+                      <TableContainer component={Paper}>
+                        <Table>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Row</TableCell>
                               {headers.map(header => (
-                                <TableCell key={header}>
-                                  {moment.isDate(row[header]) ? moment(row[header]).format('YYYY-MM-DD HH:mm:ss') : row[header] !== null ? row[header] : 'NULL'}
-                                </TableCell>
+                                <TableCell key={header}>{header}</TableCell>
                               ))}
                             </TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                  {rowsToShow < totalRows && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: 2 }}>
-                      <Button variant="outlined" onClick={() => loadMoreRows(filename, totalRows)}>
-                        Load More Rows
-                      </Button>
+                          </TableHead>
+                          <TableBody>
+                            {Object.entries(rowSet)
+                              .slice(0, rowsToShow)
+                              .map(([rowKey, row]) => (
+                                <TableRow key={rowKey}>
+                                  <TableCell>{rowKey}</TableCell>
+                                  {headers.map(header => (
+                                    <TableCell key={header}>
+                                      {moment.isDate(row[header])
+                                        ? moment(row[header]).format('YYYY-MM-DD HH:mm:ss')
+                                        : row[header] !== null
+                                          ? row[header]
+                                          : 'NULL'}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      {rowsToShow < totalRows && (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: 2 }}>
+                          <Button variant="outlined" onClick={() => loadMoreRows(filename, totalRows)}>
+                            Load More Rows
+                          </Button>
+                        </Box>
+                      )}
                     </Box>
-                  )}
-                </Box>
-              );
-            })}
-          </Box>
+                  );
+                })}
+              </Box>
+            </>
+          ) : (
+            <>
+              <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'success'}>
+                Upload completed successfully!
+              </Typography>
+              <Box sx={{ marginTop: 2, textAlign: 'center' }}>
+                <Typography level="h3" color="success">
+                  All rows were processed without errors.
+                </Typography>
+                <Typography level="body-md" sx={{ marginTop: 1 }}>
+                  Your data has been successfully uploaded and is ready for use.
+                </Typography>
+              </Box>
+            </>
+          )}
           <Box sx={{ marginTop: 4 }}>
             <Button variant="soft" color="primary" onClick={() => setOpenUploadConfirmModal(true)}>
               Confirm Changes
