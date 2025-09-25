@@ -65,8 +65,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const chunkSize = 1024 * 8;
   const connectionLimit = 8; // Reduced concurrency for production stability
 
-  // Simple client-side queue implementation to replace TransactionAwarePQueue
-  const createSimpleQueue = (concurrency: number) => {
+  // Enhanced client-side queue with proper transaction tracking
+  const createTransactionAwareQueue = (concurrency: number) => {
     let running = 0;
     let pending: (() => Promise<void>)[] = [];
     let isEmpty = true;
@@ -89,7 +89,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       try {
         await task();
       } catch (error) {
-        console.error('Task failed:', error);
+        ailogger.error('Task failed:', error instanceof Error ? error : new Error(String(error)));
       } finally {
         running--;
         processNext();
@@ -120,7 +120,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     };
   };
 
-  const queue = createSimpleQueue(connectionLimit);
+  const queue = createTransactionAwareQueue(connectionLimit);
+
+  // Simplified approach: track operations with completion callbacks
+  const activeOperations = useRef(new Set<string>());
+  const operationCompletionCallbacks = useRef<(() => void)[]>([]);
+
+  // Function to wait for all active operations to complete
+  const waitForAllOperationsToComplete = useCallback((): Promise<void> => {
+    if (activeOperations.current.size === 0) {
+      ailogger.info('No active operations to wait for');
+      return Promise.resolve();
+    }
+
+    ailogger.info(`Waiting for ${activeOperations.current.size} active operations to complete...`);
+    return new Promise<void>(resolve => {
+      operationCompletionCallbacks.current.push(resolve);
+    });
+  }, []);
 
   // refs
   const hasUploaded = useRef(false);
@@ -432,6 +449,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         },
         complete: async () => {
           await queue.onEmpty();
+          // Wait for all database operations to complete
+          await waitForAllOperationsToComplete();
+          ailogger.info(`All database operations completed for ${file.name}`);
           if (parsingInvalidRows.length > 0) {
             ailogger.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
@@ -497,6 +517,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (fileData: FileCollectionRowSet, fileName: string, retryCount = 0) => {
       const maxRetries = 3;
       const baseDelay = 1000; // 1 second base delay
+      const operationId = `${fileName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Track this operation
+      activeOperations.current.add(operationId);
+      ailogger.info(`Starting upload operation ${operationId} for ${fileName} (${activeOperations.current.size} active operations)`);
 
       try {
         const response = await fetchWithTimeout(
@@ -537,6 +562,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           if (data.failingRows) {
             ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
           }
+
+          // Check if the server indicates transaction completion
+          if (data.transactionCompleted) {
+            ailogger.info(`Server confirmed transaction completion for ${fileName} (batchID: ${data.batchID || 'N/A'})`);
+          }
+
+          // Mark operation as complete
+          activeOperations.current.delete(operationId);
+          ailogger.info(`Completed upload operation ${operationId} for ${fileName} (${activeOperations.current.size} remaining operations)`);
+
+          // Notify waiting processes if all operations are complete
+          if (activeOperations.current.size === 0) {
+            operationCompletionCallbacks.current.forEach(callback => callback());
+            operationCompletionCallbacks.current = [];
+          }
+
           return data;
         } catch (e: any) {
           ailogger.error('Error parsing response data:', e);
@@ -561,6 +602,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           return uploadToSql(fileData, fileName, retryCount + 1);
         } else {
           ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, error);
+
+          // Mark operation as complete even on failure to prevent hanging
+          activeOperations.current.delete(operationId);
+          ailogger.info(`Failed upload operation ${operationId} marked complete (${activeOperations.current.size} remaining operations)`);
+
+          // Notify waiting processes if all operations are complete
+          if (activeOperations.current.size === 0) {
+            operationCompletionCallbacks.current.forEach(callback => callback());
+            operationCompletionCallbacks.current = [];
+          }
+
           throw error;
         }
       }
@@ -630,6 +682,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setCompletedOperations(prev => prev + 1);
         }
         await queue.onEmpty();
+        // Critical: Wait for all database operations to complete before marking as uploaded
+        await waitForAllOperationsToComplete();
+        ailogger.info('All upload operations and database transactions completed successfully');
+
         if (isMounted) {
           setUploaded(true);
         }

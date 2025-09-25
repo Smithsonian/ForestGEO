@@ -76,7 +76,9 @@ export async function POST(request: NextRequest) {
           JSON.stringify({
             responseMessage: `Bulk insert to SQL completed`,
             failingRows: Array.from(failingRows),
-            insertedCount: countResult[0]?.count || 0
+            insertedCount: countResult[0]?.count || 0,
+            transactionCompleted: true,
+            batchID: batchID
           }),
           { status: HTTPResponses.OK }
         );
@@ -201,7 +203,8 @@ export async function POST(request: NextRequest) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: `Bulk insert to SQL completed`,
-        failingRows: Array.from(failingRows)
+        failingRows: Array.from(failingRows),
+        transactionCompleted: true
       }),
       { status: HTTPResponses.OK }
     );

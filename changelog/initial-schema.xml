@@ -1,0 +1,1399 @@
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:ext="http://www.liquibase.org/xml/ns/dbchangelog-ext" xmlns:pro="http://www.liquibase.org/xml/ns/pro" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog-ext http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-ext.xsd http://www.liquibase.org/xml/ns/pro http://www.liquibase.org/xml/ns/pro/liquibase-pro-latest.xsd http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+    <changeSet author="sambokar (generated)" id="1758149236884-1">
+        <createTable tableName="attributes">
+            <column name="Code" type="VARCHAR(10)">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column name="Status" type="ENUM('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing')"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+            <column name="unique_sig" type="VARCHAR(500)">
+                <constraints unique="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-2">
+        <createTable tableName="census">
+            <column autoIncrement="true" name="CensusID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PlotID" type="INT"/>
+            <column name="StartDate" type="date"/>
+            <column name="EndDate" type="date"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column name="PlotCensusNumber" type="INT"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-3">
+        <createTable tableName="censusactivepersonnel">
+            <column autoIncrement="true" name="CAPID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PersonnelID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-4">
+        <createTable tableName="cmattributes">
+            <column autoIncrement="true" name="CMAID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="CoreMeasurementID" type="INT"/>
+            <column name="Code" type="VARCHAR(10)"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-5">
+        <createTable tableName="cmverrors">
+            <column autoIncrement="true" name="CMVErrorID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="CoreMeasurementID" type="INT"/>
+            <column name="ValidationErrorID" type="INT"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-6">
+        <createTable tableName="coremeasurements">
+            <column autoIncrement="true" name="CoreMeasurementID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="CensusID" type="INT"/>
+            <column name="StemGUID" type="INT"/>
+            <column defaultValue="0" name="IsValidated" type="BIT(1)"/>
+            <column name="MeasurementDate" type="date"/>
+            <column name="MeasuredDBH" type="DECIMAL(12, 6)"/>
+            <column name="MeasuredHOM" type="DECIMAL(12, 6)"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column name="UserDefinedFields" type="JSON"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-7">
+        <createTable tableName="failedmeasurements">
+            <column autoIncrement="true" name="FailedMeasurementID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PlotID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+            <column name="Tag" type="VARCHAR(20)"/>
+            <column name="StemTag" type="VARCHAR(10)"/>
+            <column name="SpCode" type="VARCHAR(25)"/>
+            <column name="Quadrat" type="VARCHAR(255)"/>
+            <column name="X" type="DECIMAL(12, 6)"/>
+            <column name="Y" type="DECIMAL(12, 6)"/>
+            <column name="DBH" type="DECIMAL(12, 6)"/>
+            <column name="HOM" type="DECIMAL(12, 6)"/>
+            <column name="Date" type="date"/>
+            <column name="Codes" type="VARCHAR(255)"/>
+            <column name="Comments" type="VARCHAR(255)"/>
+            <column name="FailureReasons" type="TEXT"/>
+            <column name="hash_id" type="VARCHAR(32)">
+                <constraints unique="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-8">
+        <createTable tableName="family">
+            <column autoIncrement="true" name="FamilyID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="Family" type="VARCHAR(32)">
+                <constraints unique="true"/>
+            </column>
+            <column name="ReferenceID" type="INT"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-9">
+        <createTable tableName="genus">
+            <column autoIncrement="true" name="GenusID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="FamilyID" type="INT"/>
+            <column name="Genus" type="VARCHAR(32)"/>
+            <column name="ReferenceID" type="INT"/>
+            <column name="GenusAuthority" type="VARCHAR(32)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-10">
+        <createTable tableName="measurementssummary">
+            <column name="CoreMeasurementID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="StemGUID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="TreeID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="SpeciesID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="QuadratID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PlotID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="CensusID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="SpeciesName" type="VARCHAR(64)"/>
+            <column name="SubspeciesName" type="VARCHAR(64)"/>
+            <column name="SpeciesCode" type="VARCHAR(25)"/>
+            <column name="TreeTag" type="VARCHAR(20)"/>
+            <column name="StemTag" type="VARCHAR(10)"/>
+            <column name="StemLocalX" type="DECIMAL(12, 6)"/>
+            <column name="StemLocalY" type="DECIMAL(12, 6)"/>
+            <column name="QuadratName" type="VARCHAR(255)"/>
+            <column name="MeasurementDate" type="date">
+                <constraints nullable="false"/>
+            </column>
+            <column name="MeasuredDBH" type="DECIMAL(12, 6)"/>
+            <column name="MeasuredHOM" type="DECIMAL(12, 6)"/>
+            <column defaultValue="0" name="IsValidated" type="BIT(1)"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column name="Attributes" type="VARCHAR(255)"/>
+            <column name="UserDefinedFields" type="JSON"/>
+            <column name="Errors" type="TEXT"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-11">
+        <createTable tableName="personnel">
+            <column autoIncrement="true" name="PersonnelID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="FirstName" type="VARCHAR(50)"/>
+            <column name="LastName" type="VARCHAR(50)"/>
+            <column name="RoleID" type="INT"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+            <column name="unique_sig" type="VARCHAR(500)">
+                <constraints unique="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-12">
+        <createTable tableName="plots">
+            <column autoIncrement="true" name="PlotID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PlotName" type="VARCHAR(255)"/>
+            <column name="LocationName" type="VARCHAR(255)"/>
+            <column name="CountryName" type="VARCHAR(255)"/>
+            <column name="DimensionX" type="DECIMAL(12, 6)"/>
+            <column name="DimensionY" type="DECIMAL(12, 6)"/>
+            <column name="Area" type="DECIMAL(12, 6)"/>
+            <column name="GlobalX" type="DECIMAL(12, 6)"/>
+            <column name="GlobalY" type="DECIMAL(12, 6)"/>
+            <column name="GlobalZ" type="DECIMAL(12, 6)"/>
+            <column name="PlotShape" type="VARCHAR(255)"/>
+            <column name="PlotDescription" type="VARCHAR(255)"/>
+            <column defaultValue="m" name="DefaultDimensionUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m" name="DefaultCoordinateUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m2" name="DefaultAreaUnits" type="ENUM('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="mm" name="DefaultDBHUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m" name="DefaultHOMUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-13">
+        <createTable tableName="postvalidationqueries">
+            <column autoIncrement="true" name="QueryID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="QueryName" type="VARCHAR(255)"/>
+            <column name="QueryDefinition" type="TEXT"/>
+            <column name="Description" type="TEXT"/>
+            <column defaultValue="0" name="IsEnabled" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="LastRunAt" type="datetime"/>
+            <column name="LastRunResult" type="LONGTEXT"/>
+            <column name="LastRunStatus" type="ENUM('success', 'failure')"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-14">
+        <createTable tableName="quadrats">
+            <column autoIncrement="true" name="QuadratID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PlotID" type="INT"/>
+            <column name="QuadratName" type="VARCHAR(255)"/>
+            <column name="StartX" type="DECIMAL(12, 6)"/>
+            <column name="StartY" type="DECIMAL(12, 6)"/>
+            <column name="DimensionX" type="INT"/>
+            <column name="DimensionY" type="INT"/>
+            <column name="Area" type="DECIMAL(12, 6)"/>
+            <column name="QuadratShape" type="VARCHAR(255)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+            <column name="unique_sig" type="VARCHAR(500)">
+                <constraints unique="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-15">
+        <createTable tableName="reference">
+            <column autoIncrement="true" name="ReferenceID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="PublicationTitle" type="VARCHAR(64)"/>
+            <column name="FullReference" type="VARCHAR(255)"/>
+            <column name="DateOfPublication" type="date"/>
+            <column name="Citation" type="VARCHAR(50)"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-16">
+        <createTable tableName="roles">
+            <column autoIncrement="true" name="RoleID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="RoleName" type="VARCHAR(255)"/>
+            <column name="RoleDescription" type="VARCHAR(255)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-17">
+        <createTable tableName="sitespecificvalidations">
+            <column autoIncrement="true" name="ValidationID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="ProcedureName" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="Description" type="TEXT"/>
+            <column name="Criteria" type="VARCHAR(255)"/>
+            <column name="Definition" type="TEXT"/>
+            <column name="ChangelogDefinition" type="TEXT"/>
+            <column defaultValue="1" name="IsEnabled" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-18">
+        <createTable tableName="species">
+            <column autoIncrement="true" name="SpeciesID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="GenusID" type="INT"/>
+            <column name="SpeciesCode" type="VARCHAR(25)"/>
+            <column name="SpeciesName" type="VARCHAR(64)"/>
+            <column name="SubspeciesName" type="VARCHAR(64)"/>
+            <column name="IDLevel" type="VARCHAR(20)"/>
+            <column name="SpeciesAuthority" type="VARCHAR(128)"/>
+            <column name="SubspeciesAuthority" type="VARCHAR(128)"/>
+            <column name="FieldFamily" type="VARCHAR(32)"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column name="ValidCode" type="VARCHAR(255)"/>
+            <column name="ReferenceID" type="INT"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+            <column name="unique_sig" type="VARCHAR(500)">
+                <constraints unique="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-19">
+        <createTable tableName="specieslimits">
+            <column autoIncrement="true" name="SpeciesLimitID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="SpeciesID" type="INT"/>
+            <column name="PlotID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+            <column name="LimitType" type="ENUM('DBH')"/>
+            <column name="UpperBound" type="DECIMAL(12, 6)"/>
+            <column name="LowerBound" type="DECIMAL(12, 6)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-20">
+        <createTable tableName="specimens">
+            <column autoIncrement="true" name="SpecimenID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="StemID" type="INT"/>
+            <column name="PersonnelID" type="INT"/>
+            <column name="SpecimenNumber" type="INT"/>
+            <column name="SpeciesID" type="INT"/>
+            <column name="Herbarium" type="VARCHAR(32)"/>
+            <column name="Voucher" type="SMALLINT UNSIGNED"/>
+            <column name="CollectionDate" type="date"/>
+            <column name="DeterminedBy" type="VARCHAR(64)"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-21">
+        <createTable tableName="stems">
+            <column autoIncrement="true" name="StemGUID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="TreeID" type="INT"/>
+            <column name="QuadratID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+            <column name="StemCrossID" type="INT"/>
+            <column name="StemTag" type="VARCHAR(10)"/>
+            <column name="LocalX" type="DECIMAL(12, 6)"/>
+            <column name="LocalY" type="DECIMAL(12, 6)"/>
+            <column name="Moved" type="BIT(1)"/>
+            <column name="StemDescription" type="VARCHAR(255)"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-22">
+        <createTable tableName="temporarymeasurements">
+            <column autoIncrement="true" name="id" type="BIGINT UNSIGNED">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="FileID" type="VARCHAR(36)"/>
+            <column name="BatchID" type="VARCHAR(36)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="PlotID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+            <column name="TreeTag" type="VARCHAR(20)"/>
+            <column name="StemTag" type="VARCHAR(10)"/>
+            <column name="SpeciesCode" type="VARCHAR(25)"/>
+            <column name="QuadratName" type="VARCHAR(255)"/>
+            <column name="LocalX" type="DECIMAL(12, 6)"/>
+            <column name="LocalY" type="DECIMAL(12, 6)"/>
+            <column name="DBH" type="DECIMAL(12, 6)"/>
+            <column name="HOM" type="DECIMAL(12, 6)"/>
+            <column name="MeasurementDate" type="date"/>
+            <column name="Codes" type="VARCHAR(255)"/>
+            <column name="Comments" type="VARCHAR(255)"/>
+            <column defaultValueComputed="CURRENT_TIMESTAMP" name="UploadedAt" type="timestamp"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-23">
+        <createTable tableName="trees">
+            <column autoIncrement="true" name="TreeID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="TreeTag" type="VARCHAR(20)"/>
+            <column name="SpeciesID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+            <column defaultValueNumeric="1" name="IsActive" type="BIT(1)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DeletedAt" type="datetime"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-24">
+        <createTable tableName="unifiedchangelog">
+            <column autoIncrement="true" name="ChangeID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="TableName" type="VARCHAR(64)">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="RecordID" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="Operation" type="ENUM('INSERT', 'UPDATE', 'DELETE')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="OldRowState" type="JSON"/>
+            <column name="NewRowState" type="JSON"/>
+            <column defaultValueComputed="CURRENT_TIMESTAMP" name="ChangeTimestamp" type="datetime"/>
+            <column name="ChangedBy" type="VARCHAR(64)"/>
+            <column name="PlotID" type="INT"/>
+            <column name="CensusID" type="INT"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-25">
+        <createTable tableName="validationchangelog">
+            <column autoIncrement="true" name="ValidationRunID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="ProcedureName" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValueComputed="CURRENT_TIMESTAMP" name="RunDateTime" type="datetime">
+                <constraints nullable="false"/>
+            </column>
+            <column name="TargetRowID" type="INT"/>
+            <column name="ValidationOutcome" type="ENUM('Passed', 'Failed')"/>
+            <column name="ErrorMessage" type="VARCHAR(255)"/>
+            <column name="ValidationCriteria" type="VARCHAR(255)"/>
+            <column name="MeasuredValue" type="VARCHAR(255)"/>
+            <column name="ExpectedValueRange" type="VARCHAR(255)"/>
+            <column name="AdditionalDetails" type="VARCHAR(255)"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-26">
+        <createTable tableName="viewfulltable">
+            <column autoIncrement="true" name="CoreMeasurementID" type="INT">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="MeasurementDate" type="date"/>
+            <column name="MeasuredDBH" type="DECIMAL(10, 6)"/>
+            <column name="MeasuredHOM" type="DECIMAL(10, 6)"/>
+            <column name="Description" type="VARCHAR(255)"/>
+            <column defaultValue="0" name="IsValidated" type="BIT(1)"/>
+            <column name="PlotID" type="INT"/>
+            <column name="PlotName" type="VARCHAR(255)"/>
+            <column name="LocationName" type="VARCHAR(255)"/>
+            <column name="CountryName" type="VARCHAR(255)"/>
+            <column name="DimensionX" type="INT"/>
+            <column name="DimensionY" type="INT"/>
+            <column name="PlotArea" type="DECIMAL(10, 6)"/>
+            <column name="PlotGlobalX" type="DECIMAL(10, 6)"/>
+            <column name="PlotGlobalY" type="DECIMAL(10, 6)"/>
+            <column name="PlotGlobalZ" type="DECIMAL(10, 6)"/>
+            <column name="PlotShape" type="VARCHAR(255)"/>
+            <column name="PlotDescription" type="VARCHAR(255)"/>
+            <column defaultValue="m" name="PlotDefaultDimensionUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m" name="PlotDefaultCoordinateUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m2" name="PlotDefaultAreaUnits" type="ENUM('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="mm" name="PlotDefaultDBHUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column defaultValue="m" name="PlotDefaultHOMUnits" type="ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CensusID" type="INT"/>
+            <column name="CensusStartDate" type="date"/>
+            <column name="CensusEndDate" type="date"/>
+            <column name="CensusDescription" type="VARCHAR(255)"/>
+            <column name="PlotCensusNumber" type="INT"/>
+            <column name="QuadratID" type="INT"/>
+            <column name="QuadratName" type="VARCHAR(255)"/>
+            <column name="QuadratDimensionX" type="INT"/>
+            <column name="QuadratDimensionY" type="INT"/>
+            <column name="QuadratArea" type="DECIMAL(10, 6)"/>
+            <column name="QuadratStartX" type="DECIMAL(10, 6)"/>
+            <column name="QuadratStartY" type="DECIMAL(10, 6)"/>
+            <column name="QuadratShape" type="VARCHAR(255)"/>
+            <column name="TreeID" type="INT"/>
+            <column name="TreeTag" type="VARCHAR(20)"/>
+            <column name="StemGUID" type="INT"/>
+            <column name="StemTag" type="VARCHAR(10)"/>
+            <column name="StemLocalX" type="DECIMAL(10, 6)"/>
+            <column name="StemLocalY" type="DECIMAL(10, 6)"/>
+            <column name="SpeciesID" type="INT"/>
+            <column name="SpeciesCode" type="VARCHAR(25)"/>
+            <column name="SpeciesName" type="VARCHAR(64)"/>
+            <column name="SubspeciesName" type="VARCHAR(64)"/>
+            <column name="SubspeciesAuthority" type="VARCHAR(128)"/>
+            <column name="SpeciesIDLevel" type="VARCHAR(20)"/>
+            <column name="GenusID" type="INT"/>
+            <column name="Genus" type="VARCHAR(32)"/>
+            <column name="GenusAuthority" type="VARCHAR(32)"/>
+            <column name="FamilyID" type="INT"/>
+            <column name="Family" type="VARCHAR(32)"/>
+            <column name="Attributes" type="VARCHAR(255)"/>
+            <column name="UserDefinedFields" type="JSON"/>
+        </createTable>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-27">
+        <addUniqueConstraint columnNames="PersonnelID, CensusID" constraintName="censusactivepersonnel_PersonnelID_CensusID_uindex" tableName="censusactivepersonnel"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-28">
+        <addUniqueConstraint columnNames="FirstName, LastName, IsActive" constraintName="personnel_FirstName_LastName_RoleID__uindex" tableName="personnel"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-29">
+        <addUniqueConstraint columnNames="CoreMeasurementID, Code" constraintName="unique_cm_attribute" tableName="cmattributes"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-30">
+        <addUniqueConstraint columnNames="CoreMeasurementID, ValidationErrorID" constraintName="unique_cmverrors_cm_valerror" tableName="cmverrors"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-31">
+        <addUniqueConstraint columnNames="PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive" constraintName="unique_full_quadrat" tableName="quadrats"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-32">
+        <addUniqueConstraint columnNames="Genus, IsActive" constraintName="unique_genus" tableName="genus"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-33">
+        <addUniqueConstraint columnNames="RoleName, IsActive" constraintName="unique_roles" tableName="roles"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-34">
+        <addUniqueConstraint columnNames="StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM" constraintName="ux_measure_unique" tableName="coremeasurements"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-35">
+        <addUniqueConstraint columnNames="StemTag, TreeID, QuadratID, LocalX, LocalY, IsActive, CensusID" constraintName="ux_stems_coordinate" tableName="stems"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-36">
+        <addUniqueConstraint columnNames="TreeID, StemTag, CensusID" constraintName="ux_stems_treeid_stemtag_census" tableName="stems"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-37">
+        <addUniqueConstraint columnNames="TreeTag, SpeciesID, CensusID" constraintName="ux_trees_treetag_speciesid_censusid" tableName="trees"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-38">
+        <createIndex associatedWith="" indexName="CMAttributes_Attributes_Code_fk" tableName="cmattributes">
+            <column name="Code"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-39">
+        <createIndex associatedWith="" indexName="censusactivepersonnel_census_CensusID_fk" tableName="censusactivepersonnel">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-40">
+        <createIndex associatedWith="" indexName="cmverrors_sitespecificvalidations_ValidationID_fk" tableName="cmverrors">
+            <column name="ValidationErrorID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-41">
+        <createIndex associatedWith="" indexName="idx_area" tableName="plots">
+            <column name="Area"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-42">
+        <createIndex associatedWith="" indexName="idx_area" tableName="quadrats">
+            <column name="Area"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-43">
+        <createIndex associatedWith="" indexName="idx_attributes" tableName="measurementssummary">
+            <column name="Attributes"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-44">
+        <createIndex associatedWith="" indexName="idx_attributes_codes" tableName="attributes">
+            <column name="Code"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-45">
+        <createIndex associatedWith="" indexName="idx_attributes_description" tableName="attributes">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-46">
+        <createIndex associatedWith="" indexName="idx_attributes_status" tableName="attributes">
+            <column name="Status"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-47">
+        <createIndex associatedWith="" indexName="idx_censusid" tableName="coremeasurements">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-48">
+        <createIndex associatedWith="" indexName="idx_censusid" tableName="measurementssummary">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-49">
+        <createIndex associatedWith="" indexName="idx_censusid" tableName="unifiedchangelog">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-50">
+        <createIndex associatedWith="" indexName="idx_changedby" tableName="unifiedchangelog">
+            <column name="ChangedBy"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-51">
+        <createIndex associatedWith="" indexName="idx_changetimestamp" tableName="unifiedchangelog">
+            <column defaultValueComputed="CURRENT_TIMESTAMP" name="ChangeTimestamp"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-52">
+        <createIndex associatedWith="" indexName="idx_cid_md_dbh_hom_qn_tt" tableName="temporarymeasurements">
+            <column name="CensusID"/>
+            <column name="MeasurementDate"/>
+            <column name="DBH"/>
+            <column name="HOM"/>
+            <column name="QuadratName"/>
+            <column name="TreeTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-53">
+        <createIndex associatedWith="" indexName="idx_citation" tableName="reference">
+            <column name="Citation"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-54">
+        <createIndex associatedWith="" indexName="idx_coremeasurementid" tableName="measurementssummary">
+            <column name="CoreMeasurementID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-55">
+        <createIndex associatedWith="" indexName="idx_countryname" tableName="plots">
+            <column name="CountryName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-56">
+        <createIndex associatedWith="" indexName="idx_dateofpublication" tableName="reference">
+            <column name="DateOfPublication"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-57">
+        <createIndex associatedWith="" indexName="idx_defaultareaunits" tableName="plots">
+            <column name="DefaultAreaUnits"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-58">
+        <createIndex associatedWith="" indexName="idx_defaultcoordinateunits" tableName="plots">
+            <column name="DefaultCoordinateUnits"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-59">
+        <createIndex associatedWith="" indexName="idx_defaultdbhunits" tableName="plots">
+            <column name="DefaultDBHUnits"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-60">
+        <createIndex associatedWith="" indexName="idx_defaultdimensionunits" tableName="plots">
+            <column name="DefaultDimensionUnits"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-61">
+        <createIndex associatedWith="" indexName="idx_defaulthomunits" tableName="plots">
+            <column name="DefaultHOMUnits"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-62">
+        <createIndex associatedWith="" indexName="idx_description" tableName="census">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-63">
+        <createIndex associatedWith="" indexName="idx_description" tableName="coremeasurements">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-64">
+        <createIndex associatedWith="" indexName="idx_description" tableName="measurementssummary">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-65">
+        <createIndex associatedWith="" indexName="idx_description" tableName="postvalidationqueries">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-66">
+        <createIndex associatedWith="" indexName="idx_description" tableName="species">
+            <column name="Description"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-67">
+        <createIndex associatedWith="" indexName="idx_dimensionx" tableName="plots">
+            <column name="DimensionX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-68">
+        <createIndex associatedWith="" indexName="idx_dimensionx" tableName="quadrats">
+            <column name="DimensionX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-69">
+        <createIndex associatedWith="" indexName="idx_dimensiony" tableName="plots">
+            <column name="DimensionY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-70">
+        <createIndex associatedWith="" indexName="idx_dimensiony" tableName="quadrats">
+            <column name="DimensionY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-71">
+        <createIndex associatedWith="" indexName="idx_enddate" tableName="census">
+            <column name="EndDate"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-72">
+        <createIndex associatedWith="" indexName="idx_familyid" tableName="genus">
+            <column name="FamilyID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-73">
+        <createIndex associatedWith="" indexName="idx_fieldfamily" tableName="species">
+            <column name="FieldFamily"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-74">
+        <createIndex associatedWith="" indexName="idx_firstname" tableName="personnel">
+            <column name="FirstName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-75">
+        <createIndex associatedWith="" indexName="idx_fullreference" tableName="reference">
+            <column name="FullReference"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-76">
+        <createIndex associatedWith="" indexName="idx_genus" tableName="genus">
+            <column name="Genus"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-77">
+        <createIndex associatedWith="" indexName="idx_genusauthority" tableName="genus">
+            <column name="GenusAuthority"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-78">
+        <createIndex associatedWith="" indexName="idx_genusid" tableName="species">
+            <column name="GenusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-79">
+        <createIndex associatedWith="" indexName="idx_globalx" tableName="plots">
+            <column name="GlobalX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-80">
+        <createIndex associatedWith="" indexName="idx_globaly" tableName="plots">
+            <column name="GlobalY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-81">
+        <createIndex associatedWith="" indexName="idx_globalz" tableName="plots">
+            <column name="GlobalZ"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-82">
+        <createIndex associatedWith="" indexName="idx_idlevel" tableName="species">
+            <column name="IDLevel"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-83">
+        <createIndex associatedWith="" indexName="idx_isenabled" tableName="postvalidationqueries">
+            <column name="IsEnabled"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-84">
+        <createIndex associatedWith="" indexName="idx_isvalidated" tableName="coremeasurements">
+            <column name="IsValidated"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-85">
+        <createIndex associatedWith="" indexName="idx_isvalidated" tableName="measurementssummary">
+            <column name="IsValidated"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-86">
+        <createIndex associatedWith="" indexName="idx_lastname" tableName="personnel">
+            <column name="LastName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-87">
+        <createIndex associatedWith="" indexName="idx_lastrunat" tableName="postvalidationqueries">
+            <column name="LastRunAt"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-88">
+        <createIndex associatedWith="" indexName="idx_lastrunresult" tableName="postvalidationqueries">
+            <column name="LastRunResult"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-89">
+        <createIndex associatedWith="" indexName="idx_lastrunstatus" tableName="postvalidationqueries">
+            <column name="LastRunStatus"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-90">
+        <createIndex associatedWith="" indexName="idx_limittype" tableName="specieslimits">
+            <column name="LimitType"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-91">
+        <createIndex associatedWith="" indexName="idx_localx" tableName="stems">
+            <column name="LocalX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-92">
+        <createIndex associatedWith="" indexName="idx_localy" tableName="stems">
+            <column name="LocalY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-93">
+        <createIndex associatedWith="" indexName="idx_locationname" tableName="plots">
+            <column name="LocationName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-94">
+        <createIndex associatedWith="" indexName="idx_lowerbound" tableName="specieslimits">
+            <column name="LowerBound"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-95">
+        <createIndex associatedWith="" indexName="idx_measureddbh" tableName="coremeasurements">
+            <column name="MeasuredDBH"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-96">
+        <createIndex associatedWith="" indexName="idx_measureddbh" tableName="measurementssummary">
+            <column name="MeasuredDBH"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-97">
+        <createIndex associatedWith="" indexName="idx_measuredhom" tableName="coremeasurements">
+            <column name="MeasuredHOM"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-98">
+        <createIndex associatedWith="" indexName="idx_measuredhom" tableName="measurementssummary">
+            <column name="MeasuredHOM"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-99">
+        <createIndex associatedWith="" indexName="idx_measurementdate" tableName="coremeasurements">
+            <column name="MeasurementDate"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-100">
+        <createIndex associatedWith="" indexName="idx_measurementdate" tableName="measurementssummary">
+            <column name="MeasurementDate"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-101">
+        <createIndex associatedWith="" indexName="idx_moved" tableName="stems">
+            <column name="Moved"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-102">
+        <createIndex associatedWith="" indexName="idx_mss_dup_detect" tableName="measurementssummary">
+            <column name="CensusID"/>
+            <column name="QuadratName"/>
+            <column name="StemGUID"/>
+            <column name="MeasurementDate"/>
+            <column name="MeasuredDBH"/>
+            <column name="MeasuredHOM"/>
+            <column name="Attributes"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-103">
+        <createIndex associatedWith="" indexName="idx_operation" tableName="unifiedchangelog">
+            <column name="Operation"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-104">
+        <createIndex associatedWith="" indexName="idx_plotcensusnumber" tableName="census">
+            <column name="PlotCensusNumber"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-105">
+        <createIndex associatedWith="" indexName="idx_plotdescription" tableName="plots">
+            <column name="PlotDescription"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-106">
+        <createIndex associatedWith="" indexName="idx_plotid" tableName="census">
+            <column name="PlotID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-107">
+        <createIndex associatedWith="" indexName="idx_plotid" tableName="measurementssummary">
+            <column name="PlotID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-108">
+        <createIndex associatedWith="" indexName="idx_plotid" tableName="quadrats">
+            <column name="PlotID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-109">
+        <createIndex associatedWith="" indexName="idx_plotid" tableName="unifiedchangelog">
+            <column name="PlotID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-110">
+        <createIndex associatedWith="" indexName="idx_plotname" tableName="plots">
+            <column name="PlotName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-111">
+        <createIndex associatedWith="" indexName="idx_plotshape" tableName="plots">
+            <column name="PlotShape"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-112">
+        <createIndex associatedWith="" indexName="idx_publicationtitle" tableName="reference">
+            <column name="PublicationTitle"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-113">
+        <createIndex associatedWith="" indexName="idx_quadratid" tableName="measurementssummary">
+            <column name="QuadratID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-114">
+        <createIndex associatedWith="" indexName="idx_quadratid" tableName="stems">
+            <column name="QuadratID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-115">
+        <createIndex associatedWith="" indexName="idx_quadratname" tableName="measurementssummary">
+            <column name="QuadratName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-116">
+        <createIndex associatedWith="" indexName="idx_quadratname" tableName="quadrats">
+            <column name="QuadratName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-117">
+        <createIndex associatedWith="" indexName="idx_quadratshape" tableName="quadrats">
+            <column name="QuadratShape"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-118">
+        <createIndex associatedWith="" indexName="idx_querydefinition" tableName="postvalidationqueries">
+            <column name="QueryDefinition"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-119">
+        <createIndex associatedWith="" indexName="idx_queryname" tableName="postvalidationqueries">
+            <column name="QueryName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-120">
+        <createIndex associatedWith="" indexName="idx_recordid" tableName="unifiedchangelog">
+            <column name="RecordID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-121">
+        <createIndex associatedWith="" indexName="idx_referenceid" tableName="family">
+            <column name="ReferenceID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-122">
+        <createIndex associatedWith="" indexName="idx_referenceid" tableName="genus">
+            <column name="ReferenceID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-123">
+        <createIndex associatedWith="" indexName="idx_referenceid" tableName="species">
+            <column name="ReferenceID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-124">
+        <createIndex associatedWith="" indexName="idx_roledescription" tableName="roles">
+            <column name="RoleDescription"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-125">
+        <createIndex associatedWith="" indexName="idx_roleid" tableName="personnel">
+            <column name="RoleID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-126">
+        <createIndex associatedWith="" indexName="idx_rolename" tableName="roles">
+            <column name="RoleName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-127">
+        <createIndex associatedWith="" indexName="idx_s_qid_st" tableName="stems">
+            <column name="QuadratID"/>
+            <column name="StemTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-128">
+        <createIndex associatedWith="" indexName="idx_speciesauthority" tableName="species">
+            <column name="SpeciesAuthority"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-129">
+        <createIndex associatedWith="" indexName="idx_speciescode" tableName="measurementssummary">
+            <column name="SpeciesCode"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-130">
+        <createIndex associatedWith="" indexName="idx_speciescode" tableName="species">
+            <column name="SpeciesCode"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-131">
+        <createIndex associatedWith="" indexName="idx_speciesid" tableName="measurementssummary">
+            <column name="SpeciesID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-132">
+        <createIndex associatedWith="" indexName="idx_speciesid" tableName="specieslimits">
+            <column name="SpeciesID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-133">
+        <createIndex associatedWith="" indexName="idx_speciesid" tableName="trees">
+            <column name="SpeciesID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-134">
+        <createIndex associatedWith="" indexName="idx_speciesname" tableName="measurementssummary">
+            <column name="SpeciesName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-135">
+        <createIndex associatedWith="" indexName="idx_speciesname" tableName="species">
+            <column name="SpeciesName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-136">
+        <createIndex associatedWith="" indexName="idx_startdate" tableName="census">
+            <column name="StartDate"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-137">
+        <createIndex associatedWith="" indexName="idx_startx" tableName="quadrats">
+            <column name="StartX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-138">
+        <createIndex associatedWith="" indexName="idx_starty" tableName="quadrats">
+            <column name="StartY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-139">
+        <createIndex associatedWith="" indexName="idx_stemdescription" tableName="stems">
+            <column name="StemDescription"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-140">
+        <createIndex associatedWith="" indexName="idx_stemid" tableName="coremeasurements">
+            <column name="StemGUID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-141">
+        <createIndex associatedWith="" indexName="idx_stemid" tableName="measurementssummary">
+            <column name="StemGUID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-142">
+        <createIndex associatedWith="" indexName="idx_stemlocalx" tableName="measurementssummary">
+            <column name="StemLocalX"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-143">
+        <createIndex associatedWith="" indexName="idx_stemlocaly" tableName="measurementssummary">
+            <column name="StemLocalY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-144">
+        <createIndex associatedWith="" indexName="idx_stemnumber" tableName="stems">
+            <column name="StemCrossID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-145">
+        <createIndex associatedWith="" indexName="idx_stems_stemtag_quadratid" tableName="stems">
+            <column name="StemTag"/>
+            <column name="QuadratID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-146">
+        <createIndex associatedWith="" indexName="idx_stemtag" tableName="measurementssummary">
+            <column name="StemTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-147">
+        <createIndex associatedWith="" indexName="idx_stemtag" tableName="stems">
+            <column name="StemTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-148">
+        <createIndex associatedWith="" indexName="idx_subspeciesauthority" tableName="species">
+            <column name="SubspeciesAuthority"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-149">
+        <createIndex associatedWith="" indexName="idx_subspeciesname" tableName="measurementssummary">
+            <column name="SubspeciesName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-150">
+        <createIndex associatedWith="" indexName="idx_subspeciesname" tableName="species">
+            <column name="SubspeciesName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-151">
+        <createIndex associatedWith="" indexName="idx_tablename" tableName="unifiedchangelog">
+            <column name="TableName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-152">
+        <createIndex associatedWith="" indexName="idx_tm_tag_xy_cid" tableName="temporarymeasurements">
+            <column name="StemTag"/>
+            <column name="LocalX"/>
+            <column name="LocalY"/>
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-153">
+        <createIndex associatedWith="" indexName="idx_tmpm_file_batch_census" tableName="temporarymeasurements">
+            <column name="FileID"/>
+            <column name="BatchID"/>
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-154">
+        <createIndex associatedWith="" indexName="idx_treeid" tableName="measurementssummary">
+            <column name="TreeID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-155">
+        <createIndex associatedWith="" indexName="idx_treeid" tableName="stems">
+            <column name="TreeID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-156">
+        <createIndex associatedWith="" indexName="idx_treetag" tableName="measurementssummary">
+            <column name="TreeTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-157">
+        <createIndex associatedWith="" indexName="idx_upperbound" tableName="specieslimits">
+            <column name="UpperBound"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-158">
+        <createIndex associatedWith="" indexName="idx_validcode" tableName="species">
+            <column name="ValidCode"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-159">
+        <createIndex associatedWith="" indexName="ingest_temporarymeasurements_FBPC_index" tableName="temporarymeasurements">
+            <column name="FileID"/>
+            <column name="BatchID"/>
+            <column name="PlotID"/>
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-160">
+        <createIndex associatedWith="" indexName="ingest_temporarymeasurements_batchID_index" tableName="temporarymeasurements">
+            <column name="BatchID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-161">
+        <createIndex associatedWith="" indexName="ix_cm_cid_date_dbh_hom" tableName="coremeasurements">
+            <column name="CensusID"/>
+            <column name="MeasurementDate"/>
+            <column name="MeasuredDBH"/>
+            <column name="MeasuredHOM"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-162">
+        <createIndex associatedWith="" indexName="ix_stems_treeid_stemtag_quadratid" tableName="stems">
+            <column name="TreeID"/>
+            <column name="StemTag"/>
+            <column name="QuadratID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-163">
+        <createIndex associatedWith="" indexName="roles_RoleName_RoleDescription_IsActive_index" tableName="roles">
+            <column name="RoleName"/>
+            <column name="RoleDescription"/>
+            <column defaultValueNumeric="1" name="IsActive"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-164">
+        <createIndex associatedWith="" indexName="specieslimits_census_CensusID_fk" tableName="specieslimits">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-165">
+        <createIndex associatedWith="" indexName="specieslimits_plots_PlotID_fk" tableName="specieslimits">
+            <column name="PlotID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-166">
+        <createIndex associatedWith="" indexName="specimens_personnel_PersonnelID_fk" tableName="specimens">
+            <column name="PersonnelID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-167">
+        <createIndex associatedWith="" indexName="specimens_stems_StemID_fk" tableName="specimens">
+            <column name="StemID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-168">
+        <createIndex associatedWith="" indexName="stems_census_CensusID_fk_2" tableName="stems">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-169">
+        <createIndex associatedWith="" indexName="temporarymeasurements_Codes_index" tableName="temporarymeasurements">
+            <column name="Codes"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-170">
+        <createIndex associatedWith="" indexName="temporarymeasurements_DBH_HOM_MeasurementDate_index" tableName="temporarymeasurements">
+            <column name="DBH"/>
+            <column name="HOM"/>
+            <column name="MeasurementDate"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-171">
+        <createIndex associatedWith="" indexName="temporarymeasurements_FileID_BatchID_index" tableName="temporarymeasurements">
+            <column name="FileID"/>
+            <column name="BatchID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-172">
+        <createIndex associatedWith="" indexName="temporarymeasurements_FileID_index" tableName="temporarymeasurements">
+            <column name="FileID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-173">
+        <createIndex associatedWith="" indexName="temporarymeasurements_QuadratName_index" tableName="temporarymeasurements">
+            <column name="QuadratName"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-174">
+        <createIndex associatedWith="" indexName="temporarymeasurements_StemTag_LocalX_LocalY_index" tableName="temporarymeasurements">
+            <column name="StemTag"/>
+            <column name="LocalX"/>
+            <column name="LocalY"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-175">
+        <createIndex associatedWith="" indexName="temporarymeasurements_StemTag_index" tableName="temporarymeasurements">
+            <column name="StemTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-176">
+        <createIndex associatedWith="" indexName="temporarymeasurements_TreeTag_SpeciesCode_index" tableName="temporarymeasurements">
+            <column name="TreeTag"/>
+            <column name="SpeciesCode"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-177">
+        <createIndex associatedWith="" indexName="temporarymeasurements_TreeTag_index" tableName="temporarymeasurements">
+            <column name="TreeTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-178">
+        <createIndex associatedWith="" indexName="trees_TreeTag_index" tableName="trees">
+            <column name="TreeTag"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-179">
+        <createIndex associatedWith="" indexName="trees_census_CensusID_fk_2" tableName="trees">
+            <column name="CensusID"/>
+        </createIndex>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-180">
+        <addForeignKeyConstraint baseColumnNames="Code" baseTableName="cmattributes" constraintName="CMAttributes_Attributes_Code_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="Code" referencedTableName="attributes" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-181">
+        <addForeignKeyConstraint baseColumnNames="CoreMeasurementID" baseTableName="cmattributes" constraintName="CMAttributes_CoreMeasurements_CoreMeasurementID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="CoreMeasurementID" referencedTableName="coremeasurements" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-182">
+        <addForeignKeyConstraint baseColumnNames="PlotID" baseTableName="census" constraintName="Census_Plots_PlotID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="PlotID" referencedTableName="plots" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-183">
+        <addForeignKeyConstraint baseColumnNames="StemGUID" baseTableName="coremeasurements" constraintName="FK_CoreMeasurements_Stems" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="StemGUID" referencedTableName="stems" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-184">
+        <addForeignKeyConstraint baseColumnNames="TreeID" baseTableName="stems" constraintName="FK_Stems_Trees" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="TreeID" referencedTableName="trees" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-185">
+        <addForeignKeyConstraint baseColumnNames="ReferenceID" baseTableName="family" constraintName="Family_Reference_ReferenceID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="ReferenceID" referencedTableName="reference" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-186">
+        <addForeignKeyConstraint baseColumnNames="FamilyID" baseTableName="genus" constraintName="Genus_Family_FamilyID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="FamilyID" referencedTableName="family" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-187">
+        <addForeignKeyConstraint baseColumnNames="ReferenceID" baseTableName="genus" constraintName="Genus_Reference_ReferenceID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="ReferenceID" referencedTableName="reference" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-188">
+        <addForeignKeyConstraint baseColumnNames="PlotID" baseTableName="quadrats" constraintName="Quadrats_Plots_FK" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="PlotID" referencedTableName="plots" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-189">
+        <addForeignKeyConstraint baseColumnNames="GenusID" baseTableName="species" constraintName="Species_Genus_GenusID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="GenusID" referencedTableName="genus" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-190">
+        <addForeignKeyConstraint baseColumnNames="ReferenceID" baseTableName="species" constraintName="Species_Reference_ReferenceID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="ReferenceID" referencedTableName="reference" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-191">
+        <addForeignKeyConstraint baseColumnNames="SpeciesID" baseTableName="trees" constraintName="Trees_Species_SpeciesID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="SpeciesID" referencedTableName="species" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-192">
+        <addForeignKeyConstraint baseColumnNames="CensusID" baseTableName="censusactivepersonnel" constraintName="censusactivepersonnel_census_CensusID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="CASCADE" referencedColumnNames="CensusID" referencedTableName="census" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-193">
+        <addForeignKeyConstraint baseColumnNames="PersonnelID" baseTableName="censusactivepersonnel" constraintName="censusactivepersonnel_personnel_PersonnelID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="CASCADE" referencedColumnNames="PersonnelID" referencedTableName="personnel" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-194">
+        <addForeignKeyConstraint baseColumnNames="CoreMeasurementID" baseTableName="cmverrors" constraintName="cmverrors_coremeasurements_CoreMeasurementID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="CoreMeasurementID" referencedTableName="coremeasurements" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-195">
+        <addForeignKeyConstraint baseColumnNames="ValidationErrorID" baseTableName="cmverrors" constraintName="cmverrors_sitespecificvalidations_ValidationID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="ValidationID" referencedTableName="sitespecificvalidations" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-196">
+        <addForeignKeyConstraint baseColumnNames="CensusID" baseTableName="coremeasurements" constraintName="coremeasurements_census_CensusID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="CensusID" referencedTableName="census" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-197">
+        <addForeignKeyConstraint baseColumnNames="RoleID" baseTableName="personnel" constraintName="personnel_roles_RoleID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="RoleID" referencedTableName="roles" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-198">
+        <addForeignKeyConstraint baseColumnNames="CensusID" baseTableName="specieslimits" constraintName="specieslimits_census_CensusID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="CensusID" referencedTableName="census" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-199">
+        <addForeignKeyConstraint baseColumnNames="PlotID" baseTableName="specieslimits" constraintName="specieslimits_plots_PlotID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="PlotID" referencedTableName="plots" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-200">
+        <addForeignKeyConstraint baseColumnNames="SpeciesID" baseTableName="specieslimits" constraintName="specieslimits_species_SpeciesID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="SpeciesID" referencedTableName="species" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-201">
+        <addForeignKeyConstraint baseColumnNames="PersonnelID" baseTableName="specimens" constraintName="specimens_personnel_PersonnelID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="PersonnelID" referencedTableName="personnel" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-202">
+        <addForeignKeyConstraint baseColumnNames="StemID" baseTableName="specimens" constraintName="specimens_stems_StemID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="StemGUID" referencedTableName="stems" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-203">
+        <addForeignKeyConstraint baseColumnNames="CensusID" baseTableName="stems" constraintName="stems_census_CensusID_fk_2" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="CASCADE" referencedColumnNames="CensusID" referencedTableName="census" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-204">
+        <addForeignKeyConstraint baseColumnNames="QuadratID" baseTableName="stems" constraintName="stems_quadrats_QuadratID_fk" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="RESTRICT" referencedColumnNames="QuadratID" referencedTableName="quadrats" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-205">
+        <addForeignKeyConstraint baseColumnNames="CensusID" baseTableName="trees" constraintName="trees_census_CensusID_fk_2" deferrable="false" initiallyDeferred="false" onDelete="CASCADE" onUpdate="CASCADE" referencedColumnNames="CensusID" referencedTableName="census" validate="true"/>
+    </changeSet>
+    <changeSet author="sambokar (generated)" id="1758149236884-206">
+        <createView fullDefinition="false" remarks="VIEW" viewName="alltaxonomiesview">select `s`.`SpeciesID` AS `SpeciesID`,`f`.`FamilyID` AS `FamilyID`,`g`.`GenusID` AS `GenusID`,`s`.`SpeciesCode` AS `SpeciesCode`,`f`.`Family` AS `Family`,`g`.`Genus` AS `Genus`,`g`.`GenusAuthority` AS `GenusAuthority`,`s`.`SpeciesName` AS `SpeciesName`,`s`.`SubspeciesName` AS `SubspeciesName`,`s`.`IDLevel` AS `IDLevel`,`s`.`SpeciesAuthority` AS `SpeciesAuthority`,`s`.`SubspeciesAuthority` AS `SubspeciesAuthority`,`s`.`ValidCode` AS `ValidCode`,`s`.`FieldFamily` AS `FieldFamily`,`s`.`Description` AS `SpeciesDescription` from ((`forestgeo_testing`.`species` `s` left join `forestgeo_testing`.`genus` `g` on(((`s`.`GenusID` = `g`.`GenusID`) and (`g`.`IsActive` = 1)))) left join `forestgeo_testing`.`family` `f` on(((`g`.`FamilyID` = `f`.`FamilyID`) and (`f`.`IsActive` = 1)))) where (`s`.`IsActive` = 1)</createView>
+    </changeSet>
+</databaseChangeLog>

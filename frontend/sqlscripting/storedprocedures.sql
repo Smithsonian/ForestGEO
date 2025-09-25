@@ -225,6 +225,8 @@ begin
 
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
+
+    -- Remove duplicates based on StemGUID and MeasurementDate
     DELETE cm1
     FROM coremeasurements cm1
              INNER JOIN coremeasurements cm2
@@ -232,6 +234,21 @@ begin
       AND cm1.StemGUID = cm2.StemGUID
       AND cm1.MeasurementDate = cm2.MeasurementDate
       AND cm1.CensusID = vCensusID;
+
+    -- Remove duplicates based on TreeTag/StemTag combinations within the same census
+    DELETE cm1
+    FROM coremeasurements cm1
+             INNER JOIN stems s1 ON cm1.StemGUID = s1.StemGUID
+             INNER JOIN trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
+             INNER JOIN coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
+             INNER JOIN stems s2 ON cm2.StemGUID = s2.StemGUID
+             INNER JOIN trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+      AND t1.TreeTag = t2.TreeTag
+      AND s1.StemTag = s2.StemTag
+      AND cm1.CensusID = vCensusID
+      AND t1.CensusID = vCensusID
+      AND s1.CensusID = vCensusID;
 end;
 
 create

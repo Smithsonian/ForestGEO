@@ -53,3 +53,6 @@ next-env.d.ts
 /documentation/.obsidian
 /documentation/.obsidian/*
 frontend/liquibase/
+
+*.sh
+*.properties
