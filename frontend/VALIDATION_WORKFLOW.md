@@ -305,6 +305,7 @@ graph TB
 ## Key Features Summary
 
 ### 🔄 **Real-time Validation Flow**
+
 1. User types SQL query
 2. 1-second debounce delay
 3. API validates syntax + patterns + schema
@@ -312,23 +313,27 @@ graph TB
 5. Save button enabled/disabled based on validation
 
 ### 📋 **Template System**
+
 1. "Use Template" button appears for empty queries
 2. Loads corequeries.sql-compliant template
 3. Includes all required patterns and parameters
 4. Provides clear comments for customization
 
 ### 🔍 **Pattern Validation Engine**
+
 - **Required Elements**: INSERT INTO cmverrors, @validationProcedureID, IsValidated IS NULL
 - **Recommended Patterns**: DISTINCT, IsActive filters, duplicate prevention
 - **Schema Validation**: Table/column existence, proper JOIN patterns
 
 ### 💾 **Database Integration**
+
 - Automatic ValidationID generation
 - Transaction-safe operations
 - Proper error handling and rollback
 - Integration with existing corequeries.sql structure
 
 ### 📁 **Download Functionality**
+
 - Processes variable replacements (@p_PlotID, @p_CensusID)
 - Generates clean SQL files
 - Meaningful filename based on procedure name

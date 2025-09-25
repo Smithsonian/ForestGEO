@@ -115,19 +115,8 @@ VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus',
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
-         join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive is true
-         join (
-             -- Find duplicate TreeTag+StemTag combinations within same census
-             select t2.CensusID, t2.TreeTag, s2.StemTag
-             from trees t2
-             join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
-             where t2.IsActive = true and s2.IsActive = true
-             group by t2.CensusID, t2.TreeTag, s2.StemTag
-             having count(distinct s2.StemGUID) > 1
-         ) as duplicates ON t.CensusID = duplicates.CensusID
-                        AND t.TreeTag = duplicates.TreeTag
-                        AND s.StemTag = duplicates.StemTag
+         join stems s1 on cm.StemGUID = s1.StemGUID and c.CensusID = s1.CensusID and s1.IsActive is true
+         join stems s2 on s1.StemCrossID = s2.StemCrossID and s1.StemGUID <> s2.StemGUID and s2.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true

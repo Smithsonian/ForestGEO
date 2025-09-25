@@ -10,7 +10,7 @@ import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteConte
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import moment from 'moment';
-import { FileRow, FormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType } from '@/config/macros/formdetails';
 import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 
@@ -18,7 +18,7 @@ const ROWS_PER_BATCH = 10;
 
 // Helper function to check if there are any actual error rows
 const hasErrorRows = (errorRows: FileCollectionRowSet): boolean => {
-  return Object.values(errorRows).some(fileRowSet => Object.keys(fileRowSet).length > 0);
+  return Object.values(errorRows).some(fileRowSet => typeof fileRowSet === 'object' && fileRowSet !== null && Object.keys(fileRowSet).length > 0);
 };
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {

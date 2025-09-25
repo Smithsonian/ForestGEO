@@ -265,9 +265,24 @@ BEGIN
                       AND t.CensusID = vCurrentCensusID 
                       AND t.IsActive = 1;
 
-    -- Step 8: Optimized StemCrossID update (bulk update)
+    -- Step 8: Highly optimized StemCrossID update using correlated subquery
+    -- Single UPDATE statement that handles both existing and new stems efficiently
     UPDATE stems s
-    SET s.StemCrossID = s.StemGUID
+    SET s.StemCrossID = COALESCE(
+        (SELECT s_prev.StemCrossID
+         FROM stems s_prev
+         INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
+         INNER JOIN trees t_curr ON t_curr.TreeID = s.TreeID
+         WHERE t_prev.TreeTag = t_curr.TreeTag
+           AND s_prev.StemTag = s.StemTag
+           AND t_prev.CensusID < vCurrentCensusID
+           AND t_prev.IsActive = 1
+           AND s_prev.IsActive = 1
+           AND s_prev.StemCrossID IS NOT NULL
+         ORDER BY t_prev.CensusID DESC
+         LIMIT 1),
+        s.StemGUID
+    )
     WHERE s.CensusID = vCurrentCensusID
       AND s.StemCrossID IS NULL;
 

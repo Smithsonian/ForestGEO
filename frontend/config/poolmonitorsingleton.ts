@@ -15,11 +15,7 @@ const sqlConfig: PoolOptions = {
   keepAliveInitialDelay: 0,
   enableKeepAlive: true,
   connectTimeout: 30000, // Increased to 30 seconds for deployed environment
-  acquireTimeout: 60000, // 1 minute timeout for acquiring connections
-  timeout: 300000, // 5 minute query timeout for large operations
-  reconnect: true, // Enable automatic reconnection
-  idleTimeout: 900000, // 15 minutes idle timeout
-  maxReconnects: 3, // Maximum reconnection attempts
+  idleTimeout: 300000, // 5 minutes idle timeout
   // Azure SQL specific optimizations
   ssl: {
     rejectUnauthorized: false // Required for Azure SQL
