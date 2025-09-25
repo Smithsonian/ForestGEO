@@ -197,7 +197,7 @@ export default function DashboardPage() {
         {/* Census Statistics Card */}
         <Card variant="soft" color="primary" invertedColors sx={{ width: '50%' }} aria-labelledby="census-statistics-heading stats-display-heading">
           <CardContent sx={{ px: 0, width: '100%', height: '100%' }}>
-            <Typography id="census-statistics-heading" level="title-lg">
+            <Typography id="census-statistics-heading" level="title-lg" component="h2">
               Census Statistics
             </Typography>
             <Typography id="stats-display-heading" level="title-md" alignSelf="center">
@@ -374,13 +374,33 @@ export default function DashboardPage() {
 
             <AccordionGroup>
               <Accordion aria-label="File upload history accordion">
-                <AccordionSummary id="file-upload-summary" aria-controls="file-upload-details">
+                <AccordionSummary
+                  id="file-upload-summary"
+                  aria-controls="file-upload-details"
+                  aria-describedby="file-upload-description"
+                >
                   File Upload History
+                  <Typography
+                    id="file-upload-description"
+                    level="body-xs"
+                    sx={{ display: 'none' }}
+                    aria-hidden="true"
+                  >
+                    Expand to view list of uploaded files
+                  </Typography>
                 </AccordionSummary>
                 <AccordionDetails
                   id="file-upload-details"
                   aria-labelledby="file-upload-summary"
-                  sx={{ p: 0, m: 0, overflowY: 'auto', '&.MuiCollapse-wrapperInner, &.MuiCollapse-hidden': { p: 0, m: 0 } }}
+                  sx={{
+                    p: 0,
+                    m: 0,
+                    overflowY: 'auto',
+                    '&.MuiCollapse-wrapperInner, &.MuiCollapse-hidden': { p: 0, m: 0 },
+                    '&[aria-hidden="true"]': {
+                      visibility: 'hidden'
+                    }
+                  }}
                 >
                   <List aria-label="Uploaded files list">
                     {(filesUploaded ?? []).map((file, index) => (
@@ -402,7 +422,7 @@ export default function DashboardPage() {
             <Divider orientation="horizontal" sx={{ my: 1 }} />
 
             <Box role="region" aria-labelledby="recent-changes-heading" sx={{ height: '100%' }}>
-              <Typography id="recent-changes-heading" level="title-lg" fontWeight="bold" sx={{ mb: 1 }}>
+              <Typography id="recent-changes-heading" level="title-lg" component="h3" fontWeight="bold" sx={{ mb: 1 }}>
                 Recent Changes
               </Typography>
               <Stepper orientation="vertical" role="list" aria-label="Recent changes stepper">

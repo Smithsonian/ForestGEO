@@ -347,6 +347,29 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      <a
+        href="#main-content"
+        style={{
+          position: 'absolute',
+          left: '-9999px',
+          zIndex: 999999,
+          padding: '8px 16px',
+          backgroundColor: '#000',
+          color: '#fff',
+          textDecoration: 'none',
+          fontSize: '14px'
+        }}
+        onFocus={(e) => {
+          e.target.style.left = '6px';
+          e.target.style.top = '6px';
+        }}
+        onBlur={(e) => {
+          e.target.style.left = '-9999px';
+          e.target.style.top = 'auto';
+        }}
+      >
+        Skip to main content
+      </a>
       <Box
         className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
         sx={{
@@ -363,6 +386,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       <Box
         component="main"
         className="MainContent"
+        id="main-content"
+        tabIndex={-1}
         sx={{
           marginTop: 'var(--Header-height)',
           display: 'flex',
@@ -374,7 +399,10 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           overflow: 'hidden',
           minHeight: 'calc(100vh - var(--Header-height) - 30px)',
           marginLeft: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : '0',
-          transition: 'margin-left 0.3s ease-in-out'
+          transition: 'margin-left 0.3s ease-in-out',
+          '&:focus': {
+            outline: 'none'
+          }
         }}
       >
         <Box
