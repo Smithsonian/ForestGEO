@@ -1,22 +1,35 @@
 import React from 'react';
 import { mount } from '@cypress/react';
 import { LoginLogout } from '@/components/loginlogout';
+import * as NextAuth from 'next-auth/react';
 import { SessionProvider } from 'next-auth/react';
-import { setMockSession } from '../mocks/nextauthmock';
+import * as NextNav from 'next/navigation';
+import Sinon, { SinonStub } from 'cypress/types/sinon';
 
 describe('<LoginLogout />', () => {
+  let signInStub: Sinon.SinonStub;
+  let signOutStub: Sinon.SinonStub;
+  let pushStub: Cypress.Agent<SinonStub>;
+
   beforeEach(() => {
-    // No need for mocking at this level since it's handled by webpack config
+    // stub signIn / signOut
+    signInStub = cy.stub().resolves();
+    signOutStub = cy.stub().resolves();
+    cy.stub(NextAuth, 'signIn').callsFake(signInStub);
+    cy.stub(NextAuth, 'signOut').callsFake(signOutStub);
+
+    // stub useRouter().push
+    pushStub = cy.stub();
+    cy.stub(NextNav, 'useRouter').returns({ push: pushStub });
   });
 
   context('when not signed in', () => {
     beforeEach(() => {
-      // Set the mock session to unauthenticated
-      setMockSession({
+      // make useSession() report unauthenticated
+      cy.stub(NextAuth, 'useSession').returns({
         data: null,
         status: 'unauthenticated'
       });
-
       mount(
         <SessionProvider session={null}>
           <LoginLogout />
@@ -31,8 +44,12 @@ describe('<LoginLogout />', () => {
       });
     });
 
-    it('shows login button that can be clicked', () => {
-      cy.get('button[aria-label="Login button"]').should('be.visible').and('not.be.disabled');
+    it('calls signIn with the right provider on click', () => {
+      cy.get('button[aria-label="Login button"]')
+        .click()
+        .then(() => {
+          expect(signInStub).to.have.been.calledWith('microsoft-entra-id', { redirectTo: '/dashboard' });
+        });
     });
   });
 
@@ -47,12 +64,10 @@ describe('<LoginLogout />', () => {
     };
 
     beforeEach(() => {
-      // Set the mock session to authenticated
-      setMockSession({
+      cy.stub(NextAuth, 'useSession').returns({
         data: fakeSession,
         status: 'authenticated'
       });
-
       mount(
         <SessionProvider session={fakeSession as unknown as any}>
           <LoginLogout />
@@ -60,20 +75,54 @@ describe('<LoginLogout />', () => {
       );
     });
 
-    it('displays the user name, email, and initials avatar', () => {
+    it('displays the user’s name, email, and initials avatar', () => {
       cy.contains('Jane Q. Public');
       cy.contains('jane.public@example.com');
       // avatar shows initials "JQP"
-      cy.get('button').first().should('contain', 'JQP');
+      cy.get('button')
+        .first()
+        .within(() => {
+          cy.get('span').contains('JQP');
+        });
     });
 
-    it('shows disabled settings button (settings menu functionality is disabled)', () => {
-      // The settings button is disabled in the component
-      cy.get('button').eq(1).should('be.disabled');
+    it('opens the settings menu and navigates on item click', () => {
+      // open menu
+      cy.get('button').first().click();
+      cy.get('[role="menu"]').should('be.visible');
+
+      // click "User Settings"
+      cy.contains('User Settings')
+        .click()
+        .then(() => {
+          expect(pushStub).to.have.been.calledWith('/admin/users');
+        });
+
+      // reopen and click "Site Settings"
+      cy.get('button').first().click();
+      cy.contains('Site Settings')
+        .click()
+        .then(() => {
+          expect(pushStub).to.have.been.calledWith('/admin/sites');
+        });
+
+      // reopen and click "User-Site Assignments"
+      cy.get('button').first().click();
+      cy.contains('User-Site Assignments')
+        .click()
+        .then(() => {
+          expect(pushStub).to.have.been.calledWith('/admin/userstosites');
+        });
     });
 
-    it('shows logout button that can be clicked', () => {
-      cy.get('button[aria-label="Logout button"]').should('be.visible').and('not.be.disabled');
+    it('calls signOut with the right redirect on logout click', () => {
+      cy.get('button[aria-label="Logout button"]')
+        .click()
+        .then(() => {
+          expect(signOutStub).to.have.been.calledWith({
+            redirectTo: '/login'
+          });
+        });
     });
   });
 });

@@ -19,7 +19,7 @@ export async function GET(
   try {
     transactionID = await connectionManager.beginTransaction();
     ailogger.info('triggering collapser!');
-    await connectionManager.executeQuery(`CALL ${schema}.bulkingestioncollapser(?);`, [censusID], transactionID);
+    await connectionManager.executeQuery(`CALL ${schema}.bulkingestioncollapser(?);`, [censusID]);
     ailogger.info('successfully collapsed & de-duped data!');
     await connectionManager.commitTransaction(transactionID);
     return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });

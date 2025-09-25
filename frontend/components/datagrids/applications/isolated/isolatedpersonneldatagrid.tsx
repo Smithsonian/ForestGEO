@@ -68,7 +68,7 @@ export default function IsolatedPersonnelDataGrid() {
         }}
       >
         <Chip variant={'soft'} color={'primary'}>
-          <Typography level="body-sm">{roles.find(role => role.roleID === params.value)?.roleName || 'No Role'}</Typography>
+          <Typography level="body-sm">{roles.find(role => role.roleID === params.value)?.roleName}</Typography>
         </Chip>
       </Box>
     )

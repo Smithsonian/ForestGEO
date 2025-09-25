@@ -598,18 +598,18 @@ drop trigger if exists trg_trees_after_update;
 #     DECLARE new_json JSON;
 #     DECLARE plot_id INT;
 #     if @disable_triggers is null or @disable_triggers = 0 then
-#         -- Fetch PlotID associated with the StemGUID's QuadratID
+#         -- Fetch PlotID associated with the StemID's QuadratID
 #         SELECT PlotID
 #         INTO plot_id
 #         FROM quadrats q
 #                  JOIN stems s ON q.QuadratID = s.QuadratID
-#         WHERE s.StemGUID = NEW.StemGUID
+#         WHERE s.StemID = NEW.StemID
 #         LIMIT 1;
 #
 #         SET new_json = JSON_OBJECT(
 #                 'CoreMeasurementID', NEW.CoreMeasurementID,
 #                 'CensusID', NEW.CensusID,
-#                 'StemGUID', NEW.StemGUID,
+#                 'StemID', NEW.StemID,
 #                 'IsValidated', CAST(NEW.IsValidated AS UNSIGNED),
 #                 'MeasurementDate', NEW.MeasurementDate,
 #                 'MeasuredDBH', NEW.MeasuredDBH,
@@ -640,12 +640,12 @@ drop trigger if exists trg_trees_after_update;
 #     DECLARE changes_json JSON DEFAULT NULL;
 #     DECLARE plot_id INT;
 #     if @disable_triggers is null or @disable_triggers = 0 then
-#         -- Fetch PlotID associated with the StemGUID's QuadratID
+#         -- Fetch PlotID associated with the StemID's QuadratID
 #         SELECT PlotID
 #         INTO plot_id
 #         FROM quadrats q
 #                  JOIN stems s ON q.QuadratID = s.QuadratID
-#         WHERE s.StemGUID = NEW.StemGUID
+#         WHERE s.StemID = NEW.StemID
 #         LIMIT 1;
 #
 #         -- Dynamically add only changed fields to the JSON object
@@ -653,8 +653,8 @@ drop trigger if exists trg_trees_after_update;
 #             SET changes_json = JSON_SET(changes_json, '$.CensusID', NEW.CensusID);
 #         END IF;
 #
-#         IF OLD.StemGUID != NEW.StemGUID THEN
-#             SET changes_json = JSON_SET(changes_json, '$.StemGUID', NEW.StemGUID);
+#         IF OLD.StemID != NEW.StemID THEN
+#             SET changes_json = JSON_SET(changes_json, '$.StemID', NEW.StemID);
 #         END IF;
 #
 #         IF OLD.IsValidated != NEW.IsValidated THEN
@@ -1935,7 +1935,7 @@ drop trigger if exists trg_trees_after_update;
 #     if @disable_triggers is null or @disable_triggers = 0 then
 #         SET new_json = JSON_OBJECT(
 #                 'SpecimenID', NEW.SpecimenID,
-#                 'StemGUID', NEW.StemGUID,
+#                 'StemID', NEW.StemID,
 #                 'PersonnelID', NEW.PersonnelID,
 #                 'SpecimenNumber', NEW.SpecimenNumber,
 #                 'SpeciesID', NEW.SpeciesID,
@@ -1967,8 +1967,8 @@ drop trigger if exists trg_trees_after_update;
 #     DECLARE changes_json JSON DEFAULT NULL;
 #     if @disable_triggers is null or @disable_triggers = 0 then
 #         -- Dynamically add only changed fields to the JSON object
-#         IF OLD.StemGUID != NEW.StemGUID THEN
-#             SET changes_json = JSON_SET(changes_json, '$.StemGUID', NEW.StemGUID);
+#         IF OLD.StemID != NEW.StemID THEN
+#             SET changes_json = JSON_SET(changes_json, '$.StemID', NEW.StemID);
 #         END IF;
 #
 #         IF OLD.PersonnelID != NEW.PersonnelID THEN
@@ -2029,7 +2029,7 @@ drop trigger if exists trg_trees_after_update;
 #     if @disable_triggers is null or @disable_triggers = 0 then
 #         SET old_json = JSON_OBJECT(
 #                 'SpecimenID', OLD.SpecimenID,
-#                 'StemGUID', OLD.StemGUID,
+#                 'StemID', OLD.StemID,
 #                 'PersonnelID', OLD.PersonnelID,
 #                 'SpecimenNumber', OLD.SpecimenNumber,
 #                 'SpeciesID', OLD.SpeciesID,
@@ -2078,7 +2078,7 @@ drop trigger if exists trg_trees_after_update;
 #         LIMIT 1;
 #
 #         SET new_json = JSON_OBJECT(
-#                 'StemGUID', NEW.StemGUID,
+#                 'StemID', NEW.StemID,
 #                 'TreeID', NEW.TreeID,
 #                 'QuadratID', NEW.QuadratID,
 #                 'StemNumber', NEW.StemNumber,
@@ -2090,7 +2090,7 @@ drop trigger if exists trg_trees_after_update;
 #                        );
 #         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
 #                                       CensusID)
-#         VALUES ('stems', NEW.StemGUID, 'INSERT', new_json, NOW(), 'User', plot_id, census_id);
+#         VALUES ('stems', NEW.StemID, 'INSERT', new_json, NOW(), 'User', plot_id, census_id);
 #     end if;
 # END */;;
 # DELIMITER ;
@@ -2182,7 +2182,7 @@ drop trigger if exists trg_trees_after_update;
 #             INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy,
 #                                           PlotID,
 #                                           CensusID)
-#             VALUES ('stems', NEW.StemGUID, 'UPDATE', changes_json, NOW(), 'User', plot_id, census_id);
+#             VALUES ('stems', NEW.StemID, 'UPDATE', changes_json, NOW(), 'User', plot_id, census_id);
 #         END IF;
 #     end if;
 # END */;;
@@ -2215,7 +2215,7 @@ drop trigger if exists trg_trees_after_update;
 #         LIMIT 1;
 #
 #         SET old_json = JSON_OBJECT(
-#                 'StemGUID', OLD.StemGUID,
+#                 'StemID', OLD.StemID,
 #                 'TreeID', OLD.TreeID,
 #                 'QuadratID', OLD.QuadratID,
 #                 'StemNumber', OLD.StemNumber,
@@ -2227,7 +2227,7 @@ drop trigger if exists trg_trees_after_update;
 #                        );
 #         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
 #                                       CensusID)
-#         VALUES ('stems', OLD.StemGUID, 'DELETE', old_json, NOW(), 'User', plot_id, census_id);
+#         VALUES ('stems', OLD.StemID, 'DELETE', old_json, NOW(), 'User', plot_id, census_id);
 #     end if;
 # END */;;
 # DELIMITER ;

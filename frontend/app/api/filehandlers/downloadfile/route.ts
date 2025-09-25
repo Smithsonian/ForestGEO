@@ -46,8 +46,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     ailogger.error('Download file error:', error);
-    return new NextResponse(JSON.stringify({ error: 'Failed to download file: ' + (error.message || 'Unknown error') }), {
-      status: HTTPResponses.INTERNAL_SERVER_ERROR
-    });
+    return new NextResponse((error as Error).message, { status: 500 });
   }
 }

@@ -252,7 +252,7 @@ export async function POST(
       if (updatedMeasurementsExist) {
         const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
 
-        const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemGUID'];
+        const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID'];
         const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
         const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
         return new NextResponse(

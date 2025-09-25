@@ -7,7 +7,6 @@ import dynamic from 'next/dynamic';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useAsyncOperation } from '@/hooks/useAsyncOperation';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -51,7 +50,6 @@ function renderSwitch(endpoint: string) {
 export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { setLoading } = useLoading();
 
-  // Hook declarations first
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const siteListDispatch = useSiteListDispatch();
@@ -82,86 +80,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   const lastExecutedRef = useRef<number | null>(null);
   // Refs for debouncing
+  const plotLastExecutedRef = useRef<number | null>(null);
+  const censusLastExecutedRef = useRef<number | null>(null);
+  const quadratLastExecutedRef = useRef<number | null>(null);
 
   // Debounce delay
   const debounceDelay = 300;
-
-  // Create stable async operations that won't cause cascade effects
-  const { execute: executeFetchSiteList } = useAsyncOperation(
-    async () => {
-      if (session && !siteListLoaded && !currentSite) {
-        const sites = session?.user?.allsites ?? [];
-        if (sites.length === 0) {
-          const response = await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=`);
-          const allsites = await response.json();
-          if (siteListDispatch) await siteListDispatch({ siteList: allsites });
-        } else {
-          if (siteListDispatch) await siteListDispatch({ siteList: sites });
-        }
-      }
-    },
-    {
-      loadingMessage: 'Loading Sites...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
-
-  const { execute: executeLoadPlotData } = useAsyncOperation(
-    async () => {
-      if (currentSite && !plotListLoaded) {
-        const response = await fetch(
-          `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
-        );
-        const plotsData = await response.json();
-        if (!plotsData) throw new Error('Failed to load plots data');
-        if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
-        setPlotListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading plot data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
-
-  const { execute: executeLoadCensusData } = useAsyncOperation(
-    async () => {
-      if (currentSite && currentPlot && !censusListLoaded) {
-        const response = await fetch(
-          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
-        );
-        const censusRDSLoad = await response.json();
-        if (!censusRDSLoad) throw new Error('Failed to load census data');
-        const censusList = await createAndUpdateCensusList(censusRDSLoad);
-        if (censusListDispatch) await censusListDispatch({ censusList });
-        setCensusListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading census data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
-
-  const { execute: executeLoadQuadratData } = useAsyncOperation(
-    async () => {
-      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-        const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
-        const quadratsData = await response.json();
-        if (!quadratsData) throw new Error('Failed to load quadrats data');
-        if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
-        setQuadratListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading quadrat data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
 
   const fetchSiteList = useCallback(async () => {
     const now = Date.now();
@@ -188,37 +112,114 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       ).json();
       if (siteListDispatch) await siteListDispatch({ siteList: allsites });
     } finally {
-      setLoading(false, 'Loading Sites...');
+      setLoading(false);
     }
   }, [session, siteListLoaded, siteListDispatch, setLoading]);
 
+  const loadPlotData = useCallback(async () => {
+    const now = Date.now();
+    if (plotLastExecutedRef.current && now - plotLastExecutedRef.current < debounceDelay) {
+      return;
+    }
+    plotLastExecutedRef.current = now;
+
+    try {
+      setLoading(true, 'Loading plot data...');
+      if (currentSite && !plotListLoaded) {
+        const response = await fetch(
+          `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+        );
+        const plotsData = await response.json();
+        if (!plotsData) throw new Error('Failed to load plots data');
+        if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
+        setPlotListLoaded(true);
+      }
+    } catch (error: any) {
+      ailogger.error('Error loading plot data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSite, plotListLoaded, plotListDispatch, setLoading]);
+
+  // Function to load census data with debounce
+  const loadCensusData = useCallback(async () => {
+    const now = Date.now();
+    if (censusLastExecutedRef.current && now - censusLastExecutedRef.current < debounceDelay) {
+      return;
+    }
+    censusLastExecutedRef.current = now;
+
+    try {
+      setLoading(true, 'Loading census data...');
+      if (currentSite && currentPlot && !censusListLoaded) {
+        const response = await fetch(
+          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+        );
+        const censusRDSLoad = await response.json();
+        if (!censusRDSLoad) throw new Error('Failed to load census data');
+        const censusList = await createAndUpdateCensusList(censusRDSLoad);
+        if (censusListDispatch) await censusListDispatch({ censusList });
+        setCensusListLoaded(true);
+      }
+    } catch (error: any) {
+      ailogger.error('Error loading census data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSite, currentPlot, censusListLoaded, censusListDispatch, setLoading]);
+
+  // Function to load quadrat data with debounce
+  const loadQuadratData = useCallback(async () => {
+    const now = Date.now();
+    if (quadratLastExecutedRef.current && now - quadratLastExecutedRef.current < debounceDelay) {
+      return;
+    }
+    quadratLastExecutedRef.current = now;
+
+    try {
+      setLoading(true, 'Loading quadrat data...');
+      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
+        const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
+        const quadratsData = await response.json();
+        if (!quadratsData) throw new Error('Failed to load quadrats data');
+        if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
+        setQuadratListLoaded(true);
+      }
+    } catch (error: any) {
+      ailogger.error('Error loading quadrat data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, quadratListDispatch, setLoading]);
+
   // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
+    // Ensure session is ready before attempting to fetch site list
     if (session && !siteListLoaded) {
-      executeFetchSiteList();
+      fetchSiteList().catch(ailogger.error);
     }
-  }, [session, siteListLoaded]); // Removed function dependency to prevent cascade
+  }, [session, siteListLoaded, fetchSiteList]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
-      executeLoadPlotData();
+      loadPlotData().catch(ailogger.error);
     }
-  }, [currentSite, plotListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, plotListLoaded, loadPlotData]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
-      executeLoadCensusData();
+      loadCensusData().catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, censusListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, censusListLoaded, loadCensusData]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-      executeLoadQuadratData();
+      loadQuadratData().catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, currentCensus, quadratListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, loadQuadratData]);
 
   // Handle manual reset logic
   useEffect(() => {
@@ -296,9 +297,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
       // Add a short delay to ensure UI reflects clearing lists before loading new data
       setTimeout(() => {
-        executeLoadPlotData()
-          .then(() => executeLoadCensusData())
-          .then(() => executeLoadQuadratData())
+        loadPlotData()
+          .then(() => loadCensusData())
+          .then(() => loadQuadratData())
           .catch(ailogger.error);
       }, 300); // 300ms delay for UI reset
     };
@@ -306,17 +307,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
       clearLists().catch(ailogger.error);
     }
-  }, [
-    currentSite,
-    currentPlot,
-    currentCensus,
-    plotListDispatch,
-    censusListDispatch,
-    quadratListDispatch,
-    executeLoadPlotData,
-    executeLoadCensusData,
-    executeLoadQuadratData
-  ]);
+  }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadPlotData, loadCensusData, loadQuadratData]);
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
   useEffect(() => {
@@ -347,29 +338,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <a
-        href="#main-content"
-        style={{
-          position: 'absolute',
-          left: '-9999px',
-          zIndex: 999999,
-          padding: '8px 16px',
-          backgroundColor: '#000',
-          color: '#fff',
-          textDecoration: 'none',
-          fontSize: '14px'
-        }}
-        onFocus={(e) => {
-          e.target.style.left = '6px';
-          e.target.style.top = '6px';
-        }}
-        onBlur={(e) => {
-          e.target.style.left = '-9999px';
-          e.target.style.top = 'auto';
-        }}
-      >
-        Skip to main content
-      </a>
       <Box
         className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
         sx={{
@@ -386,8 +354,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       <Box
         component="main"
         className="MainContent"
-        id="main-content"
-        tabIndex={-1}
         sx={{
           marginTop: 'var(--Header-height)',
           display: 'flex',
@@ -399,10 +365,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           overflow: 'hidden',
           minHeight: 'calc(100vh - var(--Header-height) - 30px)',
           marginLeft: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : '0',
-          transition: 'margin-left 0.3s ease-in-out',
-          '&:focus': {
-            outline: 'none'
-          }
+          transition: 'margin-left 0.3s ease-in-out'
         }}
       >
         <Box

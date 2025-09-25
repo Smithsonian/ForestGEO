@@ -21,18 +21,16 @@ jobs:
       - name: Set up Node.js version
         uses: actions/setup-node@v4.0.4
         with:
-          node-version: '24.x'
+          node-version: '20.x'
 
       - name: create env file (in frontend/ directory) -- production
         id: create-env-file-prod
         run: |
           touch frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET_PRODUCTION }} >> frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_ID=${{ secrets.AZURE_AD_CLIENT_ID_PRODUCTION }} >> frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_ISSUER=${{ secrets.AZURE_AD_TENANT_ID_PRODUCTION }} >> frontend/.env
-          echo AUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
-          echo AUTH_URL=${{ secrets.AUTH_URL }} >> frontend/.env
-          echo AUTH_FUNCTIONS_POLL_URL=${{ secrets.AUTH_FUNCTIONS_POLL_URL }} >> frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET_PRODUCTION }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID_PRODUCTION }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID_PRODUCTION }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
@@ -45,9 +43,6 @@ jobs:
           echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
           echo NODE_ENV=production >> frontend/.env
-          echo NEXT_RUNTIME=nodejs >> frontend/.env
-          echo OTEL_LOG_LEVEL=debug >> frontend/.env
-          echo REACT_EDITOR=code >> frontend/.env
           echo PORT=3000 >> frontend/.env
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
@@ -173,95 +168,4 @@ jobs:
               > ${{ steps.collect_messages.outputs.messages }}
 
             Cheers,
-            GitHub Actions
-
-  notify-failure:
-    if: always() && (needs.build-app-production.result == 'failure' || needs.deploy-app-production.result == 'failure')
-    needs: [build-app-production, deploy-app-production]
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Checkout code for failure analysis
-        uses: actions/checkout@v4
-
-      - name: Collect failure information
-        id: failure_info
-        run: |
-          echo "workflow_run_id=${{ github.run_id }}" >> $GITHUB_OUTPUT
-          echo "workflow_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
-          echo "commit_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "branch_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "build_status=${{ needs.build-app-production.result }}" >> $GITHUB_OUTPUT
-          echo "deploy_status=${{ needs.deploy-app-production.result }}" >> $GITHUB_OUTPUT
-
-          # Determine which job failed
-          if [[ "${{ needs.build-app-production.result }}" == "failure" ]]; then
-            echo "failed_job=build-app-production" >> $GITHUB_OUTPUT
-            echo "failure_stage=Build" >> $GITHUB_OUTPUT
-          elif [[ "${{ needs.deploy-app-production.result }}" == "failure" ]]; then
-            echo "failed_job=deploy-app-production" >> $GITHUB_OUTPUT
-            echo "failure_stage=Deployment" >> $GITHUB_OUTPUT
-          else
-            echo "failed_job=unknown" >> $GITHUB_OUTPUT
-            echo "failure_stage=Unknown" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Get commit information
-        id: commit_info
-        run: |
-          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an <%ae>')
-          echo "commit_message=$COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
-
-      - name: Send failure notification
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.NOTIFS_EMAIL_SOURCE }}
-          password: ${{ secrets.NOTIFS_EMAIL_PWD }}
-          secure: false
-
-          from: "ForestGEO Automated Notifications <${{ secrets.NOTIFS_EMAIL_SOURCE }}>"
-          to: ${{ secrets.DEVELOPER_EMAIL }}
-
-          subject: "❌ ForestGEO Production Deployment Failed - ${{ steps.failure_info.outputs.failure_stage }} Error on ${{ steps.failure_info.outputs.branch_name }}"
-          body: |
-            Hello,
-
-            The ForestGEO production deployment pipeline has failed during the ${{ steps.failure_info.outputs.failure_stage }} stage.
-
-            ## Failure Details
-            • **Failed Job**: ${{ steps.failure_info.outputs.failed_job }}
-            • **Branch**: ${{ steps.failure_info.outputs.branch_name }}
-            • **Commit SHA**: ${{ steps.failure_info.outputs.commit_sha }}
-            • **Build Status**: ${{ steps.failure_info.outputs.build_status }}
-            • **Deploy Status**: ${{ steps.failure_info.outputs.deploy_status }}
-
-            ## Commit Information
-            • **Message**: ${{ steps.commit_info.outputs.commit_message }}
-            • **Author**: ${{ steps.commit_info.outputs.commit_author }}
-
-            ## Debugging Information
-            • **Workflow Run**: ${{ steps.failure_info.outputs.workflow_url }}
-            • **Run ID**: ${{ steps.failure_info.outputs.workflow_run_id }}
-
-            ## Next Steps
-            1. Check the workflow logs at the URL above
-            2. Review the failed job details in the GitHub Actions tab
-            3. Look for error messages in the specific step that failed
-            4. Common failure points:
-               - Build failures: Check for dependency issues, TypeScript errors, or test failures
-               - Deploy failures: Check Azure credentials, app service configuration, or artifact upload issues
-
-            ## Quick Actions
-            - View logs: ${{ steps.failure_info.outputs.workflow_url }}
-            - Repository: https://github.com/${{ github.repository }}
-            - Commit: https://github.com/${{ github.repository }}/commit/${{ steps.failure_info.outputs.commit_sha }}
-
-            This is an automated notification sent only to the developer operating this codebase.
-
-            Best regards,
             GitHub Actions

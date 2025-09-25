@@ -1,7 +1,7 @@
 'use client';
 
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
-import { Box } from '@mui/joy';
+import { Box, Chip, Stack, Typography } from '@mui/joy';
 
 export interface ProgressTachoType {
   TotalQuadrats: number;

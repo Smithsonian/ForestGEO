@@ -15,11 +15,7 @@ export function initializeAppInsights(connectionString: string) {
     disableFetchTracking: false,
     samplingPercentage: 100,
     enableDebug: process.env.NODE_ENV !== 'production',
-    name: 'forestgeo-client',
-    // Increase limits for bulk upload operations
-    maxAjaxCallsPerView: 1000, // Default is 500
-    maxBatchSize: 100,
-    maxBatchInterval: 15000
+    name: 'forestgeo-client'
   };
 
   appInsights = new ApplicationInsights({ config });

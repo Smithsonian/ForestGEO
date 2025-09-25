@@ -197,93 +197,47 @@ export default function DashboardPage() {
         {/* Census Statistics Card */}
         <Card variant="soft" color="primary" invertedColors sx={{ width: '50%' }} aria-labelledby="census-statistics-heading stats-display-heading">
           <CardContent sx={{ px: 0, width: '100%', height: '100%' }}>
-            <Typography id="census-statistics-heading" level="title-lg" component="h2">
+            <Typography id="census-statistics-heading" level="title-lg">
               Census Statistics
             </Typography>
             <Typography id="stats-display-heading" level="title-md" alignSelf="center">
               {toggleSwitch ? 'Tachometer View' : 'Pie Chart View'}
             </Typography>
 
-            {/* Only show chart and quadrat list if there are measurements */}
-            {progressTacho.PopulatedQuadrats > 0 || countStems > 0 ? (
-              <>
-                <Box
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={toggleSwitch}
-                  aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-                  sx={{ height: '50%', width: '100%' }}
-                  onClick={() => setToggleSwitch(!toggleSwitch)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setToggleSwitch(!toggleSwitch);
-                    }
-                  }}
-                >
-                  {toggleSwitch ? (
-                    <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
-                  ) : (
-                    <ProgressPieChart {...progressTacho} aria-label="Quadrat population pie chart" />
-                  )}
-                </Box>
+            <Box
+              role="button"
+              tabIndex={0}
+              aria-pressed={toggleSwitch}
+              aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
+              sx={{ height: '50%', width: '100%' }}
+              onClick={() => setToggleSwitch(!toggleSwitch)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setToggleSwitch(!toggleSwitch);
+                }
+              }}
+            >
+              {toggleSwitch ? (
+                <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
+              ) : (
+                <ProgressPieChart {...progressTacho} aria-label="Quadrat population pie chart" />
+              )}
+            </Box>
 
-                {/* List of unpopulated quadrats with overflow handling */}
-                {progressTacho.UnpopulatedQuadrats.length > 0 && (
-                  <Box role="group" aria-labelledby="missing-quadrats-heading" sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
-                    <Typography id="missing-quadrats-heading" level="body-lg">
-                      The following quadrat names do not have any recorded data for this census:
-                    </Typography>
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      role="list"
-                      aria-label="List of unpopulated quadrats"
-                      sx={{
-                        flexWrap: 'wrap',
-                        gap: 0.5,
-                        maxHeight: '120px',
-                        overflow: 'hidden',
-                        position: 'relative'
-                      }}
-                    >
-                      {(() => {
-                        const maxVisible = 20; // Maximum number of chips to show before overflow
-                        const visibleQuadrats = progressTacho.UnpopulatedQuadrats.slice(0, maxVisible);
-                        const remainingCount = progressTacho.UnpopulatedQuadrats.length - maxVisible;
-
-                        return (
-                          <>
-                            {visibleQuadrats.map(uq => (
-                              <Chip key={uq} color="primary" role="listitem" aria-label={`Unpopulated quadrat named ${uq}`}>
-                                {uq}
-                              </Chip>
-                            ))}
-                            {remainingCount > 0 && (
-                              <Chip
-                                key="overflow"
-                                color="neutral"
-                                variant="soft"
-                                role="listitem"
-                                aria-label={`And ${remainingCount} more unpopulated quadrats`}
-                              >
-                                +{remainingCount} more
-                              </Chip>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </Stack>
-                  </Box>
-                )}
-              </>
-            ) : (
-              <Box sx={{ height: '50%', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography level="body-lg" color="neutral" textAlign="center">
-                  No measurements recorded for this census yet.
-                </Typography>
-              </Box>
-            )}
+            {/* List of unpopulated quadrats */}
+            <Box role="group" aria-labelledby="missing-quadrats-heading" sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
+              <Typography id="missing-quadrats-heading" level="body-lg">
+                The following quadrat names do not have any recorded data for this census:
+              </Typography>
+              <Stack direction="row" alignItems="center" role="list" aria-label="List of unpopulated quadrats">
+                {progressTacho.UnpopulatedQuadrats.map(uq => (
+                  <Chip key={uq} color="primary" role="listitem" aria-label={`Unpopulated quadrat named ${uq}`}>
+                    {uq}
+                  </Chip>
+                ))}
+              </Stack>
+            </Box>
 
             <Divider orientation="horizontal" sx={{ my: 1 }} />
 
@@ -374,33 +328,13 @@ export default function DashboardPage() {
 
             <AccordionGroup>
               <Accordion aria-label="File upload history accordion">
-                <AccordionSummary
-                  id="file-upload-summary"
-                  aria-controls="file-upload-details"
-                  aria-describedby="file-upload-description"
-                >
+                <AccordionSummary id="file-upload-summary" aria-controls="file-upload-details">
                   File Upload History
-                  <Typography
-                    id="file-upload-description"
-                    level="body-xs"
-                    sx={{ display: 'none' }}
-                    aria-hidden="true"
-                  >
-                    Expand to view list of uploaded files
-                  </Typography>
                 </AccordionSummary>
                 <AccordionDetails
                   id="file-upload-details"
                   aria-labelledby="file-upload-summary"
-                  sx={{
-                    p: 0,
-                    m: 0,
-                    overflowY: 'auto',
-                    '&.MuiCollapse-wrapperInner, &.MuiCollapse-hidden': { p: 0, m: 0 },
-                    '&[aria-hidden="true"]': {
-                      visibility: 'hidden'
-                    }
-                  }}
+                  sx={{ p: 0, m: 0, overflowY: 'auto', '&.MuiCollapse-wrapperInner, &.MuiCollapse-hidden': { p: 0, m: 0 } }}
                 >
                   <List aria-label="Uploaded files list">
                     {(filesUploaded ?? []).map((file, index) => (
@@ -422,7 +356,7 @@ export default function DashboardPage() {
             <Divider orientation="horizontal" sx={{ my: 1 }} />
 
             <Box role="region" aria-labelledby="recent-changes-heading" sx={{ height: '100%' }}>
-              <Typography id="recent-changes-heading" level="title-lg" component="h3" fontWeight="bold" sx={{ mb: 1 }}>
+              <Typography id="recent-changes-heading" level="title-lg" fontWeight="bold" sx={{ mb: 1 }}>
                 Recent Changes
               </Typography>
               <Stepper orientation="vertical" role="list" aria-label="Recent changes stepper">

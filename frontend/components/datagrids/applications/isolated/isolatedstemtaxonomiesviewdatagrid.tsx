@@ -11,7 +11,7 @@ import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcomm
 export default function IsolatedStemTaxonomiesViewDataGrid() {
   const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
     id: 0,
-    stemGUID: 0,
+    stemID: 0,
     treeID: 0,
     speciesID: 0,
     genusID: 0,

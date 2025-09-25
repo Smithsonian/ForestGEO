@@ -46,18 +46,8 @@ export const LoginLogout = () => {
   } else {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
-        <IconButton
-          aria-label={'user avatar icon button'}
-          onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              setAnchorSettings(anchorSettings ? null : event.currentTarget);
-            }
-          }}
-          size="sm"
-        >
-          <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${session?.user?.name || 'current user'}`}>
+        <IconButton aria-label={'user avatar icon button'} onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)} size="sm">
+          <Avatar variant="outlined" size="sm" src="" alt={''}>
             <Skeleton loading={status == 'loading'}>
               {typeof session?.user?.name == 'string'
                 ? session.user.name
@@ -87,8 +77,6 @@ export const LoginLogout = () => {
           // disabled={!['global', 'db admin'].includes(session?.user.userStatus ?? '')}
           disabled
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
-          aria-label="Settings menu - Currently unavailable. Feature coming soon."
-          title="Settings menu - Currently unavailable. Feature coming soon."
           size="sm"
         >
           <Skeleton loading={status == 'loading'}>

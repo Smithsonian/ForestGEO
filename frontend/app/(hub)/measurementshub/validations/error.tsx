@@ -13,7 +13,7 @@ export default function Error(props: { error: Error & { digest?: string }; reset
   const { data: session } = useSession();
   useEffect(() => {
     // Log the error to an error reporting service
-    ailogger.error(error.message || 'Unknown error occurred', error);
+    ailogger.error(error);
   }, [error]);
   const router = useRouter();
   if (error.message === 'access-denied') {

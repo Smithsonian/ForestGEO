@@ -15,7 +15,7 @@ export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardL
           }}
         >
           <CardCover>
-            <Image src={image} alt={cardTitle || 'Card background image'} layout="fill" placeholder="blur" />
+            <Image src={image} alt={''} layout="fill" placeholder="blur" />
           </CardCover>
           <CardCover
             sx={{

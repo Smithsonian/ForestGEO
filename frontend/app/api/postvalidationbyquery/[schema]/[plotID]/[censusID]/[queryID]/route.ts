@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import moment from 'moment';
 import ConnectionManager from '@/config/connectionmanager';
-import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
   const params = await props.params;
@@ -54,16 +53,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
       await connectionManager.executeQuery(failureUpdate, [currentTime]);
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
-    ailogger.error('Error in postvalidation query:', e.message, {
-      endpoint: _request.nextUrl?.pathname || 'postvalidationbyquery',
-      schema,
-      plotID,
-      censusID,
-      queryID
-    });
-    return new NextResponse(JSON.stringify({ error: 'Failed to execute validation query' }), {
-      status: HTTPResponses.INTERNAL_SERVER_ERROR
-    });
+    return new NextResponse('Internal Server Error', { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

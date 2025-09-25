@@ -292,7 +292,7 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
     filterable: false
   },
   {
-    field: 'stemGUID',
+    field: 'stemID',
     headerName: '#',
     flex: 0.1,
     headerClassName: 'header',
@@ -590,7 +590,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true
   },
   {
-    field: 'stemGUID',
+    field: 'stemID',
     headerName: 'Stem ID',
     flex: 1,
     editable: true,
@@ -1040,7 +1040,7 @@ export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
     filterable: false
   },
   {
-    field: 'stemGUID',
+    field: 'stemID',
     headerName: '#',
     flex: 0.3,
     editable: false,

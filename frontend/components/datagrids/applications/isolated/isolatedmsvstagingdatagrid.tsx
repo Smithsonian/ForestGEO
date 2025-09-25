@@ -18,7 +18,7 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
     quadratID: 0,
     plotID: currentPlot?.plotID,
     treeID: 0,
-    stemGUID: 0,
+    stemID: 0,
     speciesID: 0,
     submittedBy: 0,
     quadratName: '',

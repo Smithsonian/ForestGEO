@@ -10,19 +10,11 @@ const sqlConfig: PoolOptions = {
   port: parseInt(process.env.AZURE_SQL_PORT!),
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
-  connectionLimit: 15, // Reduced for production stability
-  queueLimit: 25, // Increased queue to handle burst requests
-  keepAliveInitialDelay: 0,
-  enableKeepAlive: true,
-  connectTimeout: 30000, // Increased to 30 seconds for deployed environment
-  idleTimeout: 300000, // 5 minutes idle timeout
-  // Azure SQL specific optimizations
-  ssl: {
-    rejectUnauthorized: false // Required for Azure SQL
-  },
-  // Additional production-specific settings
-  charset: 'utf8mb4',
-  timezone: 'Z' // Use UTC timezone
+  connectionLimit: 100, // Lower limit if 100 is excessive for your DB
+  queueLimit: 50, // unlimited queue size
+  keepAliveInitialDelay: 0, // 0 by default.
+  enableKeepAlive: true, // false by default.
+  connectTimeout: 10000 // 10 seconds by default.
 };
 
 export function getPoolMonitorInstance(): PoolMonitor {

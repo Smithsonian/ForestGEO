@@ -90,7 +90,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             mappedUpdatedRow.TreeID = treeResult.insertId;
           } else mappedUpdatedRow.TreeID = treeSearchResults[0].TreeID;
           await connectionManager.executeQuery(
-            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { TreeID: mappedUpdatedRow.TreeID }, 'StemGUID', mappedUpdatedRow.StemGUID])
+            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { TreeID: mappedUpdatedRow.TreeID }, 'StemID', mappedUpdatedRow.StemID])
           );
         }
 
@@ -102,13 +102,13 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           if (quadratSearchResults.length === 0) throw new Error('Quadrat not found');
           mappedUpdatedRow.QuadratID = quadratSearchResults[0].QuadratID;
           await connectionManager.executeQuery(
-            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { QuadratID: mappedUpdatedRow.QuadratID }, 'StemGUID', mappedUpdatedRow.StemGUID])
+            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { QuadratID: mappedUpdatedRow.QuadratID }, 'StemID', mappedUpdatedRow.StemID])
           );
         }
 
         if (updatedFields.StemTag) {
           changesFound = true;
-          const stemSearchResults = await connectionManager.executeQuery(`SELECT StemGUID FROM ${schema}.stems WHERE StemTag = ? LIMIT 1`, [
+          const stemSearchResults = await connectionManager.executeQuery(`SELECT StemID FROM ${schema}.stems WHERE StemTag = ? LIMIT 1`, [
             updatedFields.StemTag
           ]);
           if (stemSearchResults.length === 0) {
@@ -123,8 +123,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               }
             ]);
             const stemResult = await connectionManager.executeQuery(stemInsertQuery);
-            mappedUpdatedRow.StemGUID = stemResult.insertId;
-          } else mappedUpdatedRow.StemGUID = stemSearchResults[0].StemGUID;
+            mappedUpdatedRow.StemID = stemResult.insertId;
+          } else mappedUpdatedRow.StemID = stemSearchResults[0].StemID;
           if (updatedFields.StemLocalX || updatedFields.StemLocalY) {
             await connectionManager.executeQuery(
               format(`UPDATE ?? SET ? WHERE ?? = ?`, [
@@ -133,15 +133,15 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
                   LocalX: updatedFields.StemLocalX ?? mappedUpdatedRow.StemLocalX,
                   LocalY: updatedFields.StemLocalY ?? mappedUpdatedRow.StemLocalY
                 },
-                'StemGUID',
-                mappedUpdatedRow.StemGUID
+                'StemID',
+                mappedUpdatedRow.StemID
               ])
             );
           }
           await connectionManager.executeQuery(
             format(`UPDATE ?? SET ? WHERE ?? = ?`, [
               `${schema}.coremeasurements`,
-              { StemGUID: mappedUpdatedRow.StemGUID },
+              { StemID: mappedUpdatedRow.StemID },
               'CoreMeasurementID',
               mappedUpdatedRow.CoreMeasurementID
             ])

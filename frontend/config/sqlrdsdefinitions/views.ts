@@ -47,7 +47,7 @@ export interface MeasurementsSummaryRDS {
   quadratID?: number;
   plotID?: number;
   treeID?: number;
-  stemGUID?: number;
+  stemID?: number;
   speciesID?: number;
   quadratName?: string;
   speciesName?: string;
@@ -77,7 +77,7 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
     quadratID: false,
     subquadratID: false,
     treeID: false,
-    stemGUID: false,
+    stemID: false,
     personnelID: false,
     speciesID: false
   };
@@ -92,7 +92,7 @@ export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
 
 export interface StemTaxonomiesViewRDS {
   id?: number;
-  stemGUID?: number;
+  stemID?: number;
   treeID?: number;
   speciesID?: number;
   genusID?: number;
@@ -153,7 +153,7 @@ export interface ViewFullTableRDS {
   quadratShape?: string;
   treeID?: number;
   treeTag?: string;
-  stemGUID?: number;
+  stemID?: number;
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
@@ -182,7 +182,7 @@ export function getAllViewFullTableViewsHCs(): ColumnStates {
     quadratID: false,
     speciesID: false,
     treeID: false,
-    stemGUID: false,
+    stemID: false,
     personnelID: false,
     familyID: false,
     genusID: false

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
                 INNER JOIN
             ${schema}.census c ON cm.CensusID = c.CensusID
                 INNER JOIN
-            ${schema}.stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
+            ${schema}.stems st ON cm.StemID = st.StemID and st.CensusID = c.CensusID
                 INNER JOIN
             ${schema}.trees t ON st.TreeID = t.TreeID and t.CensusID = c.CensusID
                 INNER JOIN

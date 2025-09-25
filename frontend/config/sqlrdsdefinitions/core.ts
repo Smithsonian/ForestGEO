@@ -6,7 +6,7 @@ export interface CoreMeasurementsRDS {
   id?: number;
   coreMeasurementID?: number;
   censusID?: number;
-  stemGUID?: number;
+  stemID?: number;
   isValidated?: boolean;
   measurementDate?: Date;
   measuredDBH?: number;
@@ -49,7 +49,7 @@ export function getFailedMeasurementsHCs(): ColumnStates {
 export function getCoreMeasurementsHCs(): ColumnStates {
   return {
     censusID: false,
-    stemGUID: false,
+    stemID: false,
     description: false
   };
 }
@@ -58,7 +58,7 @@ export interface StagingCoreMeasurementsRDS {
   id?: number;
   stagingMeasurementID?: number;
   censusID?: number;
-  stemGUID?: number;
+  stemID?: number;
   measuredDBH?: number;
   measuredHOM?: number;
   measurementDate?: Date;

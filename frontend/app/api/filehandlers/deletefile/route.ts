@@ -27,8 +27,6 @@ export async function DELETE(request: NextRequest) {
     });
   } catch (error: any) {
     ailogger.error('Delete file error:', error, { endpoint: request.nextUrl.toJSON() });
-    return new NextResponse(JSON.stringify({ error: 'Failed to delete file: ' + (error.message || 'Unknown error') }), {
-      status: HTTPResponses.INTERNAL_SERVER_ERROR
-    });
+    return new NextResponse((error as Error).message, { status: 500 });
   }
 }

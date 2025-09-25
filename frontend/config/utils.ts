@@ -81,6 +81,73 @@ export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
 export type ResultType<RDS, K extends keyof any = 'id' | '_pk'> = {
   [P in keyof OmitKey<RDS, K> as TransformSpecialCases<CapitalizeFirstLetter<P & string>>]: any;
 };
+
+export type InitialValue<T> = T extends string
+  ? ''
+  : T extends number
+    ? 0
+    : T extends boolean
+      ? false
+      : T extends Date
+        ? null
+        : T extends bigint
+          ? bigint
+          : T extends symbol
+            ? symbol
+            : T extends (...args: any[]) => any
+              ? (...args: any[]) => any
+              : undefined;
+
+export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> } {
+  const typeMap: Record<string, any> = {
+    string: '',
+    number: 0,
+    boolean: false,
+    object: null,
+    bigint: BigInt(0),
+    function: () => {},
+    symbol: Symbol()
+  };
+
+  // Create an object where each property of T is initialized based on its type
+  const initializedObject = {} as { [K in keyof T]: InitialValue<T[K]> };
+
+  // Initialize all properties of T in the proxy
+  for (const prop in initializedObject) {
+    const propType = typeof initializedObject[prop as keyof T];
+    initializedObject[prop as keyof T] =
+      prop.toLowerCase().includes('id') && true
+        ? 0 // If the property name includes 'id', set it to 0
+        : (typeMap[propType as keyof typeof typeMap] ?? null); // Otherwise, assign default value based on type
+  }
+
+  return new Proxy(initializedObject, {
+    get: (target, prop) => {
+      if (typeof prop === 'string' && prop.toLowerCase().includes('id')) {
+        return 0; // Set the id field to 0
+      }
+      const propType = typeof target[prop as keyof T];
+      return typeMap[propType as keyof typeof typeMap] ?? null;
+    }
+  }) as { [K in keyof T]: InitialValue<T[K]> };
+}
+
+export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>, limiter?: number): string {
+  const whereKeys = Object.keys(whereClause);
+
+  if (whereKeys.length === 0) {
+    throw new Error('No conditions provided for WHERE clause');
+  }
+
+  const whereConditions = whereKeys
+    .map(key => `\`${key}\` = ?`) // Escaping column names with backticks
+    .join(' AND ');
+
+  return `SELECT *
+          FROM \`${schema}\`.\`${tableName}\`
+          WHERE ${whereConditions} ${limiter ? `LIMIT ${limiter}` : ``}`;
+}
+
 export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
   const columns = Object.keys(data)
     .map(key => `\`${key}\``) // Escaping column names with backticks
@@ -98,37 +165,23 @@ export function createInsertOrUpdateQuery<Result>(schema: string, tableName: str
           VALUES (${values})
           ON DUPLICATE KEY UPDATE ${updates}`;
 }
-export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: string, table: string, rows: Partial<T>[], key: keyof T) {
-  if (!rows.length) {
-    throw new Error('No rows provided for bulk upsert');
+
+export async function fetchPrimaryKey<Result>(
+  schema: string,
+  table: string,
+  whereClause: Partial<Result>,
+  connectionManager: ConnectionManager,
+  primaryKeyColumn: keyof Result
+): Promise<number> {
+  const query = createSelectQuery<Result>(schema, table, whereClause);
+  const rows: Result[] = await connectionManager.executeQuery(query, Object.values(whereClause));
+
+  if (rows.length === 0) {
+    throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
   }
 
-  // 1) All the columns we're inserting/updating (assume every row has the same set)
-  const columns = Object.keys(rows[0]);
-
-  // 2) Build placeholders: "(?,?),(?,?),(?,?)…"
-  const group = `(${columns.map(() => '?').join(',')})`;
-  const placeholders = rows.map(() => group).join(',');
-
-  // 3) flatten values: [ row0.col0, row0.col1, …, row1.col0, row1.col1, …, … ]
-  const params: any[] = [];
-  for (const row of rows) {
-    for (const col of columns) {
-      params.push(row[col]);
-    }
-  }
-
-  // 4) ON DUPLICATE KEY UPDATE clause (skip the primary key itself)
-  const updates = columns
-    .filter(c => c !== String(key))
-    .map(c => `\`${c}\` = VALUES(\`${c}\`)`)
-    .join(',');
-
-  // 5) assemble
-  const sql =
-    `INSERT INTO \`${schema}\`.\`${table}\` (` + columns.map(c => `\`${c}\``).join(',') + `) VALUES ${placeholders}` + ` ON DUPLICATE KEY UPDATE ${updates};`;
-
-  return { sql, params };
+  // Retrieve and return the primary key value from the result
+  return rows[0][primaryKeyColumn] as unknown as number;
 }
 
 export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: string, table: string, rows: Partial<T>[], key: keyof T) {
@@ -240,6 +293,18 @@ export function createError(message: string, context: any): Error {
   console.error(message, context);
   return error;
 }
+
+export type UniqueKeys<T, U> = {
+  [K in keyof (T & U)]: K extends keyof T ? (K extends keyof U ? never : K) : K;
+}[keyof (T & U)];
+export type Unique<T, U> = Pick<T & U, UniqueKeys<T, U>>;
+
+export type CommonKeys<T, U> = {
+  [K in keyof T & keyof U]: K;
+}[keyof T & keyof U];
+
+export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
+
 export function capitalizeFirstLetter(field: string): string {
   return field.charAt(0).toUpperCase() + field.slice(1);
 }
@@ -274,6 +339,13 @@ export function capitalizeAndTransformField(field: string): string {
   return transformSpecialCases(capitalized);
 }
 
+export type TransformedKeys<T> = keyof ResultType<T>;
+
+export function getTransformedKeys<T>(): string[] {
+  const exampleObject: ResultType<T> = {} as ResultType<T>;
+  return Object.keys(exampleObject) as string[];
+}
+
 export function getUpdatedValues<T extends Record<string, any>>(original: T, updated: T): Partial<T> {
   const changes: Partial<T> = {};
 
@@ -285,4 +357,43 @@ export function getUpdatedValues<T extends Record<string, any>>(original: T, upd
   });
 
   return changes;
+}
+
+export function mysqlEscape(value: any): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+  throw new Error('Unsupported value type');
+}
+
+export function formatQuery(query: string, values: any[]): string {
+  let valueIndex = 0; // Pointer for values
+  return query
+    .replace(/\?\?/g, () => {
+      const identifier = values[valueIndex++];
+      if (Array.isArray(identifier) && identifier.length === 2) {
+        // If identifier is [schema, table], format it as `schema`.`table`
+        const [schema, table] = identifier;
+        return `\`${schema.replace(/`/g, '``')}\`.\`${table.replace(/`/g, '``')}\``;
+      } else if (typeof identifier === 'string') {
+        // Single string identifier
+        return `\`${identifier.replace(/`/g, '``')}\``;
+      } else {
+        throw new Error(`Invalid identifier for ?? placeholder: ${JSON.stringify(identifier)}`);
+      }
+    })
+    .replace(/\?/g, () => {
+      const value = values[valueIndex++];
+      if (value === null || value === undefined) return 'NULL';
+      if (typeof value === 'number') return value.toString();
+      if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        return Object.entries(value)
+          .map(([key, val]) => `\`${key}\` = ${mysqlEscape(val)}`)
+          .join(', ');
+      }
+      if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+      throw new Error(`Unsupported value type: ${typeof value}`);
+    });
 }

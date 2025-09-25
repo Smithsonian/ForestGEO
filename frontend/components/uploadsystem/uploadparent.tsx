@@ -69,7 +69,6 @@ export default function UploadParent(props: UploadParentProps) {
   const { data: session } = useSession();
   const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
   const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -191,8 +190,6 @@ export default function UploadParent(props: UploadParentProps) {
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}
             handleReplaceFile={handleReplaceFile}
-            selectedDelimiters={selectedDelimiters}
-            setSelectedDelimiters={setSelectedDelimiters}
           />
         );
       case ReviewStates.UPLOAD_SQL:
@@ -212,7 +209,6 @@ export default function UploadParent(props: UploadParentProps) {
             setAllRowToCMID={setAllRowToCMID}
             errorRows={errorRows}
             setErrorRows={setErrorRows}
-            selectedDelimiters={selectedDelimiters}
           />
         );
       case ReviewStates.VALIDATE:

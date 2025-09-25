@@ -39,7 +39,7 @@ export async function GET(
           WITH measured_quads AS (
             SELECT DISTINCT s.QuadratID
             FROM ${schema}.coremeasurements cm
-            JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
+            JOIN ${schema}.stems s ON cm.StemID = s.StemID
             JOIN ${schema}.quadrats q2 ON s.QuadratID = q2.QuadratID
             WHERE cm.CensusID = ? AND q2.PlotID = ?
           )
@@ -83,7 +83,7 @@ export async function GET(
         const ctResults = await connectionManager.executeQuery(query, [censusID, plotID]);
         return NextResponse.json({ CountTrees: ctResults[0].CountTrees }, { status: HTTPResponses.OK });
       case 'CountStems':
-        query = `SELECT COUNT(st.StemGUID)AS CountStems FROM ${schema}.stems st JOIN ${schema}.census c ON st.CensusID = c.CensusID WHERE st.CensusID = ? AND c.PlotID = ?`;
+        query = `SELECT COUNT(st.StemID)AS CountStems FROM ${schema}.stems st JOIN ${schema}.census c ON st.CensusID = c.CensusID WHERE st.CensusID = ? AND c.PlotID = ?`;
         const csResults = await connectionManager.executeQuery(query, [censusID, plotID]);
         return NextResponse.json({ CountStems: csResults[0].CountStems }, { status: HTTPResponses.OK });
       default:
