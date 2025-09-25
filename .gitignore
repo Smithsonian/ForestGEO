@@ -7,6 +7,9 @@
 .pnp.js
 /.idea/*
 /.idea
+/.venv
+/__pycache__
+
 
 # testing
 /coverage
@@ -50,3 +53,6 @@ next-env.d.ts
 /documentation/.obsidian
 /documentation/.obsidian/*
 frontend/liquibase/
+
+*.sh
+*.properties

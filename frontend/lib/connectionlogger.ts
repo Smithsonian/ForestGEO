@@ -1,9 +1,23 @@
 // connectionlogger.ts
-import { cookies } from 'next/headers';
 
 interface TableConfig {
   pk: string;
   fk?: string;
+}
+
+// Helper function to safely access cookies in server context
+async function getCookiesSafely() {
+  try {
+    // Only import and use cookies in server context
+    if (typeof window === 'undefined') {
+      const { cookies } = await import('next/headers');
+      return await cookies();
+    }
+    return null;
+  } catch (error) {
+    // Return null if cookies can't be accessed (e.g., in client context)
+    return null;
+  }
 }
 
 export function patchConnectionManager(cm: any) {
@@ -11,7 +25,7 @@ export function patchConnectionManager(cm: any) {
     coremeasurements: { pk: 'CoreMeasurementID' },
     cmattributes: { pk: 'CMAID', fk: 'CoreMeasurementID' },
     cmverrors: { pk: 'CMVErrorID', fk: 'CoreMeasurementID' },
-    stems: { pk: 'StemID' },
+    stems: { pk: 'StemGUID' },
     trees: { pk: 'TreeID' },
     quadrats: { pk: 'QuadratID' },
     failedmeasurements: { pk: 'FailedMeasurementID' },
@@ -25,8 +39,8 @@ export function patchConnectionManager(cm: any) {
   const orig = cm.executeQuery.bind(cm);
 
   cm.executeQuery = async function (sql: string, params?: any[], transactionId?: string) {
-    const store = await cookies();
-    if (!store.has('user') || !store.has('schema') || !store.has('plotID') || !store.has('censusID')) {
+    const store = await getCookiesSafely();
+    if (!store || !store.has('user') || !store.has('schema') || !store.has('plotID') || !store.has('censusID')) {
       return orig(sql, params, transactionId); // don't log anything
     }
     const user = String(store.get('user')?.value);

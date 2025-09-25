@@ -224,12 +224,12 @@ ON DUPLICATE KEY UPDATE TreeTag   = IF(VALUES(TreeTag) != '', VALUES(TreeTag), t
                         SpeciesID = VALUES(SpeciesID);
 
 -- Insert into stems with ON DUPLICATE KEY UPDATE
-INSERT INTO stems (StemID, TreeID, QuadratID, StemNumber, StemTag, LocalX, LocalY, Moved,
+INSERT INTO stems (StemGUID, TreeID, QuadratID, StemCrossID, StemTag, LocalX, LocalY, Moved,
                    StemDescription)
-SELECT s.StemID,
+SELECT s.StemGUID,
        s.TreeID,
        s.QuadratID,
-       s.StemNumber,
+       s.StemCrossID,
        s.StemTag,
        MIN(s.QX),
        MIN(s.QY),
@@ -238,10 +238,10 @@ SELECT s.StemID,
 FROM stable_bci.stem s
          LEFT JOIN stable_bci.quadrat q ON q.QuadratID = s.QuadratID
          LEFT JOIN stable_bci.Site si ON q.PlotID = si.PlotID
-GROUP BY s.StemID, s.TreeID, s.QuadratID, s.StemNumber, s.StemTag, s.Moved, s.StemDescription, si.QUOM
+GROUP BY s.StemGUID, s.TreeID, s.QuadratID, s.StemCrossID, s.StemTag, s.Moved, s.StemDescription, si.QUOM
 ON DUPLICATE KEY UPDATE TreeID          = VALUES(TreeID),
                         QuadratID       = VALUES(QuadratID),
-                        StemNumber      = VALUES(StemNumber),
+                        StemCrossID     = VALUES(StemCrossID),
                         StemTag         = IF(VALUES(StemTag) != '', VALUES(StemTag), stems.StemTag),
                         LocalX          = VALUES(LocalX),
                         LocalY          = VALUES(LocalY),
@@ -250,11 +250,11 @@ ON DUPLICATE KEY UPDATE TreeID          = VALUES(TreeID),
                                              stems.StemDescription);
 
 -- Insert into coremeasurements with ON DUPLICATE KEY UPDATE
-INSERT INTO coremeasurements (CoreMeasurementID, CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH,
+INSERT INTO coremeasurements (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH,
                               MeasuredHOM, Description, UserDefinedFields)
 SELECT dbh.DBHID,
        dbh.CensusID,
-       dbh.StemID,
+       dbh.StemGUID,
        NULL, -- Placeholder for IsValidated
        dbh.ExactDate,
        CAST(dbh.DBH AS DECIMAL(10, 6)),
@@ -265,13 +265,13 @@ FROM (
          -- Combine dbh and dbhbackup using UNION
          SELECT DBHID,
                 CensusID,
-                StemID,
+                StemGUID,
                 DBH,
                 HOM,
                 ExactDate,
                 Comments
          FROM stable_bci.dbh) dbh
-ON DUPLICATE KEY UPDATE StemID            = VALUES(StemID),
+ON DUPLICATE KEY UPDATE StemGUID            = VALUES(StemGUID),
                         IsValidated       = VALUES(IsValidated),
                         MeasurementDate   = VALUES(MeasurementDate),
                         MeasuredDBH       = VALUES(MeasuredDBH),
@@ -317,10 +317,10 @@ ON DUPLICATE KEY UPDATE CoreMeasurementID = VALUES(CoreMeasurementID),
                         Code              = VALUES(Code);
 
 -- Insert into specimens with ON DUPLICATE KEY UPDATE
-INSERT INTO specimens (SpecimenID, StemID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,
+INSERT INTO specimens (SpecimenID, StemGUID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,
                        DeterminedBy, Description)
 SELECT sp.SpecimenID,
-       st.StemID,
+       st.StemGUID,
        pr.PersonnelID,
        sp.SpecimenNumber,
        sp.SpeciesID,
@@ -332,7 +332,7 @@ SELECT sp.SpecimenID,
 FROM stable_bci.specimen sp
          LEFT JOIN stable_bci.stem st ON st.TreeID = sp.TreeID
          LEFT JOIN stable_bci.personnel pr ON sp.Collector = CONCAT(pr.FirstName, ' ', pr.LastName)
-ON DUPLICATE KEY UPDATE StemID         = VALUES(StemID),
+ON DUPLICATE KEY UPDATE StemGUID         = VALUES(StemGUID),
                         PersonnelID    = VALUES(PersonnelID),
                         SpecimenNumber = VALUES(SpecimenNumber),
                         SpeciesID      = VALUES(SpeciesID),

@@ -127,7 +127,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
         query = `SELECT
-                  st.StemID                                           AS StemID,
+                  st.StemGUID                                         AS StemGUID,
                   t.TreeID                                            AS TreeID,
                   st.StemTag                                          AS StemTag,
                   t.TreeTag                                           AS TreeTag,
@@ -150,7 +150,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                    WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
               FROM ${schema}.coremeasurements cm
               JOIN ${schema}.census c ON cm.CensusID = c.CensusID and c.IsActive IS TRUE
-              JOIN ${schema}.stems st ON st.StemID = cm.StemID and st.CensusID = c.CensusID and st.IsActive IS TRUE
+              JOIN ${schema}.stems st ON st.StemGUID = cm.StemGUID and st.CensusID = c.CensusID and st.IsActive IS TRUE
               JOIN ${schema}.trees t ON t.TreeID = st.TreeID and t.CensusID = c.CensusID and t.IsActive IS TRUE
               JOIN ${schema}.quadrats q on q.QuadratID = st.QuadratID and q.IsActive is true
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
@@ -185,7 +185,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [censusID, plotID]);
         formMappedResults = results.map((row: any) => ({
-          stemID: row.StemID,
+          stemID: row.StemGUID,
           treeID: row.TreeID,
           tag: row.TreeTag,
           stemtag: row.StemTag,

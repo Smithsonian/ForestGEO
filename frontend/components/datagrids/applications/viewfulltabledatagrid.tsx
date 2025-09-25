@@ -19,7 +19,7 @@ export default function ViewFullTableDataGrid() {
     censusID: 0,
     quadratID: 0,
     treeID: 0,
-    stemID: 0,
+    stemGUID: 0,
     speciesID: 0,
     genusID: 0,
     familyID: 0,

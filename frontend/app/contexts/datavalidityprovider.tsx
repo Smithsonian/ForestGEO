@@ -3,7 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { UnifiedValidityFlags } from '@/config/macros';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from './userselectionprovider';
-import { useLoading } from './loadingprovider';
+import { useApiWrapper } from '@/utils/apiWrapper';
 import ailogger from '@/ailogger';
 
 const initialValidityState: UnifiedValidityFlags = {
@@ -37,7 +37,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
 
-  const { setLoading } = useLoading();
+  const ApiWrapper = useApiWrapper();
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -51,13 +51,15 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     async (types: (keyof UnifiedValidityFlags)[]) => {
       if (!currentSite || !currentPlot || !currentCensus) return;
 
-      setLoading(true, 'Pre-validation in progress...');
       try {
         const results = await Promise.all(
           types.map(async type => {
             const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
             try {
-              const response = await fetch(url, { method: 'GET' });
+              const response = await ApiWrapper.get(url, {
+                loadingMessage: `Validating ${type}...`,
+                category: 'api'
+              });
               return { type, isValid: response.ok };
             } catch (error: any) {
               ailogger.error(error);
@@ -69,11 +71,11 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
         results.forEach(({ type, isValid }) => {
           setValidity(type, isValid);
         });
-      } finally {
-        setLoading(false);
+      } catch (error: any) {
+        ailogger.error(error);
       }
     },
-    [currentSite, currentPlot, currentCensus, setValidity]
+    [currentSite, currentPlot, currentCensus, setValidity, ApiWrapper]
   );
 
   const recheckValidityIfNeeded = useCallback(async () => {

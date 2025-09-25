@@ -119,6 +119,7 @@ function MenuRenderToggle(
           variant={isParentDataIncomplete ? 'solid' : 'soft'}
           badgeContent={isParentDataIncomplete ? '!' : undefined}
           invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
+          aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
         >
           <Icon />
         </Badge>
@@ -172,6 +173,7 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
+  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
@@ -274,6 +276,62 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
+  const handleCreateNewCensus = async () => {
+    if (isCreatingCensus) return; // Prevent multiple clicks
+
+    // Check if current census has measurements
+    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
+      alert('Cannot create a new census: Current census has no measurements.');
+      return;
+    }
+
+    // Check if any existing census has no measurements
+    const censusWithoutMeasurements = censusListContext?.find(
+      census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate
+    );
+
+    if (censusWithoutMeasurements) {
+      alert(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
+      return;
+    }
+
+    setIsCreatingCensus(true);
+
+    try {
+      const highestPlotCensusNumber =
+        censusListContext && censusListContext.length > 0
+          ? censusListContext.reduce(
+              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
+              censusListContext[0]?.plotCensusNumber ?? 0
+            )
+          : 0;
+
+      const mapper = new OrgCensusToCensusResultMapper();
+      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+      if (!newCensusID) throw new Error('census creation failure');
+
+      await Promise.all(
+        ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+          await fetch(
+            `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ incoming: {} })
+            }
+          );
+        })
+      );
+      setCensusListLoaded(false);
+    } catch (error) {
+      console.error('Error creating census:', error);
+      alert('Failed to create census. Please try again.');
+    } finally {
+      // Debounce: prevent rapid successive clicks
+      setTimeout(() => setIsCreatingCensus(false), 1000);
+    }
+  };
+
   const renderSiteValue = (option: SelectOption<string> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-site-select'}>Select a Site</Typography>;
@@ -354,11 +412,11 @@ export default function Sidebar(props: SidebarProps) {
 
     // Ensure dates are rendered in a block layout to stack them vertically
     const dateMessage = (
-      <React.Fragment aria-label={'census record information'}>
+      <span aria-label={'census record information'} style={{ display: 'block' }}>
         {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
         {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
         {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
-      </React.Fragment>
+      </span>
     );
 
     return (
@@ -390,13 +448,15 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderCensusOptions = () => (
     <Select
-      placeholder="Select a Census"
+      suppressHydrationWarning
+      placeholder="Select a Census. Required"
       className="census-select sidebar-item"
       name="None"
       required
       size={'md'}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
+      aria-label="Select a Census. Required field for accessing measurement tools"
       listboxOpen={isCensusDropdownOpen}
       onListboxOpenChange={() => {
         setSiteDropdownOpen(false);
@@ -414,15 +474,13 @@ export default function Sidebar(props: SidebarProps) {
       }}
     >
       <ListItem>
-        <ListItemButton
-          aria-label="render census list item"
-          onMouseDown={e => e.preventDefault()} // still works
-          onClick={e => e.stopPropagation()} // still works
+        <Box
           sx={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            width: '100%'
+            width: '100%',
+            padding: '8px 12px'
           }}
         >
           <Typography level="body-sm" color="primary">
@@ -433,35 +491,22 @@ export default function Sidebar(props: SidebarProps) {
             size="sm"
             color="primary"
             data-testid={'add-new-census-button'}
-            onClick={async event => {
-              event.stopPropagation();
-              const highestPlotCensusNumber =
-                censusListContext && censusListContext.length > 0
-                  ? censusListContext.reduce(
-                      (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-                      censusListContext[0]?.plotCensusNumber ?? 0
-                    )
-                  : 0;
-
-              const mapper = new OrgCensusToCensusResultMapper();
-              const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-              if (!newCensusID) throw new Error('census creation failure');
-              await new Promise(resolve => setTimeout(resolve, 300)); // debounce
-
-              await Promise.all(
-                ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-                  await fetch(
-                    `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
-                    {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ incoming: {} })
-                    }
-                  );
-                })
-              );
-              setCensusListLoaded(false);
+            tabIndex={0}
+            disabled={
+              isCreatingCensus ||
+              // Prevent creation if current census has no measurements
+              (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) ||
+              // Prevent creation if any census in the list has no measurements
+              censusListContext?.some(census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate)
+            }
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                handleCreateNewCensus();
+              }
             }}
+            onClick={handleCreateNewCensus}
           >
             <AddIcon />
           </IconButton>
@@ -472,7 +517,7 @@ export default function Sidebar(props: SidebarProps) {
         ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
         .map(item => (
           <Option
-            aria-label={'census list context item'}
+            aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges[0]?.startDate ? new Date(item.dateRanges[0].startDate).toDateString() : 'No measurements'}` : ''}`}
             data-testid={'census-selection-option'}
             key={item?.plotCensusNumber}
             value={item?.plotCensusNumber?.toString()}
@@ -571,11 +616,19 @@ export default function Sidebar(props: SidebarProps) {
                     justifyContent: 'center',
                     alignSelf: 'center'
                   }}
+                  aria-label={`Plot options for ${item?.plotName}`}
                   onMouseDown={event => event.preventDefault()}
                   onClick={event => {
                     event.preventDefault();
                     setSelectedPlot(item);
                     handleOpen(event);
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedPlot(item);
+                      handleOpen(event);
+                    }
                   }}
                   // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
                   disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
@@ -642,19 +695,29 @@ export default function Sidebar(props: SidebarProps) {
               Deselect Site (will trigger app reset!):
             </Typography>
           </ListItem>
-          <Option key="none" value="">
+          <Option key="none" value="" aria-label="Deselect site, will trigger application reset">
             None
           </Option>
         </List>
         <ListDivider role="none" />
         <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky className="sidebar-item">
-            <Typography level="body-xs" textTransform="uppercase">
+            <Typography
+              level="body-xs"
+              textTransform="uppercase"
+              aria-live="polite"
+              aria-label={`Allowed Sites section, ${allowedSites?.length} sites available`}
+            >
               Allowed Sites ({allowedSites?.length})
             </Typography>
           </ListItem>
           {allowedSites?.map(site => (
-            <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'}>
+            <Option
+              key={site.siteID}
+              value={site.siteName}
+              data-testid={'site-selection-option-allowed'}
+              aria-label={`Select ${site.siteName} site`}
+            >
               {site.siteName}
             </Option>
           ))}
@@ -662,12 +725,23 @@ export default function Sidebar(props: SidebarProps) {
         <ListDivider role="none" />
         <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky className="sidebar-item">
-            <Typography level="body-xs" textTransform="uppercase">
+            <Typography
+              level="body-xs"
+              textTransform="uppercase"
+              aria-live="polite"
+              aria-label={`Other Sites section, ${otherSites?.length} sites not available to you`}
+            >
               Other Sites ({otherSites?.length})
             </Typography>
           </ListItem>
           {otherSites?.map(site => (
-            <Option key={site.siteID} value={site.siteName} disabled data-testid={'site-selection-option-other'}>
+            <Option
+              key={site.siteID}
+              value={site.siteName}
+              disabled
+              data-testid={'site-selection-option-other'}
+              aria-label={`${site.siteName} site, not accessible to current user`}
+            >
               {site.siteName}
             </Option>
           ))}
@@ -866,6 +940,14 @@ export default function Sidebar(props: SidebarProps) {
                                     onClick={() => {
                                       if (!isLinkDisabled) {
                                         router.push(item.href);
+                                        // Move focus to main content after navigation
+                                        setTimeout(() => {
+                                          const mainContent = document.getElementById('main-content');
+                                          if (mainContent) {
+                                            mainContent.focus();
+                                            mainContent.scrollIntoView();
+                                          }
+                                        }, 100);
                                       }
                                     }}
                                   >
@@ -874,6 +956,7 @@ export default function Sidebar(props: SidebarProps) {
                                       variant={isDataIncomplete ? 'solid' : 'soft'}
                                       badgeContent={isDataIncomplete ? '!' : undefined}
                                       invisible={!isDataIncomplete}
+                                      aria-label={isDataIncomplete ? 'Error: Missing core data required for this section' : undefined}
                                     >
                                       <Icon />
                                     </Badge>
@@ -893,6 +976,14 @@ export default function Sidebar(props: SidebarProps) {
                                   onClick={() => {
                                     if (!isLinkDisabled) {
                                       router.push(item.href);
+                                      // Move focus to main content after navigation
+                                      setTimeout(() => {
+                                        const mainContent = document.getElementById('main-content');
+                                        if (mainContent) {
+                                          mainContent.focus();
+                                          mainContent.scrollIntoView();
+                                        }
+                                      }, 100);
                                     }
                                   }}
                                 >
@@ -966,6 +1057,14 @@ export default function Sidebar(props: SidebarProps) {
                                                     );
                                                     if (response.ok) {
                                                       router.push(item.href + link.href);
+                                                      // Move focus to main content after navigation
+                                                      setTimeout(() => {
+                                                        const mainContent = document.getElementById('main-content');
+                                                        if (mainContent) {
+                                                          mainContent.focus();
+                                                          mainContent.scrollIntoView();
+                                                        }
+                                                      }, 100);
                                                       return;
                                                     } else {
                                                       alert('No measurements found!');
@@ -973,6 +1072,14 @@ export default function Sidebar(props: SidebarProps) {
                                                     }
                                                   } else if (!isLinkDisabled) {
                                                     router.push(item.href + link.href);
+                                                    // Move focus to main content after navigation
+                                                    setTimeout(() => {
+                                                      const mainContent = document.getElementById('main-content');
+                                                      if (mainContent) {
+                                                        mainContent.focus();
+                                                        mainContent.scrollIntoView();
+                                                      }
+                                                    }, 100);
                                                     return;
                                                   }
                                                 }}
@@ -986,6 +1093,11 @@ export default function Sidebar(props: SidebarProps) {
                                                     link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
                                                   }
                                                   invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
+                                                  aria-label={
+                                                    link.href === '/summary'
+                                                      ? (!isAllValiditiesTrue ? 'Warning: Summary contains incomplete data sections' : undefined)
+                                                      : (isDataIncomplete ? 'Error: Missing required data for this section' : undefined)
+                                                  }
                                                 >
                                                   <SubIcon />
                                                 </Badge>
@@ -1005,6 +1117,14 @@ export default function Sidebar(props: SidebarProps) {
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);
+                                                  // Move focus to main content after navigation
+                                                  setTimeout(() => {
+                                                    const mainContent = document.getElementById('main-content');
+                                                    if (mainContent) {
+                                                      mainContent.focus();
+                                                      mainContent.scrollIntoView();
+                                                    }
+                                                  }, 100);
                                                 }
                                               }}
                                             >
@@ -1043,9 +1163,16 @@ export default function Sidebar(props: SidebarProps) {
           }}
         >
           <MenuItem
-            onMouseDown={() => {
+            onClick={() => {
               handleOptionClick();
             }}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleOptionClick();
+              }
+            }}
+            aria-label={`View and edit ${selectedPlot?.plotName} plot details`}
           >
             View/Edit this Plot
           </MenuItem>

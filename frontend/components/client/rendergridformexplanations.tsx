@@ -43,12 +43,32 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
     <Box role="region" aria-labelledby="grid-form-explanations-heading" sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
       <AccordionGroup>
         <Accordion aria-label="Grid and upload form headers explanation">
-          <AccordionSummary id="grid-form-explanation-summary" aria-controls="grid-form-explanation-content">
+          <AccordionSummary
+            id="grid-form-explanation-summary"
+            aria-controls="grid-form-explanation-content"
+            aria-describedby="accordion-help-text"
+          >
             <Typography id="grid-form-explanations-heading" level="title-lg" component="h2" sx={{ textAlign: 'center', my: 2 }}>
               Understanding Grid and Upload Form Headers
             </Typography>
+            <Typography
+              id="accordion-help-text"
+              level="body-xs"
+              sx={{ display: 'none' }}
+              aria-hidden="true"
+            >
+              Expand to view detailed header mappings between grid and form
+            </Typography>
           </AccordionSummary>
-          <AccordionDetails id="grid-form-explanation-content" aria-labelledby="grid-form-explanation-summary">
+          <AccordionDetails
+            id="grid-form-explanation-content"
+            aria-labelledby="grid-form-explanation-summary"
+            sx={{
+              '&[aria-hidden="true"]': {
+                visibility: 'hidden'
+              }
+            }}
+          >
             <FormHelperText role="note" aria-live="polite" sx={{ mb: 1 }}>
               Remember that Form headers are <strong>bold</strong> if required for upload!
             </FormHelperText>
@@ -139,8 +159,10 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                     {/* Date format alert */}
                     {getFormHeaderForGridHeader(datagridType, header.label)?.label.includes('date') && (
                       <Alert role="alert" startDecorator={<WarningIcon fontSize="large" aria-hidden="true" />} variant="soft" color="danger" sx={{ mt: 2 }}>
-                        <Typography component="div" level="body-sm">
-                          Please note: For date fields, accepted formats are
+                        <Box>
+                          <Typography level="body-sm" component="p">
+                            Please note: For date fields, accepted formats are:
+                          </Typography>
                           <List marker="decimal" aria-label="Date format list">
                             <ListItem>
                               <Tooltip describeChild title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
@@ -158,7 +180,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                             <br />
                             Please ensure your dates follow one of these formats.
                           </Typography>
-                        </Typography>
+                        </Box>
                       </Alert>
                     )}
                   </CardContent>

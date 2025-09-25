@@ -1,11 +1,13 @@
 'use client';
 import * as React from 'react';
+import { useEffect } from 'react';
 import { SessionProvider } from 'next-auth/react';
 import ThemeRegistry from '@/components/themeregistry/themeregistry';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
-import { useEffect } from 'react';
 import { initializeAppInsights } from '@/applicationinsights';
+import { LoadingProvider } from '@/app/contexts/loadingprovider';
+import { GlobalLoadingIndicator } from '@/styles/globalloadingindicator';
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -31,7 +33,12 @@ export function Providers({ children }: Readonly<ProvidersProps>) {
   return (
     <ThemeRegistry>
       <SessionProvider>
-        <LocalizationProvider dateAdapter={AdapterMoment}>{children}</LocalizationProvider>
+        <LocalizationProvider dateAdapter={AdapterMoment}>
+          <LoadingProvider>
+            {children}
+            <GlobalLoadingIndicator />
+          </LoadingProvider>
+        </LocalizationProvider>
       </SessionProvider>
     </ThemeRegistry>
   );

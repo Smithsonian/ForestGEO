@@ -357,7 +357,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       let csvRows = headers.join(',') + '\n';
       Object.entries(results).forEach(([_, row]) => {
         const rowValues = headers.map(header => {
-          if (header === 'StemID' || header === 'TreeID') return Number(row[header]);
+          if (header === 'StemGUID' || header === 'TreeID') return Number(row[header]);
           if (header === 'IsValidated') return bitToBoolean(row[header]);
           if (header === 'MeasurementDate') return moment(new Date(row[header as keyof MeasurementsSummaryResult])).format('YYYY-MM-DD');
           if (Object.prototype.toString.call(row[header as keyof MeasurementsSummaryResult]) === '[object Object]')
@@ -1008,7 +1008,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 freeSolo={['treeTag', 'stemTag'].includes(column.field)}
                 clearOnBlur={false}
                 isOptionEqualToValue={(option, value) => option === value}
-                options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
+                options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
                 value={
                   column.field === 'attributes'
                     ? params.value

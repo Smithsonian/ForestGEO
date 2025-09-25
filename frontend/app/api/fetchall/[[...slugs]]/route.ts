@@ -10,19 +10,27 @@ import ailogger from '@/ailogger';
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
-
-  if (!schema || schema === 'undefined') {
-    throw new Error('Schema selection was not provided to API endpoint');
-  }
-
   const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
-  if (!dataType || !plotIDParam || !pcnParam) {
-    throw new Error('slugs were not correctly provided');
-  }
 
   let storedCensusList: OrgCensus[];
   let storedPlotID: number = parseInt(plotIDParam);
   let storedPCN: number = parseInt(pcnParam);
+
+  function getGridID(gridType: string): string {
+    switch (gridType.trim()) {
+      case 'attributes':
+        return 'Code';
+      case 'personnel':
+        return 'PersonnelID';
+      case 'quadrats':
+        return 'QuadratID';
+      case 'alltaxonomiesview':
+      case 'species':
+        return 'SpeciesID';
+      default:
+        return 'breakage';
+    }
+  }
 
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
@@ -35,6 +43,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
 
   const connectionManager = ConnectionManager.getInstance();
   try {
+    if (!schema || schema === 'undefined') {
+      throw new Error('Schema selection was not provided to API endpoint');
+    }
+
+    if (!dataType) {
+      throw new Error('slugs were not correctly provided');
+    }
     let results: any;
     if (dataType === 'stems' || dataType === 'trees') {
       const query = `SELECT st.* FROM ${schema}.${dataType} st 
@@ -78,7 +93,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    throw new Error('Call failed');
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

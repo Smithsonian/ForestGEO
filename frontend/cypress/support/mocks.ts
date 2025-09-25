@@ -59,3 +59,23 @@ export function mockLockAnimationContext() {
 export function mockApiResponses() {
   cy.intercept('GET', '/api/changelog/**', { fixture: 'changelog.json' }).as('getChangelog');
 }
+
+export function mockAilogger() {
+  // Create a global mock for ailogger
+  const mockLogger = {
+    error: cy.stub().as('ailogger-error'),
+    info: cy.stub().as('ailogger-info'),
+    warn: cy.stub().as('ailogger-warn'),
+    debug: cy.stub().as('ailogger-debug'),
+    critical: cy.stub().as('ailogger-critical'),
+    event: cy.stub().as('ailogger-event'),
+    metric: cy.stub().as('ailogger-metric')
+  };
+
+  // Add to window so it can be accessed by the component
+  cy.window().then(win => {
+    (win as any).mockAilogger = mockLogger;
+  });
+
+  return mockLogger;
+}

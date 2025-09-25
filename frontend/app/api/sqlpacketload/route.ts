@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
+  const maxRetries = 3;
+  let retryCount = 0;
   if (formType === 'measurements') {
     const batchID = v4();
     const placeholders = Object.values(fileRowSet ?? [])
@@ -51,33 +53,66 @@ export async function POST(request: NextRequest) {
       const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
       return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, formattedDate, codes, comments];
     });
-    transactionID = await connectionManager.beginTransaction();
-    try {
-      const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments) 
-      VALUES ${placeholders}`;
-      await connectionManager.executeQuery(insertSQL, values);
-      await connectionManager.commitTransaction(transactionID);
-      ailogger.info(
-        await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
-      );
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Bulk insert to SQL completed`,
-          failingRows: Array.from(failingRows)
-        }),
-        { status: HTTPResponses.OK }
-      );
-    } catch (e: any) {
-      await connectionManager.rollbackTransaction(transactionID);
-      ailogger.error(`Error processing file ${fileName}:`, e.message);
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Error processing file ${fileName}: ${e.message}`,
-          failingRows: Array.from(failingRows)
-        }),
-        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
-      );
+    // Retry logic for database operations
+    while (retryCount <= maxRetries) {
+      try {
+        transactionID = await connectionManager.beginTransaction();
+
+        const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements
+        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+        VALUES ${placeholders}`;
+
+        await connectionManager.executeQuery(insertSQL, values, transactionID);
+        await connectionManager.commitTransaction(transactionID);
+
+        // Log successful insertion count
+        const countResult = await connectionManager.executeQuery(
+          `SELECT COUNT(*) as count FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`,
+          [fileName, batchID]
+        );
+        ailogger.info(`Successfully inserted ${countResult[0]?.count || 0} rows for ${fileName}-${batchID}`);
+
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: `Bulk insert to SQL completed`,
+            failingRows: Array.from(failingRows),
+            insertedCount: countResult[0]?.count || 0,
+            transactionCompleted: true,
+            batchID: batchID
+          }),
+          { status: HTTPResponses.OK }
+        );
+      } catch (e: any) {
+        if (transactionID) {
+          await connectionManager.rollbackTransaction(transactionID);
+        }
+
+        retryCount++;
+        const isRetryableError =
+          e.message?.includes('Lock wait timeout') ||
+          e.message?.includes('Deadlock') ||
+          e.message?.includes('Connection lost') ||
+          e.message?.includes('server has gone away') ||
+          e.code === 'PROTOCOL_CONNECTION_LOST' ||
+          e.code === 'ECONNRESET';
+
+        if (isRetryableError && retryCount <= maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 10000); // Exponential backoff, max 10s
+          ailogger.warn(`Retryable error for ${fileName} (attempt ${retryCount}/${maxRetries + 1}), retrying in ${delay}ms: ${e.message}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        ailogger.error(`Error processing file ${fileName} after ${retryCount} attempts:`, e.message);
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: `Error processing file ${fileName}: ${e.message}`,
+            failingRows: Array.from(failingRows),
+            retryCount
+          }),
+          { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+        );
+      }
     }
   } else {
     transactionID = await connectionManager.beginTransaction();
@@ -98,7 +133,7 @@ export async function POST(request: NextRequest) {
             }) as Partial<QuadratResult>
         );
         const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
-        await connectionManager.executeQuery(sql, params);
+        await connectionManager.executeQuery(sql, params, transactionID);
       } else if (formType === 'attributes') {
         const bulkAttributes = Object.values(fileRowSet).map(
           row =>
@@ -109,7 +144,7 @@ export async function POST(request: NextRequest) {
             }) as Partial<AttributesResult>
         );
         const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
-        await connectionManager.executeQuery(sql, params);
+        await connectionManager.executeQuery(sql, params, transactionID);
       } else if (formType === 'species') {
         const bulkProps: SpecialBulkProcessingProps = {
           schema,
@@ -168,7 +203,8 @@ export async function POST(request: NextRequest) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: `Bulk insert to SQL completed`,
-        failingRows: Array.from(failingRows)
+        failingRows: Array.from(failingRows),
+        transactionCompleted: true
       }),
       { status: HTTPResponses.OK }
     );
