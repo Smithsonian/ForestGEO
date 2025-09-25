@@ -1,6 +1,7 @@
 import { createError, handleUpsert } from '@/config/utils';
 import { PersonnelResult, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 import { SpecialProcessingProps } from '@/config/macros';
+import { CensusPersonnelResult } from '@/config/sqlrdsdefinitions/zones';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, census } = props;

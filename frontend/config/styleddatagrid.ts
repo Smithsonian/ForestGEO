@@ -60,5 +60,33 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
   '& .MuiSelect-root': {
     fontSize: '12px',
     padding: '4px 0'
+  },
+  '& .treestemstate--newrecruit': {
+    backgroundColor: theme.palette.primary.softBg,
+    '&:hover': { backgroundColor: theme.palette.primary.softHoverBg },
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.primary.softActiveBg
+    }
+  },
+  '& .treestemstate--oldtrees': {
+    backgroundColor: theme.palette.success.softBg,
+    '&:hover': { backgroundColor: theme.palette.success.softHoverBg },
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.success.softActiveBg
+    }
+  },
+  '& .treestemstate--multistem': {
+    backgroundColor: theme.palette.warning.softBg,
+    '&:hover': { backgroundColor: theme.palette.warning.softHoverBg },
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.warning.softActiveBg
+    }
+  },
+  '& .treestemstate--null': {
+    backgroundColor: theme.palette.danger['900'],
+    '&:hover': { backgroundColor: theme.palette.danger['800'] },
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.danger['700']
+    }
   }
 }));

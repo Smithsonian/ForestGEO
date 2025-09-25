@@ -1,6 +1,7 @@
 DROP VIEW IF EXISTS alltaxonomiesview;
 CREATE VIEW alltaxonomiesview AS
 SELECT s.SpeciesID           AS SpeciesID,
+       c.CensusID            AS CensusID,
        f.FamilyID            AS FamilyID,
        g.GenusID             AS GenusID,
        s.SpeciesCode         AS SpeciesCode,

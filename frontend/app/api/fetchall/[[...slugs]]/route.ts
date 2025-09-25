@@ -16,6 +16,22 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   let storedPlotID: number = parseInt(plotIDParam);
   let storedPCN: number = parseInt(pcnParam);
 
+  function getGridID(gridType: string): string {
+    switch (gridType.trim()) {
+      case 'attributes':
+        return 'Code';
+      case 'personnel':
+        return 'PersonnelID';
+      case 'quadrats':
+        return 'QuadratID';
+      case 'alltaxonomiesview':
+      case 'species':
+        return 'SpeciesID';
+      default:
+        return 'breakage';
+    }
+  }
+
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
     storedPlotID = parseInt((await getCookie('plotID')) ?? '0');

@@ -129,6 +129,7 @@ class ConnectionManager {
       ailogger.error(chalk.red('Error starting transaction:', e));
       throw e;
     }
+    throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
   }
 
   // Commit a transaction

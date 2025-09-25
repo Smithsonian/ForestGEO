@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
 import { DataGridSignals, FormType } from '@/config/macros/formdetails';
-import { Box } from '@mui/joy';
+import { Autocomplete, Box } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { GridColDef } from '@mui/x-data-grid';

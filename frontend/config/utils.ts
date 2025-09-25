@@ -131,6 +131,39 @@ export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: stri
   return { sql, params };
 }
 
+export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: string, table: string, rows: Partial<T>[], key: keyof T) {
+  if (!rows.length) {
+    throw new Error('No rows provided for bulk upsert');
+  }
+
+  // 1) All the columns we're inserting/updating (assume every row has the same set)
+  const columns = Object.keys(rows[0]);
+
+  // 2) Build placeholders: "(?,?),(?,?),(?,?)…"
+  const group = `(${columns.map(() => '?').join(',')})`;
+  const placeholders = rows.map(() => group).join(',');
+
+  // 3) flatten values: [ row0.col0, row0.col1, …, row1.col0, row1.col1, …, … ]
+  const params: any[] = [];
+  for (const row of rows) {
+    for (const col of columns) {
+      params.push(row[col]);
+    }
+  }
+
+  // 4) ON DUPLICATE KEY UPDATE clause (skip the primary key itself)
+  const updates = columns
+    .filter(c => c !== String(key))
+    .map(c => `\`${c}\` = VALUES(\`${c}\`)`)
+    .join(',');
+
+  // 5) assemble
+  const sql =
+    `INSERT INTO \`${schema}\`.\`${table}\` (` + columns.map(c => `\`${c}\``).join(',') + `) VALUES ${placeholders}` + ` ON DUPLICATE KEY UPDATE ${updates};`;
+
+  return { sql, params };
+}
+
 export async function handleUpsert<Result>(
   connectionManager: ConnectionManager,
   schema: string,
