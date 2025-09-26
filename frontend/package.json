@@ -26,7 +26,10 @@
     "end:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "test:e2e:ci": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
     "com": "cypress open --component",
-    "com:headless": "cypress run --component"
+    "com:headless": "cypress run --component",
+    "test:responsive": "node scripts/run-responsive-tests.js",
+    "test:responsive:dev": "node scripts/run-responsive-tests.js --headed",
+    "test:responsive:ci": "cypress run --config-file cypress.ci.config.cjs --spec 'cypress/e2e/responsive/ci-responsive-suite.cy.ts' --browser chrome"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
