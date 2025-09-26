@@ -111,7 +111,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       const headers = rowSet ? Object.keys(Object.values(rowSet)[0] || {}) : [];
       csvRows.push(`Filename,Row,${headers.join(',')}`); // Add headers
       Object.entries(rowSet).forEach(([rowKey, row]) => {
-        const rowValues = headers.map(header => row[header] ?? 'NULL');
+        const rowValues = headers.map(header => {
+          const value = row[header];
+          if (value === null || value === undefined) return 'NULL';
+          return typeof value === 'object' ? JSON.stringify(value) : value;
+        });
         csvRows.push(`${filename},${rowKey},${rowValues.join(',')}`);
       });
     });
@@ -238,7 +242,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
                                       {moment.isDate(row[header])
                                         ? moment(row[header]).format('YYYY-MM-DD HH:mm:ss')
                                         : row[header] !== null
-                                          ? row[header]
+                                          ? typeof row[header] === 'object' ? JSON.stringify(row[header]) : row[header]
                                           : 'NULL'}
                                     </TableCell>
                                   ))}
