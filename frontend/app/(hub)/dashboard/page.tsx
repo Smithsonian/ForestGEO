@@ -466,7 +466,7 @@ export default function DashboardPage() {
                                     <Box role="list" aria-label="Old row field list">
                                       {Object.entries(changelog.oldRowState).map(([key, value]) => (
                                         <Typography key={key} role="listitem" level="body-md">
-                                          <strong>{key}</strong>: {value ?? 'NULL'}
+                                          <strong>{key}</strong>: {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
                                         </Typography>
                                       ))}
                                     </Box>
@@ -490,7 +490,7 @@ export default function DashboardPage() {
                                     <Box role="list" aria-label="New row field list">
                                       {Object.entries(changelog.newRowState).map(([key, value]) => (
                                         <Typography key={key} role="listitem" level="body-md">
-                                          <strong>{key}</strong>: {value ?? 'NULL'}
+                                          <strong>{key}</strong>: {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
                                         </Typography>
                                       ))}
                                     </Box>
