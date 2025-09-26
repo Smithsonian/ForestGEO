@@ -139,10 +139,18 @@ jobs:
       - name: Collect merged commit messages
         id: collect_messages
         run: |
-          MESSAGES=$(git log --no-merges \
-          --format='- %s' \
-          ${{ github.event.before }}..${{ github.sha }})
-          
+          # Handle case where github.event.before might not exist in current branch
+          if git rev-parse --verify ${{ github.event.before }} >/dev/null 2>&1; then
+            MESSAGES=$(git log --no-merges \
+            --format='- %s' \
+            ${{ github.event.before }}..${{ github.sha }})
+          else
+            # Fallback to just the current commit if before SHA is invalid
+            MESSAGES=$(git log --no-merges \
+            --format='- %s' \
+            -1 ${{ github.sha }})
+          fi
+
           echo "messages<<EOF" >> $GITHUB_OUTPUT
           echo "$MESSAGES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
