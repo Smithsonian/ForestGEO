@@ -285,30 +285,42 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         <ModalDialog role={'alertdialog'}>
           <DialogTitle>Upload Complete!</DialogTitle>
           <DialogContent>
-            {uploadForm === 'measurements' ? (
-              <>
-                {Object.values(errorRows).length > 0 ? (
-                  <Stack direction={'column'}>
-                    <Typography level={'body-md'}>
-                      All broken rows have been moved to the <code>failedmeasurements</code> table.
-                    </Typography>
-                  </Stack>
-                ) : (
-                  <Stack direction={'column'}>
-                    <Typography level={'body-md'}>
-                      No changes will be made to the the <code>failedmeasurements</code> table.
-                    </Typography>
-                  </Stack>
-                )}
-              </>
-            ) : (
-              <Stack direction={'column'}>
-                <Typography level={'body-md'}>
-                  Non-measurements form used. No changes will be made to the <code>failedmeasurements</code> table.
+            {hasErrorRows(errorRows) ? (
+              <Stack direction={'column'} spacing={2}>
+                <Typography level={'h4'} color={'warning'}>
+                  Upload completed with errors
                 </Typography>
+                <Typography level={'body-md'}>
+                  Some rows contained errors and were not uploaded. These rows are displayed above for your review.
+                </Typography>
+                {uploadForm === 'measurements' && (
+                  <Typography level={'body-md'}>
+                    All error rows have been moved to the <code>failedmeasurements</code> table for further review.
+                  </Typography>
+                )}
+              </Stack>
+            ) : (
+              <Stack direction={'column'} spacing={2}>
+                <Typography level={'h4'} color={'success'}>
+                  Upload completed successfully!
+                </Typography>
+                <Typography level={'body-md'}>
+                  All rows from your upload were processed without any errors. Your data has been successfully uploaded and is ready for use.
+                </Typography>
+                {uploadForm === 'measurements' ? (
+                  <Typography level={'body-md'}>
+                    No changes were made to the <code>failedmeasurements</code> table.
+                  </Typography>
+                ) : (
+                  <Typography level={'body-md'}>
+                    Non-measurements form used. No changes were made to the <code>failedmeasurements</code> table.
+                  </Typography>
+                )}
               </Stack>
             )}
-            <Typography level={'body-md'}>Please confirm your changes to proceed.</Typography>
+            <Typography level={'body-md'} sx={{ marginTop: 2, fontWeight: 'bold' }}>
+              Please confirm to finalize these changes.
+            </Typography>
           </DialogContent>
           <DialogActions>
             <Button
