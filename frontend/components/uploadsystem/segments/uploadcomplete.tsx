@@ -290,9 +290,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
                 <Typography level={'h4'} color={'warning'}>
                   Upload completed with errors
                 </Typography>
-                <Typography level={'body-md'}>
-                  Some rows contained errors and were not uploaded. These rows are displayed above for your review.
-                </Typography>
+                <Typography level={'body-md'}>Some rows contained errors and were not uploaded. These rows are displayed above for your review.</Typography>
                 {uploadForm === 'measurements' && (
                   <Typography level={'body-md'}>
                     All error rows have been moved to the <code>failedmeasurements</code> table for further review.
