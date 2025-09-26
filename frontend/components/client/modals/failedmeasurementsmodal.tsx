@@ -33,7 +33,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     try {
       // Get failed measurements count
       const failedResponse = await fetch(
-        `/api/admin/clearfailedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
         { method: 'GET' }
       );
       if (failedResponse.ok) {
@@ -43,7 +43,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
       // Get temporary measurements count
       const tempResponse = await fetch(
-        `/api/admin/cleartempmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
         { method: 'GET' }
       );
       if (tempResponse.ok) {
@@ -64,7 +64,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     setIsClearingFailed(true);
     try {
       const response = await fetch(
-        `/api/admin/clearfailedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
         { method: 'DELETE' }
       );
 
@@ -100,9 +100,12 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
     setIsClearingTemp(true);
     try {
-      const response = await fetch(`/api/admin/cleartempmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
-        method: 'DELETE'
-      });
+      const response = await fetch(
+        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        {
+          method: 'DELETE'
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`Failed to clear temporary measurements: ${response.status}`);
@@ -133,7 +136,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
       ailogger.info('Starting bulk reingestion of all failed measurements');
 
       // First, run reviewfailed to update failure reasons
-      await fetch('/api/runquery', {
+      await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`)

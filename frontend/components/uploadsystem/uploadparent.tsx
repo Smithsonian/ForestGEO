@@ -51,7 +51,6 @@ export default function UploadParent(props: UploadParentProps) {
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
-  const [errorRows, setErrorRows] = useState<FileCollectionRowSet>({});
   const [errors, setErrors] = useState<FileCollectionRowSet>({});
   // Confirmation menu states:
   const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
@@ -108,7 +107,6 @@ export default function UploadParent(props: UploadParentProps) {
     setAcceptedFiles([]);
     setParsedData({});
     setErrors({});
-    setErrorRows({});
     setUploadForm(undefined);
     setPersonnelRecording('');
     setReviewState(ReviewStates.START);
@@ -210,8 +208,6 @@ export default function UploadParent(props: UploadParentProps) {
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
-            errorRows={errorRows}
-            setErrorRows={setErrorRows}
             selectedDelimiters={selectedDelimiters}
           />
         );
@@ -233,7 +229,7 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
       default:
         return (
           <UploadError

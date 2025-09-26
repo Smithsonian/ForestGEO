@@ -44,7 +44,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setUploadError,
   setReviewState,
   setAllRowToCMID,
-  setErrorRows,
   selectedDelimiters
 }) => {
   const currentPlot = usePlotContext();
@@ -60,6 +59,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processETC, setProcessETC] = useState('');
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
+  const [verificationStatus, setVerificationStatus] = useState<string>('');
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [verificationStep, setVerificationStep] = useState<number>(0);
+  const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 1024 * 8;
@@ -150,6 +153,48 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     `row-${Object.values(row)
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
+
+  const pushErrorRowsToFailedMeasurements = async (errorRows: FileRow[], fileName: string) => {
+    if (errorRows.length === 0) return;
+
+    try {
+      const failedMeasurementsData = errorRows.map(row => ({
+        plotID: currentPlot?.plotID ?? -1,
+        censusID: currentCensus?.dateRanges[0].censusID ?? -1,
+        tag: row.tag || null,
+        stemTag: row.stemtag || null,
+        spCode: row.spcode || null,
+        quadrat: row.quadrat || null,
+        x: row.lx || null,
+        y: row.ly || null,
+        dbh: row.dbh || null,
+        hom: row.hom || null,
+        date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+        codes: row.codes || null,
+        comments: row.comments || null,
+        failureReasons: row.failureReason || 'Unknown error'
+      }));
+
+      const response = await fetchWithTimeout(
+        `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(failedMeasurementsData)
+        },
+        30000
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
+      }
+
+      ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
+    } catch (error: any) {
+      ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, error);
+      // Don't throw - we don't want to stop the upload process because of error row insertion failures
+    }
+  };
 
   const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();
@@ -453,55 +498,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           await waitForAllOperationsToComplete();
           ailogger.info(`All database operations completed for ${file.name}`);
           if (parsingInvalidRows.length > 0) {
-            ailogger.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
-            setErrorRows(prevErrorRows => {
-              const updatedErrorRows = { ...prevErrorRows };
-              if (!updatedErrorRows[file.name]) {
-                updatedErrorRows[file.name] = {};
-              }
-
-              parsingInvalidRows.forEach(row => {
-                const errorId = generateErrorRowId(row);
-                if (uploadForm === 'measurements') {
-                  updatedErrorRows[file.name][errorId] = {
-                    plotID: String(currentPlot?.plotID ?? -1),
-                    censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
-                    tag: row.tag,
-                    stemTag: row.stemtag,
-                    spCode: row.spcode,
-                    quadrat: row.quadrat,
-                    x: row.lx,
-                    y: row.ly,
-                    dbh: row.dbh,
-                    hom: row.hom,
-                    date: moment(row.date).format('YYYY-MM-DD'),
-                    codes: row.codes,
-                    comments: row.comments,
-                    // Enhanced error information
-                    errorReason: row.failureReason || 'Unknown error',
-                    originalRowData: JSON.stringify(row),
-                    detectedDelimiter: delimiter,
-                    fileName: file.name,
-                    ...(row.excessData ? { excessData: row.excessData } : {})
-                  };
-                } else {
-                  const stringifiedRow = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String(v)]));
-                  updatedErrorRows[file.name][errorId] = {
-                    ...stringifiedRow,
-                    plotID: String(currentPlot?.plotID ?? -1),
-                    censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
-                    // Enhanced error information
-                    errorReason: row.failureReason || 'Unknown error',
-                    originalRowData: JSON.stringify(row),
-                    detectedDelimiter: delimiter,
-                    fileName: file.name,
-                    ...(row.excessData ? { excessData: row.excessData } : {})
-                  };
-                }
-              });
-
-              return updatedErrorRows;
-            });
+            ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
+            // Push error rows directly to failedmeasurements table instead of storing in component state
+            await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
           }
           resolve();
         },
@@ -685,9 +684,31 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Critical: Wait for all database operations to complete before marking as uploaded
         await waitForAllOperationsToComplete();
 
+        // Start upload verification process with UI feedback
+        if (isMounted) {
+          setIsVerifying(true);
+          setTotalVerificationSteps(acceptedFiles.length + 1); // Files + final sync check
+          setVerificationStep(0);
+          setVerificationStatus('Preparing upload verification...');
+        }
+
+        // Synchronization checkpoint: Ensure all operations are complete
+        ailogger.info('Upload verification checkpoint: Ensuring all database operations are synchronized...');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause for synchronization
+
         // Additional verification: Check that data was actually inserted into the database
         try {
-          for (const file of acceptedFiles) {
+          if (isMounted) {
+            setVerificationStatus('Verifying uploaded data integrity...');
+          }
+
+          for (let i = 0; i < acceptedFiles.length; i++) {
+            const file = acceptedFiles[i];
+            if (isMounted) {
+              setVerificationStep(i + 1);
+              setVerificationStatus(`Verifying file ${i + 1} of ${acceptedFiles.length}: ${file.name}...`);
+            }
+
             const verificationResponse = await fetch(
               `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
             );
@@ -699,11 +720,30 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               throw new Error(`No data found in database for ${file.name} - upload may have failed silently`);
             }
             ailogger.info(`Verified ${verificationData.count} rows uploaded for ${file.name}`);
+
+            // Brief pause between file verifications for better UX
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+
+          if (isMounted) {
+            setVerificationStep(acceptedFiles.length + 1);
+            setVerificationStatus('Upload verification completed successfully');
           }
           ailogger.info('All upload operations and database transactions verified successfully');
         } catch (verificationError: any) {
+          if (isMounted) {
+            setVerificationStatus(`Upload verification warning: ${verificationError.message}`);
+          }
           ailogger.warn('Upload verification failed, but continuing:', verificationError.message);
           // Don't fail the upload if verification fails, but log the warning
+        }
+
+        // Final synchronization checkpoint before marking as uploaded
+        ailogger.info('Final upload synchronization checkpoint...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        if (isMounted) {
+          setIsVerifying(false);
         }
 
         if (isMounted) {
@@ -846,26 +886,48 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Wait for all batch processing to complete, then increment completedOperations once
         await queue.onEmpty();
 
+        // Start processing verification with UI feedback
+        setIsVerifying(true);
+        setTotalVerificationSteps(3); // Processing verification + Collapser + Final sync
+        setVerificationStep(0);
+        setVerificationStatus('Preparing processing verification...');
+
+        // Synchronization checkpoint: Ensure all batch operations are complete
+        ailogger.info('Processing verification checkpoint: Ensuring all batch operations are synchronized...');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Longer pause for batch synchronization
+
         // Verify that all batches were processed successfully
         try {
+          setVerificationStep(1);
+          setVerificationStatus('Verifying batch processing completion...');
+
           const verifyProcessingResponse = await fetch(
             `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
+            setVerificationStatus(`Processing verification complete: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
             ailogger.info(`Processing verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining in temporary table`);
           } else {
+            setVerificationStatus('Processing verification failed, continuing with data consolidation...');
             ailogger.warn('Processing verification failed, but continuing with collapser');
           }
         } catch (verifyError: any) {
+          setVerificationStatus(`Processing verification error: ${verifyError.message}`);
           ailogger.warn('Processing verification error:', verifyError.message);
         }
+
+        // Synchronization checkpoint before collapser
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         setCompletedOperations(prev => prev + 1);
 
         // trigger collapser ONCE and wait for it to complete
         try {
+          setVerificationStep(2);
+          setVerificationStatus('Starting data consolidation (collapser procedure)...');
           ailogger.info('Starting collapser procedure...');
+
           const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
@@ -875,15 +937,27 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
           }
           const collapserData = await collapserResponse.json();
+          setVerificationStatus('Data consolidation completed successfully');
           ailogger.info('Collapser completed successfully:', collapserData);
 
           // Additional settling time to ensure database operations complete
+          setVerificationStep(3);
+          setVerificationStatus('Finalizing database operations...');
           ailogger.info('Allowing 2 seconds for database operations to settle...');
           await new Promise(resolve => setTimeout(resolve, 2000));
+
+          setVerificationStatus('All processing verification completed');
         } catch (collapserError: any) {
+          setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
           ailogger.error('Collapser error:', collapserError.message);
           throw collapserError;
         }
+
+        // Final processing synchronization checkpoint
+        ailogger.info('Final processing synchronization checkpoint...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        setIsVerifying(false);
 
         setProcessed(true);
       }
@@ -898,12 +972,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   useEffect(() => {
     if (uploadForm === FormType.measurements) {
       if (uploaded && processed) {
+        // Final synchronization checkpoint: Ensure all verification states are clean
+        setIsVerifying(false);
+        setVerificationStatus('All operations completed successfully');
+        setVerificationStep(0);
+        setTotalVerificationSteps(0);
+
         hasUploaded.current = true;
         setReviewState(ReviewStates.VALIDATE);
         setIsDataUnsaved(false);
       }
     } else {
       if (uploaded) {
+        // Final synchronization checkpoint for non-measurements uploads
+        setIsVerifying(false);
+        setVerificationStatus('Upload completed successfully');
+        setVerificationStep(0);
+        setTotalVerificationSteps(0);
+
         hasUploaded.current = true;
         setReviewState(ReviewStates.UPLOAD_AZURE);
         setIsDataUnsaved(false);
@@ -986,6 +1072,30 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               </Box>
             )}
 
+            {isVerifying && totalVerificationSteps > 0 && (
+              <Box sx={{ width: '100%' }}>
+                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
+                  <Typography level="body-sm">Verification Process</Typography>
+                  <Typography level="body-sm" color="warning">
+                    {verificationStep}/{totalVerificationSteps} steps
+                  </Typography>
+                </Stack>
+                <LinearProgress
+                  determinate
+                  variant="soft"
+                  color="warning"
+                  size="lg"
+                  value={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
+                  sx={{ width: '100%' }}
+                />
+                {verificationStatus && (
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
+                    {verificationStatus}
+                  </Typography>
+                )}
+              </Box>
+            )}
+
             <Box
               sx={{
                 display: 'flex',
@@ -996,9 +1106,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               }}
             >
               <Typography level="body-sm" color="neutral" sx={{ mb: 2 }}>
-                Please do not exit this page while upload is in progress
+                {isVerifying ? 'Please do not exit this page while verification is in progress' : 'Please do not exit this page while upload is in progress'}
               </Typography>
-              {!uploaded && !processed && (
+              {!uploaded && !processed && !isVerifying && (
                 <DotLottieReact
                   src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
                   loop
@@ -1010,7 +1120,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }}
                 />
               )}
-              {uploaded && !processed && (
+              {uploaded && !processed && !isVerifying && (
                 <DotLottieReact
                   src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
                   loop
@@ -1019,6 +1129,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   style={{
                     width: '200px',
                     height: '200px'
+                  }}
+                />
+              )}
+              {isVerifying && (
+                <DotLottieReact
+                  src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                  loop
+                  autoplay
+                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                  style={{
+                    width: '200px',
+                    height: '200px',
+                    filter: 'hue-rotate(45deg)' // Add orange tint for verification
                   }}
                 />
               )}

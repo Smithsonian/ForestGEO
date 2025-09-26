@@ -334,7 +334,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       );
 
       const results: MeasurementsSummaryResult[] = await (
-        await fetch(`/api/runquery`, {
+        await fetch(`/api/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(
@@ -488,7 +488,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (handleSelectQuadrat) handleSelectQuadrat(null);
     setLoading(false);
     if (reloadAttrs) {
-      const response = await fetch(`/api/runquery`, {
+      const response = await fetch(`/api/query`, {
         method: 'POST',
         body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
       });
@@ -673,7 +673,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                      WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
                        AND c.PlotID = ${currentPlot?.plotID ?? 0}
                        AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
-      const response = await fetch(`/api/runquery`, {
+      const response = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(query)
@@ -685,7 +685,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
     async function getFailedCount() {
       const query = `SELECT COUNT(*) AS CountFailed FROM ${currentSite?.schemaName ?? ''}.failedmeasurements WHERE PlotID = ${currentPlot?.plotID ?? 0} AND CensusID = ${currentCensus?.dateRanges[0].censusID ?? 0}`;
-      const response = await fetch(`/api/runquery`, {
+      const response = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(query)
@@ -1195,13 +1195,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                                         WHERE PlotID = ${currentPlot?.plotID}
                                           AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
                      AND c.PlotID = ${currentPlot?.plotID}`;
-    const clearCMVResponse = await fetch(`/api/runquery`, {
+    const clearCMVResponse = await fetch(`/api/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(clearCMVQuery)
     });
     if (!clearCMVResponse.ok) throw new Error('clear cmverrors query failed!');
-    const response = await fetch(`/api/runquery`, {
+    const response = await fetch(`/api/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(query)
@@ -1417,18 +1417,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 </Button>
                 <Button
                   onClick={async () => {
-                    await fetch(`/api/formatrunquery`, {
+                    await fetch(`/api/query`, {
                       method: 'POST',
                       body: JSON.stringify({
                         query: `DELETE FROM ${currentSite?.schemaName}.cmverrors WHERE CoreMeasurementID = ?`,
-                        params: [cmvSelected]
+                        params: [cmvSelected],
+                        format: true
                       })
                     });
-                    await fetch(`/api/formatrunquery`, {
+                    await fetch(`/api/query`, {
                       method: 'POST',
                       body: JSON.stringify({
                         query: `UPDATE ${currentSite?.schemaName}.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
-                        params: [cmvSelected]
+                        params: [cmvSelected],
+                        format: true
                       })
                     });
                     await fetchValidationErrors();

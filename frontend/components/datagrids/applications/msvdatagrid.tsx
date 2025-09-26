@@ -72,8 +72,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
 
   useEffect(() => {
-    if (openFSM)
-      fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(ailogger.error);
+    if (openFSM) fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(ailogger.error);
   }, [openFSM]);
 
   const addNewRowToGrid = () => {

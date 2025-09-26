@@ -176,7 +176,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
         .trim();
       const results = await (
-        await fetch(`/api/runquery`, {
+        await fetch(`/api/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tempFQuery)
