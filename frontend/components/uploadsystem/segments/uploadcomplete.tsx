@@ -8,21 +8,11 @@ import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
-import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
-import moment from 'moment';
-import { FileCollectionRowSet, FileRow, FormType } from '@/config/macros/formdetails';
-import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
+import { FormType } from '@/config/macros/formdetails';
 import ailogger from '@/ailogger';
 
-const ROWS_PER_BATCH = 10;
-
-// Helper function to check if there are any actual error rows
-const hasErrorRows = (errorRows: FileCollectionRowSet): boolean => {
-  return Object.values(errorRows).some(fileRowSet => typeof fileRowSet === 'object' && fileRowSet !== null && Object.keys(fileRowSet).length > 0);
-};
-
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const { handleCloseUploadModal, errorRows, uploadForm } = props;
+  const { handleCloseUploadModal, uploadForm } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
@@ -96,41 +86,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
   };
 
-  const [visibleRows, setVisibleRows] = useState<Record<string, number>>({});
-
-  const loadMoreRows = (filename: string, totalRows: number) => {
-    setVisibleRows(prev => ({
-      ...prev,
-      [filename]: Math.min((prev[filename] || 0) + ROWS_PER_BATCH, totalRows)
-    }));
-  };
-
-  const downloadCSV = () => {
-    const csvRows: string[] = [];
-    Object.entries(errorRows).forEach(([filename, rowSet]) => {
-      const headers = rowSet ? Object.keys(Object.values(rowSet)[0] || {}) : [];
-      csvRows.push(`Filename,Row,${headers.join(',')}`); // Add headers
-      Object.entries(rowSet).forEach(([rowKey, row]) => {
-        const rowValues = headers.map(header => {
-          const value = row[header];
-          if (value === null || value === undefined) return 'NULL';
-          return typeof value === 'object' ? JSON.stringify(value) : value;
-        });
-        csvRows.push(`${filename},${rowKey},${rowValues.join(',')}`);
-      });
-    });
-
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'error_rows.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
   useEffect(() => {
     if (hasRunRef.current) return;
     hasRunRef.current = true;
@@ -138,34 +93,17 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     const runAsyncTasks = async () => {
       try {
         if (uploadForm === FormType.measurements) {
-          await fetch(`/api/formatrunquery`, {
+          // Clean up temporary measurements table
+          await fetch(`/api/query`, {
             body: JSON.stringify({
               query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID],
+              format: true
             }),
             method: 'POST'
           });
-          const flattened: FileRow[] = [];
-          for (const fileName in errorRows) {
-            const fileRowSet = errorRows[fileName];
-            Object.values(fileRowSet).forEach(row => flattened.push(row));
-          }
-          for (const row of flattened) {
-            await fetch(
-              createPostPatchQuery(
-                currentSite?.schemaName ?? '',
-                'failedmeasurements',
-                getGridID('failedmeasurements'),
-                currentPlot?.plotID,
-                currentCensus?.plotCensusNumber
-              ),
-              {
-                method: 'POST',
-                body: JSON.stringify({ newRow: row })
-              }
-            );
-          }
-          await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
+          // Run failed measurements review procedure
+          await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
         }
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
@@ -200,84 +138,17 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         </>
       ) : (
         <>
-          {hasErrorRows(errorRows) ? (
-            <>
-              <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
-                The following rows were captured during pre-processing and were not uploaded:
-              </Typography>
-              <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
-                <Button variant="plain" onClick={downloadCSV}>
-                  Download All Errors as CSV
-                </Button>
-              </Box>
-              <Box>
-                {Object.entries(errorRows).map(([filename, rowSet]) => {
-                  const headers = rowSet ? Object.keys(Object.values(rowSet)[0] || {}) : [];
-                  const totalRows = Object.keys(rowSet).length;
-                  const rowsToShow = visibleRows[filename] || ROWS_PER_BATCH;
-
-                  return (
-                    <Box key={filename} mb={4}>
-                      <Typography level="h3" gutterBottom>
-                        File: {filename} (Showing {Math.min(rowsToShow, totalRows)} of {totalRows} rows)
-                      </Typography>
-                      <TableContainer component={Paper}>
-                        <Table>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Row</TableCell>
-                              {headers.map(header => (
-                                <TableCell key={header}>{header}</TableCell>
-                              ))}
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {Object.entries(rowSet)
-                              .slice(0, rowsToShow)
-                              .map(([rowKey, row]) => (
-                                <TableRow key={rowKey}>
-                                  <TableCell>{rowKey}</TableCell>
-                                  {headers.map(header => (
-                                    <TableCell key={header}>
-                                      {moment.isDate(row[header])
-                                        ? moment(row[header]).format('YYYY-MM-DD HH:mm:ss')
-                                        : row[header] !== null
-                                          ? typeof row[header] === 'object' ? JSON.stringify(row[header]) : row[header]
-                                          : 'NULL'}
-                                    </TableCell>
-                                  ))}
-                                </TableRow>
-                              ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                      {rowsToShow < totalRows && (
-                        <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: 2 }}>
-                          <Button variant="outlined" onClick={() => loadMoreRows(filename, totalRows)}>
-                            Load More Rows
-                          </Button>
-                        </Box>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Box>
-            </>
-          ) : (
-            <>
-              <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'success'}>
-                Upload completed successfully!
-              </Typography>
-              <Box sx={{ marginTop: 2, textAlign: 'center' }}>
-                <Typography level="h3" color="success">
-                  All rows were processed without errors.
-                </Typography>
-                <Typography level="body-md" sx={{ marginTop: 1 }}>
-                  Your data has been successfully uploaded and is ready for use.
-                </Typography>
-              </Box>
-            </>
-          )}
+          <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'success'}>
+            Upload completed successfully!
+          </Typography>
+          <Box sx={{ marginTop: 2, textAlign: 'center' }}>
+            <Typography level="h3" color="success">
+              Your data has been processed and uploaded.
+            </Typography>
+            <Typography level="body-md" sx={{ marginTop: 1 }}>
+              Any error rows have been automatically moved to the failedmeasurements table for review.
+            </Typography>
+          </Box>
           <Box sx={{ marginTop: 4 }}>
             <Button variant="soft" color="primary" onClick={() => setOpenUploadConfirmModal(true)}>
               Confirm Changes
@@ -289,37 +160,19 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         <ModalDialog role={'alertdialog'}>
           <DialogTitle>Upload Complete!</DialogTitle>
           <DialogContent>
-            {hasErrorRows(errorRows) ? (
-              <Stack direction={'column'} spacing={2}>
-                <Typography level={'h4'} color={'warning'}>
-                  Upload completed with errors
-                </Typography>
-                <Typography level={'body-md'}>Some rows contained errors and were not uploaded. These rows are displayed above for your review.</Typography>
-                {uploadForm === 'measurements' && (
-                  <Typography level={'body-md'}>
-                    All error rows have been moved to the <code>failedmeasurements</code> table for further review.
-                  </Typography>
-                )}
-              </Stack>
-            ) : (
-              <Stack direction={'column'} spacing={2}>
-                <Typography level={'h4'} color={'success'}>
-                  Upload completed successfully!
-                </Typography>
+            <Stack direction={'column'} spacing={2}>
+              <Typography level={'h4'} color={'success'}>
+                Upload completed successfully!
+              </Typography>
+              <Typography level={'body-md'}>
+                Your data has been processed and uploaded. Any rows with errors have been automatically moved to the failedmeasurements table for review.
+              </Typography>
+              {uploadForm === 'measurements' && (
                 <Typography level={'body-md'}>
-                  All rows from your upload were processed without any errors. Your data has been successfully uploaded and is ready for use.
+                  You can review any error rows in the <code>failedmeasurements</code> table through the data validation interface.
                 </Typography>
-                {uploadForm === 'measurements' ? (
-                  <Typography level={'body-md'}>
-                    No changes were made to the <code>failedmeasurements</code> table.
-                  </Typography>
-                ) : (
-                  <Typography level={'body-md'}>
-                    Non-measurements form used. No changes were made to the <code>failedmeasurements</code> table.
-                  </Typography>
-                )}
-              </Stack>
-            )}
+              )}
+            </Stack>
             <Typography level={'body-md'} sx={{ marginTop: 2, fontWeight: 'bold' }}>
               Please confirm to finalize these changes.
             </Typography>

@@ -124,7 +124,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
         await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${updatedRow.failedMeasurementID}`);
       } else {
         // need to updated in-DB row with new reasons now that they've been found!
-        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`) });
+        await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`) });
       }
       setRefresh(true);
     },

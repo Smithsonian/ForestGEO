@@ -37,7 +37,6 @@ export interface UploadReviewFilesProps {
   expectedHeaders: string[];
   parsedData: FileCollectionRowSet;
   errors: FileCollectionRowSet;
-  errorRows: FileCollectionRowSet;
   confirmationDialogOpen: boolean;
   dataViewActive: number;
   currentFileHeaders: string[];
@@ -47,7 +46,6 @@ export interface UploadReviewFilesProps {
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
-  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
   // centralized functions
@@ -68,11 +66,9 @@ export interface UploadFireProps {
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
-  errorRows: FileCollectionRowSet;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // state setters
-  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   setUploadError: React.Dispatch<React.SetStateAction<any>>;
@@ -122,7 +118,6 @@ export interface UploadUpdateValidationsProps {
 export interface UploadCompleteProps {
   // state vars
   uploadForm: FormType | undefined;
-  errorRows: FileCollectionRowSet;
   // state setters
   handleCloseUploadModal: () => void;
 }

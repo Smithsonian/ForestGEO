@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     // Check how many rows were processed into the main measurements table
     const processedResult = await connectionManager.executeQuery(
-      `SELECT COUNT(*) as count FROM ${schema}.coremeasurements WHERE PlotID = ? AND CensusID = ? AND MeasurementDate >= CURDATE() - INTERVAL 1 DAY`,
+      `SELECT COUNT(*) as count FROM ${schema}.coremeasurements cm JOIN ${schema}.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.MeasurementDate >= CURDATE() - INTERVAL 1 DAY`,
       [plotID, censusID]
     );
 
