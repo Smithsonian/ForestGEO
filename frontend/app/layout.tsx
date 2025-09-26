@@ -19,6 +19,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="icon" href="icon.jpg" />
       </head>
       <body>
+        <a href="#main-content" className="skip-to-main">
+          Skip to main content
+        </a>
         <ClearCookiesOnUnload />
         <Providers>
           <LoadingProvider>
@@ -27,7 +30,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <UserSelectionProvider>
                 <DataValidityProvider>
                   <LockAnimationProvider>
-                    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
+                    <div id="app-root" role="application" aria-label="ForestGEO Census Application">
+                      <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
+                    </div>
                   </LockAnimationProvider>
                 </DataValidityProvider>
               </UserSelectionProvider>

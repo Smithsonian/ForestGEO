@@ -374,18 +374,9 @@ export default function DashboardPage() {
 
             <AccordionGroup>
               <Accordion aria-label="File upload history accordion">
-                <AccordionSummary
-                  id="file-upload-summary"
-                  aria-controls="file-upload-details"
-                  aria-describedby="file-upload-description"
-                >
+                <AccordionSummary id="file-upload-summary" aria-controls="file-upload-details" aria-describedby="file-upload-description">
                   File Upload History
-                  <Typography
-                    id="file-upload-description"
-                    level="body-xs"
-                    sx={{ display: 'none' }}
-                    aria-hidden="true"
-                  >
+                  <Typography id="file-upload-description" level="body-xs" sx={{ display: 'none' }} aria-hidden="true">
                     Expand to view list of uploaded files
                   </Typography>
                 </AccordionSummary>

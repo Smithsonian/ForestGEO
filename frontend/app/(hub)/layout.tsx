@@ -41,7 +41,7 @@ function renderSwitch(endpoint: string) {
 
   return (
     <Box sx={commonStyle}>
-      <h1 style={{ lineHeight: '1.1em' }} className={title({ color: 'cyan' })} key={endpoint}>
+      <h1 style={{ lineHeight: '1.1em' }} className={title({ color: 'cyan' })} key={endpoint} id="page-title" tabIndex={-1} aria-live="polite">
         {getEndpointHeaderName(endpoint)}
       </h1>
     </Box>
@@ -359,11 +359,11 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           textDecoration: 'none',
           fontSize: '14px'
         }}
-        onFocus={(e) => {
+        onFocus={e => {
           e.target.style.left = '6px';
           e.target.style.top = '6px';
         }}
-        onBlur={(e) => {
+        onBlur={e => {
           e.target.style.left = '-9999px';
           e.target.style.top = 'auto';
         }}
@@ -371,6 +371,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
       <Box
+        component="nav"
+        role="navigation"
+        aria-label="Site navigation"
         className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
         sx={{
           position: 'fixed',
@@ -382,7 +385,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       >
         <Sidebar setCensusListLoaded={setCensusListLoaded} siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
       </Box>
-      <Header />
+      <Box component="header" role="banner" aria-label="Application header">
+        <Header />
+      </Box>
       <Box
         component="main"
         className="MainContent"

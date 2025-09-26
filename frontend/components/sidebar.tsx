@@ -312,14 +312,11 @@ export default function Sidebar(props: SidebarProps) {
 
       await Promise.all(
         ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-          await fetch(
-            `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ incoming: {} })
-            }
-          );
+          await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ incoming: {} })
+          });
         })
       );
       setCensusListLoaded(false);
@@ -627,7 +624,7 @@ export default function Sidebar(props: SidebarProps) {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       setSelectedPlot(item);
-                      handleOpen(event);
+                      setAnchorPlotEdit(event.currentTarget);
                     }
                   }}
                   // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
@@ -712,12 +709,7 @@ export default function Sidebar(props: SidebarProps) {
             </Typography>
           </ListItem>
           {allowedSites?.map(site => (
-            <Option
-              key={site.siteID}
-              value={site.siteName}
-              data-testid={'site-selection-option-allowed'}
-              aria-label={`Select ${site.siteName} site`}
-            >
+            <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
               {site.siteName}
             </Option>
           ))}
@@ -1095,8 +1087,12 @@ export default function Sidebar(props: SidebarProps) {
                                                   invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
                                                   aria-label={
                                                     link.href === '/summary'
-                                                      ? (!isAllValiditiesTrue ? 'Warning: Summary contains incomplete data sections' : undefined)
-                                                      : (isDataIncomplete ? 'Error: Missing required data for this section' : undefined)
+                                                      ? !isAllValiditiesTrue
+                                                        ? 'Warning: Summary contains incomplete data sections'
+                                                        : undefined
+                                                      : isDataIncomplete
+                                                        ? 'Error: Missing required data for this section'
+                                                        : undefined
                                                   }
                                                 >
                                                   <SubIcon />
