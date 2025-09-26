@@ -139,11 +139,19 @@ jobs:
       - name: Collect merged commit messages
         id: collect_messages
         run: |
-          # Handle case where github.event.before might not exist in current branch
+          # Handle case where github.event.before might not exist or be invalid
           if git rev-parse --verify ${{ github.event.before }} >/dev/null 2>&1; then
-            MESSAGES=$(git log --no-merges \
-            --format='- %s' \
-            ${{ github.event.before }}..${{ github.sha }})
+            # Check if we can create a valid range (before should be ancestor of current)
+            if git merge-base --is-ancestor ${{ github.event.before }} ${{ github.sha }} 2>/dev/null; then
+              MESSAGES=$(git log --no-merges \
+              --format='- %s' \
+              ${{ github.event.before }}..${{ github.sha }})
+            else
+              # If before is not an ancestor, just get the current commit
+              MESSAGES=$(git log --no-merges \
+              --format='- %s' \
+              -1 ${{ github.sha }})
+            fi
           else
             # Fallback to just the current commit if before SHA is invalid
             MESSAGES=$(git log --no-merges \
