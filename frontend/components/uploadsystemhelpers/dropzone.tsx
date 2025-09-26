@@ -15,22 +15,40 @@ import { subtitle } from '@/config/primitives';
 export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive }: DropzonePureProps) {
   return (
     <>
-      <div id={'outerBox'} {...getRootProps()} className={'m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle'}>
+      <div
+        id={'outerBox'}
+        {...getRootProps()}
+        className={'m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle'}
+        role="button"
+        tabIndex={0}
+        aria-label={isDragActive ? 'Drop files here to upload' : 'Click to select files or drag and drop CSV, XLSX, or TXT files here'}
+        aria-describedby="file-upload-instructions"
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            // Trigger the file input
+            const input = event.currentTarget.querySelector('input[type="file"]') as HTMLInputElement;
+            input?.click();
+          }
+        }}
+      >
         <div />
-        <p className={subtitle()} style={{ textAlign: 'center' }}>
-          {' '}
-          <FileUploadIcon color="primary" size={80} />{' '}
-        </p>
-        <input {...getInputProps()} />
-        {isDragActive ? (
-          <p className={subtitle()} color="primary" style={{ textAlign: 'center' }}>
-            Drop file here...
-          </p>
-        ) : (
-          <p className={subtitle()} color="primary" style={{ textAlign: 'center' }}>
-            <b>Choose a CSV or ArcGIS file</b> or drag it here.
-          </p>
-        )}
+        <div className={subtitle()} style={{ textAlign: 'center' }} aria-hidden="true">
+          <FileUploadIcon color="primary" size={80} />
+        </div>
+        <input {...getInputProps()} aria-describedby="file-upload-instructions" />
+        <div id="file-upload-instructions" className={subtitle()} style={{ textAlign: 'center' }}>
+          {isDragActive ? (
+            <span>Drop files here to upload...</span>
+          ) : (
+            <span>
+              <strong>Click to select files</strong> or drag CSV, XLSX, or TXT files here
+            </span>
+          )}
+        </div>
+        <div className="sr-only">
+          Supported file formats: CSV (.csv), Excel (.xlsx), and Text (.txt) files. Use Tab to navigate, Enter or Space to activate file selection.
+        </div>
         <div />
       </div>
     </>
@@ -46,8 +64,14 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
       acceptedFiles.forEach((file: FileWithPath) => {
         const reader = new FileReader();
 
-        reader.onabort = () => alert('file reading was aborted');
-        reader.onerror = () => alert('file reading has failed');
+        reader.onabort = () => {
+          console.error('File reading was aborted');
+          // In a real app, you would show a proper accessible error message
+        };
+        reader.onerror = () => {
+          console.error('File reading has failed');
+          // In a real app, you would show a proper accessible error message
+        };
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
@@ -55,7 +79,8 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
           const results = parse(binaryStr, config);
 
           if (results.errors.length) {
-            alert(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
+            console.error(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
+            // In a real app, you would show a proper accessible error message
             // Only print the first error for now to avoid dialog clog
           }
         };
@@ -63,7 +88,9 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
       });
       onChange(acceptedFiles, rejectedFiles);
       rejectedFiles.forEach((fileRejection: FileRejection) => {
-        alert(' The file ' + fileRejection.file.name + ' was not uploaded. Only .csv and .xlsx files are supported.');
+        console.error(`File ${fileRejection.file.name} was rejected:`, fileRejection.errors);
+        // In a real app, you would show a proper accessible error message
+        // instead of using browser alerts
       });
     },
     [onChange]

@@ -58,6 +58,13 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     }
   }, [validationMessages]);
 
+  // Only call onValidationComplete when validation is truly complete and not updating rows
+  useEffect(() => {
+    if (isValidationComplete && !isUpdatingRows && onValidationComplete) {
+      onValidationComplete();
+    }
+  }, [isValidationComplete, isUpdatingRows, onValidationComplete]);
+
   const performValidations = async () => {
     try {
       const validationProcedureNames = Object.keys(validationMessages);
@@ -134,24 +141,46 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     } finally {
       setIsUpdatingRows(false);
       setIsValidationComplete(true);
-      if (onValidationComplete) onValidationComplete();
     }
   };
 
   const renderProgressBars = () => {
-    return Object.keys(validationMessages).map(validationProcedureName => (
-      <Box key={validationProcedureName} sx={{ mb: 2 }}>
-        <Typography variant="subtitle1">{validationProcedureName}</Typography>
-        <Typography variant={'subtitle1'}>{validationMessages[validationProcedureName]?.description}</Typography>
-        <LinearProgress variant="determinate" value={validationProgress[validationProcedureName]} />
-      </Box>
-    ));
+    return Object.keys(validationMessages).map(validationProcedureName => {
+      const progress = validationProgress[validationProcedureName] || 0;
+      const progressId = `progress-${validationProcedureName.replace(/\s+/g, '-').toLowerCase()}`;
+      const descId = `desc-${validationProcedureName.replace(/\s+/g, '-').toLowerCase()}`;
+
+      return (
+        <Box key={validationProcedureName} sx={{ mb: 2 }} role="group" aria-labelledby={progressId}>
+          <Typography variant="subtitle1" id={progressId}>
+            {validationProcedureName}
+          </Typography>
+          <Typography variant="subtitle1" id={descId}>
+            {validationMessages[validationProcedureName]?.description}
+          </Typography>
+          <LinearProgress
+            variant="determinate"
+            value={progress}
+            aria-labelledby={progressId}
+            aria-describedby={descId}
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={`${Math.round(progress)}% complete`}
+          />
+          <div className="sr-only">
+            {validationProcedureName}: {Math.round(progress)}% complete
+          </div>
+        </Box>
+      );
+    });
   };
 
   return (
     <>
       {Object.keys(validationMessages).length > 0 && (
         <Box
+          component="section"
           sx={{
             width: '100%',
             p: 2,
@@ -159,6 +188,9 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             flex: 1,
             flexDirection: 'column'
           }}
+          role="status"
+          aria-live="polite"
+          aria-label="Data validation progress"
         >
           {!isValidationComplete ? (
             <Box
@@ -169,8 +201,12 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6">Validating data...</Typography>
-              {renderProgressBars()}
+              <Typography variant="h6" component="h2" id="validation-status">
+                Validating data...
+              </Typography>
+              <div role="progressbar" aria-describedby="validation-status">
+                {renderProgressBars()}
+              </div>
             </Box>
           ) : isUpdatingRows ? (
             <Box
@@ -181,8 +217,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <CircularProgress />
-              <Typography variant="h6">Updating validated rows...</Typography>
+              <CircularProgress aria-label="Updating validated rows" />
+              <Typography variant="h6" component="h2">
+                Updating validated rows...
+              </Typography>
             </Box>
           ) : (
             <Box
@@ -193,15 +231,21 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6">Validation Results</Typography>
+              <Typography variant="h6" component="h2">
+                Validation Results
+              </Typography>
               {apiErrors.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography color="error">Some validations could not be performed:</Typography>
-                  {apiErrors.map(error => (
-                    <Typography key={error} color="error">
-                      - {error}
-                    </Typography>
-                  ))}
+                <Box sx={{ mb: 2 }} role="alert" aria-live="assertive">
+                  <Typography color="error" component="h3">
+                    Some validations could not be performed:
+                  </Typography>
+                  <ul>
+                    {apiErrors.map((error, index) => (
+                      <li key={error}>
+                        <Typography color="error">{error}</Typography>
+                      </li>
+                    ))}
+                  </ul>
                 </Box>
               )}
             </Box>

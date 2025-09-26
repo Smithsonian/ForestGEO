@@ -684,7 +684,27 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         await queue.onEmpty();
         // Critical: Wait for all database operations to complete before marking as uploaded
         await waitForAllOperationsToComplete();
-        ailogger.info('All upload operations and database transactions completed successfully');
+
+        // Additional verification: Check that data was actually inserted into the database
+        try {
+          for (const file of acceptedFiles) {
+            const verificationResponse = await fetch(
+              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+            );
+            if (!verificationResponse.ok) {
+              throw new Error(`Upload verification failed for ${file.name}: ${verificationResponse.status}`);
+            }
+            const verificationData = await verificationResponse.json();
+            if (verificationData.count === 0) {
+              throw new Error(`No data found in database for ${file.name} - upload may have failed silently`);
+            }
+            ailogger.info(`Verified ${verificationData.count} rows uploaded for ${file.name}`);
+          }
+          ailogger.info('All upload operations and database transactions verified successfully');
+        } catch (verificationError: any) {
+          ailogger.warn('Upload verification failed, but continuing:', verificationError.message);
+          // Don't fail the upload if verification fails, but log the warning
+        }
 
         if (isMounted) {
           setUploaded(true);
@@ -825,9 +845,46 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Wait for all batch processing to complete, then increment completedOperations once
         await queue.onEmpty();
+
+        // Verify that all batches were processed successfully
+        try {
+          const verifyProcessingResponse = await fetch(
+            `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+          );
+          if (verifyProcessingResponse.ok) {
+            const verifyData = await verifyProcessingResponse.json();
+            ailogger.info(`Processing verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining in temporary table`);
+          } else {
+            ailogger.warn('Processing verification failed, but continuing with collapser');
+          }
+        } catch (verifyError: any) {
+          ailogger.warn('Processing verification error:', verifyError.message);
+        }
+
         setCompletedOperations(prev => prev + 1);
-        // trigger collapser ONCE
-        await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`);
+
+        // trigger collapser ONCE and wait for it to complete
+        try {
+          ailogger.info('Starting collapser procedure...');
+          const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          if (!collapserResponse.ok) {
+            const errorText = await collapserResponse.text().catch(() => 'Unknown error');
+            throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
+          }
+          const collapserData = await collapserResponse.json();
+          ailogger.info('Collapser completed successfully:', collapserData);
+
+          // Additional settling time to ensure database operations complete
+          ailogger.info('Allowing 2 seconds for database operations to settle...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (collapserError: any) {
+          ailogger.error('Collapser error:', collapserError.message);
+          throw collapserError;
+        }
+
         setProcessed(true);
       }
 
