@@ -77,6 +77,15 @@ jobs:
           npm run build
           npm run test --if-present
 
+      - name: Run responsive design tests
+        run: |
+          cd frontend/
+          # Use start-server-and-test to run responsive tests
+          npx start-server-and-test start http://localhost:3000 "npm run test:responsive:ci"
+        env:
+          NODE_ENV: production
+          CYPRESS_CI: true
+
       - name: Move directories into build/standalone to reduce app load
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
