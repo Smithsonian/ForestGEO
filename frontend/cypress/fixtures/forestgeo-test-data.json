@@ -1,0 +1,335 @@
+{
+  "sites": {
+    "allSites": [
+      {
+        "siteID": 1,
+        "siteName": "Luquillo",
+        "schemaName": "luquillo",
+        "subquadratDimX": 5,
+        "subquadratDimY": 5,
+        "doubleDataEntry": true,
+        "locationName": "Puerto Rico",
+        "countryName": "USA"
+      },
+      {
+        "siteID": 2,
+        "siteName": "Barro Colorado Island",
+        "schemaName": "bci",
+        "subquadratDimX": 5,
+        "subquadratDimY": 5,
+        "doubleDataEntry": true,
+        "locationName": "Panama",
+        "countryName": "Panama"
+      },
+      {
+        "siteID": 3,
+        "siteName": "Pasoh",
+        "schemaName": "pasoh",
+        "subquadratDimX": 5,
+        "subquadratDimY": 5,
+        "doubleDataEntry": false,
+        "locationName": "Malaysia",
+        "countryName": "Malaysia"
+      },
+      {
+        "siteID": 4,
+        "siteName": "Lambir",
+        "schemaName": "lambir",
+        "subquadratDimX": 5,
+        "subquadratDimY": 5,
+        "doubleDataEntry": false,
+        "locationName": "Malaysia",
+        "countryName": "Malaysia"
+      },
+      {
+        "siteID": 5,
+        "siteName": "Harvard Forest",
+        "schemaName": "harvard",
+        "subquadratDimX": 5,
+        "subquadratDimY": 5,
+        "doubleDataEntry": true,
+        "locationName": "Massachusetts",
+        "countryName": "USA"
+      }
+    ]
+  },
+  "plots": {
+    "luquillo": [
+      {
+        "plotID": 1,
+        "plotName": "Luquillo Main Plot",
+        "locationName": "El Yunque National Forest",
+        "countryName": "USA",
+        "plotShape": "rectangular",
+        "plotDescription": "16-ha tropical wet forest plot",
+        "dimensionX": 320,
+        "dimensionY": 500,
+        "area": 16,
+        "globalX": -65.816667,
+        "globalY": 18.316667,
+        "globalZ": 350,
+        "defaultDimensionUnits": "m",
+        "defaultCoordinateUnits": "decimal degrees",
+        "defaultAreaUnits": "ha",
+        "defaultDBHUnits": "mm",
+        "defaultHOMUnits": "cm",
+        "numQuadrats": 320,
+        "usesSubquadrats": true
+      }
+    ],
+    "bci": [
+      {
+        "plotID": 2,
+        "plotName": "BCI 50-ha Plot",
+        "locationName": "Barro Colorado Island",
+        "countryName": "Panama",
+        "plotShape": "rectangular",
+        "plotDescription": "50-ha tropical moist forest plot",
+        "dimensionX": 1000,
+        "dimensionY": 500,
+        "area": 50,
+        "globalX": -79.851667,
+        "globalY": 9.154167,
+        "globalZ": 120,
+        "defaultDimensionUnits": "m",
+        "defaultCoordinateUnits": "decimal degrees",
+        "defaultAreaUnits": "ha",
+        "defaultDBHUnits": "mm",
+        "defaultHOMUnits": "cm",
+        "numQuadrats": 1250,
+        "usesSubquadrats": true
+      }
+    ],
+    "pasoh": [
+      {
+        "plotID": 3,
+        "plotName": "Pasoh Main Plot",
+        "locationName": "Pasoh Forest Reserve",
+        "countryName": "Malaysia",
+        "plotShape": "rectangular",
+        "plotDescription": "50-ha lowland dipterocarp forest plot",
+        "dimensionX": 1000,
+        "dimensionY": 500,
+        "area": 50,
+        "globalX": 102.3,
+        "globalY": 2.973333,
+        "globalZ": 75,
+        "defaultDimensionUnits": "m",
+        "defaultCoordinateUnits": "decimal degrees",
+        "defaultAreaUnits": "ha",
+        "defaultDBHUnits": "mm",
+        "defaultHOMUnits": "cm",
+        "numQuadrats": 1250,
+        "usesSubquadrats": false
+      }
+    ],
+    "harvard": [
+      {
+        "plotID": 4,
+        "plotName": "Harvard Forest Plot",
+        "locationName": "Harvard Forest",
+        "countryName": "USA",
+        "plotShape": "rectangular",
+        "plotDescription": "35-ha temperate deciduous forest plot",
+        "dimensionX": 700,
+        "dimensionY": 500,
+        "area": 35,
+        "globalX": -72.183333,
+        "globalY": 42.533333,
+        "globalZ": 340,
+        "defaultDimensionUnits": "m",
+        "defaultCoordinateUnits": "decimal degrees",
+        "defaultAreaUnits": "ha",
+        "defaultDBHUnits": "mm",
+        "defaultHOMUnits": "cm",
+        "numQuadrats": 875,
+        "usesSubquadrats": true
+      }
+    ]
+  },
+  "census": {
+    "plot1": [
+      {
+        "plotCensusNumber": 1,
+        "startDate": "1990-01-01",
+        "endDate": "1991-12-31",
+        "censusID": 1,
+        "plotID": 1,
+        "description": "First census of Luquillo plot"
+      },
+      {
+        "plotCensusNumber": 2,
+        "startDate": "1995-01-01",
+        "endDate": "1996-12-31",
+        "censusID": 2,
+        "plotID": 1,
+        "description": "Second census of Luquillo plot"
+      },
+      {
+        "plotCensusNumber": 3,
+        "startDate": "2000-01-01",
+        "endDate": "2001-12-31",
+        "censusID": 3,
+        "plotID": 1,
+        "description": "Third census of Luquillo plot"
+      },
+      {
+        "plotCensusNumber": 4,
+        "startDate": "2005-01-01",
+        "endDate": "2006-12-31",
+        "censusID": 4,
+        "plotID": 1,
+        "description": "Fourth census of Luquillo plot"
+      },
+      {
+        "plotCensusNumber": 5,
+        "startDate": "2010-01-01",
+        "endDate": "2011-12-31",
+        "censusID": 5,
+        "plotID": 1,
+        "description": "Fifth census of Luquillo plot"
+      }
+    ],
+    "plot2": [
+      {
+        "plotCensusNumber": 1,
+        "startDate": "1980-01-01",
+        "endDate": "1982-12-31",
+        "censusID": 6,
+        "plotID": 2,
+        "description": "First census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 2,
+        "startDate": "1985-01-01",
+        "endDate": "1987-12-31",
+        "censusID": 7,
+        "plotID": 2,
+        "description": "Second census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 3,
+        "startDate": "1990-01-01",
+        "endDate": "1992-12-31",
+        "censusID": 8,
+        "plotID": 2,
+        "description": "Third census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 4,
+        "startDate": "1995-01-01",
+        "endDate": "1997-12-31",
+        "censusID": 9,
+        "plotID": 2,
+        "description": "Fourth census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 5,
+        "startDate": "2000-01-01",
+        "endDate": "2002-12-31",
+        "censusID": 10,
+        "plotID": 2,
+        "description": "Fifth census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 6,
+        "startDate": "2005-01-01",
+        "endDate": "2007-12-31",
+        "censusID": 11,
+        "plotID": 2,
+        "description": "Sixth census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 7,
+        "startDate": "2010-01-01",
+        "endDate": "2012-12-31",
+        "censusID": 12,
+        "plotID": 2,
+        "description": "Seventh census of BCI plot"
+      },
+      {
+        "plotCensusNumber": 8,
+        "startDate": "2015-01-01",
+        "endDate": "2017-12-31",
+        "censusID": 13,
+        "plotID": 2,
+        "description": "Eighth census of BCI plot"
+      }
+    ]
+  },
+  "quadrats": {
+    "sample": [
+      {
+        "quadratID": 1,
+        "plotID": 1,
+        "quadratName": "0001",
+        "startX": 0,
+        "startY": 0,
+        "dimensionX": 20,
+        "dimensionY": 20,
+        "area": 400,
+        "quadratShape": "rectangular"
+      },
+      {
+        "quadratID": 2,
+        "plotID": 1,
+        "quadratName": "0002",
+        "startX": 20,
+        "startY": 0,
+        "dimensionX": 20,
+        "dimensionY": 20,
+        "area": 400,
+        "quadratShape": "rectangular"
+      },
+      {
+        "quadratID": 3,
+        "plotID": 1,
+        "quadratName": "0003",
+        "startX": 40,
+        "startY": 0,
+        "dimensionX": 20,
+        "dimensionY": 20,
+        "area": 400,
+        "quadratShape": "rectangular"
+      }
+    ]
+  },
+  "userProfiles": {
+    "standardUser": {
+      "name": "Dr. Jane Forest",
+      "email": "jane.forest@forestgeo.si.edu",
+      "userStatus": "active",
+      "sites": [1, 2],
+      "allsites": [1, 2, 3, 4, 5],
+      "permissions": ["read", "write"],
+      "affiliation": "Smithsonian Institution"
+    },
+    "adminUser": {
+      "name": "Dr. Admin Forestry",
+      "email": "admin@forestgeo.si.edu",
+      "userStatus": "global",
+      "sites": [1, 2, 3, 4, 5],
+      "allsites": [1, 2, 3, 4, 5],
+      "permissions": ["read", "write", "admin"],
+      "affiliation": "Smithsonian Institution"
+    },
+    "limitedUser": {
+      "name": "Student Researcher",
+      "email": "student@university.edu",
+      "userStatus": "limited",
+      "sites": [1],
+      "allsites": [1, 2, 3, 4, 5],
+      "permissions": ["read"],
+      "affiliation": "University Research"
+    },
+    "newUser": {
+      "name": "New Field Assistant",
+      "email": "new.user@forestgeo.si.edu",
+      "userStatus": "pending",
+      "sites": [],
+      "allsites": [1, 2, 3, 4, 5],
+      "permissions": [],
+      "affiliation": "Field Station"
+    }
+  }
+}
