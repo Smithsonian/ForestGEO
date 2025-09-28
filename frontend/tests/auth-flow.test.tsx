@@ -9,8 +9,8 @@ import MapperFactory from '@/config/datamapper';
 // Mock next-auth
 vi.mock('next-auth/react', () => ({
   useSession: vi.fn(),
-  signIn: vi.fn(),
-  signOut: vi.fn()
+  signIn: vi.fn(() => Promise.resolve()), // Return a Promise to support .catch()
+  signOut: vi.fn(() => Promise.resolve())
 }));
 
 // Mock auth config and dependencies

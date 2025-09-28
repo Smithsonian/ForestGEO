@@ -178,29 +178,26 @@ describe('Enhanced Date Parsing', () => {
 
   it('should handle multiple date formats', () => {
     const testDates = [
-      { input: '1994-11-02', expected: new Date(1994, 10, 2) },
-      { input: '11/02/1994', expected: new Date(1994, 10, 2) },
-      { input: '02/11/1994', expected: new Date(1994, 10, 2) },
-      { input: 'November 2, 1994', expected: new Date(1994, 10, 2) },
-      { input: 'Nov 2, 1994', expected: new Date(1994, 10, 2) }
+      { input: '1994-11-02', format: 'YYYY-MM-DD', expected: new Date(1994, 10, 2) },
+      { input: '11/02/1994', format: 'MM/DD/YYYY', expected: new Date(1994, 10, 2) },
+      { input: 'November 2, 1994', format: 'MMMM D, YYYY', expected: new Date(1994, 10, 2) },
+      { input: 'Nov 2, 1994', format: 'MMM D, YYYY', expected: new Date(1994, 10, 2) }
     ];
 
-    testDates.forEach(({ input }) => {
-      let parsed = false;
-      for (const format of dateFormats) {
-        const momentDate = moment(input, format, true);
-        if (momentDate.isValid()) {
-          parsed = true;
-          break;
-        }
-      }
-
-      // If no specific format worked, try flexible parsing
-      if (!parsed) {
-        const flexible = moment(input);
-        expect(flexible.isValid()).toBe(true);
-      }
+    testDates.forEach(({ input, format }) => {
+      const momentDate = moment(input, format, true);
+      expect(momentDate.isValid()).toBe(true);
+      expect(momentDate.year()).toBe(1994);
+      expect(momentDate.month()).toBe(10); // November (0-based)
+      expect(momentDate.date()).toBe(2);
     });
+
+    // Test DD/MM/YYYY format separately as it represents day/month/year
+    const ddmmDate = moment('02/11/1994', 'DD/MM/YYYY', true);
+    expect(ddmmDate.isValid()).toBe(true);
+    expect(ddmmDate.year()).toBe(1994);
+    expect(ddmmDate.month()).toBe(10); // November (0-based)
+    expect(ddmmDate.date()).toBe(2);
   });
 });
 
