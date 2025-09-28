@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { validateContextualValues } from '@/lib/contextvalidation';
+import ailogger from '@/ailogger';
 
 export async function GET(
   request: NextRequest,
@@ -8,10 +10,42 @@ export async function GET(
     params: Promise<{ gridType: string; plotID: string; censusID: string }>;
   }
 ) {
-  const { gridType, plotID, censusID } = await props.params;
-  if (!gridType || !plotID || !censusID) throw new Error('missing core params');
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('schema was not provided');
+  const { gridType, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
+
+  if (!gridType) {
+    return NextResponse.json({ error: 'Grid type parameter is required' }, { status: HTTPResponses.BAD_REQUEST });
+  }
+
+  // Validate contextual values with fallback to URL params
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: true,
+    requireCensus: true,
+    allowFallback: true,
+    fallbackMessage: 'Resettable view operations require active site, plot, and census selections.'
+  });
+
+  if (!validation.success) {
+    // Try to use URL parameters as fallback
+    const schema = request.nextUrl.searchParams.get('schema');
+    if (schema && plotIDParam && censusIDParam) {
+      const plotID = parseInt(plotIDParam);
+      const censusID = parseInt(censusIDParam);
+
+      if (isNaN(plotID) || isNaN(censusID)) {
+        return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+
+      return await processReset(gridType, schema, plotID, censusID);
+    }
+    return validation.response!;
+  }
+
+  const { schema, plotID, censusID } = validation.values!;
+  return await processReset(gridType, schema!, plotID!, censusID!);
+}
+
+async function processReset(gridType: string, schema: string, plotID: number, censusID: number): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {
@@ -34,9 +68,14 @@ export async function GET(
         break;
     }
     await connectionManager.commitTransaction(transactionID);
-    return NextResponse.json({ message: 'Species reset completed' }, { status: HTTPResponses.OK });
-  } catch (e) {
-    await connectionManager.rollbackTransaction(transactionID);
-    throw e;
+    return NextResponse.json({ message: `${gridType} reset completed` }, { status: HTTPResponses.OK });
+  } catch (e: any) {
+    ailogger.error('Reset operation failed:', e);
+    if (transactionID) {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
+    return NextResponse.json({ error: 'Reset operation failed', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
+import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 
 // Valid table types that can be cleared
@@ -12,15 +13,15 @@ const VALID_TABLE_TYPES = {
 type TableType = keyof typeof VALID_TABLE_TYPES;
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   props: {
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const { tableType, schema, plotID, censusID } = await props.params;
+  const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
 
-  if (!tableType || !schema || !plotID || !censusID) {
-    return new NextResponse(JSON.stringify({ error: 'Missing required parameters: tableType, schema, plotID, censusID' }), {
+  if (!tableType) {
+    return new NextResponse(JSON.stringify({ error: 'Table type parameter is required' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -34,6 +35,39 @@ export async function DELETE(
       }),
       { status: HTTPResponses.INVALID_REQUEST }
     );
+  }
+
+  // Validate contextual values with fallback to URL params
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: true,
+    requireCensus: true,
+    allowFallback: true,
+    fallbackMessage: 'Admin clear operations require active site, plot, and census selections.'
+  });
+
+  let plotID: number, censusID: number, schema: string;
+
+  if (!validation.success) {
+    // Try to use URL parameters as fallback
+    if (schemaParam && plotIDParam && censusIDParam) {
+      plotID = parseInt(plotIDParam);
+      censusID = parseInt(censusIDParam);
+      schema = schemaParam;
+
+      if (isNaN(plotID) || isNaN(censusID)) {
+        return new NextResponse(JSON.stringify({ error: 'Invalid plotID or censusID parameters' }), {
+          status: HTTPResponses.INVALID_REQUEST
+        });
+      }
+    } else {
+      return validation.response!;
+    }
+  } else {
+    const values = validation.values!;
+    schema = values.schema!;
+    plotID = values.plotID!;
+    censusID = values.censusID!;
   }
 
   const tableName = VALID_TABLE_TYPES[tableType as TableType];
