@@ -72,7 +72,7 @@ BEGIN
             
             -- Clean up temporary tables on error
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered,
-                old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes;
+                old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes, stem_crossid_mapping;
             -- Table locks are automatically released on procedure exit
             SET @disable_triggers = 0;
             
@@ -265,26 +265,39 @@ BEGIN
                       AND t.CensusID = vCurrentCensusID 
                       AND t.IsActive = 1;
 
-    -- Step 8: Highly optimized StemCrossID update using correlated subquery
-    -- Single UPDATE statement that handles both existing and new stems efficiently
+    -- Step 8: Fixed StemCrossID update using temporary table to avoid MySQL error 1093
+    -- Create temporary table with stem cross reference mapping
+    CREATE TEMPORARY TABLE stem_crossid_mapping ENGINE = MEMORY AS
+    SELECT s_curr.StemGUID as CurrentStemID,
+           COALESCE(
+               (SELECT s_prev.StemCrossID
+                FROM stems s_prev
+                INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
+                INNER JOIN trees t_curr ON t_curr.TreeID = s_curr.TreeID
+                WHERE t_prev.TreeTag = t_curr.TreeTag
+                  AND s_prev.StemTag = s_curr.StemTag
+                  AND t_prev.CensusID < vCurrentCensusID
+                  AND t_prev.IsActive = 1
+                  AND s_prev.IsActive = 1
+                  AND s_prev.StemCrossID IS NOT NULL
+                ORDER BY t_prev.CensusID DESC
+                LIMIT 1),
+               s_curr.StemGUID
+           ) as NewStemCrossID
+    FROM stems s_curr
+    WHERE s_curr.CensusID = vCurrentCensusID
+      AND s_curr.StemCrossID IS NULL;
+
+    -- Add index for efficient update
+    CREATE INDEX idx_mapping_stemid ON stem_crossid_mapping (CurrentStemID);
+
+    -- Update stems using the mapping table
     UPDATE stems s
-    SET s.StemCrossID = COALESCE(
-        (SELECT s_prev.StemCrossID
-         FROM stems s_prev
-         INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
-         INNER JOIN trees t_curr ON t_curr.TreeID = s.TreeID
-         WHERE t_prev.TreeTag = t_curr.TreeTag
-           AND s_prev.StemTag = s.StemTag
-           AND t_prev.CensusID < vCurrentCensusID
-           AND t_prev.IsActive = 1
-           AND s_prev.IsActive = 1
-           AND s_prev.StemCrossID IS NOT NULL
-         ORDER BY t_prev.CensusID DESC
-         LIMIT 1),
-        s.StemGUID
-    )
-    WHERE s.CensusID = vCurrentCensusID
-      AND s.StemCrossID IS NULL;
+    INNER JOIN stem_crossid_mapping scm ON s.StemGUID = scm.CurrentStemID
+    SET s.StemCrossID = scm.NewStemCrossID;
+
+    -- Clean up the mapping table
+    DROP TEMPORARY TABLE stem_crossid_mapping;
 
     -- Step 9: Optimized core measurements insertion
     -- Use a single UNION query instead of multiple temp tables for better performance
@@ -359,7 +372,7 @@ BEGIN
 
     -- Clean up temporary tables
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered,
-        old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes;
+        old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes, stem_crossid_mapping;
 
     -- Clean up temporarymeasurements for this successful batch
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;

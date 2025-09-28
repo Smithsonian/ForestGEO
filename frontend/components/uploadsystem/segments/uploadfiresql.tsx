@@ -309,7 +309,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return;
     }
 
-    // Validate delimiter before parsing
+    // Validate delimiter and headers before parsing
     try {
       const validation = await validateDelimiter(
         file,
@@ -320,11 +320,99 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.warn(`Delimiter validation issues for file ${file.name}:`, validation.issues);
         // Log issues but continue parsing - user may have non-standard format that still works
       }
+
+      // Enhanced header validation with mapping feedback
+      if (validation.preview && validation.preview.length > 0) {
+        const csvHeaders = validation.preview[0];
+        const requiredHeaderLabels = requiredHeaders.map(h => h.label);
+        const mappingResults: string[] = [];
+        const missingRequired: string[] = [];
+
+        // Check which required headers can be mapped
+        for (const requiredHeader of requiredHeaderLabels) {
+          const normalizedRequired = requiredHeader.toLowerCase().replace(/[_\s-]/g, '');
+          const found = csvHeaders.some(csvHeader => {
+            const normalizedCsv = csvHeader.toLowerCase().replace(/[_\s-]/g, '');
+            return normalizedCsv === normalizedRequired || normalizedCsv.includes(normalizedRequired) || normalizedRequired.includes(normalizedCsv);
+          });
+
+          if (found) {
+            mappingResults.push(`✓ ${requiredHeader}`);
+          } else {
+            missingRequired.push(requiredHeader);
+            mappingResults.push(`✗ ${requiredHeader} (not found)`);
+          }
+        }
+
+        ailogger.info(`Header mapping preview for ${file.name}:`, mappingResults);
+
+        if (missingRequired.length > 0) {
+          ailogger.warn(`Missing required headers in ${file.name}: ${missingRequired.join(', ')}`);
+          ailogger.info(`Available headers: ${csvHeaders.join(', ')}`);
+          // Don't fail here - let the processing continue and handle missing fields during validation
+        } else {
+          ailogger.info(`All required headers found in ${file.name} - proceeding with enhanced parsing`);
+        }
+      }
     } catch (error) {
       ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
     }
 
-    const transformHeader = (header: string) => header.trim();
+    const transformHeader = (header: string) => {
+      const normalizedHeader = header
+        .trim()
+        .toLowerCase()
+        .replace(/[_\s-]/g, '');
+
+      // Map common header variations to expected field names
+      const headerMappings: Record<string, string> = {
+        tag: 'tag',
+        treetag: 'tag',
+        stemtag: 'stemtag',
+        stem: 'stemtag',
+        spcode: 'spcode',
+        species: 'spcode',
+        speciescode: 'spcode',
+        sp: 'spcode',
+        quadrat: 'quadrat',
+        quad: 'quadrat',
+        quadratname: 'quadrat',
+        lx: 'lx',
+        localx: 'lx',
+        x: 'lx',
+        xcoord: 'lx',
+        ly: 'ly',
+        localy: 'ly',
+        y: 'ly',
+        ycoord: 'ly',
+        dbh: 'dbh',
+        diameter: 'dbh',
+        hom: 'hom',
+        height: 'hom',
+        heightofmeasurement: 'hom',
+        date: 'date',
+        measurementdate: 'date',
+        dateof: 'date',
+        codes: 'codes',
+        code: 'codes',
+        attributes: 'codes',
+        attributecodes: 'codes',
+        comments: 'comments',
+        comment: 'comments',
+        description: 'comments',
+        notes: 'comments'
+      };
+
+      const mappedHeader = headerMappings[normalizedHeader];
+      if (mappedHeader) {
+        ailogger.info(`Header mapping: "${header}" -> "${mappedHeader}"`);
+        return mappedHeader;
+      }
+
+      // If no mapping found, return original trimmed header
+      ailogger.warn(`No mapping found for header: "${header}". Using as-is.`);
+      return header.trim();
+    };
     const validateRow = (row: FileRow): boolean => {
       const errors: string[] = [];
       let extraData = false;
@@ -389,40 +477,76 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     const transform = (value: string, field: string) => {
       if (value === 'NA' || value === 'NULL' || value === '') return null;
 
+      // Enhanced date handling with multiple format support
       if (uploadForm === FormType.measurements && field === 'date') {
-        const match = value.match(/(\d{4})[\/.\\-](\d{1,2})[\/.\\-](\d{1,2})|(\d{1,2})[\/.\\-](\d{1,2})[\/.\\-](\d{2,4})/);
+        const dateFormats = [
+          'YYYY-MM-DD',
+          'MM/DD/YYYY',
+          'DD/MM/YYYY',
+          'YYYY/MM/DD',
+          'MM-DD-YYYY',
+          'DD-MM-YYYY',
+          'YYYY.MM.DD',
+          'MM.DD.YYYY',
+          'DD.MM.YYYY',
+          'MMMM DD, YYYY',
+          'MMM DD, YYYY',
+          'DD MMM YYYY',
+          'DD MMMM YYYY',
+          'YYYY-MM-DD HH:mm:ss',
+          'MM/DD/YYYY HH:mm:ss',
+          'DD/MM/YYYY HH:mm:ss',
+          'YYYY-MM-DDTHH:mm:ss',
+          'YYYY-MM-DDTHH:mm:ss.SSS',
+          'YYYY-MM-DDTHH:mm:ss.SSSZ'
+        ];
 
-        if (match) {
-          let normalizedDate;
-
-          if (match[1]) {
-            // Format: YYYY/MM/DD or YYYY-MM-DD
-            normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-          } else {
-            // Format: MM/DD/YY(YY) or DD-MM-YY(YY)
-            const year = match[6].length === 2 ? `20${match[6]}` : match[6]; // Convert two-digit year to four-digit
-            normalizedDate = `${year}-${match[4].padStart(2, '0')}-${match[5].padStart(2, '0')}`;
+        // Try each format
+        for (const format of dateFormats) {
+          const parsed = moment(value.trim(), format, true);
+          if (parsed.isValid()) {
+            ailogger.info(`Date "${value}" parsed successfully with format "${format}"`);
+            return parsed.toDate();
           }
+        }
 
-          // Parse the date with both MM/DD/YYYY and DD/MM/YYYY for flexibility
-          const validFormats = ['YYYY-MM-DD', 'MM-DD-YYYY', 'DD-MM-YYYY', 'MM/DD/YYYY', 'DD/MM/YYYY'];
-          const parsedDate = moment(normalizedDate, validFormats, true);
+        // Try moment's flexible parsing as fallback
+        const flexible = moment(value.trim());
+        if (flexible.isValid()) {
+          ailogger.info(`Date "${value}" parsed with flexible format detection`);
+          return flexible.toDate();
+        }
 
-          if (parsedDate.isValid()) {
-            return parsedDate.toDate();
-          } else {
-            ailogger.error(
-              `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
-            );
-            return value;
+        ailogger.error(`Unable to parse date "${value}" with any known format`);
+        return value; // Return original value if parsing fails
+      }
+
+      // Enhanced coordinate precision handling
+      if (uploadForm === FormType.measurements && (field === 'lx' || field === 'ly')) {
+        const numValue = parseFloat(value);
+        if (!isNaN(numValue)) {
+          // Round to 6 decimal places for coordinate precision
+          const rounded = Math.round(numValue * 1000000) / 1000000;
+          if (rounded !== numValue) {
+            ailogger.info(`Coordinate ${field} value ${numValue} rounded to ${rounded} for precision`);
           }
-        } else {
-          ailogger.error(
-            `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
-          );
-          return value;
+          return rounded;
         }
       }
+
+      // Enhanced numeric field handling
+      if (uploadForm === FormType.measurements && (field === 'dbh' || field === 'hom')) {
+        const numValue = parseFloat(value);
+        if (!isNaN(numValue)) {
+          // Round to 2 decimal places for measurement precision
+          const rounded = Math.round(numValue * 100) / 100;
+          if (rounded !== numValue) {
+            ailogger.info(`Measurement ${field} value ${numValue} rounded to ${rounded} for precision`);
+          }
+          return rounded;
+        }
+      }
+
       return value;
     };
 
@@ -502,6 +626,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             // Push error rows directly to failedmeasurements table instead of storing in component state
             await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
           }
+
+          // Enhanced processing summary
+          const validRowsCount = totalRows - parsingInvalidRows.length;
+          const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
+
+          ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
+          ailogger.info(`  • Total rows processed: ${totalRows}`);
+          ailogger.info(`  • Valid rows: ${validRowsCount}`);
+          ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
+          ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
+          ailogger.info(`  • Header mapping: Enhanced (order-independent)`);
+          ailogger.info(`  • Date format support: Multi-format enabled`);
+          ailogger.info(`  • Coordinate precision: Auto-normalized`);
+
           resolve();
         },
         error: (err: any) => {

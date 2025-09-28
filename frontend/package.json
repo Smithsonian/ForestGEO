@@ -29,7 +29,8 @@
     "com:headless": "cypress run --component",
     "test:responsive": "node scripts/run-responsive-tests.js",
     "test:responsive:dev": "node scripts/run-responsive-tests.js --headed",
-    "test:responsive:ci": "cypress run --config-file cypress.ci.config.cjs --spec 'cypress/e2e/responsive/ci-responsive-suite.cy.ts' --browser chrome"
+    "test:responsive:ci": "cypress run --config-file cypress.ci.config.cjs --spec 'cypress/e2e/responsive/ci-responsive-suite.cy.ts' --browser chrome",
+    "test:auth-flow": "node scripts/test-auth-flow.js"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
@@ -55,6 +56,7 @@
     "@next/eslint-plugin-next": "^15.3.5",
     "@octokit/types": "^14.1.0",
     "@playwright/test": "^1.53.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/codemirror": "^5.60.16",
     "@types/fast-levenshtein": "^0.0.4",
     "@types/p-queue": "^3.2.1",
