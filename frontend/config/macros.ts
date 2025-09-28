@@ -20,6 +20,7 @@ export type ValidationErrorID = number;
 export enum HTTPResponses {
   OK = 200,
   CREATED = 201,
+  BAD_REQUEST = 400,
   CONFLICT = 409,
   INTERNAL_SERVER_ERROR = 500,
   SERVICE_UNAVAILABLE = 503,
@@ -27,7 +28,8 @@ export enum HTTPResponses {
   INVALID_REQUEST = 400,
   PRECONDITION_VALIDATION_FAILURE = 412,
   FOREIGN_KEY_CONFLICT = 555,
-  NOT_FOUND // Custom code, example
+  METHOD_NOT_ALLOWED = 405,
+  NOT_FOUND = 404 // Custom code, example
 }
 
 export enum ErrorMessages {

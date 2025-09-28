@@ -308,7 +308,10 @@ export default function Sidebar(props: SidebarProps) {
 
       const mapper = new OrgCensusToCensusResultMapper();
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) throw new Error('census creation failure');
+      if (!newCensusID) {
+        alert('Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.');
+        return;
+      }
 
       await Promise.all(
         ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {

@@ -4,8 +4,8 @@ import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, census } = props;
-  if (!census) throw createError('CensusID missing', { census });
-  if (!rowData.role) throw createError('Row data does not contain a role property', { rowData });
+  if (!census) throw createError('CensusID missing - census context is required for personnel processing', { census });
+  if (!rowData.role) throw createError('Row data does not contain a role property - role is required for personnel processing', { rowData });
 
   const { firstname, lastname, role, roledescription } = rowData;
 

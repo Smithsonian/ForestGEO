@@ -6,6 +6,7 @@ import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
 import { Box, Typography } from '@mui/joy';
+import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
@@ -64,7 +65,6 @@ export default function UploadParent(props: UploadParentProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error('site must be selected!');
   const { data: session } = useSession();
   const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
   const [isStreaming, setIsStreaming] = useState(false);
@@ -245,24 +245,27 @@ export default function UploadParent(props: UploadParentProps) {
     }
   };
   return (
-    <>
-      {currentCensus && currentPlot && (
-        <Box
-          sx={{
-            display: 'flex',
-            width: '100%',
-            flexDirection: 'column',
-            marginBottom: 2
-          }}
-        >
-          <Typography level={'title-lg'} color={'primary'}>
-            Drag and drop files into the box to upload them to storage
-          </Typography>
-          <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
-            <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
-          </Box>
+    <ContextValidationGuard
+      requireSite={true}
+      requirePlot={true}
+      requireCensus={true}
+      customMessage="Upload functionality requires site, plot, and census selections to be active."
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          width: '100%',
+          flexDirection: 'column',
+          marginBottom: 2
+        }}
+      >
+        <Typography level={'title-lg'} color={'primary'}>
+          Drag and drop files into the box to upload them to storage
+        </Typography>
+        <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
+          <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
         </Box>
-      )}
-    </>
+      </Box>
+    </ContextValidationGuard>
   );
 }

@@ -2,17 +2,53 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
+import { validateContextualValues } from '@/lib/contextvalidation';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest, props: { params: Promise<{ changelogType: string; options?: string[] }> }) {
   const params = await props.params;
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('schema not found');
-  if (!params.changelogType) throw new Error('changelogType not provided');
-  if (!params.options) throw new Error('options not provided');
-  if (params.options.length !== 2) throw new Error('Missing plot id or census id parameters');
-  const [plotIDParam, pcnParam] = params.options;
-  const plotID = parseInt(plotIDParam);
-  const pcn = parseInt(pcnParam);
+
+  if (!params.changelogType) {
+    return NextResponse.json({ error: 'changelogType parameter is required' }, { status: HTTPResponses.BAD_REQUEST });
+  }
+
+  if (!params.options || params.options.length !== 2) {
+    return NextResponse.json({ error: 'Missing plot ID or census ID parameters in options' }, { status: HTTPResponses.BAD_REQUEST });
+  }
+
+  // Validate contextual values with fallback to URL params
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: true,
+    allowFallback: true,
+    fallbackMessage: 'Changelog requires active site and plot selections.'
+  });
+
+  let plotID: number, pcn: number, schema: string;
+
+  if (!validation.success) {
+    // Try to use URL parameters as fallback
+    const schemaParam = request.nextUrl.searchParams.get('schema');
+    if (schemaParam && params.options.length === 2) {
+      const [plotIDParam, pcnParam] = params.options;
+      plotID = parseInt(plotIDParam);
+      pcn = parseInt(pcnParam);
+      schema = schemaParam;
+
+      if (isNaN(plotID) || isNaN(pcn)) {
+        return NextResponse.json({ error: 'Invalid plot ID or census number parameters' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+    } else {
+      return validation.response!;
+    }
+  } else {
+    const values = validation.values!;
+    schema = values.schema!;
+    plotID = values.plotID!;
+    // For changelog, we might need to derive PCN from context
+    pcn = parseInt(params.options[1]);
+  }
+
   const connectionManager = ConnectionManager.getInstance();
   try {
     let query = ``;
@@ -35,7 +71,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
       status: HTTPResponses.OK
     });
   } catch (e: any) {
-    throw new Error('SQL query failed: ' + e.message);
+    ailogger.error('Changelog query failed:', e);
+    return NextResponse.json({ error: 'Failed to fetch changelog data', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
 import {
   Alert,
   Box,
@@ -208,7 +209,10 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         return;
       }
 
-      if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error('site context OR plot context are undefined');
+      if (!currentSite?.schemaName || !currentPlot?.plotID) {
+        alert('Site or plot context is missing. Please ensure all required selections are made.');
+        return;
+      }
       if (rolloverStems) {
         const highestPlotCensusNumber =
           updatedCensusList.length > 0
@@ -257,97 +261,104 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   };
 
   return (
-    <Modal open={open} onClose={undefined} data-testid={'rollover-stems-modal'}>
-      <ModalDialog role="alertdialog">
-        <DialogTitle>
-          <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} mb={2}>
-            <Typography level="title-lg">Rollover Stems Data</Typography>
-            <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8 }}>
-              <CloseIcon />
-            </IconButton>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <Stack direction={'column'}>
-            <Typography mb={2} level="title-md" fontWeight={'xl'}>
-              Roll over <b>Stems</b> data:
-            </Typography>
-            <Select
-              sx={{ mb: 2 }}
-              value={selectedStemsCensus.censusID}
-              onChange={(_event, newValue) => {
-                const selected = censusValidationStatus.find(census => census.censusID === newValue) || defaultCVS;
-                if (selected === defaultCVS) setConfirmNoStemsRollover(false);
-                setSelectedStemsCensus(selected);
-              }}
-            >
-              <Option value={0}>Do not roll over any Stems data</Option>
-              {censusValidationStatus.map(census => (
-                <Option key={census.censusID} value={census.censusID} disabled={!census.hasStemsData}>
-                  {`Census: ${census.plotCensusNumber} - Stems: ${census.hasStemsData ? `Yes` : `No`}`}
-                </Option>
-              ))}
-            </Select>
-            {selectedStemsCensus.censusID === 0 ? (
-              <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
-                <Alert color="warning" sx={{ my: 2 }}>
-                  You have selected to not roll over any Stems data. <br /> Please confirm to proceed.
-                </Alert>
-                <Button
-                  variant={confirmNoStemsRollover ? 'solid' : 'soft'}
-                  color="warning"
-                  onClick={() => {
-                    setConfirmNoStemsRollover(!confirmNoStemsRollover);
-                  }}
-                >
-                  {confirmNoStemsRollover ? `Confirmed` : `Confirm No Rollover`}
-                </Button>
-              </Box>
-            ) : (
-              <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
-                <Stack direction={'row'} spacing={2} alignItems={'center'}>
-                  <Checkbox
-                    aria-label={'stems rollover checkbox'}
-                    checked={rolloverStems}
-                    onChange={() => setRolloverStems(!rolloverStems)}
-                    disabled={!customizeStems && !selectedStemsCensus.hasStemsData}
-                  />
-                  <Typography>Rollover stems data</Typography>
-                </Stack>
-                {rolloverStems && (
-                  <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
-                    <Button onClick={() => setCustomizeStems(!customizeStems)}>{customizeStems ? 'Roll over all stems' : 'Customize stems selection'}</Button>
-                    {customizeStems && (
-                      <DataGrid
-                        rows={previousStems}
-                        columns={StemGridColumns}
-                        pageSizeOptions={[5, 10, 25, 100]}
-                        checkboxSelection
-                        onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedStems)}
-                        initialState={{
-                          pagination: {
-                            paginationModel: { pageSize: 5, page: 0 }
-                          }
-                        }}
-                      />
-                    )}
-                  </Box>
-                )}
-              </Box>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Stack direction={'row'} justifyContent={'flex-end'} spacing={1} mt={2}>
-            <Button variant="plain" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button variant="solid" onClick={handleConfirm}>
-              Confirm
-            </Button>
-          </Stack>
-        </DialogActions>
-      </ModalDialog>
-    </Modal>
+    <ContextValidationGuard
+      requireSite={true}
+      requirePlot={true}
+      requireCensus={true}
+      customMessage="Rollover operations require active site, plot, and census selections."
+    >
+      <Modal open={open} onClose={undefined} data-testid={'rollover-stems-modal'}>
+        <ModalDialog role="alertdialog">
+          <DialogTitle>
+            <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} mb={2}>
+              <Typography level="title-lg">Rollover Stems Data</Typography>
+              <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8 }}>
+                <CloseIcon />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
+          <DialogContent>
+            <Stack direction={'column'}>
+              <Typography mb={2} level="title-md" fontWeight={'xl'}>
+                Roll over <b>Stems</b> data:
+              </Typography>
+              <Select
+                sx={{ mb: 2 }}
+                value={selectedStemsCensus.censusID}
+                onChange={(_event, newValue) => {
+                  const selected = censusValidationStatus.find(census => census.censusID === newValue) || defaultCVS;
+                  if (selected === defaultCVS) setConfirmNoStemsRollover(false);
+                  setSelectedStemsCensus(selected);
+                }}
+              >
+                <Option value={0}>Do not roll over any Stems data</Option>
+                {censusValidationStatus.map(census => (
+                  <Option key={census.censusID} value={census.censusID} disabled={!census.hasStemsData}>
+                    {`Census: ${census.plotCensusNumber} - Stems: ${census.hasStemsData ? `Yes` : `No`}`}
+                  </Option>
+                ))}
+              </Select>
+              {selectedStemsCensus.censusID === 0 ? (
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                  <Alert color="warning" sx={{ my: 2 }}>
+                    You have selected to not roll over any Stems data. <br /> Please confirm to proceed.
+                  </Alert>
+                  <Button
+                    variant={confirmNoStemsRollover ? 'solid' : 'soft'}
+                    color="warning"
+                    onClick={() => {
+                      setConfirmNoStemsRollover(!confirmNoStemsRollover);
+                    }}
+                  >
+                    {confirmNoStemsRollover ? `Confirmed` : `Confirm No Rollover`}
+                  </Button>
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                  <Stack direction={'row'} spacing={2} alignItems={'center'}>
+                    <Checkbox
+                      aria-label={'stems rollover checkbox'}
+                      checked={rolloverStems}
+                      onChange={() => setRolloverStems(!rolloverStems)}
+                      disabled={!customizeStems && !selectedStemsCensus.hasStemsData}
+                    />
+                    <Typography>Rollover stems data</Typography>
+                  </Stack>
+                  {rolloverStems && (
+                    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                      <Button onClick={() => setCustomizeStems(!customizeStems)}>{customizeStems ? 'Roll over all stems' : 'Customize stems selection'}</Button>
+                      {customizeStems && (
+                        <DataGrid
+                          rows={previousStems}
+                          columns={StemGridColumns}
+                          pageSizeOptions={[5, 10, 25, 100]}
+                          checkboxSelection
+                          onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedStems)}
+                          initialState={{
+                            pagination: {
+                              paginationModel: { pageSize: 5, page: 0 }
+                            }
+                          }}
+                        />
+                      )}
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Stack direction={'row'} justifyContent={'flex-end'} spacing={1} mt={2}>
+              <Button variant="plain" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button variant="solid" onClick={handleConfirm}>
+                Confirm
+              </Button>
+            </Stack>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
+    </ContextValidationGuard>
   );
 }

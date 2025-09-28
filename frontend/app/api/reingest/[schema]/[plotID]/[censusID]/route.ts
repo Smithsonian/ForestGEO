@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
+import { validateContextualValues } from '@/lib/contextvalidation';
 import { v4 } from 'uuid';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function GET(
   request: NextRequest,
@@ -9,15 +11,43 @@ export async function GET(
     params: Promise<{ schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const { schema, plotID, censusID } = await props.params;
+  const { schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
+
+  // Validate contextual values with fallback to URL params
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: true,
+    requireCensus: true,
+    allowFallback: true,
+    fallbackMessage: 'Reingestion requires active site, plot, and census selections.'
+  });
+
+  let plotID: number, censusID: number, schema: string;
+
+  if (!validation.success) {
+    // Try to use URL parameters as fallback
+    if (schemaParam && plotIDParam && censusIDParam) {
+      plotID = parseInt(plotIDParam);
+      censusID = parseInt(censusIDParam);
+      schema = schemaParam;
+
+      if (isNaN(plotID) || isNaN(censusID)) {
+        return NextResponse.json({ error: 'Invalid plotID or censusID parameters' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+    } else {
+      return validation.response!;
+    }
+  } else {
+    const values = validation.values!;
+    schema = values.schema!;
+    plotID = values.plotID!;
+    censusID = values.censusID!;
+  }
 
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
   try {
-    if (!schema || !plotID || !censusID) {
-      throw new Error('schema or plotID or censusID not provided');
-    }
     // Clean up stale transactions first
     await connectionManager.cleanupStaleTransactions();
 
@@ -103,13 +133,16 @@ export async function GET(
       { status: HTTPResponses.OK }
     );
   } catch (e: any) {
-    await connectionManager.rollbackTransaction(transactionID);
+    ailogger.error('Reingestion failed:', e);
+    if (transactionID) {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
 
     // Try to run reviewfailed to update any failure reasons
     try {
       await connectionManager.executeQuery(`CALL ${schema}.reviewfailed()`);
     } catch (reviewError: any) {
-      console.error('Failed to update failure reasons:', reviewError);
+      ailogger.error('Failed to update failure reasons:', reviewError);
     }
 
     return new NextResponse(
@@ -119,5 +152,7 @@ export async function GET(
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

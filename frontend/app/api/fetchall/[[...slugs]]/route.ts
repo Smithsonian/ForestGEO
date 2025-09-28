@@ -3,36 +3,48 @@ import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
-  const schema = request.nextUrl.searchParams.get('schema');
   const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
 
+  // Validate contextual values first
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: dataType === 'stems' || dataType === 'trees' || dataType === 'personnel' || dataType === 'census',
+    requireCensus: dataType === 'stems' || dataType === 'trees' || dataType === 'personnel',
+    allowFallback: true,
+    fallbackMessage: `Data type '${dataType}' requires active site/plot/census selections.`
+  });
+
+  if (!validation.success) {
+    return validation.response!;
+  }
+
+  const { schema, plotID: storedPlotID, censusID } = validation.values!;
+
+  // Get additional context values for specific operations
   let storedCensusList: OrgCensus[];
-  let storedPlotID: number = parseInt(plotIDParam);
   let storedPCN: number = parseInt(pcnParam);
 
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
-    storedPlotID = parseInt((await getCookie('plotID')) ?? '0');
     storedPCN =
-      storedCensusList.find(
-        (oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(async dr => dr.censusID === parseInt((await getCookie('censusID')) ?? '0'))
-      )?.plotCensusNumber ?? 0;
-  } catch (e) {}
+      storedCensusList.find((oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(dr => dr.censusID === censusID))?.plotCensusNumber ??
+      parseInt(pcnParam) ??
+      0;
+  } catch (e: any) {
+    ailogger.warn('Failed to parse census list from cookies', e);
+  }
 
   const connectionManager = ConnectionManager.getInstance();
   try {
-    if (!schema || schema === 'undefined') {
-      throw new Error('Schema selection was not provided to API endpoint');
-    }
-
     if (!dataType) {
-      throw new Error('slugs were not correctly provided');
+      return NextResponse.json({ error: 'Data type not specified in request parameters' }, { status: HTTPResponses.BAD_REQUEST });
     }
     let results: any;
     if (dataType === 'stems' || dataType === 'trees') {

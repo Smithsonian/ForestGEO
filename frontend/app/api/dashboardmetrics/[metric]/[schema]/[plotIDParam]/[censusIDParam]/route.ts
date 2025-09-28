@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { HTTPResponses } from '@/config/macros';
+import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 
 export async function GET(
@@ -10,11 +11,47 @@ export async function GET(
     params: Promise<{ metric: string; schema: string; plotIDParam: string; censusIDParam: string }>;
   }
 ) {
-  const { metric, schema, plotIDParam, censusIDParam } = await props.params;
+  const { metric, schema: schemaParam, plotIDParam, censusIDParam } = await props.params;
   const plotName = request.nextUrl.searchParams.get('plot');
-  if (!metric || !schema || !plotIDParam || !censusIDParam || !plotName) throw new Error('Missing core slugs');
-  const plotID = parseInt(plotIDParam);
-  const censusID = parseInt(censusIDParam);
+
+  if (!metric) {
+    return NextResponse.json({ error: 'Metric parameter is required' }, { status: HTTPResponses.BAD_REQUEST });
+  }
+
+  if (!plotName) {
+    return NextResponse.json({ error: 'Plot name query parameter is required' }, { status: HTTPResponses.BAD_REQUEST });
+  }
+
+  // Validate contextual values with fallback to URL params
+  const validation = await validateContextualValues(request, {
+    requireSchema: true,
+    requirePlot: true,
+    requireCensus: true,
+    allowFallback: true,
+    fallbackMessage: 'Dashboard metrics require active site, plot, and census selections.'
+  });
+
+  if (!validation.success) {
+    // Try to use URL parameters as fallback
+    if (schemaParam && plotIDParam && censusIDParam) {
+      const plotID = parseInt(plotIDParam);
+      const censusID = parseInt(censusIDParam);
+
+      if (isNaN(plotID) || isNaN(censusID)) {
+        return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+
+      // Continue with URL parameters
+      return await processMetrics(metric, schemaParam, plotID, censusID, plotName);
+    }
+    return validation.response!;
+  }
+
+  const { schema, plotID, censusID } = validation.values!;
+  return await processMetrics(metric, schema!, plotID!, censusID!, plotName);
+}
+
+async function processMetrics(metric: string, schema: string, plotID: number, censusID: number, plotName: string): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   // count active users?
@@ -89,7 +126,10 @@ export async function GET(
       default:
         return NextResponse.json({}, { status: HTTPResponses.OK });
     }
-  } catch (e) {
-    return NextResponse.json({}, { status: HTTPResponses.INVALID_REQUEST });
+  } catch (e: any) {
+    ailogger.error('Dashboard metrics error:', e);
+    return NextResponse.json({ error: 'Failed to retrieve metrics', details: e.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+  } finally {
+    await connectionManager.closeConnection();
   }
 }
