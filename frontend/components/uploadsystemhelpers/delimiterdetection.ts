@@ -2,6 +2,8 @@
  * Utility functions for detecting and validating file delimiters
  */
 
+import { parseLineWithDelimiter } from './csvparserutils';
+
 export interface DelimiterDetectionResult {
   delimiter: string;
   confidence: number;
@@ -130,45 +132,6 @@ function analyzeDelimiter(lines: string[], delimiter: string): DelimiterDetectio
     sampleRows: validRows,
     avgColumnsPerRow: avgColumns
   };
-}
-
-/**
- * Parses a line with the specified delimiter, respecting quoted fields
- */
-function parseLineWithDelimiter(line: string, delimiter: string): string[] {
-  const columns: string[] = [];
-  let currentColumn = '';
-  let insideQuotes = false;
-  let quoteChar = '';
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (!insideQuotes && (char === '"' || char === "'")) {
-      insideQuotes = true;
-      quoteChar = char;
-      currentColumn += char;
-    } else if (insideQuotes && char === quoteChar) {
-      // Check for escaped quotes
-      if (i + 1 < line.length && line[i + 1] === quoteChar) {
-        currentColumn += char + char;
-        i++; // Skip next character
-      } else {
-        insideQuotes = false;
-        currentColumn += char;
-      }
-    } else if (!insideQuotes && char === delimiter) {
-      columns.push(currentColumn.trim());
-      currentColumn = '';
-    } else {
-      currentColumn += char;
-    }
-  }
-
-  // Add the last column
-  columns.push(currentColumn.trim());
-
-  return columns;
 }
 
 /**

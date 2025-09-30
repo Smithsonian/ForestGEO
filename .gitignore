@@ -56,3 +56,4 @@ frontend/liquibase/
 
 *.sh
 *.properties
+.jscpd
