@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Alert, Box, Chip, Collapse, IconButton, Sheet, Stack, Table, Typography } from '@mui/joy';
+import { Alert, Box, Chip, IconButton, Sheet, Stack, Table, Typography } from '@mui/joy';
+import { Collapse } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon, ExpandLess as ExpandLessIcon, Warning as WarningIcon, Error as ErrorIcon, Info as InfoIcon } from '@mui/icons-material';
 import { DataWarning } from './csvheadermapper';
 

@@ -28,32 +28,33 @@ const nextConfig = withBundleAnalyzer({
   turbopack: {
     resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
   },
+  // Type checking and linting enabled for production builds
+  // These should NEVER be disabled - they catch critical errors before deployment
   eslint: {
-    ignoreDuringBuilds: true
+    ignoreDuringBuilds: false
   },
   typescript: {
-    ignoreBuildErrors: true
+    ignoreBuildErrors: false
   },
   images: {
     unoptimized: true
   },
   output: 'standalone',
   reactStrictMode: true,
-  distDir: 'build',
-  env: {
-    AZURE_SQL_USER: process.env.AZURE_SQL_USER,
-    AZURE_SQL_PASSWORD: process.env.AZURE_SQL_PASSWORD,
-    AZURE_SQL_SERVER: process.env.AZURE_SQL_SERVER,
-    AZURE_SQL_PORT: process.env.AZURE_SQL_PORT,
-    AZURE_SQL_SCHEMA: process.env.AZURE_SQL_SCHEMA,
-    AZURE_SQL_CATALOG_SCHEMA: process.env.AZURE_SQL_CATALOG_SCHEMA,
-    AZURE_STORAGE_CONNECTION_STRING: process.env.AZURE_STORAGE_CONNECTION_STRING,
-    APP_INSIGHTS_CONNECTION_STRING: process.env.APP_INSIGHTS_CONNECTION_STRING,
-    DEVELOPER_EMAIL: process.env.DEVELOPER_EMAIL,
-    FG_PAT: process.env.FG_PAT,
-    OWNER: process.env.OWNER,
-    REPO: process.env.REPO
-  }
+  distDir: 'build'
+  // SECURITY: Do NOT add environment variables here unless they need to be public
+  // Variables added to the 'env' block are inlined into the client bundle at build time
+  // This means they are visible in browser DevTools and the JavaScript source
+  //
+  // For server-only secrets (database credentials, API keys):
+  //   - Keep them in .env.local (already done ✓)
+  //   - Access via process.env in Server Components and Route Handlers
+  //
+  // For client-exposed values:
+  //   - Add NEXT_PUBLIC_ prefix in .env.local
+  //   - Next.js automatically inlines these at build time
+  //
+  // See: https://nextjs.org/docs/app/building-your-application/configuring/environment-variables
 });
 
 module.exports = nextConfig;

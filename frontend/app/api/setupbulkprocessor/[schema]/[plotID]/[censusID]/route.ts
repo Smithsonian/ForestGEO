@@ -3,6 +3,10 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function GET(
   _request: NextRequest,
   props: {

@@ -4,6 +4,10 @@ import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 interface QueryRequest {
   query: string;
   params?: any[];
@@ -53,7 +57,7 @@ export async function POST(request: NextRequest) {
 
       queryToExecute = query;
       params = queryParams || [];
-      shouldFormat = shouldFormatQuery === true || (queryParams && queryParams.length > 0);
+      shouldFormat = shouldFormatQuery === true || (queryParams !== undefined && queryParams.length > 0);
     } else {
       return new NextResponse(JSON.stringify({ error: 'Request body must be a string (query) or object with query property' }), {
         status: HTTPResponses.INVALID_REQUEST

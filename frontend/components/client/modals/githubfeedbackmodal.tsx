@@ -30,13 +30,13 @@ import { ChangeEvent, useState } from 'react';
 import { AccessibilityNew, BugReport, Build, Error as ErrorIcon, Event, GitHub, Info, Person } from '@mui/icons-material';
 import { useFormSubmission } from '@/hooks/useAsyncOperation';
 import { useApiWrapper } from '@/utils/apiWrapper';
-import { Octokit } from 'octokit';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Grid from '@mui/material/Grid';
+import { createGitHubIssue } from '@/app/actions/github';
 
 // this has been shelved -- it's a little too complicated for a first iteration.
 // saving it for a later version.
@@ -84,10 +84,6 @@ export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
   const [description, setDescription] = useState('');
   const [createdIssue, setCreatedIssue] = useState<Issue | null>(null);
   const [isBodyTooltipHovered, setIsBodyTooltipHovered] = useState(false);
-  const pat = process.env.FG_PAT;
-  const owner = process.env.OWNER;
-  const repo = process.env.REPO;
-  if (!pat || !owner || !repo) return <>ENV FAILURE</>;
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -106,27 +102,23 @@ export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
   // Use form submission hook for GitHub issue creation
   const { submitForm: handleSubmitIssue, isSubmitting } = useFormSubmission(
     async () => {
-      const octokit = new Octokit({
-        auth: pat
-      });
-
       const issueBody = `
 ### Description
-${description}  
+${description}
 
 
 ### Pathname
-${pathname}  
+${pathname}
 
 
 ### User Details
-- **Provided Name**: ${name}  
+- **Provided Name**: ${name}
 
 
 ### Session Details
 - **Name**: ${session?.user?.name}
 - **Email**: ${session?.user?.email}
-- **Assigned Sites**: ${session?.user?.sites?.toString()}  
+- **Assigned Sites**: ${session?.user?.sites?.toString()}
 
 
 ### Site Details
@@ -134,24 +126,17 @@ ${pathname}
 - **Schema**: ${currentSite ? currentSite.schemaName : 'Not selected'}
 - **Plot**: ${currentPlot ? currentPlot.plotName : 'Not selected'}
 - **Location**: ${currentPlot ? currentPlot.locationName : 'Not selected'}
-- **Census**: ${currentCensus ? currentCensus.plotCensusNumber : 'Not selected'}  
+- **Census**: ${currentCensus ? currentCensus.plotCensusNumber : 'Not selected'}
 `;
 
-      // handle the issue submission logic here
-      const response = await octokit.request(`POST /repos/${owner}/${repo}/issues`, {
-        owner,
-        repo,
-        title: `APP-USER-GENERATED: Feedback Ticket: ${issueType}`,
-        body: issueBody,
-        labels: ['useridentifiedbug'],
-        assignees: ['siddheshraze']
-      });
+      // Use Server Action to securely create GitHub issue without exposing PAT
+      const result = await createGitHubIssue(`APP-USER-GENERATED: Feedback Ticket: ${issueType}`, issueBody, ['useridentifiedbug']);
 
-      if (response.status !== 201) {
+      if (!result.success) {
         throw new Error('Failed to create GitHub issue');
       }
 
-      setCreatedIssue(response.data);
+      setCreatedIssue(result.issue);
 
       // Reset form after success
       setName('');

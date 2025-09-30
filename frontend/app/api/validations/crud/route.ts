@@ -6,6 +6,10 @@ import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function GET(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');

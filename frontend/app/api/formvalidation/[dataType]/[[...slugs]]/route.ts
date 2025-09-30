@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 // dataType
 // slugs: schema, columnName, value ONLY
 // needs to match dynamic format established by other slug routes!

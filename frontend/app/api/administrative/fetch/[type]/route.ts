@@ -4,6 +4,10 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function GET(_request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
