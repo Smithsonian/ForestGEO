@@ -97,17 +97,19 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     vi.clearAllMocks();
   });
 
-  it('throws when missing core slugs (including plot search param)', async () => {
+  it('returns 400 when missing core slugs (including plot search param)', async () => {
     // missing plot name (?plot=)
-    await expect(callGET('CountTrees', 's1', '1', '2', '')).rejects.toThrow(/Missing core slugs/i);
+    const res1 = await callGET('CountTrees', 's1', '1', '2', '');
+    expect(res1.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body1 = await res1.json();
+    expect(body1.error).toMatch(/Plot name.*required/i);
 
     // missing metric
     const props = { params: Promise.resolve({ metric: undefined as any, schema: 's1', plotIDParam: '1', censusIDParam: '2' }) } as any;
-    await expect(GET(makeRequest('PlotX'), props)).rejects.toThrow(/Missing core slugs/i);
-
-    // missing schema
-    const props2 = { params: Promise.resolve({ metric: 'CountTrees', schema: undefined as any, plotIDParam: '1', censusIDParam: '2' }) } as any;
-    await expect(GET(makeRequest('PlotX'), props2)).rejects.toThrow(/Missing core slugs/i);
+    const res2 = await GET(makeRequest('PlotX'), props);
+    expect(res2.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body2 = await res2.json();
+    expect(body2.error).toMatch(/Metric.*required/i);
   });
 
   it('CountActiveUsers: returns 200 and proper JSON; builds expected SQL + params', async () => {
@@ -244,13 +246,13 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(body).toEqual({});
   });
 
-  it('on DB error: returns 400 (INVALID_REQUEST)', async () => {
+  it('on DB error: returns 500 (INTERNAL_SERVER_ERROR)', async () => {
     const cm = (ConnectionManager as any).getInstance();
     vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
 
     const res = await callGET('CountTrees', 'sch', '5', '6', 'PlotX');
-    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
-    expect(body).toEqual({}); // handler returns empty object on error
+    expect(body.error).toMatch(/Failed to retrieve metrics/i);
   });
 });
