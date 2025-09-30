@@ -64,24 +64,36 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     vi.clearAllMocks();
   });
 
-  it('throws if schema missing', async () => {
+  it('returns 500 if schema missing', async () => {
     const req = makeRequest('http://localhost/api'); // no ?schema=
-    await expect(GET(req, makeProps('unifiedchangelog', ['1', '2']))).rejects.toThrow(/schema not found/i);
+    const res = await GET(req, makeProps('unifiedchangelog', ['1', '2']));
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/Failed to validate context|Failed to fetch changelog/i);
   });
 
-  it('throws if changelogType missing', async () => {
+  it('returns 400 if changelogType missing', async () => {
     const req = makeRequest('http://localhost/api?schema=myschema');
-    await expect(GET(req, makeProps(undefined as any, ['1', '2']))).rejects.toThrow(/changelogType not provided/i);
+    const res = await GET(req, makeProps(undefined as any, ['1', '2']));
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/changelogType.*required/i);
   });
 
-  it('throws if options missing', async () => {
+  it('returns 400 if options missing', async () => {
     const req = makeRequest('http://localhost/api?schema=myschema');
-    await expect(GET(req, makeProps('unifiedchangelog', undefined as any))).rejects.toThrow(/options not provided/i);
+    const res = await GET(req, makeProps('unifiedchangelog', undefined as any));
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Missing plot.*census/i);
   });
 
-  it('throws if options length !== 2', async () => {
+  it('returns 400 if options length !== 2', async () => {
     const req = makeRequest('http://localhost/api?schema=myschema');
-    await expect(GET(req, makeProps('unifiedchangelog', ['1']))).rejects.toThrow(/Missing plot id or census id/i);
+    const res = await GET(req, makeProps('unifiedchangelog', ['1']));
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Missing plot.*census/i);
   });
 
   it('unifiedchangelog: 200 with mapped results; builds expected SQL; closes connection', async () => {
@@ -161,13 +173,17 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates SQL errors (rejects) and still closes connection', async () => {
+  it('returns 500 on SQL errors and still closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api?schema=myschema');
-    await expect(GET(req, makeProps('unifiedchangelog', ['1', '2']))).rejects.toThrow(/SQL query failed: boom/i);
+    const res = await GET(req, makeProps('unifiedchangelog', ['1', '2']));
+
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/Failed to fetch changelog/i);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

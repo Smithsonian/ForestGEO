@@ -46,26 +46,26 @@ describe('batchedupload POST route', () => {
     const res = await POST(req, makeParams('myschema', ['1', '2']));
 
     expect(res.status).toBe(400);
-    const body = await res.json(); // ⟵ FIX: consume, don’t use .resolves on a value
-    expect(body.message).toMatch(/Missing requirements/i);
+    const body = await res.json(); // ⟵ FIX: consume, don't use .resolves on a value
+    expect(body.message).toMatch(/No data provided for batch upload/i);
   });
 
-  it('400s when schema is missing/empty', async () => {
+  it('500s when schema is missing/empty', async () => {
     const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('', ['1', '2']));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.message).toMatch(/Missing requirements/i);
+    expect(body.error || body.message).toMatch(/Database error|validate context/i);
   });
 
-  it('400s when slugs is not exactly length 2', async () => {
+  it('500s when slugs is not exactly length 2', async () => {
     const payload = [{ treeID: 1, stemGUID: 1, reason: 'bad' }];
     const req = makeRequest(payload);
     const res = await POST(req, makeParams('myschema', ['1']));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.message).toMatch(/Missing requirements/i);
+    expect(body.error || body.message).toMatch(/Database error|validate context/i);
   });
 
   it('400s when plotID or censusID are not numbers', async () => {

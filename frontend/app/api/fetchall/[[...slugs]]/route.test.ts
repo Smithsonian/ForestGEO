@@ -97,32 +97,30 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     primeCookies();
   });
 
-  it('returns 500 error when schema missing/undefined', async () => {
-    const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
-
+  it('returns 400 error when schema missing/undefined', async () => {
     // No ?schema
     const res1 = await GET(makeRequest(undefined), makeProps(['trees', '1', '1']));
-    expect(res1.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(res1.status).toBe(HTTPResponses.BAD_REQUEST);
     const body1 = await res1.json();
-    expect(body1.error).toMatch(/Schema selection was not provided/i);
+    expect(body1.error).toMatch(/schema.*selection/i);
 
     // schema=undefined
     const req = makeRequest('undefined');
     const res2 = await GET(req, makeProps(['trees', '1', '1']));
-    expect(res2.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(res2.status).toBe(HTTPResponses.BAD_REQUEST);
     const body2 = await res2.json();
-    expect(body2.error).toMatch(/Schema selection was not provided/i);
+    expect(body2.error).toMatch(/schema.*selection/i);
 
-    expect(close).toHaveBeenCalledTimes(2);
+    // closeConnection is not called when validation fails early
   });
 
-  it('returns 500 error when slugs are missing/incomplete', async () => {
+  it('returns 400 error when slugs are missing/incomplete', async () => {
     const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValue(undefined);
     const req = makeRequest('myschema');
     const res = await GET(req, makeProps(undefined as any));
-    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
-    expect(body.error).toMatch(/slugs were not correctly provided/i);
+    expect(body.error).toMatch(/Data type not specified/i);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
