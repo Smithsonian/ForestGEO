@@ -10,10 +10,11 @@ interface FailedMeasurementsModalProps {
   open: boolean;
   setReingested: Dispatch<SetStateAction<boolean>>;
   handleCloseModal: () => Promise<void>;
+  onTriggerReingestion?: () => void; // Callback to trigger upload modal reopening
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, setReingested, handleCloseModal } = props;
+  const { open, setReingested, handleCloseModal, onTriggerReingestion } = props;
   const [isReingesting, setIsReingesting] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
   const [isClearingTemp, setIsClearingTemp] = useState(false);
@@ -133,43 +134,31 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
     setIsReingesting(true);
     try {
-      ailogger.info('Starting bulk reingestion of all failed measurements');
+      ailogger.info('Starting bulk reingestion: moving failed measurements to temporary table');
 
-      // First, run reviewfailed to update failure reasons
-      await fetch('/api/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`)
-      });
-
-      // Then attempt reingestion of all rows
+      // Move all rows from failedmeasurements to temporarymeasurements
       const response = await fetch(`/api/reingest/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
-        method: 'GET'
+        method: 'POST' // Changed to POST to indicate this is triggering the modal flow
       });
 
       if (!response.ok) {
-        throw new Error(`Reingestion failed with status ${response.status}`);
+        throw new Error(`Failed to prepare reingestion: ${response.status}`);
       }
 
       const result = await response.json();
-      ailogger.info('Bulk reingestion completed:', result);
+      ailogger.info('Rows moved to temporary table:', result);
 
-      // Show results to user
-      const { totalProcessed, successfulReingestions, remainingFailures } = result;
-      if (remainingFailures === 0) {
-        ailogger.info(`All ${successfulReingestions} rows successfully reingested!`);
-      } else {
-        ailogger.info(`Reingestion completed: ${successfulReingestions}/${totalProcessed} successful, ${remainingFailures} still failing`);
+      // Close the failed measurements modal
+      await handleCloseModal();
+
+      // Trigger the upload modal to reopen, which will pick up the temporarymeasurements
+      if (onTriggerReingestion) {
+        onTriggerReingestion();
       }
 
       setReingested(true);
-
-      // Only close modal if all rows were successful, otherwise let user see remaining failures
-      if (remainingFailures === 0) {
-        await handleCloseModal();
-      }
     } catch (error: any) {
-      ailogger.error('Failed to reingest measurements:', error);
+      ailogger.error('Failed to prepare reingestion:', error);
       // Don't close modal on error so user can see what happened
     } finally {
       setIsReingesting(false);
