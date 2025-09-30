@@ -15,6 +15,7 @@ import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadup
 import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
+import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import ailogger from '@/ailogger';
 
 export interface CMIDRow {
@@ -33,10 +34,11 @@ export interface DetailedCMIDRow extends CMIDRow {
 interface UploadParentProps {
   onReset: () => void; // closes the modal
   overrideUploadForm?: FormType;
+  skipToProcessing?: boolean; // Skip file upload and go directly to batch processing
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const { onReset, overrideUploadForm } = props;
+  const { onReset, overrideUploadForm, skipToProcessing } = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -164,6 +166,14 @@ export default function UploadParent(props: UploadParentProps) {
     if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
+  // Check if we should start with reingestion processing
+  useEffect(() => {
+    if (skipToProcessing && uploadForm === FormType.measurements) {
+      ailogger.info('Skipping to reingestion processing stage');
+      setReviewState(ReviewStates.UPLOAD_SQL);
+    }
+  }, [skipToProcessing, uploadForm]);
+
   const renderStateContent = () => {
     if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(ailogger.error);
     switch (reviewState) {
@@ -194,6 +204,10 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.UPLOAD_SQL:
+        // If skipToProcessing is true and there are no files, use reingestion component
+        if (skipToProcessing && acceptedFiles.length === 0) {
+          return <UploadReingestion schema={currentSite?.schemaName || ''} setReviewState={setReviewState} setIsDataUnsaved={setIsDataUnsaved} />;
+        }
         return (
           <UploadFireSQL
             personnelRecording={personnelRecording}
@@ -202,7 +216,7 @@ export default function UploadParent(props: UploadParentProps) {
             parsedData={parsedData}
             setReviewState={setReviewState}
             setIsDataUnsaved={setIsDataUnsaved}
-            schema={currentSite.schemaName || ''}
+            schema={currentSite?.schemaName || ''}
             uploadCompleteMessage={uploadCompleteMessage}
             setUploadCompleteMessage={setUploadCompleteMessage}
             setUploadError={setUploadError}
@@ -212,9 +226,9 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.VALIDATE:
-        return <UploadValidation setReviewState={setReviewState} schema={currentSite.schemaName || ''} />;
+        return <UploadValidation setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPDATE:
-        return <UploadUpdateValidations setReviewState={setReviewState} schema={currentSite.schemaName || ''} />;
+        return <UploadUpdateValidations setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPLOAD_AZURE:
         return (
           <UploadFireAzure

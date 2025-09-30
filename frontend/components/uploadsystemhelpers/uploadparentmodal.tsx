@@ -10,10 +10,11 @@ interface UPMProps {
   isUploadModalOpen: boolean;
   handleCloseUploadModal: () => void;
   formType: FormType;
+  skipToProcessing?: boolean; // Skip file upload and go directly to batch processing
 }
 
 export default function UploadParentModal(props: UPMProps) {
-  const { formType, handleCloseUploadModal, isUploadModalOpen } = props;
+  const { formType, handleCloseUploadModal, isUploadModalOpen, skipToProcessing } = props;
 
   return (
     <>
@@ -50,7 +51,7 @@ export default function UploadParentModal(props: UPMProps) {
           <div id="upload-dialog-description" className="sr-only">
             Upload {formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.
           </div>
-          <UploadParent onReset={handleCloseUploadModal} overrideUploadForm={formType} />
+          <UploadParent onReset={handleCloseUploadModal} overrideUploadForm={formType} skipToProcessing={skipToProcessing} />
         </ModalDialog>
       </Modal>
     </>

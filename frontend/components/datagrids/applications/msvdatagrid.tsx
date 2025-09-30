@@ -58,6 +58,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
   const [dataReingested, setDataReingested] = useState(false);
+  const [isReingesting, setIsReingesting] = useState(false); // Track if we're in reingestion mode
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -129,10 +130,12 @@ export default function MeasurementsSummaryViewDataGrid() {
         handleCloseUploadModal={() => {
           reloadMSV().then(() => {
             setIsUploadModalOpen(false);
+            setIsReingesting(false); // Reset reingestion flag when modal closes
             setOpenAlert(true);
           });
         }}
         formType={FormType.measurements}
+        skipToProcessing={isReingesting} // Pass flag to skip file upload stage
       />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
@@ -151,6 +154,11 @@ export default function MeasurementsSummaryViewDataGrid() {
           reloadMSV().then(() => {
             setOpenFSM(false);
           });
+        }}
+        onTriggerReingestion={() => {
+          // Open upload modal in reingestion mode after failed measurements modal closes
+          setIsReingesting(true);
+          setIsUploadModalOpen(true);
         }}
       />
       <MeasurementsCommons
