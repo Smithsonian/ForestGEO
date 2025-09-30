@@ -15,7 +15,9 @@ export interface ProvidersProps {
 
 export function Providers({ children }: Readonly<ProvidersProps>) {
   useEffect(() => {
-    const connectionString = process.env.APP_INSIGHTS_CONNECTION_STRING;
+    // Application Insights connection string is safe for client-side use
+    // It's a public identifier for the telemetry endpoint, not a secret
+    const connectionString = process.env.NEXT_PUBLIC_APP_INSIGHTS_CONNECTION_STRING;
     if (!connectionString) {
       console.warn('Application Insights connection string not set.');
       return;

@@ -8,6 +8,10 @@ import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
 export async function POST(

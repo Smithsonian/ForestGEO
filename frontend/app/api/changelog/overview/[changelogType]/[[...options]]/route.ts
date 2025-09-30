@@ -5,6 +5,10 @@ import ConnectionManager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function GET(request: NextRequest, props: { params: Promise<{ changelogType: string; options?: string[] }> }) {
   const params = await props.params;
 

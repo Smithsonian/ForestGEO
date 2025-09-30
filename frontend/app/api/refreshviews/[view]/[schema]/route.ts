@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function POST(_request: NextRequest, props: { params: Promise<{ view: string; schema: string }> }) {
   const params = await props.params;
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined' || !params) throw new Error('schema not provided');

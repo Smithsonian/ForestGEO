@@ -3,6 +3,10 @@ import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 // pulls everything
 export async function GET(request: NextRequest, props: { params: Promise<{ plotID: string; plotCensusNumber: string }> }) {
   const params = await props.params;

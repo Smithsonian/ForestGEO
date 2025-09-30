@@ -37,6 +37,7 @@ export interface UploadReviewFilesProps {
   expectedHeaders: string[];
   parsedData: FileCollectionRowSet;
   errors: FileCollectionRowSet;
+  errorRows: FileCollectionRowSet;
   confirmationDialogOpen: boolean;
   dataViewActive: number;
   currentFileHeaders: string[];
@@ -46,6 +47,7 @@ export interface UploadReviewFilesProps {
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
   // centralized functions

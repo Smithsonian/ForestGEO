@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
 function getGridID(gridType: string): string {

@@ -8,6 +8,10 @@ import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { v4 } from 'uuid';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const dataType: string = body.gridType;

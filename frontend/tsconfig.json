@@ -27,16 +27,6 @@
     },
     "types": ["cypress", "node"]
   },
-  "include": [
-    "types/next-auth.d.ts",
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    "build/types/**/*.ts",
-    "**/*.sql",
-    "**/*.cy.*",
-    "**/*.d.ts"
-  ],
-  "exclude": ["node_modules"]
+  "include": ["types/next-auth.d.ts", "next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "build/types/**/*.ts", "**/*.sql", "**/*.d.ts"],
+  "exclude": ["node_modules", "cypress/**/*", "**/*.cy.ts", "**/*.cy.tsx", "**/*.cy.js"]
 }

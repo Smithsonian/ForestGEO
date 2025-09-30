@@ -7,6 +7,10 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;

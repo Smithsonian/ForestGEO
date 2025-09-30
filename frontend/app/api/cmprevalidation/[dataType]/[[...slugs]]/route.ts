@@ -3,6 +3,10 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 
+// Force Node.js runtime for database and Azure SDK compatibility
+// mysql2 and @azure/storage-* are not compatible with Edge Runtime
+export const runtime = 'nodejs';
+
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
