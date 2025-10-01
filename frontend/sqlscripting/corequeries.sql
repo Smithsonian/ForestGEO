@@ -263,6 +263,71 @@ where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
 
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+VALUES (14, 'ValidateFindInvalidAttributeCodes',
+        'Attribute code does not exist in attributes table',
+        'attributes',
+        'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+from coremeasurements cm
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
+         left join attributes a on cma.Code = a.Code and a.IsActive is true
+         left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID
+              and e.ValidationErrorID = @validationProcedureID
+where cm.IsValidated is null
+  and cm.IsActive is true
+  and a.Code is null  -- Attribute code doesn''t exist in attributes table
+  and e.CoreMeasurementID is null
+  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+        '', true)
+ON DUPLICATE KEY UPDATE
+    Description = VALUES(Description),
+    Criteria = VALUES(Criteria),
+    Definition = VALUES(Definition),
+    IsEnabled = VALUES(IsEnabled);
+
+-- Validation 15: Abnormally High DBH Values
+-- Flags measurements with DBH >= 3500mm or >= 350cm (converted to mm)
+-- Addresses bug: Tag=011379 with dbh=26600 should be flagged
+-- This provides an absolute maximum threshold regardless of species-specific limits
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+VALUES (15, 'ValidateFindAbnormallyHighDBH',
+        'DBH exceeds absolute maximum threshold (3500mm or 350cm)',
+        'measuredDBH',
+        'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+from coremeasurements cm
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         join plots p on c.PlotID = p.PlotID
+         left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID
+              and e.ValidationErrorID = @validationProcedureID
+where cm.IsValidated is null
+  and cm.IsActive is true
+  and cm.MeasuredDBH is not null
+  and e.CoreMeasurementID is null
+  and (
+      -- Convert DBH to mm and check against 3500mm threshold
+      (cm.MeasuredDBH * (case p.DefaultDBHUnits
+                            when ''km'' THEN 1000000
+                            when ''hm'' THEN 100000
+                            when ''dam'' THEN 10000
+                            when ''m'' THEN 1000
+                            when ''dm'' THEN 100
+                            when ''cm'' THEN 10
+                            when ''mm'' THEN 1
+                            else 1 end)) >= 3500
+  )
+  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+        '', true)
+ON DUPLICATE KEY UPDATE
+    Description = VALUES(Description),
+    Criteria = VALUES(Criteria),
+    Definition = VALUES(Definition),
+    IsEnabled = VALUES(IsEnabled);
+
 truncate postvalidationqueries; -- clear the table if re-running this script on accident
 insert into postvalidationqueries
     (QueryName, QueryDefinition, Description, IsEnabled)

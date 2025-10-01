@@ -18,7 +18,7 @@ import './commands';
 import process from 'process';
 // Example use:
 // cy.mount(<MyComponent />)
-import { mount } from 'cypress/react';
+import { mount } from '@cypress/react';
 
 window.process = process as any;
 

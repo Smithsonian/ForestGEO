@@ -212,6 +212,65 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const apiRef = useGridApiRef();
 
+  // Define refreshCounts early so it can be used in other hooks
+  const refreshCounts = useCallback(async () => {
+    if (!currentSite || !currentPlot || !currentCensus) return;
+
+    try {
+      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
+                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
+                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending,
+                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
+                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
+                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
+                     FROM ${currentSite.schemaName}.${gridType} vft
+                            JOIN ${currentSite.schemaName}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID AND c.IsActive IS TRUE
+                     WHERE vft.PlotID = ${currentPlot.plotID}
+                       AND c.PlotID = ${currentPlot.plotID}
+                       AND c.PlotCensusNumber = ${currentCensus.plotCensusNumber}`;
+      const response = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(query)
+      });
+      if (!response.ok) throw new Error('measurementscommons failure. runquery execution for errorRowCount failed.');
+      const data = await response.json();
+      const countsData = data[0];
+
+      setValidCount(countsData.CountValid);
+      setErrorCount(countsData.CountErrors);
+      setPendingCount(countsData.CountPending);
+      setOTCount(countsData.CountOldTrees);
+      setMSCount(countsData.CountMultiStems);
+      setNRCount(countsData.CountNewRecruits);
+
+      const counts = [
+        { count: countsData.CountErrors, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: countsData.CountPending, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
+        { count: countsData.CountValid, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
+      ];
+      const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
+      if (highestCount.count !== null) {
+        setSnackbar({
+          children: highestCount.message,
+          severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
+        });
+      }
+
+      const failedQuery = `SELECT COUNT(*) AS CountFailed FROM ${currentSite.schemaName}.failedmeasurements WHERE PlotID = ${currentPlot.plotID} AND CensusID = ${currentCensus.dateRanges[0].censusID}`;
+      const failedResponse = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(failedQuery)
+      });
+      if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
+      const failedData = await failedResponse.json();
+      setFailedCount(failedData[0].CountFailed);
+    } catch (error: any) {
+      ailogger.error('Error refreshing counts:', error);
+    }
+  }, [currentSite, currentPlot, currentCensus, gridType]);
+
   useEffect(() => {
     setFilterModel(prevModel => ({
       ...prevModel,
@@ -231,9 +290,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   useEffect(() => {
     if (refresh) {
-      runFetchPaginated().then(() => setRefresh(false));
+      Promise.all([runFetchPaginated(), refreshCounts()])
+        .then(() => setRefresh(false))
+        .catch(ailogger.error);
     }
-  }, [refresh]);
+  }, [refresh, refreshCounts]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -661,64 +722,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel]);
 
   useEffect(() => {
-    async function getCounts() {
-      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
-                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
-                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending,
-                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
-                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
-                            SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
-                     FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
-                            JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID AND c.IsActive IS TRUE
-                     WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
-                       AND c.PlotID = ${currentPlot?.plotID ?? 0}
-                       AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
-      });
-      if (!response.ok) throw new Error('measurementscommons failure. runquery execution for errorRowCount failed.');
-      const data = await response.json();
-      return data[0];
-    }
-
-    async function getFailedCount() {
-      const query = `SELECT COUNT(*) AS CountFailed FROM ${currentSite?.schemaName ?? ''}.failedmeasurements WHERE PlotID = ${currentPlot?.plotID ?? 0} AND CensusID = ${currentCensus?.dateRanges[0].censusID ?? 0}`;
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
-      });
-      if (!response.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
-      const data = await response.json();
-      return data[0];
-    }
-
-    getCounts()
-      .then(data => {
-        setValidCount(data.CountValid);
-        setErrorCount(data.CountErrors);
-        setPendingCount(data.CountPending);
-        setOTCount(data.CountOldTrees);
-        setMSCount(data.CountMultiStems);
-        setNRCount(data.CountNewRecruits);
-        const counts = [
-          { count: data.CountErrors, message: `${data.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
-          { count: data.CountPending, message: `${data.CountPending} row(s) pending validation.`, severity: 'info' },
-          { count: data.CountValid, message: `${data.CountValid} row(s) passed validation.`, severity: 'success' }
-        ];
-        const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
-        if (highestCount.count !== null) {
-          setSnackbar({
-            children: highestCount.message,
-            severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
-          });
-        }
-      })
-      .then(getFailedCount)
-      .then(data => setFailedCount(data.CountFailed));
-  }, [rows, paginationModel]);
+    refreshCounts().catch(ailogger.error);
+  }, [refreshCounts, rows, paginationModel]);
 
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>

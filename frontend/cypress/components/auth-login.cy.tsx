@@ -1,6 +1,7 @@
-import { mount } from 'cypress/react';
+import { mount } from '@cypress/react';
 import { LoginLogout } from '@/components/loginlogout';
 import { SessionProvider } from 'next-auth/react';
+import * as NextAuthReact from 'next-auth/react';
 
 // Mock session data
 const mockUnauthenticatedSession = null;
@@ -18,16 +19,13 @@ const mockLoadingSession = undefined;
 describe('LoginLogout Component Tests', () => {
   beforeEach(() => {
     // Mock next-auth signIn and signOut functions
-    cy.window().then(win => {
-      win.next = win.next || {};
-      win.next.auth = {
-        signIn: cy.stub().as('signIn'),
-        signOut: cy.stub().as('signOut')
-      };
-    });
+    cy.stub(NextAuthReact, 'signIn').as('signIn');
+    cy.stub(NextAuthReact, 'signOut').as('signOut');
   });
 
   it('renders login button when user is unauthenticated', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: null, status: 'unauthenticated' });
+
     mount(
       <SessionProvider session={mockUnauthenticatedSession}>
         <LoginLogout />
@@ -41,6 +39,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('handles login button click', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: null, status: 'unauthenticated' });
+
     mount(
       <SessionProvider session={mockUnauthenticatedSession}>
         <LoginLogout />
@@ -53,6 +53,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('renders user information when authenticated', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -66,6 +68,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('shows user avatar with initials', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -77,6 +81,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('handles logout button click', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -88,6 +94,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('displays settings menu (currently disabled)', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -99,6 +107,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('handles user avatar click for settings menu', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -113,6 +123,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('handles keyboard navigation for avatar button', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: mockAuthenticatedSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={mockAuthenticatedSession}>
         <LoginLogout />
@@ -125,6 +137,8 @@ describe('LoginLogout Component Tests', () => {
   });
 
   it('displays proper accessibility labels', () => {
+    cy.stub(NextAuthReact, 'useSession').returns({ data: null, status: 'unauthenticated' });
+
     mount(
       <SessionProvider session={mockUnauthenticatedSession}>
         <LoginLogout />
@@ -145,6 +159,8 @@ describe('LoginLogout Component Tests', () => {
       }
     };
 
+    cy.stub(NextAuthReact, 'useSession').returns({ data: adminSession, status: 'authenticated' });
+
     mount(
       <SessionProvider session={adminSession}>
         <LoginLogout />
@@ -163,6 +179,8 @@ describe('LoginLogout Component Tests', () => {
         email: 'very.long.email.address.that.should.be.truncated@example.com'
       }
     };
+
+    cy.stub(NextAuthReact, 'useSession').returns({ data: longEmailSession, status: 'authenticated' });
 
     mount(
       <SessionProvider session={longEmailSession}>
