@@ -1,4 +1,4 @@
-import { mount } from 'cypress/react';
+import { mount } from '@cypress/react';
 import { SessionProvider } from 'next-auth/react';
 import React from 'react';
 
