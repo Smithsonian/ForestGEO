@@ -170,7 +170,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               }}
             >
               <Option value={''}>None</Option>
-              {quadratList?.map(item => (
+              {Array.isArray(quadratList) && quadratList.map(item => (
                 <Option aria-label={`quadrat name option for ${item?.quadratName}`} value={item?.quadratName} key={item?.quadratName}>
                   <Box
                     sx={{

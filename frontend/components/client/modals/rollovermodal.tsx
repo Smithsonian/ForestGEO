@@ -148,7 +148,7 @@ export default function RolloverModal(props: RolloverModalProps) {
     setLoading(true);
 
     const status = await Promise.all(
-      censusListContext.map(async census => {
+      Array.isArray(censusListContext) ? censusListContext.map(async census => {
         const { schemaName } = currentSite || {};
         const { plotID } = currentPlot || {};
         const { plotCensusNumber } = census || {};
@@ -169,7 +169,7 @@ export default function RolloverModal(props: RolloverModalProps) {
           plotCensusNumber: census?.plotCensusNumber,
           ...flags
         } as CensusValidationStatus;
-      })
+      }) : []
     );
     setCensusValidationStatus(status.filter((s): s is CensusValidationStatus => s !== null));
     setLoading(false);

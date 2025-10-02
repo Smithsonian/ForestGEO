@@ -513,60 +513,67 @@ export default function Sidebar(props: SidebarProps) {
         </Box>
       </ListItem>
       <Divider orientation={'horizontal'} sx={{ my: 1 }} />
-      {censusListContext
-        ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
-        .map(item => (
-          <Option
-            aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges[0]?.startDate ? new Date(item.dateRanges[0].startDate).toDateString() : 'No measurements'}` : ''}`}
-            data-testid={'census-selection-option'}
-            key={item?.plotCensusNumber}
-            value={item?.plotCensusNumber?.toString()}
-          >
-            <Box
-              sx={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                width: '100%',
-                gap: 1
-              }}
-              className="sidebar-item"
+      {Array.isArray(censusListContext) &&
+        censusListContext
+          .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
+          .map(item => (
+            <Option
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges[0]?.startDate ? new Date(item.dateRanges[0].startDate).toDateString() : 'No measurements'}` : ''}`}
+              data-testid={'census-selection-option'}
+              key={item?.plotCensusNumber}
+              value={item?.plotCensusNumber?.toString()}
             >
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <Typography level="body-lg" data-testid={'census-selection-option-plotcensusnumber'}>
-                  Census: {item?.plotCensusNumber}
-                </Typography>
-                {item?.dateRanges?.map((dateRange, index) => (
-                  <React.Fragment key={index}>
-                    <Stack direction={'row'}>
-                      <Typography level="body-sm" color={'neutral'}>
-                        {`${dateRange.startDate ? ` — First Msmt: ${new Date(dateRange.startDate).toDateString()}` : ' — No Measurements'}`}
-                      </Typography>
-                      {dateRange.endDate && (
-                        <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
-                          &lt;===&gt;
-                        </Typography>
-                      )}
-                      <Typography level="body-sm" color={'neutral'}>
-                        {`${dateRange.endDate ? ` — Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
-                      </Typography>
-                    </Stack>
-                  </React.Fragment>
-                ))}
-              </Box>
-              <IconButton
-                variant={'soft'}
-                color={'danger'}
-                onClick={async () => {
-                  setIsClearDropdownOpen(true);
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  width: '100%',
+                  gap: 1
                 }}
-                disabled={(item?.plotCensusNumber ?? 0) < censusListContext?.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)}
+                className="sidebar-item"
               >
-                <DeleteForever />
-              </IconButton>
-            </Box>
-          </Option>
-        ))}
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <Typography level="body-lg" data-testid={'census-selection-option-plotcensusnumber'}>
+                    Census: {item?.plotCensusNumber}
+                  </Typography>
+                  {Array.isArray(item?.dateRanges) &&
+                    item.dateRanges.map((dateRange, index) => (
+                      <React.Fragment key={index}>
+                        <Stack direction={'row'}>
+                          <Typography level="body-sm" color={'neutral'}>
+                            {`${dateRange.startDate ? ` — First Msmt: ${new Date(dateRange.startDate).toDateString()}` : ' — No Measurements'}`}
+                          </Typography>
+                          {dateRange.endDate && (
+                            <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
+                              &lt;===&gt;
+                            </Typography>
+                          )}
+                          <Typography level="body-sm" color={'neutral'}>
+                            {`${dateRange.endDate ? ` — Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
+                          </Typography>
+                        </Stack>
+                      </React.Fragment>
+                    ))}
+                </Box>
+                <IconButton
+                  variant={'soft'}
+                  color={'danger'}
+                  onClick={async () => {
+                    setIsClearDropdownOpen(true);
+                  }}
+                  disabled={
+                    (item?.plotCensusNumber ?? 0) <
+                    (Array.isArray(censusListContext)
+                      ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
+                      : 0)
+                  }
+                >
+                  <DeleteForever />
+                </IconButton>
+              </Box>
+            </Option>
+          ))}
     </Select>
   );
 
@@ -594,7 +601,7 @@ export default function Sidebar(props: SidebarProps) {
         await handlePlotSelection(selectedPlot);
       }}
     >
-      {plotListContext?.map(item => (
+      {Array.isArray(plotListContext) && plotListContext.map(item => (
         <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
           <Box
             sx={{
@@ -646,24 +653,28 @@ export default function Sidebar(props: SidebarProps) {
     </Select>
   );
   const renderSiteOptions = () => {
-    const allowedSites = siteListContext
-      ?.filter(site => session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-      .sort((a, b) => {
-        const nameA = a.siteName?.toLowerCase() ?? '';
-        const nameB = b.siteName?.toLowerCase() ?? '';
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
-        return 0;
-      });
-    const otherSites = siteListContext
-      ?.filter(site => !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-      .sort((a, b) => {
-        const nameA = a.siteName?.toLowerCase() ?? '';
-        const nameB = b.siteName?.toLowerCase() ?? '';
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
-        return 0;
-      });
+    const allowedSites = Array.isArray(siteListContext)
+      ? siteListContext
+          .filter(site => session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
+          .sort((a, b) => {
+            const nameA = a.siteName?.toLowerCase() ?? '';
+            const nameB = b.siteName?.toLowerCase() ?? '';
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+          })
+      : [];
+    const otherSites = Array.isArray(siteListContext)
+      ? siteListContext
+          .filter(site => !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
+          .sort((a, b) => {
+            const nameA = a.siteName?.toLowerCase() ?? '';
+            const nameB = b.siteName?.toLowerCase() ?? '';
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+          })
+      : [];
 
     return (
       <Select
@@ -706,12 +717,12 @@ export default function Sidebar(props: SidebarProps) {
               level="body-xs"
               textTransform="uppercase"
               aria-live="polite"
-              aria-label={`Allowed Sites section, ${allowedSites?.length} sites available`}
+              aria-label={`Allowed Sites section, ${allowedSites.length} sites available`}
             >
-              Allowed Sites ({allowedSites?.length})
+              Allowed Sites ({allowedSites.length})
             </Typography>
           </ListItem>
-          {allowedSites?.map(site => (
+          {allowedSites.map(site => (
             <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
               {site.siteName}
             </Option>
@@ -724,12 +735,12 @@ export default function Sidebar(props: SidebarProps) {
               level="body-xs"
               textTransform="uppercase"
               aria-live="polite"
-              aria-label={`Other Sites section, ${otherSites?.length} sites not available to you`}
+              aria-label={`Other Sites section, ${otherSites.length} sites not available to you`}
             >
-              Other Sites ({otherSites?.length})
+              Other Sites ({otherSites.length})
             </Typography>
           </ListItem>
-          {otherSites?.map(site => (
+          {otherSites.map(site => (
             <Option
               key={site.siteID}
               value={site.siteName}
