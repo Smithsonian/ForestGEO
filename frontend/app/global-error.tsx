@@ -67,7 +67,9 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
               fontWeight: '500'
             }}
             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1565c0'}
+            onFocus={(e) => e.currentTarget.style.backgroundColor = '#1565c0'}
             onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#1976d2'}
+            onBlur={(e) => e.currentTarget.style.backgroundColor = '#1976d2'}
           >
             Try again
           </button>
