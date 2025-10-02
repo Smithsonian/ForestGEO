@@ -260,7 +260,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
     const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
-    const hasCensusChanged = previousCensusRef.current !== currentCensus?.dateRanges[0]?.censusID;
+    const hasCensusChanged = previousCensusRef.current !== (currentCensus?.dateRanges?.[0]?.censusID ?? undefined);
 
     const clearLists = async () => {
       const promises = [];
@@ -289,18 +289,10 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         // Clear quadrat list when a new census is selected
         setQuadratListLoaded(false);
         if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
-        previousCensusRef.current = currentCensus?.dateRanges[0]?.censusID;
+        previousCensusRef.current = currentCensus?.dateRanges?.[0]?.censusID ?? undefined;
       }
 
       await Promise.all(promises);
-
-      // Add a short delay to ensure UI reflects clearing lists before loading new data
-      setTimeout(() => {
-        executeLoadPlotData()
-          .then(() => executeLoadCensusData())
-          .then(() => executeLoadQuadratData())
-          .catch(ailogger.error);
-      }, 300); // 300ms delay for UI reset
     };
 
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
@@ -312,10 +304,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     currentCensus,
     plotListDispatch,
     censusListDispatch,
-    quadratListDispatch,
-    executeLoadPlotData,
-    executeLoadCensusData,
-    executeLoadQuadratData
+    quadratListDispatch
+    // Note: execute functions intentionally excluded to prevent cascade effects
   ]);
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard

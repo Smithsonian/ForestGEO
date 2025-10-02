@@ -14,7 +14,7 @@ const ErrorPage = (props: { error: Error & { digest?: string }; reset: () => voi
 
   return (
     <Box sx={{ p: 3, textAlign: 'center' }}>
-      <Typography level="h1">Something went wrong - Uploaded Files Page</Typography>
+      <Typography level="h1">Something went wrong - Admin Page</Typography>
       <Typography level="body-lg">{error?.message ?? 'No error message received'}</Typography>
       {error?.digest && (
         <Typography level="body-sm" sx={{ mt: 1, opacity: 0.7 }}>

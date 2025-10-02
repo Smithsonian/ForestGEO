@@ -82,6 +82,14 @@ export default function Error(props: { error: Error & { digest?: string }; reset
                 </Typography>
                 <Typography level={'body-md'}>{error?.message ?? 'No error message received'}</Typography>
               </Stack>
+              {error?.digest && (
+                <Stack direction={'row'} spacing={1} sx={{ mt: 1 }}>
+                  <Typography level={'body-md'} fontWeight={'bold'}>
+                    Error ID:{' '}
+                  </Typography>
+                  <Typography level={'body-md'}>{error.digest}</Typography>
+                </Stack>
+              )}
             </CardContent>
           </Card>
           <Stack direction={'row'} spacing={1}>
