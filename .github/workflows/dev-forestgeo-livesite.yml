@@ -52,6 +52,7 @@ jobs:
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
           echo REPO=${{ secrets.REPO }} >> frontend/.env
+          cat frontend/.env
 
       #      - name: Cache node modules
       #        uses: actions/cache@v2
