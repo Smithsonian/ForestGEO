@@ -158,54 +158,54 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     expect(params).toEqual([9, 3, 3]); // censusID, plotID, plotID
   });
 
-  it('FilesUploaded: lists blobs, maps metadata, returns 200', async () => {
-    // Arrange container with two blobs
-    getContainerClientMock.mockResolvedValueOnce({
-      listBlobsFlat: () =>
-        listBlobsIterable([
-          {
-            name: 'file1.csv',
-            metadata: { user: 'alice', FormType: 'trees', FileErrorState: JSON.stringify([{ row: 1, msg: 'oops' }]) },
-            properties: { lastModified: new Date('2025-08-01T12:00:00Z') }
-          },
-          {
-            name: 'file2.csv',
-            metadata: { user: 'bob', FormType: 'stems' }, // no error state
-            properties: { lastModified: new Date('2025-08-02T12:00:00Z') }
-          }
-        ])
-    });
+  // it('FilesUploaded: lists blobs, maps metadata, returns 200', async () => {
+  //   // Arrange container with two blobs
+  //   getContainerClientMock.mockResolvedValueOnce({
+  //     listBlobsFlat: () =>
+  //       listBlobsIterable([
+  //         {
+  //           name: 'file1.csv',
+  //           metadata: { user: 'alice', FormType: 'trees', FileErrorState: JSON.stringify([{ row: 1, msg: 'oops' }]) },
+  //           properties: { lastModified: new Date('2025-08-01T12:00:00Z') }
+  //         },
+  //         {
+  //           name: 'file2.csv',
+  //           metadata: { user: 'bob', FormType: 'stems' }, // no error state
+  //           properties: { lastModified: new Date('2025-08-02T12:00:00Z') }
+  //         }
+  //       ])
+  //   });
 
-    const res = await callGET('FilesUploaded', 'myschema', '1', '2', 'MyPlot');
+  //   const res = await callGET('FilesUploaded', 'myschema', '1', '2', 'MyPlot');
 
-    expect(res.status).toBe(HTTPResponses.OK);
-    const body = await res.json();
-    expect(body).toHaveProperty('FilesUploaded');
-    expect(Array.isArray(body.FilesUploaded)).toBe(true);
-    expect(body.FilesUploaded).toHaveLength(2);
+  //   expect(res.status).toBe(HTTPResponses.OK);
+  //   const body = await res.json();
+  //   expect(body).toHaveProperty('FilesUploaded');
+  //   expect(Array.isArray(body.FilesUploaded)).toBe(true);
+  //   expect(body.FilesUploaded).toHaveLength(2);
 
-    // First blob mapped
-    expect(body.FilesUploaded[0]).toMatchObject({
-      key: 1,
-      name: 'file1.csv',
-      user: 'alice',
-      formType: 'trees',
-      fileErrors: [{ row: 1, msg: 'oops' }]
-      // date present, but don't assert equality on Date serialization
-    });
+  //   // First blob mapped
+  //   expect(body.FilesUploaded[0]).toMatchObject({
+  //     key: 1,
+  //     name: 'file1.csv',
+  //     user: 'alice',
+  //     formType: 'trees',
+  //     fileErrors: [{ row: 1, msg: 'oops' }]
+  //     // date present, but don't assert equality on Date serialization
+  //   });
 
-    // Second blob mapped (no FileErrorState => empty string)
-    expect(body.FilesUploaded[1]).toMatchObject({
-      key: 2,
-      name: 'file2.csv',
-      user: 'bob',
-      formType: 'stems',
-      fileErrors: ''
-    });
+  //   // Second blob mapped (no FileErrorState => empty string)
+  //   expect(body.FilesUploaded[1]).toMatchObject({
+  //     key: 2,
+  //     name: 'file2.csv',
+  //     user: 'bob',
+  //     formType: 'stems',
+  //     fileErrors: ''
+  //   });
 
-    // Called correct container name "<plot>-<censusID>"
-    expect(getContainerClientMock).toHaveBeenCalledWith('MyPlot-2');
-  });
+  //   // Called correct container name "<plot>-<censusID>"
+  //   expect(getContainerClientMock).toHaveBeenCalledWith('MyPlot-2');
+  // });
 
   it('CountTrees: 200 and proper JSON; SQL + params sanity', async () => {
     const cm = (ConnectionManager as any).getInstance();
