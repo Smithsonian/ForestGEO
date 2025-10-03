@@ -99,7 +99,7 @@ export class PoolMonitor {
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
     const bufferTime = 120; // 2 minutes - reasonable time after transaction completion
     try {
-      if (!this.isPoolClosed()) {
+      if (!this.isPoolClosed() && process.env.AZURE_SQL_SERVER !== '127.0.0.1') { // resolving econnrefused error
         // only log if pool is not closed
         const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE INFO IS NULL AND USER <> 'event_scheduler';`);
         if (rows.length > 0) {
