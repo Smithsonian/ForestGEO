@@ -99,26 +99,27 @@ async function processMetrics(metric: string, schema: string, plotID: number, ce
           PopulatedPercent: ptResults[0].populated_pct,
           UnpopulatedQuadrats: ptResults[0].unpopulated_quadrats
         });
-      case 'FilesUploaded':
-        const blobData: any = [];
-        let i = 0;
-        const containerClient = await getContainerClient(`${plotName}-${censusID}`);
-        const listOptions = {
-          includeMetadata: true,
-          includeVersions: false
-        };
-        for await (const blob of containerClient?.listBlobsFlat(listOptions) ?? []) {
-          if (!blob) ailogger.error('blob is undefined');
-          blobData.push({
-            key: ++i,
-            name: blob.name,
-            user: blob.metadata?.user,
-            formType: blob.metadata?.FormType,
-            fileErrors: blob.metadata?.FileErrorState ? JSON.parse(blob.metadata?.FileErrorState as string) : '',
-            date: blob.properties.lastModified
-          });
-        }
-        return NextResponse.json({ FilesUploaded: blobData }, { status: HTTPResponses.OK });
+      // case 'FilesUploaded':
+      //   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) return NextResponse.json({ FilesUploaded: [] }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
+      //   const blobData: any = [];
+      //   let i = 0;
+      //   const containerClient = await getContainerClient(`${plotName}-${censusID}`);
+      //   const listOptions = {
+      //     includeMetadata: true,
+      //     includeVersions: false
+      //   };
+      //   for await (const blob of containerClient?.listBlobsFlat(listOptions) ?? []) {
+      //     if (!blob) ailogger.error('blob is undefined');
+      //     blobData.push({
+      //       key: ++i,
+      //       name: blob.name,
+      //       user: blob.metadata?.user,
+      //       formType: blob.metadata?.FormType,
+      //       fileErrors: blob.metadata?.FileErrorState ? JSON.parse(blob.metadata?.FileErrorState as string) : '',
+      //       date: blob.properties.lastModified
+      //     });
+      //   }
+      //   return NextResponse.json({ FilesUploaded: blobData }, { status: HTTPResponses.OK });
       case 'CountTrees':
         query = `SELECT COUNT(t.TreeID) AS CountTrees FROM ${schema}.trees t JOIN ${schema}.census c ON t.CensusID = c.CensusID WHERE t.CensusID = ? AND c.PlotID = ?`;
         const ctResults = await connectionManager.executeQuery(query, [censusID, plotID]);
