@@ -36,7 +36,6 @@ jobs:
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
-          echo ${{ secrets.AZURE_SQL_SERVER }} | sed 's/./& /g'
           echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
           echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
           echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
@@ -53,7 +52,6 @@ jobs:
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
           echo REPO=${{ secrets.REPO }} >> frontend/.env
-          cat frontend/.env
 
       #      - name: Cache node modules
       #        uses: actions/cache@v2
