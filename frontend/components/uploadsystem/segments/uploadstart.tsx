@@ -170,19 +170,20 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               }}
             >
               <Option value={''}>None</Option>
-              {Array.isArray(quadratList) && quadratList.map(item => (
-                <Option aria-label={`quadrat name option for ${item?.quadratName}`} value={item?.quadratName} key={item?.quadratName}>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start'
-                    }}
-                  >
-                    <Typography level="body-lg">{item?.quadratName}</Typography>
-                  </Box>
-                </Option>
-              ))}
+              {Array.isArray(quadratList) &&
+                quadratList.map(item => (
+                  <Option aria-label={`quadrat name option for ${item?.quadratName}`} value={item?.quadratName} key={item?.quadratName}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start'
+                      }}
+                    >
+                      <Typography level="body-lg">{item?.quadratName}</Typography>
+                    </Box>
+                  </Option>
+                ))}
             </Select>
             <Button onClick={handleConfirmQuadrat} size="sm" color="primary">
               Confirm

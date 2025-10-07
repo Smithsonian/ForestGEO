@@ -148,28 +148,30 @@ export default function RolloverModal(props: RolloverModalProps) {
     setLoading(true);
 
     const status = await Promise.all(
-      Array.isArray(censusListContext) ? censusListContext.map(async census => {
-        const { schemaName } = currentSite || {};
-        const { plotID } = currentPlot || {};
-        const { plotCensusNumber } = census || {};
-        if (!schemaName || !plotID || !plotCensusNumber) return null;
+      Array.isArray(censusListContext)
+        ? censusListContext.map(async census => {
+            const { schemaName } = currentSite || {};
+            const { plotID } = currentPlot || {};
+            const { plotCensusNumber } = census || {};
+            if (!schemaName || !plotID || !plotCensusNumber) return null;
 
-        const responses = await Promise.all(CATEGORY_KEYS.map(key => fetch(`/api/cmprevalidation/${key}/${schemaName}/${plotID}/${plotCensusNumber}`)));
+            const responses = await Promise.all(CATEGORY_KEYS.map(key => fetch(`/api/cmprevalidation/${key}/${schemaName}/${plotID}/${plotCensusNumber}`)));
 
-        const flags = CATEGORY_KEYS.reduce<Partial<CensusValidationStatus>>((acc, key, idx) => {
-          const flagKey = FLAG_KEY_MAP[key];
-          return {
-            ...acc,
-            [flagKey]: responses[idx].ok // `ok` is boolean
-          };
-        }, {});
+            const flags = CATEGORY_KEYS.reduce<Partial<CensusValidationStatus>>((acc, key, idx) => {
+              const flagKey = FLAG_KEY_MAP[key];
+              return {
+                ...acc,
+                [flagKey]: responses[idx].ok // `ok` is boolean
+              };
+            }, {});
 
-        return {
-          censusID: census?.dateRanges[0].censusID,
-          plotCensusNumber: census?.plotCensusNumber,
-          ...flags
-        } as CensusValidationStatus;
-      }) : []
+            return {
+              censusID: census?.dateRanges[0].censusID,
+              plotCensusNumber: census?.plotCensusNumber,
+              ...flags
+            } as CensusValidationStatus;
+          })
+        : []
     );
     setCensusValidationStatus(status.filter((s): s is CensusValidationStatus => s !== null));
     setLoading(false);

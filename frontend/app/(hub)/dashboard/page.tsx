@@ -30,10 +30,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
-import { UploadedFileData } from '@/config/macros/formdetails';
 import ProgressTachometer from '@/components/metrics/progresstachometer';
-import { FileDownload } from '@mui/icons-material';
-import ListItemContent from '@mui/joy/ListItemContent';
 import ailogger from '@/ailogger';
 import ProgressPieChart from '@/components/metrics/progresspiechart';
 
@@ -42,6 +39,12 @@ interface ProgressTachoType {
   PopulatedQuadrats: number;
   PopulatedPercent: number;
   UnpopulatedQuadrats: string[];
+}
+
+interface StemTypesType {
+  CountOldStems: number;
+  CountMultiStems: number;
+  CountNewRecruits: number;
 }
 
 export default function DashboardPage() {
@@ -66,7 +69,11 @@ export default function DashboardPage() {
   const [activeUsers, setActiveUsers] = useState(0);
   const [countStems, setCountStems] = useState(0);
   const [countTrees, setCountTrees] = useState(0);
-  const [filesUploaded, setFilesUploaded] = useState<UploadedFileData[]>([]);
+  const [stemTypes, setStemTypes] = useState<StemTypesType>({
+    CountOldStems: 0,
+    CountMultiStems: 0,
+    CountNewRecruits: 0
+  });
   const [toggleSwitch, setToggleSwitch] = useState(true);
 
   const loadProgressTachometer = useCallback(async () => {
@@ -98,20 +105,6 @@ export default function DashboardPage() {
     }
   }, [currentSite, currentPlot, currentCensus]);
 
-  const loadFilesUploaded = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotName || !currentCensus?.dateRanges[0].censusID) return null;
-    try {
-      const { FilesUploaded } = await (
-        await fetch(
-          `/api/dashboardmetrics/FilesUploaded/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}?plot=${currentPlot?.plotName ?? ''}`
-        )
-      ).json();
-      setFilesUploaded(FilesUploaded);
-    } catch (e: any) {
-      ailogger.error('FilesUploaded: ', e);
-    }
-  }, [currentSite, currentPlot, currentCensus]);
-
   const loadCountTrees = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotName || !currentCensus?.dateRanges[0].censusID) return null;
     try {
@@ -137,6 +130,20 @@ export default function DashboardPage() {
       setCountStems(CountStems);
     } catch (e: any) {
       ailogger.info('CountStems: ', e);
+    }
+  }, [currentSite, currentPlot, currentCensus]);
+
+  const loadStemTypes = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotName || !currentCensus?.dateRanges[0].censusID) return null;
+    try {
+      const { CountOldStems, CountMultiStems, CountNewRecruits } = await (
+        await fetch(
+          `/api/dashboardmetrics/StemTypes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}?plot=${currentPlot?.plotName ?? ''}`
+        )
+      ).json();
+      setStemTypes({ CountOldStems, CountMultiStems, CountNewRecruits });
+    } catch (e: any) {
+      ailogger.info('StemTypes: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -176,12 +183,12 @@ export default function DashboardPage() {
     if (currentSite && currentPlot && currentCensus) {
       loadProgressTachometer().catch(ailogger.error);
       loadCountActiveUsers().catch(ailogger.error);
-      loadFilesUploaded().catch(ailogger.error);
       loadCountTrees().catch(ailogger.error);
       loadCountStems().catch(ailogger.error);
+      loadStemTypes().catch(ailogger.error);
       loadChangelogHistory().catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, currentCensus, loadProgressTachometer, loadCountActiveUsers, loadFilesUploaded, loadCountTrees, loadCountStems]);
+  }, [currentSite, currentPlot, currentCensus, loadProgressTachometer, loadCountActiveUsers, loadCountTrees, loadCountStems, loadStemTypes]);
 
   return (
     <Box role="region" aria-label="Dashboard page container" sx={{ display: 'flex', flexGrow: 1, width: '99%', flexDirection: 'column', mb: 5 }}>
@@ -224,7 +231,7 @@ export default function DashboardPage() {
                   {toggleSwitch ? (
                     <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
                   ) : (
-                    <ProgressPieChart {...progressTacho} aria-label="Quadrat population pie chart" />
+                    <ProgressPieChart {...progressTacho} stemTypes={stemTypes} aria-label="Stem types pie chart" />
                   )}
                 </Box>
 
@@ -302,6 +309,41 @@ export default function DashboardPage() {
               <Chip aria-label={`${countTrees} trees recorded`}>{countTrees}</Chip>
             </Stack>
 
+            <Divider orientation="horizontal" sx={{ my: 1 }} />
+
+            <Typography level="body-lg" fontWeight="bold">
+              Stem Type Breakdown:
+            </Typography>
+            <Stack direction="row" spacing={1} role="group" aria-label="Old stems statistics">
+              <Typography level="body-md">Old Stems:</Typography>
+              <Chip aria-label={`${stemTypes.CountOldStems} old stems`}>{stemTypes.CountOldStems}</Chip>
+            </Stack>
+
+            <Stack direction="row" spacing={1} role="group" aria-label="Multi stems statistics">
+              <Typography level="body-md">Multi Stems:</Typography>
+              <Chip aria-label={`${stemTypes.CountMultiStems} multi stems`}>{stemTypes.CountMultiStems}</Chip>
+            </Stack>
+
+            <Stack direction="row" spacing={1} role="group" aria-label="New recruits statistics">
+              <Typography level="body-md">New Recruits:</Typography>
+              <Chip aria-label={`${stemTypes.CountNewRecruits} new recruits`}>{stemTypes.CountNewRecruits}</Chip>
+            </Stack>
+
+            <Divider orientation="horizontal" sx={{ my: 1 }} />
+
+            <Typography level="body-lg" fontWeight="bold">
+              Quadrat Measurements:
+            </Typography>
+            <Stack direction="row" spacing={1} role="group" aria-label="Quadrats with measurements statistics">
+              <Typography level="body-md">Quadrats with Measurements:</Typography>
+              <Chip aria-label={`${progressTacho.PopulatedQuadrats} quadrats with measurements`}>{progressTacho.PopulatedQuadrats}</Chip>
+            </Stack>
+
+            <Stack direction="row" spacing={1} role="group" aria-label="Quadrats without measurements statistics">
+              <Typography level="body-md">Quadrats without Measurements:</Typography>
+              <Chip aria-label={`${progressTacho.UnpopulatedQuadrats.length} quadrats without measurements`}>{progressTacho.UnpopulatedQuadrats.length}</Chip>
+            </Stack>
+
             <Divider orientation="horizontal" sx={{ my: 2 }} />
 
             <Tooltip title={isPulsing ? undefined : 'This form creates and submits a Github issue!'}>
@@ -369,46 +411,6 @@ export default function DashboardPage() {
                 </Box>
               </Stack>
             </Stack>
-
-            <Divider orientation="horizontal" sx={{ my: 1 }} />
-
-            <AccordionGroup>
-              <Accordion aria-label="File upload history accordion">
-                <AccordionSummary id="file-upload-summary" aria-controls="file-upload-details" aria-describedby="file-upload-description">
-                  File Upload History
-                  <Typography id="file-upload-description" level="body-xs" sx={{ display: 'none' }} aria-hidden="true">
-                    Expand to view list of uploaded files
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails
-                  id="file-upload-details"
-                  aria-labelledby="file-upload-summary"
-                  sx={{
-                    p: 0,
-                    m: 0,
-                    overflowY: 'auto',
-                    '&.MuiCollapse-wrapperInner, &.MuiCollapse-hidden': { p: 0, m: 0 },
-                    '&[aria-hidden="true"]': {
-                      visibility: 'hidden'
-                    }
-                  }}
-                >
-                  <List aria-label="Uploaded files list">
-                    {(filesUploaded ?? []).map((file, index) => (
-                      <ListItem key={index}>
-                        <ListItemDecorator>
-                          <FileDownload aria-hidden="true" />
-                        </ListItemDecorator>
-                        <ListItemContent>
-                          <Chip aria-label={`File name: ${file.name}`}>{file.name}</Chip> uploaded by{' '}
-                          <Chip aria-label={`Uploader: ${file.user}`}>{file.user}</Chip>
-                        </ListItemContent>
-                      </ListItem>
-                    ))}
-                  </List>
-                </AccordionDetails>
-              </Accordion>
-            </AccordionGroup>
 
             <Divider orientation="horizontal" sx={{ my: 1 }} />
 

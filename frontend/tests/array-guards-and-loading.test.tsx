@@ -10,12 +10,7 @@ import {
   useSiteContext,
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
-import {
-  useOrgCensusListContext,
-  usePlotListContext,
-  useQuadratListContext,
-  useSiteListContext
-} from '@/app/contexts/listselectionprovider';
+import { useOrgCensusListContext, usePlotListContext, useQuadratListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
 import { useAsyncOperation } from '@/hooks/useAsyncOperation';
 
 // Mock all the context hooks
@@ -141,9 +136,7 @@ describe('Array Guard Protection Tests', () => {
       expect(plotListContext).toHaveLength(0);
 
       // Should not throw and should return empty array
-      const result = Array.isArray(plotListContext)
-        ? plotListContext.map(item => item.plotName)
-        : [];
+      const result = Array.isArray(plotListContext) ? plotListContext.map(item => item.plotName) : [];
       expect(result).toEqual([]);
     });
 
@@ -155,9 +148,7 @@ describe('Array Guard Protection Tests', () => {
       expect(Array.isArray(plotListContext)).toBe(true);
       expect(plotListContext).toHaveLength(2);
 
-      const plotNames = Array.isArray(plotListContext)
-        ? plotListContext.map(item => item.plotName)
-        : [];
+      const plotNames = Array.isArray(plotListContext) ? plotListContext.map(item => item.plotName) : [];
       expect(plotNames).toEqual(['Plot 1', 'Plot 2']);
     });
 
@@ -168,9 +159,7 @@ describe('Array Guard Protection Tests', () => {
 
       expect(() => {
         if (Array.isArray(censusListContext)) {
-          censusListContext
-            .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
-            .map(item => item?.plotCensusNumber);
+          censusListContext.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map(item => item?.plotCensusNumber);
         }
       }).not.toThrow();
 
@@ -189,9 +178,7 @@ describe('Array Guard Protection Tests', () => {
 
       // Simulate the filtering logic used in sidebar
       const allowedSites = Array.isArray(siteListContext)
-        ? siteListContext.filter(site =>
-            mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-          )
+        ? siteListContext.filter(site => mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID))
         : [];
 
       expect(allowedSites).toEqual([]);
@@ -226,10 +213,7 @@ describe('Array Guard Protection Tests', () => {
 
       // Simulate the reduce logic used for finding max census number
       const maxCensusNumber = Array.isArray(censusListContext)
-        ? censusListContext.reduce(
-            (currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0),
-            0
-          )
+        ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
         : 0;
 
       expect(maxCensusNumber).toBe(0);
@@ -241,10 +225,7 @@ describe('Array Guard Protection Tests', () => {
       const censusListContext = useOrgCensusListContext();
 
       const maxCensusNumber = Array.isArray(censusListContext)
-        ? censusListContext.reduce(
-            (currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0),
-            0
-          )
+        ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
         : 0;
 
       expect(maxCensusNumber).toBe(2);
@@ -265,9 +246,7 @@ describe('Array Guard Protection Tests', () => {
       // Simulate the complete filter-sort-map chain
       const allowedSites = Array.isArray(siteListContext)
         ? siteListContext
-            .filter(site =>
-              mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-            )
+            .filter(site => mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID))
             .sort((a, b) => {
               const nameA = a.siteName?.toLowerCase() ?? '';
               const nameB = b.siteName?.toLowerCase() ?? '';
@@ -290,9 +269,7 @@ describe('Array Guard Protection Tests', () => {
 
       const allowedSites = Array.isArray(siteListContext)
         ? siteListContext
-            .filter(site =>
-              mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-            )
+            .filter(site => mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID))
             .sort((a, b) => {
               const nameA = a.siteName?.toLowerCase() ?? '';
               const nameB = b.siteName?.toLowerCase() ?? '';
@@ -373,9 +350,7 @@ describe('Array Guard Protection Tests', () => {
       const censusListContext = useOrgCensusListContext();
       expect(() => {
         if (Array.isArray(censusListContext)) {
-          censusListContext
-            .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
-            .map(item => item?.plotCensusNumber);
+          censusListContext.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map(item => item?.plotCensusNumber);
         }
       }).not.toThrow();
       expect(censusListContext).toBeUndefined();

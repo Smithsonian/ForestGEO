@@ -10,6 +10,12 @@ export interface ProgressTachoType {
   UnpopulatedQuadrats: string[];
 }
 
+export interface StemTypesType {
+  CountOldStems: number;
+  CountMultiStems: number;
+  CountNewRecruits: number;
+}
+
 type TooltipPayload = ReadonlyArray<any>;
 
 type Coordinate = {
@@ -63,13 +69,19 @@ function bestTextColor(backgroundHex: string) {
 const RADIAN = Math.PI / 180;
 const COLORS = ['#4D90FE', '#1ABC9C', '#FFC758', '#FF8F5A'];
 
-export default function ProgressPieChart(props: ProgressTachoType) {
-  const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats } = props;
+export default function ProgressPieChart(props: ProgressTachoType & { stemTypes?: StemTypesType }) {
+  const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats, stemTypes } = props;
 
-  const data = [
-    { name: 'Unpopulated', value: UnpopulatedQuadrats },
-    { name: 'Populated', value: PopulatedQuadrats }
-  ];
+  const data = stemTypes
+    ? [
+        { name: 'Old Stems', value: stemTypes.CountOldStems },
+        { name: 'Multi Stems', value: stemTypes.CountMultiStems },
+        { name: 'New Recruits', value: stemTypes.CountNewRecruits }
+      ]
+    : [
+        { name: 'Unpopulated', value: UnpopulatedQuadrats },
+        { name: 'Populated', value: PopulatedQuadrats }
+      ];
   const renderCustomizedLabel = ({
     cx = 0,
     cy = 0,

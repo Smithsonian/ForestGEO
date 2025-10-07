@@ -32,9 +32,7 @@ describe('Loading Duplicate Prevention Tests', () => {
 
   describe('useAsyncOperation - Duplicate Prevention', () => {
     it('should prevent duplicate operations when preventDuplicates is true', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve('success'), 50))
-      );
+      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 50)));
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {
@@ -236,9 +234,7 @@ describe('Loading Duplicate Prevention Tests', () => {
     });
 
     it('should prevent duplicate "Loading plot data..." messages', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve('success'), 100))
-      );
+      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 100)));
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {
@@ -302,11 +298,7 @@ describe('Loading Duplicate Prevention Tests', () => {
 
       // Execute all three in parallel
       await act(async () => {
-        await Promise.all([
-          siteResult.current.execute(),
-          plotResult.current.execute(),
-          censusResult.current.execute()
-        ]);
+        await Promise.all([siteResult.current.execute(), plotResult.current.execute(), censusResult.current.execute()]);
       });
 
       // Each should only be called once
@@ -482,9 +474,7 @@ describe('Loading Duplicate Prevention Tests', () => {
 
   describe('Operation State Tracking', () => {
     it('should correctly track active operation state', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve('success'), 100))
-      );
+      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 100)));
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {

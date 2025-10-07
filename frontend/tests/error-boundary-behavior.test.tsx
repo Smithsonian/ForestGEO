@@ -4,7 +4,11 @@ import React from 'react';
 import ErrorPage from '@/app/error';
 
 vi.mock('@mui/joy', () => ({
-  Box: ({ children, ...props }: any) => <div data-testid="box" {...props}>{children}</div>,
+  Box: ({ children, ...props }: any) => (
+    <div data-testid="box" {...props}>
+      {children}
+    </div>
+  ),
   Button: ({ children, onClick, ...props }: any) => (
     <button data-testid="retry-button" onClick={onClick} {...props}>
       {children}
@@ -231,7 +235,9 @@ describe('Error Boundary Behavior Tests', () => {
   describe('Error Boundary Integration with Context State', () => {
     it('should safely handle context clearing during site change', () => {
       // Simulate clearing contexts
-      const clearContexts = (contexts: any): {
+      const clearContexts = (
+        contexts: any
+      ): {
         site: any;
         plot: any;
         census: any;

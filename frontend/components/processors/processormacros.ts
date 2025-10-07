@@ -177,10 +177,25 @@ export const buildSearchStub = (columns: string[], quickFilter: string[], alias?
     return ''; // Return empty if no quick filters
   }
 
+  // Identify key identifier columns that should prioritize exact matches
+  const identifierColumns = ['Tag', 'TreeTag', 'StemTag', 'QuadratName', 'Quadrat'];
+
   return columns
     .map(column => {
       const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
-      return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
+
+      // For identifier columns, prioritize exact match, then fall back to contains
+      if (identifierColumns.includes(column)) {
+        return quickFilter
+          .map(word => {
+            // Try exact match first, then contains
+            return `(${aliasedColumn} = ${escape(word)} OR ${aliasedColumn} LIKE ${escape(`%${word}%`)})`;
+          })
+          .join(' OR ');
+      } else {
+        // For other columns, use contains search
+        return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
+      }
     })
     .join(' OR ');
 };
