@@ -9,18 +9,8 @@ import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FormType } from '@/config/macros/formdetails';
 import { SessionProvider } from 'next-auth/react';
-import {
-  PlotContext,
-  OrgCensusContext,
-  QuadratContext,
-  SiteContext
-} from '@/app/contexts/userselectionprovider';
-import {
-  PlotListContext,
-  OrgCensusListContext,
-  QuadratListContext,
-  SiteListContext
-} from '@/app/contexts/listselectionprovider';
+import { PlotContext, OrgCensusContext, QuadratContext, SiteContext } from '@/app/contexts/userselectionprovider';
+import { PlotListContext, OrgCensusListContext, QuadratListContext, SiteListContext } from '@/app/contexts/listselectionprovider';
 
 // Mock data samples based on actual CSV files
 const cocoliCsvData = `tag,stemtag,spcode,quadrat,lx,ly,dbh,codes,hom,date
@@ -171,9 +161,7 @@ const TestContextWrapper: React.FC<{ children: React.ReactNode }> = ({ children 
               <SiteContext.Provider value={mockSiteContext}>
                 <PlotContext.Provider value={mockPlotContext}>
                   <OrgCensusContext.Provider value={mockCensusContext}>
-                    <QuadratContext.Provider value={mockQuadratContext}>
-                      {children}
-                    </QuadratContext.Provider>
+                    <QuadratContext.Provider value={mockQuadratContext}>{children}</QuadratContext.Provider>
                   </OrgCensusContext.Provider>
                 </PlotContext.Provider>
               </SiteContext.Provider>

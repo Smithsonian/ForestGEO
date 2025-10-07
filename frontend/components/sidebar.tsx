@@ -601,55 +601,56 @@ export default function Sidebar(props: SidebarProps) {
         await handlePlotSelection(selectedPlot);
       }}
     >
-      {Array.isArray(plotListContext) && plotListContext.map(item => (
-        <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              width: '100%'
-            }}
-            className="sidebar-item"
-          >
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
-              <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
-                <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
-                  {item?.plotName}
-                </Typography>
-                <IconButton
-                  variant={'soft'}
-                  sx={{
-                    justifyContent: 'center',
-                    alignSelf: 'center'
-                  }}
-                  aria-label={`Plot options for ${item?.plotName}`}
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={event => {
-                    event.preventDefault();
-                    setSelectedPlot(item);
-                    handleOpen(event);
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter' || event.key === ' ') {
+      {Array.isArray(plotListContext) &&
+        plotListContext.map(item => (
+          <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%'
+              }}
+              className="sidebar-item"
+            >
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
+                  <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
+                    {item?.plotName}
+                  </Typography>
+                  <IconButton
+                    variant={'soft'}
+                    sx={{
+                      justifyContent: 'center',
+                      alignSelf: 'center'
+                    }}
+                    aria-label={`Plot options for ${item?.plotName}`}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={event => {
                       event.preventDefault();
                       setSelectedPlot(item);
-                      setAnchorPlotEdit(event.currentTarget);
-                    }
-                  }}
-                  // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
-                  disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
-                >
-                  <MoreHoriz />
-                </IconButton>
-              </Stack>
-              <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
-                {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
-              </Typography>
+                      handleOpen(event);
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedPlot(item);
+                        setAnchorPlotEdit(event.currentTarget);
+                      }
+                    }}
+                    // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
+                    disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
+                  >
+                    <MoreHoriz />
+                  </IconButton>
+                </Stack>
+                <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
+                  {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
+                </Typography>
+              </Box>
             </Box>
-          </Box>
-        </Option>
-      ))}
+          </Option>
+        ))}
     </Select>
   );
   const renderSiteOptions = () => {

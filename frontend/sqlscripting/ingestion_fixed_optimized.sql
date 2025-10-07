@@ -112,6 +112,7 @@ BEGIN
         old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes;
 
     -- Step 1: Optimized deduplication with strategic indexing
+    -- Enhanced to preserve information from duplicate records by merging Codes and Comments
     CREATE TEMPORARY TABLE initial_dup_filter ENGINE = MEMORY AS
     SELECT min(id)                                                                        as id,
            FileID,
@@ -127,8 +128,25 @@ BEGIN
            DBH,
            HOM,
            MeasurementDate,
-           max(case when Codes is not null and trim(Codes) != '' then Codes end)          as Codes,
-           max(case when Comments is not null and trim(Comments) != '' then Comments end) as Comments
+           -- Merge all distinct codes from duplicate records using GROUP_CONCAT
+           -- This preserves information instead of discarding it with MAX
+           NULLIF(
+               GROUP_CONCAT(
+                   DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
+                   ORDER BY Codes
+                   SEPARATOR ';'
+               ),
+               ''
+           ) as Codes,
+           -- Merge comments from duplicate records with clear separation
+           NULLIF(
+               GROUP_CONCAT(
+                   DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
+                   ORDER BY Comments
+                   SEPARATOR ' | '
+               ),
+               ''
+           ) as Comments
     FROM temporarymeasurements
     WHERE FileID = vFileID
       AND BatchID = vBatchID

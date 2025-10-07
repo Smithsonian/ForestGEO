@@ -128,6 +128,69 @@ async function processMetrics(metric: string, schema: string, plotID: number, ce
         query = `SELECT COUNT(st.StemGUID)AS CountStems FROM ${schema}.stems st JOIN ${schema}.census c ON st.CensusID = c.CensusID WHERE st.CensusID = ? AND c.PlotID = ?`;
         const csResults = await connectionManager.executeQuery(query, [censusID, plotID]);
         return NextResponse.json({ CountStems: csResults[0].CountStems }, { status: HTTPResponses.OK });
+      case 'StemTypes':
+        query = `
+          WITH previous_census AS (
+            SELECT MAX(c.CensusID) as PreviousCensusID
+            FROM ${schema}.census c
+            WHERE c.PlotID = ? AND c.CensusID < ?
+          ),
+          measured_stems AS (
+            SELECT DISTINCT s.StemGUID, s.TreeID, t.TreeTag, s.StemTag
+            FROM ${schema}.coremeasurements cm
+            JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
+            JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+            WHERE cm.CensusID = ? AND s.CensusID = ?
+          ),
+          old_stems AS (
+            SELECT ms.StemGUID
+            FROM measured_stems ms
+            WHERE EXISTS (
+              SELECT 1
+              FROM ${schema}.trees t_prev
+              JOIN ${schema}.stems s_prev ON s_prev.TreeID = t_prev.TreeID
+              CROSS JOIN previous_census pc
+              WHERE t_prev.TreeTag = ms.TreeTag
+                AND s_prev.StemTag = ms.StemTag
+                AND t_prev.CensusID = pc.PreviousCensusID
+                AND s_prev.CensusID = pc.PreviousCensusID
+                AND t_prev.IsActive = 1
+                AND s_prev.IsActive = 1
+            )
+          ),
+          multi_stems AS (
+            SELECT ms.StemGUID
+            FROM measured_stems ms
+            WHERE EXISTS (
+              SELECT 1
+              FROM ${schema}.trees t_prev
+              CROSS JOIN previous_census pc
+              WHERE t_prev.TreeTag = ms.TreeTag
+                AND t_prev.CensusID = pc.PreviousCensusID
+                AND t_prev.IsActive = 1
+            )
+            AND NOT EXISTS (SELECT 1 FROM old_stems os WHERE os.StemGUID = ms.StemGUID)
+          ),
+          new_recruits AS (
+            SELECT ms.StemGUID
+            FROM measured_stems ms
+            WHERE NOT EXISTS (SELECT 1 FROM old_stems os WHERE os.StemGUID = ms.StemGUID)
+              AND NOT EXISTS (SELECT 1 FROM multi_stems mst WHERE mst.StemGUID = ms.StemGUID)
+          )
+          SELECT
+            (SELECT COUNT(*) FROM old_stems) as CountOldStems,
+            (SELECT COUNT(*) FROM multi_stems) as CountMultiStems,
+            (SELECT COUNT(*) FROM new_recruits) as CountNewRecruits
+        `;
+        const stResults = await connectionManager.executeQuery(query, [plotID, censusID, censusID, censusID]);
+        return NextResponse.json(
+          {
+            CountOldStems: stResults[0].CountOldStems,
+            CountMultiStems: stResults[0].CountMultiStems,
+            CountNewRecruits: stResults[0].CountNewRecruits
+          },
+          { status: HTTPResponses.OK }
+        );
       default:
         return NextResponse.json({}, { status: HTTPResponses.OK });
     }

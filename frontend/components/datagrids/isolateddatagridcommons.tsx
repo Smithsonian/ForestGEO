@@ -690,7 +690,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     paginationModel: { page: number }
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
-    if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
+    if ('date' in newRow && newRow.date) {
+      const parsedDate = moment(newRow.date, 'YYYY-MM-DD', true);
+      if (parsedDate.isValid()) {
+        newRow.date = parsedDate.format('YYYY-MM-DD');
+      }
+    }
     let fetchProcessQuery =
       gridType !== 'quadrats'
         ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
