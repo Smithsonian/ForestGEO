@@ -1,0 +1,52 @@
+Fri Oct  3 17:36:55 EDT 2025: Starting 01_create_mapping_tables.sql
+Status
+Mapping tables created successfully
+Fri Oct  3 17:36:56 EDT 2025: 01_create_mapping_tables.sql completed successfully
+Fri Oct  3 17:36:56 EDT 2025: Starting 02_migrate_plots.sql
+
+Ctrl-C -- query killed.
+--------------
+INSERT INTO plots (
+    PlotName,
+    LocationName,
+    CountryName,
+    DimensionX,
+    DimensionY,
+    Area,
+    PlotDescription,
+    DefaultDimensionUnits,
+    DefaultCoordinateUnits,
+    DefaultAreaUnits,
+    DefaultDBHUnits,
+    DefaultHOMUnits
+)
+SELECT DISTINCT
+    v.PlotName,
+    'Mpala' AS LocationName,
+    'Kenya' AS CountryName,
+    
+    (SELECT MAX(co.PX) - MIN(co.PX)
+     FROM stable_mpala.coordinates co
+     JOIN stable_mpala.quadrat q ON co.QuadratID = q.QuadratID
+     WHERE q.PlotID = v.PlotID) AS DimensionX,
+    (SELECT MAX(co.PY) - MIN(co.PY)
+     FROM stable_mpala.coordinates co
+     JOIN stable_mpala.quadrat q ON co.QuadratID = q.QuadratID
+     WHERE q.PlotID = v.PlotID) AS DimensionY,
+    
+    (SELECT (MAX(co.PX) - MIN(co.PX)) * (MAX(co.PY) - MIN(co.PY))
+     FROM stable_mpala.coordinates co
+     JOIN stable_mpala.quadrat q ON co.QuadratID = q.QuadratID
+     WHERE q.PlotID = v.PlotID) AS Area,
+    'Migrated from stable_mpala' AS PlotDescription,
+    'm' AS DefaultDimensionUnits,
+    'm' AS DefaultCoordinateUnits,
+    'm2' AS DefaultAreaUnits,
+    'mm' AS DefaultDBHUnits,
+    'm' AS DefaultHOMUnits
+FROM stable_mpala.viewfulltable v
+GROUP BY v.PlotID, v.PlotName
+--------------
+
+ERROR 1317 (70100) at line 11: Query execution was interrupted
+Fri Oct  3 19:30:30 EDT 2025: 02_migrate_plots.sql failed
