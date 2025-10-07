@@ -296,10 +296,11 @@ describe('FK Constraint Removal - Issue #4', () => {
   describe('Documentation', () => {
     it('should verify migration script exists', async () => {
       const fs = await import('fs/promises');
-      const path = '/Users/sambokar/Documents/ForestGEO/frontend/db-migrations/11_remove_cmattributes_fk_constraint.sql';
+      const path = await import('path');
+      const migrationPath = path.join(process.cwd(), 'db-migrations', '11_remove_cmattributes_fk_constraint.sql');
 
       const exists = await fs
-        .access(path)
+        .access(migrationPath)
         .then(() => true)
         .catch(() => false);
 
@@ -308,9 +309,10 @@ describe('FK Constraint Removal - Issue #4', () => {
 
     it('should verify tablestructures.sql has been updated', async () => {
       const fs = await import('fs/promises');
-      const path = '/Users/sambokar/Documents/ForestGEO/frontend/sqlscripting/tablestructures.sql';
+      const path = await import('path');
+      const tableStructuresPath = path.join(process.cwd(), 'sqlscripting', 'tablestructures.sql');
 
-      const content = await fs.readFile(path, 'utf-8');
+      const content = await fs.readFile(tableStructuresPath, 'utf-8');
 
       // Should have the FK constraint commented out or removed
       expect(content).toContain('-- FK constraint removed to allow invalid attribute codes');
