@@ -146,38 +146,6 @@ module.exports = defineConfig({
     specPattern: 'cypress/components/responsive/**/*.cy.{js,ts,jsx,tsx}'
   },
 
-  // Cross-browser testing configurations
-  browsers: [
-    {
-      name: 'chrome',
-      family: 'chromium',
-      channel: 'stable',
-      displayName: 'Chrome',
-      version: 'stable'
-    },
-    {
-      name: 'chrome',
-      family: 'chromium',
-      channel: 'beta',
-      displayName: 'Chrome Beta',
-      version: 'beta'
-    },
-    {
-      name: 'edge',
-      family: 'chromium',
-      channel: 'stable',
-      displayName: 'Edge',
-      version: 'stable'
-    },
-    {
-      name: 'firefox',
-      family: 'firefox',
-      channel: 'stable',
-      displayName: 'Firefox',
-      version: 'stable'
-    }
-  ],
-
   // Retries for flaky responsive tests
   retries: {
     runMode: 2,

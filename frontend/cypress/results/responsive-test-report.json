@@ -1,0 +1,84 @@
+{
+  "timestamp": "2025-10-09T00:07:57.691Z",
+  "summary": {
+    "total": 12,
+    "passed": 0,
+    "failed": 12
+  },
+  "results": [
+    {
+      "browser": "chrome",
+      "testType": "modal",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "chrome",
+      "testType": "table",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "chrome",
+      "testType": "upload",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "chrome",
+      "testType": "visual",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "firefox",
+      "testType": "modal",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "firefox",
+      "testType": "table",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "firefox",
+      "testType": "upload",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "firefox",
+      "testType": "visual",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "edge",
+      "testType": "modal",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "edge",
+      "testType": "table",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "edge",
+      "testType": "upload",
+      "success": false,
+      "exitCode": 1
+    },
+    {
+      "browser": "edge",
+      "testType": "visual",
+      "success": false,
+      "exitCode": 1
+    }
+  ],
+  "browsers": ["chrome", "firefox", "edge"],
+  "testTypes": ["modal", "table", "upload", "visual"]
+}

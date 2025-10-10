@@ -16,11 +16,8 @@
 // Import commands.js using ES2015 syntax:
 import './commands';
 import './responsive-commands';
-
-// Import CI-optimized commands if in CI environment
-if (Cypress.env('CI_MODE') || Cypress.env('CYPRESS_CI')) {
-  import('./ci-responsive-commands');
-}
+import './ci-responsive-commands';
+import './test-data-helpers';
 
 // Alternatively you can use CommonJS syntax:
 // require('./commands')

@@ -33,14 +33,9 @@ describe('Deduplication Merge Fix - Issue #5', () => {
       dbAvailable = true;
 
       // Get test data
-      const [plots] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT PlotID FROM plots LIMIT 1`
-      );
+      const [plots] = await connection.query<mysql.RowDataPacket[]>(`SELECT PlotID FROM plots LIMIT 1`);
 
-      const [census] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT CensusID FROM census WHERE PlotID = ? LIMIT 1`,
-        [plots[0].PlotID]
-      );
+      const [census] = await connection.query<mysql.RowDataPacket[]>(`SELECT CensusID FROM census WHERE PlotID = ? LIMIT 1`, [plots[0].PlotID]);
 
       testPlotID = plots[0].PlotID;
       testCensusID = census[0].CensusID;
@@ -55,10 +50,7 @@ describe('Deduplication Merge Fix - Issue #5', () => {
   afterAll(async () => {
     // Clean up test data
     if (connection && testFileID && testBatchID) {
-      await connection.query(
-        `DELETE FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?`,
-        [testFileID, testBatchID]
-      );
+      await connection.query(`DELETE FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [testFileID, testBatchID]);
     }
     if (connection) {
       await connection.end();
@@ -71,9 +63,7 @@ describe('Deduplication Merge Fix - Issue #5', () => {
         console.warn('Skipping: Database not available');
         return;
       }
-      const [rows] = await connection.query<mysql.RowDataPacket[]>(
-        `SHOW CREATE PROCEDURE bulkingestionprocess`
-      );
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW CREATE PROCEDURE bulkingestionprocess`);
 
       const procedureContent = rows[0]['Create Procedure'];
 
@@ -88,9 +78,7 @@ describe('Deduplication Merge Fix - Issue #5', () => {
         console.warn('Skipping: Database not available');
         return;
       }
-      const [rows] = await connection.query<mysql.RowDataPacket[]>(
-        `SHOW CREATE PROCEDURE bulkingestionprocess`
-      );
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW CREATE PROCEDURE bulkingestionprocess`);
 
       const procedureContent = rows[0]['Create Procedure'];
 
@@ -105,9 +93,7 @@ describe('Deduplication Merge Fix - Issue #5', () => {
         console.warn('Skipping: Database not available');
         return;
       }
-      const [rows] = await connection.query<mysql.RowDataPacket[]>(
-        `SHOW CREATE PROCEDURE bulkingestionprocess`
-      );
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW CREATE PROCEDURE bulkingestionprocess`);
 
       const procedureContent = rows[0]['Create Procedure'];
 
@@ -129,13 +115,10 @@ describe('Deduplication Merge Fix - Issue #5', () => {
         return;
       }
       // Get valid test data
-      const [species] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`
-      );
-      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`,
-        [testPlotID]
-      );
+      const [species] = await connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`);
+      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(`SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`, [
+        testPlotID
+      ]);
 
       if (species.length === 0 || quadrat.length === 0) {
         console.warn('Insufficient test data');
@@ -258,13 +241,10 @@ describe('Deduplication Merge Fix - Issue #5', () => {
         console.warn('Skipping: Database not available');
         return;
       }
-      const [species] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`
-      );
-      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`,
-        [testPlotID]
-      );
+      const [species] = await connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`);
+      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(`SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`, [
+        testPlotID
+      ]);
 
       if (species.length === 0 || quadrat.length === 0) {
         console.warn('Insufficient test data');
@@ -370,13 +350,10 @@ describe('Deduplication Merge Fix - Issue #5', () => {
       }
       // This test verifies the fix for the "2 missing records" issue
 
-      const [species] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`
-      );
-      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`,
-        [testPlotID]
-      );
+      const [species] = await connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`);
+      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(`SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`, [
+        testPlotID
+      ]);
 
       if (species.length === 0 || quadrat.length === 0) {
         console.warn('Insufficient test data');
@@ -488,13 +465,10 @@ describe('Deduplication Merge Fix - Issue #5', () => {
       }
       // This documents the old buggy behavior
 
-      const [species] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`
-      );
-      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`,
-        [testPlotID]
-      );
+      const [species] = await connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1`);
+      const [quadrat] = await connection.query<mysql.RowDataPacket[]>(`SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1`, [
+        testPlotID
+      ]);
 
       if (species.length === 0 || quadrat.length === 0) {
         console.warn('Insufficient test data');
