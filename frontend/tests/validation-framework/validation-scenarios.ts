@@ -29,10 +29,10 @@ export const validation1Scenarios: ValidationTestScenario[] = [
       trees: [{ TreeTag: 'GROWTH_TEST_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
       coremeasurements: [
-        // Census 1: DBH = 100mm
-        { MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
-        // Census 2: DBH = 200mm (growth of 100mm > 65mm limit)
-        { MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        // Census 1: DBH = 100mm (CensusID: 0 means first census in array)
+        { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
+        // Census 2: DBH = 200mm (CensusID: 1 means second census in array - growth of 100mm > 65mm limit)
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: null, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },
@@ -54,8 +54,8 @@ export const validation1Scenarios: ValidationTestScenario[] = [
       trees: [{ TreeTag: 'NORMAL_GROWTH_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
       coremeasurements: [
-        { MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
-        { MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, MeasuredHOM: 130, IsValidated: null, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },
@@ -83,9 +83,9 @@ export const validation2Scenarios: ValidationTestScenario[] = [
       trees: [{ TreeTag: 'SHRINK_TEST_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
       coremeasurements: [
-        { MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: true, IsActive: true },
+        { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: true, IsActive: true },
         // 90% of 200 = 190 (10% shrinkage > 5% limit)
-        { MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 180, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 180, MeasuredHOM: 130, IsValidated: null, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },

@@ -458,14 +458,33 @@ export class ValidationTester {
     const ids: number[] = [];
     const censusIDs = this.testDataIDs.get('census') || [];
 
-    for (const cm of measurements) {
+    for (let i = 0; i < measurements.length; i++) {
+      const cm = measurements[i];
+
+      // Smart CensusID assignment:
+      // - If cm.CensusID is specified and < 100, treat it as an index into censusIDs array
+      // - If cm.CensusID is specified and >= 100, use it as-is (literal ID)
+      // - If cm.CensusID is not specified, default to censusIDs[0]
+      let assignedCensusID: number;
+      if (cm.CensusID !== undefined) {
+        if (cm.CensusID < 100) {
+          // Treat as index
+          assignedCensusID = censusIDs[cm.CensusID] || censusIDs[0] || 1;
+        } else {
+          // Treat as literal ID
+          assignedCensusID = cm.CensusID;
+        }
+      } else {
+        assignedCensusID = censusIDs[0] || 1;
+      }
+
       const [result] = await this.connection.query<mysql.ResultSetHeader>(
         `INSERT INTO ${this.schema}.coremeasurements
          (StemGUID, CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM, IsValidated, IsActive)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           cm.StemGUID || this.testStemGUIDs[0],
-          cm.CensusID || censusIDs[0] || 1,
+          assignedCensusID,
           cm.MeasurementDate || new Date('2020-06-01'),
           cm.MeasuredDBH ?? null,
           cm.MeasuredHOM ?? null,
@@ -480,6 +499,13 @@ export class ValidationTester {
 
   private async insertCMAttributes(cmattributes: Partial<CMAttribute>[]): Promise<void> {
     const cmIDs = this.testDataIDs.get('coremeasurements') || [];
+
+    // First, delete any existing cmattributes for these CoreMeasurementIDs to avoid duplicates
+    if (cmIDs.length > 0) {
+      await this.connection.query(
+        `DELETE FROM ${this.schema}.cmattributes WHERE CoreMeasurementID IN (${cmIDs.join(',')})`
+      );
+    }
 
     // Track which CoreMeasurementID gets which codes to handle unique constraints
     for (let i = 0; i < cmattributes.length; i++) {

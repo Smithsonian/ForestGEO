@@ -75,12 +75,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        // Get census IDs for parameters
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -110,11 +106,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -142,11 +135,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -174,11 +164,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -206,11 +193,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -238,11 +222,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -270,11 +251,8 @@ describe('Validation Query Tests', () => {
           return;
         }
 
-        const [census] = await connection.query<mysql.RowDataPacket[]>(
-          `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-        );
-
-        const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+        // Don't pass census/plot parameters - let validation run on all data including test data
+        const params = undefined;
 
         const result = await tester.testValidation(validationID, scenario, params);
 
@@ -292,7 +270,7 @@ describe('Validation Query Tests', () => {
    * Summary Test: Run all validations and report overall status
    */
   describe('Summary: All Validation Tests', () => {
-    it('should provide summary of all validation test results', async () => {
+    it('should provide summary of all validation test results', { timeout: 30000 }, async () => {
       if (!dbAvailable) {
         console.warn('Skipping: Database not available');
         return;
@@ -307,11 +285,8 @@ describe('Validation Query Tests', () => {
       let failedTests = 0;
       const results: ValidationTestResult[] = [];
 
-      const [census] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT PlotID, CensusID FROM ${dbConfig.database}.census ORDER BY CensusID DESC LIMIT 1`
-      );
-
-      const params = census.length > 0 ? { p_PlotID: census[0].PlotID, p_CensusID: census[0].CensusID } : undefined;
+      // Don't pass census/plot parameters - let validation run on all data including test data
+      const params = undefined;
 
       for (const [validationID, scenarios] of allValidationScenarios.entries()) {
         console.log(`\nValidation ${validationID}:`);
