@@ -123,9 +123,7 @@ describe('FK Constraint Removal - Issue #4', () => {
       // This test verifies the fix allows invalid codes to be stored
 
       // Clean up any existing test data
-      await connection.query(
-        `DELETE FROM cmattributes WHERE Code = 'INVALID_TEST_CODE'`
-      );
+      await connection.query(`DELETE FROM cmattributes WHERE Code = 'INVALID_TEST_CODE'`);
 
       // Get a valid CoreMeasurementID to use
       const [cmRows] = await connection.query<mysql.RowDataPacket[]>(
@@ -160,9 +158,7 @@ describe('FK Constraint Removal - Issue #4', () => {
         expect(rows[0].count).toBeGreaterThan(0);
       } finally {
         // Clean up test data
-        await connection.query(
-          `DELETE FROM cmattributes WHERE Code = 'INVALID_TEST_CODE'`
-        );
+        await connection.query(`DELETE FROM cmattributes WHERE Code = 'INVALID_TEST_CODE'`);
       }
     });
 

@@ -237,7 +237,6 @@ Cypress.Commands.add('setupForestGEOUser', (userType: UserProfile = 'standardUse
   // Clear any existing state
   cy.clearCookies();
   cy.clearLocalStorage();
-  cy.clearSessionStorage();
 
   // Set up test environment
   const { userSession, availableSites } = TestDataHelper.setupTestEnvironment(userType);

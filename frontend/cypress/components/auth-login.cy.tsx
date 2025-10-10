@@ -18,15 +18,7 @@ const MountWithMockedSession = (session: any, status: 'authenticated' | 'unauthe
   const mockSignOut = cy.stub().as('signOut');
   const mockRouterPush = cy.stub().as('routerPush');
 
-  return mount(
-    <LoginLogoutTestWrapper
-      session={session}
-      status={status}
-      onSignIn={mockSignIn}
-      onSignOut={mockSignOut}
-      onRouterPush={mockRouterPush}
-    />
-  );
+  return mount(<LoginLogoutTestWrapper session={session} status={status} onSignIn={mockSignIn} onSignOut={mockSignOut} onRouterPush={mockRouterPush} />);
 };
 
 describe('LoginLogout Component Tests', () => {

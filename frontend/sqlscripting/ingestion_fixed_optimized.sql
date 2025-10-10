@@ -113,7 +113,7 @@ BEGIN
 
     -- Step 1: Optimized deduplication with strategic indexing
     -- Enhanced to preserve information from duplicate records by merging Codes and Comments
-    CREATE TEMPORARY TABLE initial_dup_filter ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE initial_dup_filter AS
     SELECT min(id)                                                                        as id,
            FileID,
            BatchID,
@@ -159,7 +159,7 @@ BEGIN
     CREATE INDEX idx_dup_quadrat ON initial_dup_filter (QuadratName);
 
     -- Step 2: Optimized validation with reduced subqueries
-    CREATE TEMPORARY TABLE filter_validity ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id,
            i.FileID,
            i.BatchID,
@@ -195,7 +195,7 @@ BEGIN
     CREATE INDEX idx_validity_tree ON filter_validity (TreeTag, SpeciesID, CensusID);
 
     -- Step 3: Create filtered dataset (only valid rows)
-    CREATE TEMPORARY TABLE filtered ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE filtered AS
     SELECT *
     FROM filter_validity
     WHERE Valid = true;
@@ -226,7 +226,7 @@ BEGIN
 
     -- Step 5: Optimized stem categorization with better index usage
     -- Use EXISTS instead of JOINs where possible for better performance
-    CREATE TEMPORARY TABLE old_trees ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE old_trees AS
     SELECT DISTINCT f.*
     FROM filtered f
     WHERE EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = f.TreeTag AND t.CensusID < f.CensusID AND t.IsActive = 1)
@@ -239,20 +239,20 @@ BEGIN
                     AND t.IsActive = 1
                     AND s.IsActive = 1);
 
-    CREATE TEMPORARY TABLE multi_stems ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE multi_stems AS
     SELECT DISTINCT f.*
     FROM filtered f
     WHERE EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = f.TreeTag AND t.CensusID < f.CensusID AND t.IsActive = 1)
       AND NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id);
 
-    CREATE TEMPORARY TABLE new_recruits ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE new_recruits AS
     SELECT DISTINCT f.*
     FROM filtered f
     WHERE NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id)
       AND NOT EXISTS (SELECT 1 FROM multi_stems ms WHERE ms.id = f.id);
 
     -- Step 6: Optimized tree insertion with batch processing
-    CREATE TEMPORARY TABLE unique_trees_to_insert ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE unique_trees_to_insert AS
     SELECT DISTINCT TreeTag, SpeciesID, CensusID
     FROM filtered
     WHERE CensusID = vCurrentCensusID;
@@ -270,7 +270,7 @@ BEGIN
     WHERE existing.TreeID IS NULL;
 
     -- Step 7: Optimized stem insertion
-    CREATE TEMPORARY TABLE unique_stems_to_insert ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE unique_stems_to_insert AS
     SELECT DISTINCT TreeTag, QuadratID, StemTag, LocalX, LocalY, CensusID, SpeciesID
     FROM filtered
     WHERE CensusID = vCurrentCensusID;
@@ -298,7 +298,7 @@ BEGIN
 
     -- Step 8: Fixed StemCrossID update using temporary table to avoid MySQL error 1093
     -- Create temporary table with stem cross reference mapping
-    CREATE TEMPORARY TABLE stem_crossid_mapping ENGINE = MEMORY AS
+    CREATE TEMPORARY TABLE stem_crossid_mapping AS
     SELECT s_curr.StemGUID as CurrentStemID,
            COALESCE(
                    (SELECT s_prev.StemCrossID
@@ -371,7 +371,7 @@ BEGIN
     -- Step 11: Optimized attribute code handling
     -- Only process rows that actually have codes to avoid unnecessary JSON parsing
     IF EXISTS(SELECT 1 FROM filtered WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
-        CREATE TEMPORARY TABLE tempcodes ENGINE = MEMORY AS
+        CREATE TEMPORARY TABLE tempcodes AS
         SELECT cm.CoreMeasurementID,
                trim(jt.code) as Code
         FROM filtered f

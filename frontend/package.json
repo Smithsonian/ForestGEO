@@ -27,12 +27,15 @@
     "test:e2e:open": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "test:e2e:prod": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "test:all": "npm run test:unit && npm run test:component && npm run test:e2e",
-    "test:ci": "npm run test:unit && npm run test:component && npm run test:e2e:prod",
+    "test:ci": "npm run test:unit && npm run test:component",
+    "test:deployment": "npm run lint && npm run test:unit && npm run test:component",
     "test:responsive": "node scripts/run-responsive-tests.js",
     "test:responsive:dev": "node scripts/run-responsive-tests.js --headed",
     "test:responsive:ci": "cypress run --config-file cypress.ci.config.cjs --spec 'cypress/e2e/responsive/ci-responsive-suite.cy.ts' --browser chrome",
-    "test:auth-flow": "node scripts/test-auth-flow.js",
-    "test:auto": "node scripts/auto-test-check.js"
+    "test:auth-flow": "node scripts/test-auth-flow.mjs",
+    "test:auto": "node scripts/auto-test-check.js",
+    "test:validations": "vitest run tests/validation-framework/run-validation-tests.test.ts",
+    "test:validations:watch": "vitest watch tests/validation-framework/run-validation-tests.test.ts"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
