@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Git LFS check
+command -v git-lfs >/dev/null 2>&1 || { echo >&2 "\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\n"; exit 2; }
+git lfs pre-push "$@"
+
+# Read stdin for branch information
+while read local_ref local_sha remote_ref remote_sha
+do
+  # Extract the remote branch name (remove refs/heads/ prefix)
+  remote_branch=$(echo "$remote_ref" | sed 's/refs\/heads\///')
+
+  # Check if pushing to main or forestgeo-app-development branches
+  if [ "$remote_branch" = "main" ] || [ "$remote_branch" = "forestgeo-app-development" ]; then
+    echo ""
+    echo "🔍 Pushing to protected branch: $remote_branch"
+    echo "🧪 Running tests before push..."
+    echo ""
+
+    # Change to frontend directory and run tests
+    cd frontend || exit 1
+
+    # Run npm test (vitest run)
+    if ! npm test; then
+      echo ""
+      echo "❌ Tests failed! Push aborted."
+      echo "Please fix the failing tests before pushing to $remote_branch"
+      echo ""
+      exit 1
+    fi
+
+    echo ""
+    echo "✅ All tests passed! Proceeding with push..."
+    echo ""
+  fi
+done
+
+exit 0
