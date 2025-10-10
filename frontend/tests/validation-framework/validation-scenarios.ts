@@ -32,7 +32,7 @@ export const validation1Scenarios: ValidationTestScenario[] = [
         // Census 1: DBH = 100mm (CensusID: 0 means first census in array)
         { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
         // Census 2: DBH = 200mm (CensusID: 1 means second census in array - growth of 100mm > 65mm limit)
-        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: undefined, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },
@@ -55,7 +55,7 @@ export const validation1Scenarios: ValidationTestScenario[] = [
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
       coremeasurements: [
         { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 100, MeasuredHOM: 130, IsValidated: true, IsActive: true },
-        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, MeasuredHOM: 130, IsValidated: undefined, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },
@@ -85,7 +85,7 @@ export const validation2Scenarios: ValidationTestScenario[] = [
       coremeasurements: [
         { CensusID: 0, MeasurementDate: new Date('2015-06-01'), MeasuredDBH: 200, MeasuredHOM: 130, IsValidated: true, IsActive: true },
         // 90% of 200 = 190 (10% shrinkage > 5% limit)
-        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 180, MeasuredHOM: 130, IsValidated: null, IsActive: true }
+        { CensusID: 1, MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 180, MeasuredHOM: 130, IsValidated: undefined, IsActive: true }
       ],
       cmattributes: [{ Code: 'A' }, { Code: 'A' }]
     },
@@ -113,7 +113,7 @@ export const validation3Scenarios: ValidationTestScenario[] = [
         }
       ],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }]
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
     },
     expectedErrors: [{ treeTag: 'INVALID_SP_1', condition: 'Species ID 99999 does not exist in species table' }]
   },
@@ -127,7 +127,7 @@ export const validation3Scenarios: ValidationTestScenario[] = [
       quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
       trees: [{ TreeTag: 'VALID_SP_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }]
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
     },
     expectedErrors: [],
     expectedNoErrors: [{ treeTag: 'VALID_SP_1', condition: 'Valid species should not be flagged' }]
@@ -159,7 +159,7 @@ export const validation6Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2019-12-15'), // Before census start
           MeasuredDBH: 150,
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
@@ -187,7 +187,7 @@ export const validation6Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2021-01-15'), // After census end
           MeasuredDBH: 150,
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
@@ -215,7 +215,7 @@ export const validation6Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2020-06-15'), // Within bounds
           MeasuredDBH: 150,
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
@@ -263,7 +263,7 @@ export const validation8Scenarios: ValidationTestScenario[] = [
           IsActive: true
         }
       ],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }]
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
     },
     expectedErrors: [{ treeTag: 'OUT_OF_BOUNDS_X', condition: 'Stem X coordinate 200 exceeds plot dimension 100' }]
   },
@@ -301,7 +301,7 @@ export const validation8Scenarios: ValidationTestScenario[] = [
           IsActive: true
         }
       ],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }]
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
     },
     expectedErrors: [],
     expectedNoErrors: [{ treeTag: 'IN_BOUNDS_1', condition: 'Stem within plot bounds should not be flagged' }]
@@ -322,7 +322,7 @@ export const validation14Scenarios: ValidationTestScenario[] = [
       quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
       trees: [{ TreeTag: 'INVALID_ATTR_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }],
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }],
       // NOTE: NOT creating the 'MX' attribute - it won't exist in attributes table
       cmattributes: [{ Code: 'MX' }] // Invalid code from bug report
     },
@@ -339,7 +339,7 @@ export const validation14Scenarios: ValidationTestScenario[] = [
       quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
       trees: [{ TreeTag: 'VALID_ATTR_1', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
-      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: null, IsActive: true }],
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }],
       cmattributes: [{ Code: 'A' }]
     },
     expectedErrors: [],
@@ -365,7 +365,7 @@ export const validation15Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2020-06-01'),
           MeasuredDBH: 26600, // From bug report
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
@@ -386,7 +386,7 @@ export const validation15Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2020-06-01'),
           MeasuredDBH: 3500, // Exactly at threshold
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
@@ -407,7 +407,7 @@ export const validation15Scenarios: ValidationTestScenario[] = [
         {
           MeasurementDate: new Date('2020-06-01'),
           MeasuredDBH: 350, // Normal DBH
-          IsValidated: null,
+          IsValidated: undefined,
           IsActive: true
         }
       ]
