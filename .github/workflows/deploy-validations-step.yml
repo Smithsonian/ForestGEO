@@ -1,0 +1,22 @@
+# Validation Deployment Step Template
+# This snippet should be added to your deployment workflows
+# after the Azure Web App deployment step
+
+- name: Setup Node.js for validation deployment
+  uses: actions/setup-node@v4.0.4
+  with:
+    node-version: '24.x'
+
+- name: Checkout code for validation deployment
+  uses: actions/checkout@v4
+  with:
+    path: repo
+
+- name: Deploy validation queries to all schemas
+  env:
+    AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+  run: |
+    cd repo/frontend
+    npm install --production=false
+    npx tsx scripts/deploy-validations-to-all-schemas.ts
+  continue-on-error: false  # Fail deployment if validations fail to deploy

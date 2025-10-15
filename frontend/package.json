@@ -30,7 +30,8 @@
     "test:all": "npm run test && npm run test:component && npm run test:e2e",
     "test:validations": "vitest run tests/validation-framework",
     "test:responsive": "cypress run --config-file cypress.ci.config.cjs --spec 'cypress/e2e/responsive/*.cy.ts'",
-    "test:auth": "node scripts/test-auth-flow.mjs"
+    "test:auth": "node scripts/test-auth-flow.mjs",
+    "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",

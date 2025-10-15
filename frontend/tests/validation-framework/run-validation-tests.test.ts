@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { ValidationTester, ValidationTestResult } from './validation-test-framework';
 import { allValidationScenarios } from './validation-scenarios';
+import { setupValidations } from './setup-validations';
 
 const dbConfig = {
   host: process.env.AZURE_SQL_SERVER || 'forestgeo-mysqldataserver.mysql.database.azure.com',
@@ -40,6 +41,10 @@ describe('Validation Query Tests', () => {
 
       connection = await mysql.createConnection(dbConfig);
       dbAvailable = true;
+
+      // Load validation queries from corequeries.sql
+      await setupValidations(connection, dbConfig.database);
+
       tester = new ValidationTester(connection, dbConfig.database);
       console.log(`✓ Connected to database: ${dbConfig.database}\n`);
     } catch (error: any) {

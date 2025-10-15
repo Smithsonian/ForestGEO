@@ -8,10 +8,12 @@
 ## 1. ✅ Backup Files Cleanup
 
 ### Action Taken
+
 - **Removed 9 .bak files** from `db-migrations/` directory
 - Files were safe backups created when removing `USE forestgeo_testing;` line from migration scripts
 
 ### Files Removed
+
 ```
 db-migrations/01_create_mapping_tables.sql.bak
 db-migrations/02_migrate_plots.sql.bak
@@ -25,6 +27,7 @@ db-migrations/09_migrate_attributes.sql.bak
 ```
 
 ### Result
+
 ✅ Cleaned repository, reduced clutter
 
 ---
@@ -32,15 +35,18 @@ db-migrations/09_migrate_attributes.sql.bak
 ## 2. ✅ Markdown Documentation Review
 
 ### Action Taken
+
 - **Removed** outdated `tests/validation-framework/validation-status-report.md` (Jan 2025 version)
 - **Kept** current `tests/validation-framework/BROKEN_VALIDATIONS_REPORT.md` (Oct 2025 version)
 - **Skipped** `documentation/` folder (as requested)
 
 ### Files Kept
+
 - `VALIDATION_TESTING.md` - Framework documentation
 - `BROKEN_VALIDATIONS_REPORT.md` - Current validation analysis (Oct 2025)
 
 ### Result
+
 ✅ Removed outdated documentation while preserving current reports
 
 ---
@@ -48,20 +54,24 @@ db-migrations/09_migrate_attributes.sql.bak
 ## 3. ✅ Test Suite Status
 
 ### Overall Results
+
 - **Total Tests:** 442
 - **Passing:** 416 (94.1%)
 - **Failing:** 26 (5.9%)
 
 ### Passing Test Suites (42/44)
+
 - ✅ Auth mocks (3 tests)
 - ✅ Database mocks (9 tests)
 - ✅ Loading duplicate prevention
 - ✅ All other unit/integration tests
 
 ### Failing Tests (2 suites, 26 tests)
+
 **Validation Framework Tests** - All failures due to `"Validation X not found"` errors
 
 This indicates validation procedures aren't in test database or connection issues:
+
 - Validation 1: DBH Growth (2 tests)
 - Validation 2: DBH Shrinkage (1 test)
 - Validation 3: Invalid Species Codes (2 tests)
@@ -75,6 +85,7 @@ This indicates validation procedures aren't in test database or connection issue
 **Note:** These tests require the `forestgeo_testing` database to be populated with validation procedures. Tests are structurally sound.
 
 ### Result
+
 ✅ 94.1% pass rate - Core functionality working correctly
 
 ---
@@ -82,6 +93,7 @@ This indicates validation procedures aren't in test database or connection issue
 ## 4. ✅ Build Status
 
 ### Build Results
+
 ```
 ✔ No ESLint warnings or errors
 ✔ Compiled successfully in 41s
@@ -90,11 +102,13 @@ This indicates validation procedures aren't in test database or connection issue
 ```
 
 ### Bundle Analysis
+
 - **First Load JS:** ~100kB
 - **Routes:** 58 total (app routes + API routes)
 - **Middleware:** 106kB
 
 ### Result
+
 ✅ Clean production build with no errors
 
 ---
@@ -104,11 +118,13 @@ This indicates validation procedures aren't in test database or connection issue
 ### What Was Implemented
 
 #### Package Installation
+
 ```json
 "@vitest/coverage-v8": "^3.2.4"
 ```
 
 #### Coverage Configuration (`vitest.config.mts`)
+
 ```typescript
 coverage: {
   provider: 'v8',
@@ -136,6 +152,7 @@ coverage: {
 ```
 
 #### New Coverage Commands
+
 ```json
 "test:coverage": "vitest run --coverage"
 ```
@@ -143,17 +160,20 @@ coverage: {
 ### How to Use Coverage
 
 #### Run coverage report:
+
 ```bash
 npm run test:coverage
 ```
 
 #### Output locations (after running):
+
 - **Terminal:** Text summary
 - **HTML Report:** `coverage/index.html` (open in browser)
 - **JSON Data:** `coverage/coverage-final.json`
 - **LCOV Format:** `coverage/lcov.info` (for CI/CD tools)
 
 #### Advanced coverage commands (manual use):
+
 ```bash
 # Interactive UI
 npx vitest --coverage --ui
@@ -163,6 +183,7 @@ npx vitest watch --coverage
 ```
 
 ### Coverage Review Status
+
 ✅ **Implementation verified working** - "Coverage enabled with v8" confirmed
 
 **Note:** Coverage reports are only generated when tests complete. Currently, coverage directory doesn't exist due to 26 failing validation tests. Once validation database is set up, full coverage reports will be generated.
@@ -173,15 +194,16 @@ npx vitest watch --coverage
 
 ### Before vs After
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Total Commands** | 21 | 13 | -38% |
-| **Duplicates** | 2 | 0 | -100% |
-| **Clarity** | Medium | High | ↑ |
+| Metric             | Before | After | Improvement |
+| ------------------ | ------ | ----- | ----------- |
+| **Total Commands** | 21     | 13    | -38%        |
+| **Duplicates**     | 2      | 0     | -100%       |
+| **Clarity**        | Medium | High  | ↑           |
 
 ### Consolidated Commands
 
 #### Core Unit Tests (3 commands)
+
 ```bash
 npm run test              # Run all unit tests once
 npm run test:watch        # Watch mode (renamed from test:unit:watch)
@@ -189,6 +211,7 @@ npm run test:coverage     # Run with coverage report
 ```
 
 #### Component & E2E Tests (4 commands)
+
 ```bash
 npm run test:component    # Run component tests (Cypress)
 npm run test:cypress      # Open Cypress interactive mode
@@ -197,6 +220,7 @@ npm run test:e2e:prod     # Run E2E tests (production build)
 ```
 
 #### CI/Deployment (3 commands)
+
 ```bash
 npm run test:ci           # CI pipeline (unit + component)
 npm run test:deployment   # Pre-deployment (lint + CI tests)
@@ -204,6 +228,7 @@ npm run test:all          # All tests (unit + component + e2e)
 ```
 
 #### Specialized Tests (3 commands)
+
 ```bash
 npm run test:validations  # Run validation framework tests
 npm run test:responsive   # Run responsive design tests
@@ -212,20 +237,21 @@ npm run test:auth         # Run authentication flow tests
 
 ### Removed Commands (Advanced users can run manually)
 
-| Old Command | Manual Alternative |
-|-------------|-------------------|
-| `test:unit` | Use `npm run test` (same thing) |
-| `test:unit:watch` | Now `test:watch` (renamed) |
-| `test:component:open` | Now `test:cypress` (consolidated) |
-| `test:e2e:open` | Now `test:cypress` (consolidated) |
+| Old Command              | Manual Alternative                            |
+| ------------------------ | --------------------------------------------- |
+| `test:unit`              | Use `npm run test` (same thing)               |
+| `test:unit:watch`        | Now `test:watch` (renamed)                    |
+| `test:component:open`    | Now `test:cypress` (consolidated)             |
+| `test:e2e:open`          | Now `test:cypress` (consolidated)             |
 | `test:validations:watch` | `npx vitest watch tests/validation-framework` |
-| `test:coverage:ui` | `npx vitest --coverage --ui` |
-| `test:coverage:watch` | `npx vitest watch --coverage` |
-| `test:responsive:dev` | Use `test:cypress` with manual selection |
-| `test:responsive:ci` | Merged into `test:responsive` |
-| `test:auto` | Removed (unclear purpose) |
+| `test:coverage:ui`       | `npx vitest --coverage --ui`                  |
+| `test:coverage:watch`    | `npx vitest watch --coverage`                 |
+| `test:responsive:dev`    | Use `test:cypress` with manual selection      |
+| `test:responsive:ci`     | Merged into `test:responsive`                 |
+| `test:auto`              | Removed (unclear purpose)                     |
 
 ### Benefits of Consolidation
+
 1. ✅ **Reduced complexity** - 38% fewer commands
 2. ✅ **Eliminated duplicates** - `test` and `test:unit` were identical
 3. ✅ **Clearer naming** - `test:watch` instead of `test:unit:watch`
@@ -238,15 +264,18 @@ npm run test:auth         # Run authentication flow tests
 ## Summary of All Changes
 
 ### Files Modified
+
 - ✅ `package.json` - Consolidated test scripts (21 → 13)
 - ✅ `vitest.config.mts` - Added `lcov` reporter
 - ✅ `.gitignore` - Already had `/coverage` (no change needed)
 
 ### Files Created
+
 - ✅ `TEST_COMMANDS_CONSOLIDATION.md` - Documentation of consolidation
 - ✅ `CLEANUP_AND_TESTING_SUMMARY.md` - This file
 
 ### Files Removed
+
 - ✅ 9 `.bak` files from `db-migrations/`
 - ✅ `tests/validation-framework/validation-status-report.md` (outdated)
 
@@ -255,6 +284,7 @@ npm run test:auth         # Run authentication flow tests
 ## Next Steps & Recommendations
 
 ### Immediate (Optional)
+
 1. **Set up validation test database**
    - Populate `forestgeo_testing` with validation procedures
    - This will fix the 26 failing validation tests
@@ -266,7 +296,9 @@ npm run test:auth         # Run authentication flow tests
    - Identify areas that need more test coverage
 
 ### Short-term
+
 3. **Add coverage badge to README**
+
    ```markdown
    ![Coverage](https://img.shields.io/badge/coverage-XX%25-green)
    ```
@@ -276,6 +308,7 @@ npm run test:auth         # Run authentication flow tests
    - Upload coverage reports to Codecov or similar (optional, since Sonar unavailable)
 
 ### Long-term
+
 5. **Gradually increase coverage thresholds**
    - Current: 60% for all metrics
    - Target: 70% → 80% over time
@@ -290,6 +323,7 @@ npm run test:auth         # Run authentication flow tests
 ## Quick Reference Card
 
 ### Most Common Commands
+
 ```bash
 # Development
 npm run dev                    # Start dev server
@@ -308,6 +342,7 @@ npm run build                 # Build for production
 ```
 
 ### Coverage Reports
+
 ```bash
 # Generate coverage
 npm run test:coverage
