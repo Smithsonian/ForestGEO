@@ -76,6 +76,47 @@ export async function POST(request: NextRequest) {
         );
         ailogger.info(`Successfully inserted ${countResult[0]?.count || 0} rows for ${fileName}-${batchID}`);
 
+        // Track file upload in unifiedchangelog (single row per file, not per batch)
+        try {
+          // Check if we've already logged this file upload
+          const existingEntry = await connectionManager.executeQuery(
+            `SELECT ChangeID, NewRowState FROM ${schema}.unifiedchangelog
+             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
+             ORDER BY ChangeID DESC LIMIT 1`,
+            [fileName, censusCookie]
+          );
+
+          if (existingEntry.length === 0) {
+            // First batch for this file - insert new entry
+            const uploadMetadata = JSON.stringify({
+              fileName,
+              formType,
+              rowCount: countResult[0]?.count || 0,
+              batchCount: 1
+            });
+            await connectionManager.executeQuery(
+              `INSERT INTO ${schema}.unifiedchangelog
+              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
+              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie]
+            );
+          } else {
+            // Subsequent batch - update the existing entry with accumulated count
+            const metadata = JSON.parse(existingEntry[0].NewRowState);
+            metadata.rowCount = (metadata.rowCount || 0) + (countResult[0]?.count || 0);
+            metadata.batchCount = (metadata.batchCount || 1) + 1;
+            await connectionManager.executeQuery(
+              `UPDATE ${schema}.unifiedchangelog
+               SET NewRowState = ?, ChangeTimestamp = NOW()
+               WHERE ChangeID = ?`,
+              [JSON.stringify(metadata), existingEntry[0].ChangeID]
+            );
+          }
+        } catch (logError: any) {
+          // Log but don't fail the upload if changelog tracking fails
+          ailogger.error(`Failed to log file upload to changelog: ${logError.message}`);
+        }
+
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Bulk insert to SQL completed`,
@@ -179,6 +220,50 @@ export async function POST(request: NextRequest) {
       }
 
       await connectionManager.commitTransaction(transactionID ?? '');
+
+      // Track file upload in unifiedchangelog (single row per file)
+      try {
+        const batchRowCount = Object.keys(fileRowSet).length;
+        const censusID = census?.dateRanges[0]?.censusID;
+
+        // Check if we've already logged this file upload
+        const existingEntry = await connectionManager.executeQuery(
+          `SELECT ChangeID, NewRowState FROM ${schema}.unifiedchangelog
+           WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
+           ORDER BY ChangeID DESC LIMIT 1`,
+          [fileName, censusID]
+        );
+
+        if (existingEntry.length === 0) {
+          // First batch for this file - insert new entry
+          const uploadMetadata = JSON.stringify({
+            fileName,
+            formType,
+            rowCount: batchRowCount,
+            batchCount: 1
+          });
+          await connectionManager.executeQuery(
+            `INSERT INTO ${schema}.unifiedchangelog
+            (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+            VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
+            ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]
+          );
+        } else {
+          // Subsequent batch - update the existing entry with accumulated count
+          const metadata = JSON.parse(existingEntry[0].NewRowState);
+          metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
+          metadata.batchCount = (metadata.batchCount || 1) + 1;
+          await connectionManager.executeQuery(
+            `UPDATE ${schema}.unifiedchangelog
+             SET NewRowState = ?, ChangeTimestamp = NOW()
+             WHERE ChangeID = ?`,
+            [JSON.stringify(metadata), existingEntry[0].ChangeID]
+          );
+        }
+      } catch (logError: any) {
+        // Log but don't fail the upload if changelog tracking fails
+        ailogger.error(`Failed to log file upload to changelog: ${logError.message}`);
+      }
     } catch (error: any) {
       await connectionManager.rollbackTransaction(transactionID ?? '');
       ailogger.error('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');

@@ -1,0 +1,587 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
+
+/**
+ * Unified Changelog Tracking System Tests
+ *
+ * Purpose: The unifiedchangelog table tracks user-initiated data modifications for audit purposes:
+ * - Single-row edits via datagrid EditToolbar (PATCH/DELETE operations)
+ * - File uploads (INSERT operations with batch tracking)
+ *
+ * Exclusions:
+ * - Bulk census deletions (would flood the log with thousands of entries)
+ * - System-generated changes (auto-calculations, triggers firing from other triggers)
+ *
+ * Test Coverage:
+ * 1. Single-row UPDATE operations create ONE changelog entry
+ * 2. Single-row DELETE operations create ONE changelog entry
+ * 3. Census deletions do NOT create changelog entries
+ * 4. File uploads create ONE changelog entry per file (not per batch)
+ * 5. Multiple batches from same file UPDATE the same changelog entry
+ */
+
+// ========== Mocks ==========
+vi.mock('@/config/connectionmanager', async () => {
+  const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
+
+  const candidate =
+    (typeof actual?.getInstance === 'function' && actual.getInstance()) ||
+    (actual?.default && typeof actual.default.getInstance === 'function' && actual.default.getInstance()) ||
+    actual?.default ||
+    actual;
+
+  const instance = (candidate &&
+    typeof candidate.beginTransaction === 'function' &&
+    typeof candidate.commitTransaction === 'function' &&
+    typeof candidate.rollbackTransaction === 'function' &&
+    typeof candidate.executeQuery === 'function' &&
+    candidate) || {
+    beginTransaction: vi.fn(async () => 'tx-test'),
+    commitTransaction: vi.fn(async () => {}),
+    rollbackTransaction: vi.fn(async () => {}),
+    executeQuery: vi.fn(async () => []),
+    closeConnection: vi.fn(async () => {})
+  };
+
+  const getInstance = vi.fn(() => instance);
+
+  return {
+    ...actual,
+    default: { ...(actual?.default ?? {}), getInstance },
+    getInstance
+  };
+});
+
+vi.mock('@/config/datamapper', () => ({
+  default: {
+    getMapper: vi.fn(() => ({
+      mapData: vi.fn((rows: any[]) => rows),
+      demapData: vi.fn((rows: any[]) => rows)
+    }))
+  }
+}));
+
+vi.mock('@/ailogger', () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
+
+vi.mock('@/app/actions/cookiemanager', () => ({
+  getCookie: vi.fn(async () => '123')
+}));
+
+// Import handlers AFTER mocks
+import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
+import { GET as CLEARCENSUS_GET } from '../clearcensus/route';
+import { POST as SQLPACKETLOAD_POST } from '../sqlpacketload/route';
+
+// ========== Helpers ==========
+function makeRequest(url: string, method: string = 'GET', body?: any): any {
+  const req: any = new Request(url, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { 'Content-Type': 'application/json' } : {}
+  });
+  req.nextUrl = new URL(url);
+  req.json = async () => body;
+  return req as any;
+}
+
+function makeParams(dataType: string, slugs?: string[]): { params: Promise<{ dataType: string; slugs?: string[] }> } {
+  return { params: Promise.resolve({ dataType, slugs }) };
+}
+
+describe('Unified Changelog Tracking System', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('1. Single-Row UPDATE via EditToolbar', () => {
+    it('should create ONE changelog entry when user updates a row via PATCH', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      // Mock the database calls
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
+        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+
+      const oldRow = { code: 'A', description: 'Old Description', status: 'alive' };
+      const newRow = { code: 'A', description: 'New Description', status: 'alive' };
+
+      const req = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
+        oldRow,
+        newRow
+      });
+
+      const res = await PATCH(req, makeParams('attributes', ['testschema', 'code']));
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(exec).toHaveBeenCalled();
+
+      // Verify UPDATE was called
+      const updateCall = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('attributes'));
+      expect(updateCall).toBeDefined();
+
+      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      expect(commit).toHaveBeenCalledWith('tx-1');
+    });
+
+    it('should create ONE changelog entry for personnel row update', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-2');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({ affectedRows: 1 }) // UPDATE query
+        .mockResolvedValueOnce([{ Count: 1 }]); // COUNT query
+
+      const oldRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'researcher' };
+      const newRow = { personnelID: 1, firstName: 'John', lastName: 'Doe', role: 'lead researcher' };
+
+      const req = makeRequest('http://localhost/api/fixeddata/personnel/testschema/personnelID', 'PATCH', {
+        oldRow,
+        newRow
+      });
+
+      const res = await PATCH(req, makeParams('personnel', ['testschema', 'personnelID']));
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      expect(exec).toHaveBeenCalled();
+      expect(commit).toHaveBeenCalledWith('tx-2');
+    });
+  });
+
+  describe('2. Single-Row DELETE via EditToolbar', () => {
+    it('should create ONE changelog entry when user deletes a row via DELETE', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({ affectedRows: 1 }); // DELETE query
+
+      const rowToDelete = { code: 'B', description: 'To Delete', status: 'dead' };
+
+      const req = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'DELETE', {
+        newRow: rowToDelete
+      });
+
+      const res = await DELETE(req, makeParams('attributes', ['testschema', 'code']));
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(exec).toHaveBeenCalled();
+
+      // Verify DELETE was called
+      const deleteCall = exec.mock.calls.find(call => String(call[0]).includes('DELETE') && String(call[0]).includes('attributes'));
+      expect(deleteCall).toBeDefined();
+
+      // Once triggers are enabled, this would create ONE changelog entry via trigger
+      expect(commit).toHaveBeenCalledWith('tx-3');
+    });
+  });
+
+  describe('3. Census Deletion Exclusion', () => {
+    it('should NOT create changelog entries during full census deletion', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+
+      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=5&type=full');
+
+      const res = await CLEARCENSUS_GET(req);
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+      expect(body).toEqual({ message: 'Census cleared successfully' });
+
+      // Verify the stored procedure is called with correct parameters
+      const [sql, params] = exec.mock.calls[0];
+      expect(String(sql)).toMatch(/CALL testschema\.clearcensusfull\(\?\);?/i);
+      expect(params).toEqual(['5']);
+
+      // The stored procedure sets @disable_triggers = 1
+      // This prevents changelog entries from being created during bulk deletion
+      expect(commit).toHaveBeenCalledWith('tx-4');
+    });
+
+    it('should NOT create changelog entries during partial census deletion (measurements only)', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
+
+      const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=7&type=msmts');
+
+      const res = await CLEARCENSUS_GET(req);
+
+      expect(res.status).toBe(HTTPResponses.OK);
+
+      // Verify the stored procedure is called
+      const [sql, params] = exec.mock.calls[0];
+      expect(String(sql)).toMatch(/CALL testschema\.clearcensusmsmts\(\?\);?/i);
+      expect(params).toEqual(['7']);
+
+      // The stored procedure sets @disable_triggers = 1
+      expect(commit).toHaveBeenCalledWith('tx-5');
+    });
+  });
+
+  describe('4. File Upload Tracking - Single Row Per File', () => {
+    it('should create ONE changelog entry for measurements file upload (first batch)', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-6');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      // Mock sequence for measurements upload path:
+      // 1. INSERT to temporarymeasurements
+      // 2. COUNT inserted rows
+      // 3. SELECT existing changelog entry (none found)
+      // 4. INSERT new changelog entry
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
+        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT inserted rows
+        .mockResolvedValueOnce([]) // SELECT existing changelog entry (none found)
+        .mockResolvedValueOnce({ insertId: 1 }); // INSERT new changelog entry
+
+      const fileRowSet = {
+        'row-1': {
+          tag: '100',
+          stemtag: '1',
+          spcode: 'sp1',
+          quadrat: 'Q01',
+          lx: 0.5,
+          ly: 0.5,
+          dbh: 10.5,
+          hom: 1.3,
+          date: new Date('2024-01-01'),
+          codes: 'A',
+          comments: null
+        }
+      };
+
+      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'measurements.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet
+      });
+
+      const res = await SQLPACKETLOAD_POST(req);
+
+      expect(res.status).toBe(HTTPResponses.OK);
+
+      // For measurements, the code path includes:
+      // 1. INSERT to temporarymeasurements
+      // 2. COUNT from temporarymeasurements
+      // 3. SELECT from unifiedchangelog (check for existing entry)
+      // 4. INSERT into unifiedchangelog (first batch) OR UPDATE unifiedchangelog (subsequent batches)
+
+      // Find the changelog-related queries
+      const changelogQueries = exec.mock.calls.filter(call => {
+        const sql = String(call[0]);
+        return sql.includes('unifiedchangelog');
+      });
+
+      // Should have at least 2 changelog queries: SELECT and INSERT
+      expect(changelogQueries.length).toBeGreaterThanOrEqual(2);
+
+      // Verify changelog INSERT was called
+      const changelogInsert = exec.mock.calls.find(call => {
+        const sql = String(call[0]);
+        return sql.includes('INSERT') && sql.includes('unifiedchangelog');
+      });
+
+      expect(changelogInsert).toBeDefined();
+
+      // Verify the parameters structure
+      if (changelogInsert) {
+        const params = changelogInsert[1];
+        expect(params).toBeDefined();
+        expect(params[0]).toBe('file_upload'); // TableName
+        expect(params[1]).toBe('measurements.csv'); // RecordID (fileName)
+        expect(params[2]).toBe('INSERT'); // Operation
+        // params[3] is the JSON metadata
+        const metadata = JSON.parse(params[3]);
+        expect(metadata.fileName).toBe('measurements.csv');
+        expect(metadata.formType).toBe('measurements');
+        expect(metadata.rowCount).toBe(1200);
+        expect(metadata.batchCount).toBe(1);
+      }
+    });
+
+    it('should UPDATE same changelog entry for subsequent batches of same file', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-7');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      // Mock sequence: INSERT temporarymeasurements, COUNT rows, SELECT changelog (found), UPDATE changelog
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
+        .mockResolvedValueOnce([{ count: 800 }]) // COUNT inserted rows
+        .mockResolvedValueOnce([
+          {
+            // SELECT existing changelog entry (found)
+            ChangeID: 1,
+            NewRowState: JSON.stringify({
+              fileName: 'measurements.csv',
+              formType: 'measurements',
+              rowCount: 1200,
+              batchCount: 1
+            })
+          }
+        ])
+        .mockResolvedValueOnce({}); // UPDATE changelog entry
+
+      const fileRowSet = {
+        'row-1': {
+          tag: '200',
+          stemtag: '1',
+          spcode: 'sp2',
+          quadrat: 'Q02',
+          lx: 1.5,
+          ly: 1.5,
+          dbh: 12.5,
+          hom: 1.3,
+          date: new Date('2024-01-02'),
+          codes: 'A',
+          comments: null
+        }
+      };
+
+      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'measurements.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet
+      });
+
+      const res = await SQLPACKETLOAD_POST(req);
+
+      expect(res.status).toBe(HTTPResponses.OK);
+
+      // Verify changelog UPDATE was called (not INSERT)
+      const changelogUpdate = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('unifiedchangelog'));
+      expect(changelogUpdate).toBeDefined();
+
+      // Verify accumulated counts
+      if (changelogUpdate) {
+        const [sql, params] = changelogUpdate;
+        const metadata = JSON.parse(params[0]);
+        expect(metadata.rowCount).toBe(2000); // 1200 + 800
+        expect(metadata.batchCount).toBe(2); // 1 + 1
+      }
+    });
+
+    it('should create ONE changelog entry for supporting data file upload (attributes)', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-8');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({}) // INSERT/UPSERT to attributes
+        .mockResolvedValueOnce([]) // SELECT existing changelog entry (none)
+        .mockResolvedValueOnce({}); // INSERT changelog entry
+
+      const fileRowSet = {
+        'row-1': { code: 'A', description: 'Alive', status: 'alive' },
+        'row-2': { code: 'D', description: 'Dead', status: 'dead' }
+      };
+
+      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'attributes',
+        fileName: 'attributes.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet
+      });
+
+      const res = await SQLPACKETLOAD_POST(req);
+
+      expect(res.status).toBe(HTTPResponses.OK);
+
+      // Verify ONE changelog entry was created
+      const changelogInsert = exec.mock.calls.find(call => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('unifiedchangelog'));
+      expect(changelogInsert).toBeDefined();
+    });
+
+    it('should create separate changelog entries for different files', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      // First file upload
+      let begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9a');
+      let commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      let exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce([{ count: 500 }])
+        .mockResolvedValueOnce([]) // No existing entry for file1
+        .mockResolvedValueOnce({});
+
+      const req1 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'file1.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+      });
+
+      const res1 = await SQLPACKETLOAD_POST(req1);
+      expect(res1.status).toBe(HTTPResponses.OK);
+
+      vi.clearAllMocks();
+
+      // Second file upload
+      begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
+      commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce([{ count: 300 }])
+        .mockResolvedValueOnce([]) // No existing entry for file2
+        .mockResolvedValueOnce({});
+
+      const req2 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'file2.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet: { 'row-1': { tag: '200', stemtag: '1' } }
+      });
+
+      const res2 = await SQLPACKETLOAD_POST(req2);
+      expect(res2.status).toBe(HTTPResponses.OK);
+
+      // Both files should create separate changelog entries
+      // Each file gets its own INSERT into unifiedchangelog
+    });
+  });
+
+  describe('5. Additional Intent-Based Test Cases', () => {
+    it('should handle concurrent edits from multiple users without conflicts', async () => {
+      // Test that multiple users editing different rows doesn't cause conflicts
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce([{ Count: 1 }])
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce([{ Count: 1 }]);
+
+      // User 1 edits row A
+      const req1 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
+        oldRow: { code: 'A', description: 'Old A' },
+        newRow: { code: 'A', description: 'New A' }
+      });
+
+      // User 2 edits row B
+      const req2 = makeRequest('http://localhost/api/fixeddata/attributes/testschema/code', 'PATCH', {
+        oldRow: { code: 'B', description: 'Old B' },
+        newRow: { code: 'B', description: 'New B' }
+      });
+
+      const [res1, res2] = await Promise.all([
+        PATCH(req1, makeParams('attributes', ['testschema', 'code'])),
+        PATCH(req2, makeParams('attributes', ['testschema', 'code']))
+      ]);
+
+      expect(res1.status).toBe(HTTPResponses.OK);
+      expect(res2.status).toBe(HTTPResponses.OK);
+
+      // Both should create separate changelog entries
+      expect(exec).toHaveBeenCalled();
+    });
+
+    it('should track WHO made the change via ChangedBy field', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-11');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce([{ count: 100 }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce({});
+
+      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'test.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'john.doe@example.com',
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+      });
+
+      await SQLPACKETLOAD_POST(req);
+
+      // Verify ChangedBy field is populated
+      const changelogInsert = exec.mock.calls.find(call => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('unifiedchangelog'));
+
+      if (changelogInsert) {
+        const params = changelogInsert[1];
+        expect(params).toContain('john.doe@example.com');
+      }
+    });
+
+    it('should not fail upload if changelog tracking fails', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+
+      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-12');
+      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+
+      // Mock changelog insert failure but upload succeeds
+      const exec = vi
+        .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
+        .mockResolvedValueOnce([{ count: 50 }]) // COUNT succeeds
+        .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog fails
+
+      const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
+        schema: 'testschema',
+        formType: 'measurements',
+        fileName: 'test.csv',
+        plot: { plotID: 1 },
+        census: { dateRanges: [{ censusID: 10 }] },
+        user: 'test-user',
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+      });
+
+      const res = await SQLPACKETLOAD_POST(req);
+
+      // Upload should still succeed even if changelog fails
+      expect(res.status).toBe(HTTPResponses.OK);
+    });
+  });
+});

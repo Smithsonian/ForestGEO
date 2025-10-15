@@ -86,29 +86,29 @@ flowchart TD
 
 ### Currently Tested Validations
 
-| ID | Validation | Scenarios | Status |
-|----|------------|-----------|--------|
-| 1  | DBH Growth Exceeds Max (65mm) | 2 | ✅ |
-| 2  | DBH Shrinkage Exceeds Max (5%) | 1 | ✅ |
-| 3  | Invalid Species Codes | 2 | ✅ |
-| 6  | Measurement Date Outside Census Bounds | 3 | ✅ |
-| 8  | Stems Outside Plot Boundaries | 2 | ✅ |
-| 14 | Invalid Attribute Codes | 2 | ✅ |
-| 15 | Abnormally High DBH (>= 3500mm) | 3 | ✅ |
+| ID  | Validation                             | Scenarios | Status |
+| --- | -------------------------------------- | --------- | ------ |
+| 1   | DBH Growth Exceeds Max (65mm)          | 2         | ✅     |
+| 2   | DBH Shrinkage Exceeds Max (5%)         | 1         | ✅     |
+| 3   | Invalid Species Codes                  | 2         | ✅     |
+| 6   | Measurement Date Outside Census Bounds | 3         | ✅     |
+| 8   | Stems Outside Plot Boundaries          | 2         | ✅     |
+| 14  | Invalid Attribute Codes                | 2         | ✅     |
+| 15  | Abnormally High DBH (>= 3500mm)        | 3         | ✅     |
 
 **Total**: 15 test scenarios covering 7 validations
 
 ### Validations To Be Added
 
-| ID | Validation | Priority |
-|----|------------|----------|
-| 4  | Duplicated Quadrat Names | Medium |
-| 5  | Duplicate Stem/Tree Tag Combinations | High |
-| 7  | Stems in Tree with Different Species | Medium |
-| 9  | Tree Stems in Different Quadrats | Medium |
-| 11 | Measured Diameter Min/Max | Low |
-| 12 | Stems with Measurements but Dead Attributes | Medium |
-| 13 | Stems with Missing Measurements but Live Attributes | Medium |
+| ID  | Validation                                          | Priority |
+| --- | --------------------------------------------------- | -------- |
+| 4   | Duplicated Quadrat Names                            | Medium   |
+| 5   | Duplicate Stem/Tree Tag Combinations                | High     |
+| 7   | Stems in Tree with Different Species                | Medium   |
+| 9   | Tree Stems in Different Quadrats                    | Medium   |
+| 11  | Measured Diameter Min/Max                           | Low      |
+| 12  | Stems with Measurements but Dead Attributes         | Medium   |
+| 13  | Stems with Missing Measurements but Live Attributes | Medium   |
 
 ## Writing New Test Scenarios
 
@@ -125,21 +125,25 @@ export const validationXScenarios: ValidationTestScenario[] = [
       // Define test data
       species: [{ SpeciesCode: 'TEST', SpeciesName: 'Test Species', IsActive: true }],
       plots: [{ DimensionX: 100, DimensionY: 100, IsActive: true }],
-      census: [{
-        PlotCensusNumber: 1,
-        StartDate: new Date('2020-01-01'),
-        EndDate: new Date('2020-12-31'),
-        IsActive: true
-      }],
+      census: [
+        {
+          PlotCensusNumber: 1,
+          StartDate: new Date('2020-01-01'),
+          EndDate: new Date('2020-12-31'),
+          IsActive: true
+        }
+      ],
       quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, IsActive: true }],
       trees: [{ TreeTag: 'TEST_001', IsActive: true }],
       stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
-      coremeasurements: [{
-        MeasurementDate: new Date('2020-06-01'),
-        MeasuredDBH: 150,
-        IsValidated: null,
-        IsActive: true
-      }]
+      coremeasurements: [
+        {
+          MeasurementDate: new Date('2020-06-01'),
+          MeasuredDBH: 150,
+          IsValidated: null,
+          IsActive: true
+        }
+      ]
     },
     expectedErrors: [
       {
@@ -187,7 +191,7 @@ export const allValidationScenarios: Map<number, ValidationTestScenario[]> = new
   [1, validation1Scenarios],
   [2, validation2Scenarios],
   // ... existing validations ...
-  [X, validationXScenarios]  // Add your new validation
+  [X, validationXScenarios] // Add your new validation
 ]);
 ```
 
@@ -320,11 +324,13 @@ mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
 ### Test Fails: "Missed expected errors"
 
 **Possible Causes**:
+
 1. **Validation query has a bug** - Query doesn't detect the issue
 2. **Test data setup incorrect** - Data doesn't trigger validation condition
 3. **Query parameters wrong** - @p_PlotID or @p_CensusID filtering out test data
 
 **Debug Steps**:
+
 1. Run validation query manually with test data
 2. Check `cmverrors` table for created errors
 3. Verify test data meets validation trigger conditions
@@ -334,6 +340,7 @@ mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
 **Meaning**: Validation flagged measurements that should NOT be flagged
 
 **Solution**:
+
 1. Review validation query logic
 2. Check for edge cases in validation conditions
 3. Add more specific WHERE clauses to validation query

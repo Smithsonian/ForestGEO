@@ -100,9 +100,7 @@ async function checkDatabase() {
       console.log('✓ Validations loaded successfully!\n');
 
       // Re-check count
-      const [newValidations] = await connection.query<mysql.RowDataPacket[]>(
-        `SELECT COUNT(*) as count FROM ${dbConfig.database}.sitespecificvalidations`
-      );
+      const [newValidations] = await connection.query<mysql.RowDataPacket[]>(`SELECT COUNT(*) as count FROM ${dbConfig.database}.sitespecificvalidations`);
 
       console.log(`✓ Database now has ${newValidations[0].count} validations\n`);
     } else if (validations.length < 15) {
@@ -125,18 +123,7 @@ async function checkDatabase() {
 
     // Check other required tables
     console.log('🔍 Checking other required tables...');
-    const requiredTables = [
-      'plots',
-      'census',
-      'quadrats',
-      'species',
-      'trees',
-      'stems',
-      'coremeasurements',
-      'cmattributes',
-      'attributes',
-      'cmverrors'
-    ];
+    const requiredTables = ['plots', 'census', 'quadrats', 'species', 'trees', 'stems', 'coremeasurements', 'cmattributes', 'attributes', 'cmverrors'];
 
     const [existingTables] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT TABLE_NAME

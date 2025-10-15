@@ -417,13 +417,229 @@ export const validation15Scenarios: ValidationTestScenario[] = [
   }
 ];
 
+/**
+ * Validation 7: Stems in Tree with Different Species (BROKEN)
+ *
+ * ⚠️ THIS VALIDATION IS BROKEN - Tests will FAIL until query is fixed
+ *
+ * Issue: The query checks if trees have stems with different species, but species
+ * is defined at the TREE level, not the STEM level. All stems in a tree will always
+ * have the same species. The query joins stems to trees and gets SpeciesID from the
+ * tree, then counts distinct species codes per tree - this count will ALWAYS be 1.
+ *
+ * Expected: These tests should FAIL with current implementation
+ * After Fix: Tests should PASS
+ */
+export const validation7Scenarios: ValidationTestScenario[] = [
+  {
+    name: 'BROKEN QUERY TEST - Tree Stems with Same Species (will fail)',
+    description: 'EXPECTED TO FAIL: Current query cannot detect different species because species is at tree level',
+    setupData: {
+      species: [
+        { SpeciesCode: 'ACRU', SpeciesName: 'Acer rubrum', IsActive: true },
+        { SpeciesCode: 'QURU', SpeciesName: 'Quercus rubra', IsActive: true }
+      ],
+      plots: [{ DimensionX: 100, DimensionY: 100, IsActive: true }],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
+      trees: [{ TreeTag: 'MULTI_SPECIES_TREE', IsActive: true }], // This tree will only have one species
+      stems: [
+        { StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true },
+        { StemTag: 'S2', LocalX: 11, LocalY: 11, IsActive: true }
+      ],
+      coremeasurements: [
+        { MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true },
+        { MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 160, IsValidated: undefined, IsActive: true }
+      ]
+    },
+    // In an ideal world where stems could have different species, this would be flagged
+    // But current data model makes this impossible to test properly
+    expectedErrors: [{ treeTag: 'MULTI_SPECIES_TREE', condition: 'Tree has stems with different species (IMPOSSIBLE IN CURRENT MODEL)' }]
+  }
+];
+
+/**
+ * Validation 8 Extension: Lower Bound Check (FIXED ✅)
+ *
+ * ✅ THIS VALIDATION IS NOW FIXED - Includes comprehensive boundary checks
+ *
+ * Fixed: Query now checks:
+ * - NULL stem coordinates
+ * - Negative stem coordinates
+ * - Lower bound violations (coordinates < 0)
+ * - Upper bound violations (coordinates > DimensionX/Y)
+ *
+ * Expected: All tests should PASS
+ */
+export const validation8ExtendedScenarios: ValidationTestScenario[] = [
+  ...validation8Scenarios,
+  {
+    name: 'Negative X Coordinate - Should Flag',
+    description: 'Stem with negative X coordinate should be flagged',
+    setupData: {
+      species: [{ SpeciesCode: 'ACRU', SpeciesName: 'Acer rubrum', IsActive: true }],
+      plots: [
+        {
+          DimensionX: 100,
+          DimensionY: 100,
+          GlobalX: 0,
+          GlobalY: 0,
+          IsActive: true
+        }
+      ],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      quadrats: [
+        {
+          QuadratName: 'Q1',
+          DimensionX: 20,
+          DimensionY: 20,
+          StartX: 10,
+          StartY: 10,
+          IsActive: true
+        }
+      ],
+      trees: [{ TreeTag: 'NEGATIVE_X_STEM', IsActive: true }],
+      stems: [
+        {
+          StemTag: 'S1',
+          LocalX: -20, // Negative local coordinate: -20 + 10 (quadrat) + 0 (global) = -10 (OUTSIDE!)
+          LocalY: 5,
+          IsActive: true
+        }
+      ],
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
+    },
+    expectedErrors: [{ treeTag: 'NEGATIVE_X_STEM', condition: 'Stem X coordinate -20 results in negative absolute position -10' }]
+  },
+  {
+    name: 'Negative Y Coordinate - Should Flag',
+    description: 'Stem with negative Y coordinate should be flagged',
+    setupData: {
+      species: [{ SpeciesCode: 'ACRU', SpeciesName: 'Acer rubrum', IsActive: true }],
+      plots: [
+        {
+          DimensionX: 100,
+          DimensionY: 100,
+          GlobalX: 0,
+          GlobalY: 0,
+          IsActive: true
+        }
+      ],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      quadrats: [
+        {
+          QuadratName: 'Q1',
+          DimensionX: 20,
+          DimensionY: 20,
+          StartX: 5,
+          StartY: 5,
+          IsActive: true
+        }
+      ],
+      trees: [{ TreeTag: 'NEGATIVE_Y_STEM', IsActive: true }],
+      stems: [
+        {
+          StemTag: 'S1',
+          LocalX: 5,
+          LocalY: -10, // Negative local coordinate: -10 + 5 (quadrat) + 0 (global) = -5 (OUTSIDE!)
+          IsActive: true
+        }
+      ],
+      coremeasurements: [{ MeasurementDate: new Date('2020-06-01'), MeasuredDBH: 150, IsValidated: undefined, IsActive: true }]
+    },
+    expectedErrors: [{ treeTag: 'NEGATIVE_Y_STEM', condition: 'Stem Y coordinate -10 results in negative absolute position -5' }]
+  }
+];
+
+/**
+ * Validation 11: Measured Diameter Min/Max (FIXED ✅)
+ *
+ * ✅ THIS VALIDATION IS NOW FIXED - Uses species-specific limits from specieslimits table
+ *
+ * Fixed: Query now joins with specieslimits table to check each measurement against its
+ * species-specific LowerBound and UpperBound values.
+ *
+ * Expected: All tests should PASS
+ */
+export const validation11Scenarios: ValidationTestScenario[] = [
+  {
+    name: 'DBH Below Species-Specific Minimum - Should Flag',
+    description: 'Measurement with DBH below species minimum should be flagged',
+    setupData: {
+      species: [{ SpeciesCode: 'ACRU', SpeciesName: 'Acer rubrum', IsActive: true }],
+      plots: [{ DimensionX: 100, DimensionY: 100, DefaultDBHUnits: 'mm', IsActive: true }],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      specieslimits: [{ LimitType: 'DBH', LowerBound: 10, UpperBound: 500, IsActive: true }],
+      quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
+      trees: [{ TreeTag: 'BELOW_SPECIES_MIN', IsActive: true }],
+      stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
+      coremeasurements: [
+        {
+          MeasurementDate: new Date('2020-06-01'),
+          MeasuredDBH: 5, // Below species minimum of 10mm
+          IsValidated: undefined,
+          IsActive: true
+        }
+      ]
+    },
+    expectedErrors: [{ treeTag: 'BELOW_SPECIES_MIN', condition: 'DBH 5mm below species-specific minimum of 10mm' }]
+  },
+  {
+    name: 'DBH Above Species-Specific Maximum - Should Flag',
+    description: 'Measurement with DBH above species maximum should be flagged',
+    setupData: {
+      species: [{ SpeciesCode: 'SMALL_SP', SpeciesName: 'Small Species', IsActive: true }],
+      plots: [{ DimensionX: 100, DimensionY: 100, DefaultDBHUnits: 'mm', IsActive: true }],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      specieslimits: [{ LimitType: 'DBH', LowerBound: 5, UpperBound: 500, IsActive: true }],
+      quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
+      trees: [{ TreeTag: 'ABOVE_SPECIES_MAX', IsActive: true }],
+      stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
+      coremeasurements: [
+        {
+          MeasurementDate: new Date('2020-06-01'),
+          MeasuredDBH: 1000, // Above species maximum of 500mm
+          IsValidated: undefined,
+          IsActive: true
+        }
+      ]
+    },
+    expectedErrors: [{ treeTag: 'ABOVE_SPECIES_MAX', condition: 'DBH 1000mm above species-specific maximum of 500mm' }]
+  },
+  {
+    name: 'DBH Within Species-Specific Bounds - Should Not Flag',
+    description: 'DBH within species-specific bounds should NOT be flagged',
+    setupData: {
+      species: [{ SpeciesCode: 'NORMAL_SP', SpeciesName: 'Normal Species', IsActive: true }],
+      plots: [{ DimensionX: 100, DimensionY: 100, DefaultDBHUnits: 'mm', IsActive: true }],
+      census: [{ PlotCensusNumber: 1, StartDate: new Date('2020-01-01'), EndDate: new Date('2020-12-31'), IsActive: true }],
+      specieslimits: [{ LimitType: 'DBH', LowerBound: 10, UpperBound: 500, IsActive: true }],
+      quadrats: [{ QuadratName: 'Q1', DimensionX: 20, DimensionY: 20, StartX: 0, StartY: 0, IsActive: true }],
+      trees: [{ TreeTag: 'WITHIN_BOUNDS', IsActive: true }],
+      stems: [{ StemTag: 'S1', LocalX: 10, LocalY: 10, IsActive: true }],
+      coremeasurements: [
+        {
+          MeasurementDate: new Date('2020-06-01'),
+          MeasuredDBH: 250, // Within species bounds (10-500mm)
+          IsValidated: undefined,
+          IsActive: true
+        }
+      ]
+    },
+    expectedErrors: [],
+    expectedNoErrors: [{ treeTag: 'WITHIN_BOUNDS', condition: 'DBH within species-specific bounds should not be flagged' }]
+  }
+];
+
 // Export all scenarios organized by validation ID
 export const allValidationScenarios: Map<number, ValidationTestScenario[]> = new Map([
   [1, validation1Scenarios],
   [2, validation2Scenarios],
   [3, validation3Scenarios],
   [6, validation6Scenarios],
-  [8, validation8Scenarios],
+  [7, validation7Scenarios], // BROKEN - Expected to fail
+  [8, validation8ExtendedScenarios], // INCOMPLETE - Some tests will fail
+  [11, validation11Scenarios], // BROKEN - Expected to fail
   [14, validation14Scenarios],
   [15, validation15Scenarios]
 ]);

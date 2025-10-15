@@ -43,6 +43,7 @@ import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
 import { useSession } from 'next-auth/react';
+import { useLoading } from '@/app/contexts/loadingprovider';
 import { TransitionComponent } from '@/components/client/clientmacros';
 import ListDivider from '@mui/joy/ListDivider';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
@@ -151,6 +152,7 @@ export default function Sidebar(props: SidebarProps) {
   const siteListContext = useSiteListContext();
   const plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
+  const { setLoading } = useLoading();
   const isAllValiditiesTrue = Object.entries(validity)
     .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
@@ -1218,18 +1220,28 @@ export default function Sidebar(props: SidebarProps) {
             <DialogActions>
               <Button
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                  setLoading(true, 'Deleting census measurements...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
-                  setManualReset(true);
+                  try {
+                    await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                    setManualReset(true);
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
               >
                 Partial Deletion
               </Button>
               <Button
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                  setLoading(true, 'Deleting census measurements and fixed data...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
-                  setManualReset(true);
+                  try {
+                    await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                    setManualReset(true);
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
               >
                 Full Deletion

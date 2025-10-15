@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => ({
     mockReset: true,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'html', 'lcov'],
       exclude: [
         'node_modules/**',
         'build/**',

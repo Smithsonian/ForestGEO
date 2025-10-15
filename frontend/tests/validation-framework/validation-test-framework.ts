@@ -32,6 +32,7 @@ export interface TestDataSetup {
   census?: Partial<Census>[];
   quadrats?: Partial<Quadrat>[];
   species?: Partial<Species>[];
+  specieslimits?: Partial<SpeciesLimit>[];
   trees?: Partial<Tree>[];
   stems?: Partial<Stem>[];
   coremeasurements?: Partial<CoreMeasurement>[];
@@ -91,6 +92,17 @@ export interface Species {
   SpeciesID: number;
   SpeciesCode: string;
   SpeciesName: string;
+  IsActive: boolean;
+}
+
+export interface SpeciesLimit {
+  SpeciesLimitID: number;
+  SpeciesID: number;
+  CensusID: number;
+  PlotID: number;
+  LimitType: string; // 'DBH' or 'HOM'
+  LowerBound?: number;
+  UpperBound?: number;
   IsActive: boolean;
 }
 
@@ -169,7 +181,7 @@ export class ValidationTester {
   async testValidation(
     validationID: number,
     scenario: ValidationTestScenario,
-    params?: { p_PlotID?: number; p_CensusID?: number; minDBH?: number; maxDBH?: number }
+    params?: { p_PlotID?: number; p_CensusID?: number }
   ): Promise<ValidationTestResult> {
     const result: ValidationTestResult = {
       passed: false,
@@ -222,8 +234,7 @@ export class ValidationTester {
       result.falsePositives = verificationResult.falsePositives;
 
       // 6. Determine if test passed
-      result.passed =
-        result.missedErrors.length === 0 && result.falsePositives.length === 0 && result.unexpectedErrors.length === 0;
+      result.passed = result.missedErrors.length === 0 && result.falsePositives.length === 0 && result.unexpectedErrors.length === 0;
 
       if (result.passed) {
         result.details.push(`✓ Test PASSED: Found ${result.actualErrorCount} errors as expected`);
@@ -271,6 +282,10 @@ export class ValidationTester {
 
     if (setup.census) {
       await this.insertCensus(setup.census, testID, params);
+    }
+
+    if (setup.specieslimits) {
+      await this.insertSpeciesLimits(setup.specieslimits, params);
     }
 
     if (setup.quadrats) {
@@ -372,10 +387,9 @@ export class ValidationTester {
     const ids: number[] = [];
     for (const sp of species) {
       // Check if species already exists
-      const [existing] = await this.connection.query<mysql.RowDataPacket[]>(
-        `SELECT SpeciesID FROM ${this.schema}.species WHERE SpeciesCode = ?`,
-        [sp.SpeciesCode]
-      );
+      const [existing] = await this.connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesID FROM ${this.schema}.species WHERE SpeciesCode = ?`, [
+        sp.SpeciesCode
+      ]);
 
       if (existing.length > 0) {
         ids.push(existing[0].SpeciesID);
@@ -389,6 +403,33 @@ export class ValidationTester {
       }
     }
     this.testDataIDs.set('species', ids);
+  }
+
+  private async insertSpeciesLimits(limits: Partial<SpeciesLimit>[], params?: any): Promise<void> {
+    const ids: number[] = [];
+    const speciesIDs = this.testDataIDs.get('species') || [];
+    const censusIDs = this.testDataIDs.get('census') || [];
+    const plotIDs = this.testDataIDs.get('plots') || [];
+
+    for (let i = 0; i < limits.length; i++) {
+      const limit = limits[i];
+      const [result] = await this.connection.query<mysql.ResultSetHeader>(
+        `INSERT INTO ${this.schema}.specieslimits
+         (SpeciesID, CensusID, PlotID, LimitType, LowerBound, UpperBound, IsActive)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          limit.SpeciesID || speciesIDs[i] || speciesIDs[0] || 1,
+          limit.CensusID || censusIDs[0] || params?.p_CensusID || 1,
+          limit.PlotID || plotIDs[0] || params?.p_PlotID || 1,
+          limit.LimitType || 'DBH',
+          limit.LowerBound ?? null,
+          limit.UpperBound ?? null,
+          limit.IsActive ?? true
+        ]
+      );
+      ids.push(result.insertId);
+    }
+    this.testDataIDs.set('specieslimits', ids);
   }
 
   private async insertTrees(trees: Partial<Tree>[], testID: string, params?: any): Promise<void> {
@@ -502,9 +543,7 @@ export class ValidationTester {
 
     // First, delete any existing cmattributes for these CoreMeasurementIDs to avoid duplicates
     if (cmIDs.length > 0) {
-      await this.connection.query(
-        `DELETE FROM ${this.schema}.cmattributes WHERE CoreMeasurementID IN (${cmIDs.join(',')})`
-      );
+      await this.connection.query(`DELETE FROM ${this.schema}.cmattributes WHERE CoreMeasurementID IN (${cmIDs.join(',')})`);
     }
 
     // Track which CoreMeasurementID gets which codes to handle unique constraints
@@ -523,10 +562,7 @@ export class ValidationTester {
   private async insertAttributes(attributes: Partial<Attribute>[]): Promise<void> {
     for (const attr of attributes) {
       // Check if exists first
-      const [existing] = await this.connection.query<mysql.RowDataPacket[]>(
-        `SELECT Code FROM ${this.schema}.attributes WHERE Code = ?`,
-        [attr.Code]
-      );
+      const [existing] = await this.connection.query<mysql.RowDataPacket[]>(`SELECT Code FROM ${this.schema}.attributes WHERE Code = ?`, [attr.Code]);
 
       if (existing.length === 0) {
         await this.connection.query(
@@ -541,11 +577,7 @@ export class ValidationTester {
   /**
    * Execute validation query with parameter replacement
    */
-  private async executeValidation(
-    validationID: number,
-    queryDefinition: string,
-    params?: { p_PlotID?: number; p_CensusID?: number; minDBH?: number; maxDBH?: number }
-  ): Promise<void> {
+  private async executeValidation(validationID: number, queryDefinition: string, params?: { p_PlotID?: number; p_CensusID?: number }): Promise<void> {
     // Set validation procedure ID
     await this.connection.query(`SET @validationProcedureID = ?`, [validationID]);
 
@@ -556,12 +588,6 @@ export class ValidationTester {
       }
       if (params.p_CensusID !== undefined) {
         await this.connection.query(`SET @p_CensusID = ?`, [params.p_CensusID]);
-      }
-      if (params.minDBH !== undefined) {
-        await this.connection.query(`SET @minDBH = ?`, [params.minDBH]);
-      }
-      if (params.maxDBH !== undefined) {
-        await this.connection.query(`SET @maxDBH = ?`, [params.maxDBH]);
       }
     }
 
@@ -677,6 +703,11 @@ export class ValidationTester {
       const quadratIDs = this.testDataIDs.get('quadrats') || [];
       if (quadratIDs.length > 0) {
         await this.connection.query(`DELETE FROM ${this.schema}.quadrats WHERE QuadratID IN (${quadratIDs.join(',')})`);
+      }
+
+      const speciesLimitIDs = this.testDataIDs.get('specieslimits') || [];
+      if (speciesLimitIDs.length > 0) {
+        await this.connection.query(`DELETE FROM ${this.schema}.specieslimits WHERE SpeciesLimitID IN (${speciesLimitIDs.join(',')})`);
       }
 
       const censusIDs = this.testDataIDs.get('census') || [];

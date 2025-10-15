@@ -5,7 +5,6 @@
 -- Links trees to species and census
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- Insert trees
 -- Note: Each tree has a unique Tag and is associated with a species and census
@@ -26,14 +25,15 @@ JOIN id_map_species s_map ON
     AND (v.SubspeciesID = s_map.old_SubspeciesID OR (v.SubspeciesID IS NULL AND s_map.old_SubspeciesID IS NULL))
 JOIN id_map_census c_map ON v.CensusID = c_map.old_CensusID
 WHERE v.Tag IS NOT NULL AND v.TreeID IS NOT NULL
-GROUP BY v.TreeID, v.Tag, s_map.new_SpeciesID, c_map.new_CensusID
-ORDER BY v.TreeID;
+GROUP BY v.TreeID, v.Tag, s_map.new_SpeciesID, c_map.new_CensusID;
 
 -- Populate mapping table
+-- Use GROUP BY to ensure only one mapping per old_TreeID
+-- (viewfulltable is denormalized with multiple rows per tree)
 INSERT INTO id_map_trees (old_TreeID, new_TreeID)
-SELECT DISTINCT
+SELECT
     v.TreeID AS old_TreeID,
-    nt.TreeID AS new_TreeID
+    MIN(nt.TreeID) AS new_TreeID
 FROM stable_mpala.viewfulltable v
 JOIN id_map_species s_map ON
     v.SpeciesID = s_map.old_SpeciesID
@@ -43,7 +43,8 @@ JOIN trees nt ON
     nt.TreeTag = v.Tag
     AND nt.SpeciesID = s_map.new_SpeciesID
     AND nt.CensusID = c_map.new_CensusID
-WHERE nt.IsActive = 1;
+WHERE nt.IsActive = 1
+GROUP BY v.TreeID;
 
 -- Validation query
 SELECT

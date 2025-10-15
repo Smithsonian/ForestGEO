@@ -6,7 +6,6 @@
 -- Handles subspecies by combining with species name
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- ================================================================
 -- STEP 1: Migrate Family
@@ -101,15 +100,17 @@ JOIN stable_mpala.species ss ON v.SpeciesID = ss.SpeciesID
 JOIN stable_mpala.genus sg ON ss.GenusID = sg.GenusID
 JOIN id_map_genus g_map ON sg.GenusID = g_map.old_GenusID
 WHERE v.SpeciesName IS NOT NULL OR v.Subspecies IS NOT NULL
-GROUP BY g_map.new_GenusID, v.Mnemonic, v.SpeciesName, v.Subspecies;
+GROUP BY g_map.new_GenusID, v.Mnemonic, v.SpeciesName, v.Subspecies, v.Genus;
 
 -- Populate species mapping table
 -- This is complex because we need to handle both SpeciesID and SubspeciesID
+-- Use GROUP BY to ensure only one mapping per old_SpeciesID
+-- (viewfulltable is denormalized with multiple rows per species)
 INSERT INTO id_map_species (old_SpeciesID, new_SpeciesID, old_SubspeciesID)
-SELECT DISTINCT
+SELECT
     v.SpeciesID AS old_SpeciesID,
-    ns.SpeciesID AS new_SpeciesID,
-    v.SubspeciesID AS old_SubspeciesID
+    MIN(ns.SpeciesID) AS new_SpeciesID,
+    MIN(v.SubspeciesID) AS old_SubspeciesID
 FROM stable_mpala.viewfulltable v
 JOIN stable_mpala.species ss ON v.SpeciesID = ss.SpeciesID
 JOIN stable_mpala.genus sg ON ss.GenusID = sg.GenusID
@@ -119,7 +120,8 @@ JOIN species ns ON
     AND ns.SpeciesCode = v.Mnemonic
     AND (ns.SpeciesName = v.SpeciesName OR (ns.SpeciesName IS NULL AND v.SpeciesName IS NULL))
     AND (ns.SubspeciesName = v.Subspecies OR (ns.SubspeciesName IS NULL AND v.Subspecies IS NULL))
-WHERE ns.IsActive = 1;
+WHERE ns.IsActive = 1
+GROUP BY v.SpeciesID;
 
 SELECT 'Species migration complete' AS Status, COUNT(*) AS SpeciesCount FROM species;
 

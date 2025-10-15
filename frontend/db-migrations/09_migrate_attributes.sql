@@ -7,7 +7,6 @@
 -- Also handles Status field
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- ================================================================
 -- STEP 1: Populate Attributes Table
@@ -188,7 +187,7 @@ JOIN quadrats q ON st.QuadratID = q.QuadratID
 JOIN plots p ON q.PlotID = p.PlotID
 LEFT JOIN cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
 LEFT JOIN attributes a ON cma.Code = a.Code
-GROUP BY p.PlotName, t.TreeTag, sp.SpeciesCode, cm.MeasuredDBH
+GROUP BY cm.CoreMeasurementID, p.PlotName, t.TreeTag, sp.SpeciesCode, cm.MeasuredDBH
 ORDER BY cm.CoreMeasurementID
 LIMIT 20;
 

@@ -6,7 +6,6 @@
 -- Links measurements to stems and census
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- Insert core measurements from the dbh table
 INSERT INTO coremeasurements (
@@ -37,8 +36,7 @@ SELECT DISTINCT
 FROM stable_mpala.dbh sdbh
 JOIN id_map_stems s_map ON sdbh.StemID = s_map.old_StemID
 JOIN id_map_census c_map ON sdbh.CensusID = c_map.old_CensusID
-WHERE sdbh.DBH IS NOT NULL  -- Only migrate records with actual measurements
-ORDER BY sdbh.DBHID;
+WHERE sdbh.DBH IS NOT NULL;  -- Only migrate records with actual measurements
 
 -- Validation query
 SELECT

@@ -37,9 +37,7 @@ async function debugValidation1() {
     await connection.query(`DELETE FROM ${dbConfig.database}.stems WHERE StemGUID = 999999`);
 
     // Get TreeIDs for DEBUG_GROWTH_1
-    const [existingTrees] = await connection.query<mysql.RowDataPacket[]>(
-      `SELECT TreeID FROM ${dbConfig.database}.trees WHERE TreeTag = 'DEBUG_GROWTH_1'`
-    );
+    const [existingTrees] = await connection.query<mysql.RowDataPacket[]>(`SELECT TreeID FROM ${dbConfig.database}.trees WHERE TreeTag = 'DEBUG_GROWTH_1'`);
     if (existingTrees.length > 0) {
       const treeIDs = existingTrees.map((r: any) => r.TreeID).join(',');
       await connection.query(`DELETE FROM ${dbConfig.database}.trees WHERE TreeID IN (${treeIDs})`);
@@ -64,36 +62,45 @@ async function debugValidation1() {
     console.log('2. Creating test data...\n');
 
     // Attribute
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.attributes (Code, Description, Status, IsActive) VALUES (?, ?, ?, ?)`,
-      ['DEBUG_A', 'debug alive', 'alive', true]
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.attributes (Code, Description, Status, IsActive) VALUES (?, ?, ?, ?)`, [
+      'DEBUG_A',
+      'debug alive',
+      'alive',
+      true
+    ]);
 
     // Species
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.species (SpeciesCode, SpeciesName, IsActive) VALUES (?, ?, ?)`,
-      ['DEBUG_SP', 'Debug Species', true]
-    );
-    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>(
-      `SELECT SpeciesID FROM ${dbConfig.database}.species WHERE SpeciesCode = 'DEBUG_SP'`
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.species (SpeciesCode, SpeciesName, IsActive) VALUES (?, ?, ?)`, [
+      'DEBUG_SP',
+      'Debug Species',
+      true
+    ]);
+    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>(`SELECT SpeciesID FROM ${dbConfig.database}.species WHERE SpeciesCode = 'DEBUG_SP'`);
     const speciesID = speciesRows[0].SpeciesID;
 
     // Plot
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.plots (PlotID, DimensionX, DimensionY, DefaultDBHUnits) VALUES (?, ?, ?, ?)`,
-      [9999, 100, 100, 'mm']
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.plots (PlotID, DimensionX, DimensionY, DefaultDBHUnits) VALUES (?, ?, ?, ?)`, [
+      9999,
+      100,
+      100,
+      'mm'
+    ]);
 
     // Census 1 and 2
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive) VALUES (?, ?, ?, ?, ?)`,
-      [9999, 991, new Date('2015-01-01'), new Date('2015-12-31'), true]
-    );
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive) VALUES (?, ?, ?, ?, ?)`,
-      [9999, 992, new Date('2020-01-01'), new Date('2020-12-31'), true]
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive) VALUES (?, ?, ?, ?, ?)`, [
+      9999,
+      991,
+      new Date('2015-01-01'),
+      new Date('2015-12-31'),
+      true
+    ]);
+    await connection.query(`INSERT INTO ${dbConfig.database}.census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive) VALUES (?, ?, ?, ?, ?)`, [
+      9999,
+      992,
+      new Date('2020-01-01'),
+      new Date('2020-12-31'),
+      true
+    ]);
     const [census1Rows] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT CensusID FROM ${dbConfig.database}.census WHERE PlotID = 9999 AND PlotCensusNumber = 991`
     );
@@ -108,16 +115,16 @@ async function debugValidation1() {
       `INSERT INTO ${dbConfig.database}.quadrats (PlotID, QuadratName, DimensionX, DimensionY, StartX, StartY, IsActive) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [9999, 'DEBUG_Q1', 20, 20, 0, 0, true]
     );
-    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>(
-      `SELECT QuadratID FROM ${dbConfig.database}.quadrats WHERE QuadratName = 'DEBUG_Q1'`
-    );
+    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>(`SELECT QuadratID FROM ${dbConfig.database}.quadrats WHERE QuadratName = 'DEBUG_Q1'`);
     const quadratID = quadratRows[0].QuadratID;
 
     // Tree (for Census 1) - Trees are also per-census
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.trees (CensusID, SpeciesID, TreeTag, IsActive) VALUES (?, ?, ?, ?)`,
-      [census1ID, speciesID, 'DEBUG_GROWTH_1', true]
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.trees (CensusID, SpeciesID, TreeTag, IsActive) VALUES (?, ?, ?, ?)`, [
+      census1ID,
+      speciesID,
+      'DEBUG_GROWTH_1',
+      true
+    ]);
     const [tree1Rows] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT TreeID FROM ${dbConfig.database}.trees WHERE TreeTag = 'DEBUG_GROWTH_1' AND CensusID = ?`,
       [census1ID]
@@ -125,10 +132,12 @@ async function debugValidation1() {
     const tree1ID = tree1Rows[0].TreeID;
 
     // Tree (for Census 2)
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.trees (CensusID, SpeciesID, TreeTag, IsActive) VALUES (?, ?, ?, ?)`,
-      [census2ID, speciesID, 'DEBUG_GROWTH_1', true]
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.trees (CensusID, SpeciesID, TreeTag, IsActive) VALUES (?, ?, ?, ?)`, [
+      census2ID,
+      speciesID,
+      'DEBUG_GROWTH_1',
+      true
+    ]);
     const [tree2Rows] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT TreeID FROM ${dbConfig.database}.trees WHERE TreeTag = 'DEBUG_GROWTH_1' AND CensusID = ?`,
       [census2ID]
@@ -167,14 +176,8 @@ async function debugValidation1() {
     const cm2ID = cm2Rows[0].CoreMeasurementID;
 
     // CMAttributes
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-      [cm1ID, 'DEBUG_A']
-    );
-    await connection.query(
-      `INSERT INTO ${dbConfig.database}.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-      [cm2ID, 'DEBUG_A']
-    );
+    await connection.query(`INSERT INTO ${dbConfig.database}.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [cm1ID, 'DEBUG_A']);
+    await connection.query(`INSERT INTO ${dbConfig.database}.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [cm2ID, 'DEBUG_A']);
 
     console.log('  ✓ Test data created:');
     console.log(`    - PlotID: 9999`);
@@ -399,7 +402,6 @@ async function debugValidation1() {
     await connection.query(`DELETE FROM ${dbConfig.database}.species WHERE SpeciesID = ${speciesID}`);
     await connection.query(`DELETE FROM ${dbConfig.database}.attributes WHERE Code = 'DEBUG_A'`);
     console.log('  ✓ Test data cleaned up\n');
-
   } finally {
     await connection.end();
   }

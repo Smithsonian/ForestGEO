@@ -255,6 +255,8 @@ create
     definer = azureroot@`%` procedure clearcensusfull(IN targetCensusID int)
 BEGIN
     declare vCountCensus int;
+    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    set @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
     DELETE
@@ -313,11 +315,15 @@ BEGIN
         AUTO_INCREMENT = 1;
     COMMIT;
     set foreign_key_checks = 1;
+    -- Re-enable triggers after census deletion
+    set @disable_triggers = 0;
 END;
 
 create
     definer = azureroot@`%` procedure clearcensusmsmts(IN targetCensusID int)
 BEGIN
+    -- Disable triggers to prevent changelog tracking during bulk census deletion
+    set @disable_triggers = 1;
     START TRANSACTION;
 
     DELETE
@@ -345,6 +351,8 @@ BEGIN
     ALTER TABLE census
         AUTO_INCREMENT = 1;
     COMMIT;
+    -- Re-enable triggers after census deletion
+    set @disable_triggers = 0;
 END;
 
 create

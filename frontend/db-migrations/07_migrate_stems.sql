@@ -6,7 +6,6 @@
 -- Links stems to trees, quadrats, and census
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- Insert stems with coordinates from the stem table
 -- Note: Using QX, QY as local coordinates within the quadrat
@@ -40,14 +39,15 @@ JOIN id_map_quadrats q_map ON v.QuadratID = q_map.old_QuadratID
 JOIN id_map_census c_map ON v.CensusID = c_map.old_CensusID
 WHERE v.StemID IS NOT NULL
 GROUP BY v.StemID, t_map.new_TreeID, q_map.new_QuadratID, c_map.new_CensusID,
-         v.StemTag, ss.QX, ss.QY, ss.Moved, ss.StemDescription
-ORDER BY v.StemID;
+         v.StemTag, ss.QX, ss.QY, ss.Moved, ss.StemDescription;
 
 -- Populate mapping table
+-- Use GROUP BY to ensure only one mapping per old_StemID
+-- (viewfulltable is denormalized with multiple rows per stem)
 INSERT INTO id_map_stems (old_StemID, new_StemGUID)
-SELECT DISTINCT
+SELECT
     v.StemID AS old_StemID,
-    ns.StemGUID AS new_StemGUID
+    MIN(ns.StemGUID) AS new_StemGUID
 FROM stable_mpala.viewfulltable v
 JOIN stable_mpala.stem ss ON v.StemID = ss.StemID
 JOIN id_map_trees t_map ON v.TreeID = t_map.old_TreeID
@@ -60,7 +60,8 @@ JOIN stems ns ON
     AND (ns.StemTag = v.StemTag OR (ns.StemTag IS NULL AND v.StemTag IS NULL))
     AND (ns.LocalX = ss.QX OR (ns.LocalX IS NULL AND ss.QX IS NULL))
     AND (ns.LocalY = ss.QY OR (ns.LocalY IS NULL AND ss.QY IS NULL))
-WHERE ns.IsActive = 1;
+WHERE ns.IsActive = 1
+GROUP BY v.StemID;
 
 -- Validation query
 SELECT

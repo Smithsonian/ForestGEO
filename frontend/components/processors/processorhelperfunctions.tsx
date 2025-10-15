@@ -280,8 +280,6 @@ export async function runValidation(
   params: {
     p_CensusID?: number | null;
     p_PlotID?: number | null;
-    minDBH?: number | null;
-    maxDBH?: number | null;
   } = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
@@ -299,8 +297,6 @@ export async function runValidation(
       const formattedCursorQuery = cursorQuery
         .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
         .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        // .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
         .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
         .replace(/coremeasurements/g, `${schema}.coremeasurements`)
@@ -309,6 +305,7 @@ export async function runValidation(
         .replace(/quadrats/g, `${schema}.quadrats`)
         .replace(/cmverrors/g, `${schema}.cmverrors`)
         .replace(/species/g, `${schema}.species`)
+        .replace(/specieslimits/g, `${schema}.specieslimits`)
         .replace(/genus/g, `${schema}.genus`)
         .replace(/family/g, `${schema}.family`)
         .replace(/plots/g, `${schema}.plots`)
@@ -317,43 +314,8 @@ export async function runValidation(
         .replace(/attributes/g, `${schema}.attributes`)
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
-      // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
-      if (params.minDBH === null || params.maxDBH === null) {
-        const speciesLimitsQuery = `
-        SELECT sp.SpeciesID, sl.LimitType,
-          IF(sl.LimitType = 'DBH', sl.LowerBound, NULL) AS minDBH,
-          IF(sl.LimitType = 'DBH', sl.UpperBound, NULL) AS maxDBH
-        FROM ${schema}.specieslimits sl
-               JOIN
-             ${schema}.species sp ON sp.SpeciesID = sl.SpeciesID
-               JOIN
-             ${schema}.trees t ON t.SpeciesID = sp.SpeciesID and t.CensusID = sl.CensusID
-               JOIN
-             ${schema}.stems st ON st.TreeID = t.TreeID and st.CensusID = sl.CensusID
-               JOIN
-             ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
-               JOIN
-             ${schema}.coremeasurements cm ON cm.StemGUID = st.StemGUID
-        WHERE cm.IsValidated IS NULL
-          AND (${params.p_CensusID !== null ? `sl.CensusID = ${params.p_CensusID}` : '1 = 1'})
-          AND (${params.p_PlotID !== null ? `sl.PlotID = ${params.p_PlotID}` : '1 = 1'})
-        LIMIT 1;
-      `;
-        const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
-        if (speciesLimits.length > 0) {
-          // If any species-specific limits were fetched, update the variables
-          params.minDBH = speciesLimits[0].minDBH || params.minDBH;
-          params.maxDBH = speciesLimits[0].maxDBH || params.maxDBH;
-        }
-      }
-
-      // Reformat the query after potentially updating the parameters with species-specific limits
-      const reformattedCursorQuery = formattedCursorQuery
-        .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL');
-
       // Execute the cursor query to get the rows that need validation
-      await connectionManager.executeQuery(reformattedCursorQuery);
+      await connectionManager.executeQuery(formattedCursorQuery);
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {

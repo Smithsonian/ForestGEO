@@ -82,11 +82,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               validationProcedureID,
               cursorQuery,
               p_CensusID: currentCensus?.dateRanges[0].censusID,
-              p_PlotID: plotID,
-              minDBH: null,
-              maxDBH: null,
-              minHOM: null,
-              maxHOM: null
+              p_PlotID: plotID
             })
           });
 

@@ -5,7 +5,6 @@
 -- These tables are essential for preserving relationships during migration
 -- ================================================================
 
-USE forestgeo_testing;
 
 -- Drop mapping tables if they exist (for re-running migration)
 DROP TABLE IF EXISTS id_map_plots;
