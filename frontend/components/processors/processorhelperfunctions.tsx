@@ -232,17 +232,18 @@ const measurementSummaryViewFields = [
   'Attributes'
 ];
 
-export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
-  fieldList: measurementSummaryViewFields,
-  slices: {
-    quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
-    species: { range: [1, 4], primaryKey: 'SpeciesID' },
-    trees: { range: [4, 5], primaryKey: 'TreeID' },
-    stems: { range: [5, 9], primaryKey: 'StemGUID' },
-    coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
-    cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
-  }
-};
+// UNUSED: MeasurementsSummaryViewQueryConfig - removed to reduce bundle size
+// export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
+//   fieldList: measurementSummaryViewFields,
+//   slices: {
+//     quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
+//     species: { range: [1, 4], primaryKey: 'SpeciesID' },
+//     trees: { range: [4, 5], primaryKey: 'TreeID' },
+//     stems: { range: [5, 9], primaryKey: 'StemGUID' },
+//     coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
+//     cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
+//   }
+// };
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
@@ -253,19 +254,20 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   }
 };
 
-export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
-  fieldList: stemTaxonomiesViewFields,
-  slices: {
-    family: { range: [2, 3], primaryKey: 'FamilyID' },
-    genus: { range: [3, 5], primaryKey: 'GenusID' },
-    species: {
-      range: [5, stemTaxonomiesViewFields.length],
-      primaryKey: 'SpeciesID'
-    },
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemGUID' }
-  }
-};
+// UNUSED: StemTaxonomiesViewQueryConfig - removed to reduce bundle size
+// export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
+//   fieldList: stemTaxonomiesViewFields,
+//   slices: {
+//     family: { range: [2, 3], primaryKey: 'FamilyID' },
+//     genus: { range: [3, 5], primaryKey: 'GenusID' },
+//     species: {
+//       range: [5, stemTaxonomiesViewFields.length],
+//       primaryKey: 'SpeciesID'
+//     },
+//     trees: { range: [0, 1], primaryKey: 'TreeID' },
+//     stems: { range: [1, 2], primaryKey: 'StemGUID' }
+//   }
+// };
 
 function isDeadlockError(error: any) {
   return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;

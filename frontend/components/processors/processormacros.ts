@@ -7,7 +7,7 @@ import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 import ailogger from '@/ailogger';
 
-export async function getSqlConnection(tries: number): Promise<PoolConnection> {
+async function getSqlConnection(tries: number): Promise<PoolConnection> {
   let connection: PoolConnection | null = null;
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
@@ -111,7 +111,7 @@ function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-export function buildCondition({ operator, column, value }: { operator: Operator; column: string; value?: number | string | string[] }): string {
+function buildCondition({ operator, column, value }: { operator: Operator; column: string; value?: number | string | string[] }): string {
   switch (operator) {
     case 'contains':
       // Use the value as provided since it already includes the % signs

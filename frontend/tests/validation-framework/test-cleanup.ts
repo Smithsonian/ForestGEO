@@ -142,11 +142,7 @@ export async function cleanupAllTestData(connection: mysql.Connection, schema: s
  * Clean up specific test data by table
  * Useful for targeted cleanup between individual tests
  */
-export async function cleanupTestDataByTable(
-  connection: mysql.Connection,
-  schema: string,
-  tables: string[]
-): Promise<void> {
+export async function cleanupTestDataByTable(connection: mysql.Connection, schema: string, tables: string[]): Promise<void> {
   try {
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
@@ -234,7 +230,10 @@ export async function cleanupTestDataByTable(
  * Verify database is in clean state
  * Returns counts of potential test data
  */
-export async function verifyCleanState(connection: mysql.Connection, schema: string): Promise<{
+export async function verifyCleanState(
+  connection: mysql.Connection,
+  schema: string
+): Promise<{
   clean: boolean;
   counts: Record<string, number>;
 }> {

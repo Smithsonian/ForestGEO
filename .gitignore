@@ -57,3 +57,5 @@ frontend/liquibase/
 *.sh
 *.properties
 .jscpd
+CLAUDE.md
+.claudeignore
