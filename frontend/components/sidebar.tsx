@@ -587,6 +587,7 @@ export default function Sidebar(props: SidebarProps) {
       required
       size={'md'}
       data-testid={'plot-select-component'}
+      aria-label="Select a Plot"
       renderValue={renderPlotValue}
       value={currentPlot?.plotName || ''}
       listboxOpen={isPlotDropdownOpen}
