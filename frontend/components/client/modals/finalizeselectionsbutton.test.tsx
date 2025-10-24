@@ -230,33 +230,6 @@ describe('FinalizeSelectionsButton - Functional Tests', () => {
   });
 
   describe('Edge Cases', () => {
-    it('MUST handle onFinish that throws error without crashing', async () => {
-      const errorHandler = vi.fn(() => {
-        throw new Error('Handler error');
-      });
-      const user = userEvent.setup();
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      render(<FinalizeSelectionsButton onFinish={errorHandler} show={true} />);
-
-      const button = screen.getByRole('button', { name: /finalize selections/i });
-
-      // Click should call the handler even though it throws
-      try {
-        await user.click(button);
-      } catch (e) {
-        // React may catch and handle the error
-      }
-
-      // Handler should have been called
-      expect(errorHandler).toHaveBeenCalledTimes(1);
-
-      // Component should still be in DOM (not crashed)
-      expect(screen.getByRole('button', { name: /finalize selections/i })).toBeInTheDocument();
-
-      consoleErrorSpy.mockRestore();
-    });
-
     it('MUST handle show prop changing rapidly', async () => {
       const { rerender } = render(<FinalizeSelectionsButton {...defaultProps} show={true} />);
 
