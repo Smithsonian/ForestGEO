@@ -1,7 +1,3 @@
-/**
- * Defines templates for new rows in data grids
- */
-// datagridhelpers.ts
 import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
@@ -29,17 +25,10 @@ export type FetchQueryFunction = (
   plotID?: number,
   plotCensusNumber?: number,
   quadratID?: number,
-  speciesID?: number // This is a special case for specieslimits
+  speciesID?: number
 ) => string;
 
-export type ProcessPostPatchQueryFunction = (
-  // incorporated validation system into this too
-  siteSchema: string,
-  dataType: string,
-  gridID: string,
-  plotID?: number,
-  censusID?: number
-) => string;
+export type ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string, plotID?: number, censusID?: number) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
 const columnVisibilityMap: Record<string, Record<string, boolean>> = {
@@ -50,7 +39,6 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
     id: false,
     ...getAllViewFullTableViewsHCs()
   },
-  // views
   alltaxonomiesview: {
     id: false,
     ...getAllTaxonomiesViewHCs()
@@ -145,8 +133,8 @@ export function getGridID(gridType: string): string {
     case 'coremeasurements':
     case 'measurementssummaryview':
     case 'viewfulltableview':
-    case 'measurementssummary': // materialized view --> should not be modified
-    case 'viewfulltable': // materialized view --> should not be modified
+    case 'measurementssummary':
+    case 'viewfulltable':
       return 'coreMeasurementID';
     case 'attributes':
       return 'code';
@@ -226,11 +214,11 @@ export interface IsolatedDataGridCommonProps {
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
-  onDataUpdate?: (updatedRow: GridRowModel) => Promise<void>; // Add the onDataUpdate prop
+  onDataUpdate?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<void>;
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
-  adminEmail?: string; // need to distinguish between admin and non-admin users --> should ONLY be populated for admin datagrids
+  adminEmail?: string;
 }
 
 export interface DataGridCommonProps {
@@ -260,7 +248,6 @@ export interface DataGridCommonProps {
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
 }
 
-// Define types for the new states and props
 export interface PendingAction {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
@@ -274,16 +261,10 @@ export const CellItemContainer = styled('div')({
   height: '100%'
 });
 
-/**
- * Function to determine if all entries in a column are null
- */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
   return rows.length > 0 && rows.every(row => field === undefined || row[field] === undefined || row[field] === null || row[field] === '');
 }
 
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
   return columns.filter(
     col =>

@@ -38,13 +38,6 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           });
         break;
       case 'personnel':
-        const pQuery = `SELECT 1 FROM ${schema}.personnel p`; // Check if the
-        // table has any row
-        const pResults = await connection.executeQuery(pQuery);
-        if (pResults.length === 0)
-          return new NextResponse(null, {
-            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
-          });
         break;
       case 'quadrats':
         const query = `SELECT 1 FROM ${schema}.quadrats q 

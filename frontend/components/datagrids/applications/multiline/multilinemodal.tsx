@@ -19,10 +19,11 @@ interface MultilineModalProps {
   isManualEntryFormOpen: boolean;
   handleCloseManualEntryForm: () => void;
   formType: string;
+  onSubmitComplete?: () => void;
 }
 
 export default function MultilineModal(props: MultilineModalProps) {
-  const { isManualEntryFormOpen, handleCloseManualEntryForm, formType } = props;
+  const { isManualEntryFormOpen, handleCloseManualEntryForm, formType, onSubmitComplete } = props;
 
   const [changesSubmitted, setChangesSubmitted] = useState(false);
   const [openValidations, setOpenValidations] = useState(false);
@@ -52,10 +53,15 @@ export default function MultilineModal(props: MultilineModalProps) {
       if (formType === 'measurements' && tempReviewState === ReviewStates.VALIDATE) {
         setOpenValidations(true);
         setOpenUpdateValidations(false);
-      } else handleCloseManualEntryForm();
+      } else {
+        handleCloseManualEntryForm();
+      }
       triggerRefresh();
+      if (onSubmitComplete) {
+        onSubmitComplete();
+      }
     }
-  }, [changesSubmitted]);
+  }, [changesSubmitted, formType, tempReviewState, handleCloseManualEntryForm, triggerRefresh, onSubmitComplete]);
 
   useEffect(() => {
     // monitor changes in tempReviewState and trigger update once they're done

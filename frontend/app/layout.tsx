@@ -30,7 +30,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <UserSelectionProvider>
                 <DataValidityProvider>
                   <LockAnimationProvider>
-                    <div id="app-root" role="application" aria-label="ForestGEO Census Application">
+                    <div id="app-root">
                       <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
                     </div>
                   </LockAnimationProvider>

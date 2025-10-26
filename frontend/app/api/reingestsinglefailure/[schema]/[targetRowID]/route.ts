@@ -17,8 +17,8 @@ export async function GET(
   if (!schema || !targetRowID) throw new Error('core parameters not provided');
   const staticBatchID = v4();
   const shiftQuery = `insert into ${schema}.temporarymeasurements (FileID, BatchID, PlotID,
-  CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
-  select 'single_row_file.csv' as FileID, ? as BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes
+  CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+  select 'single_row_file.csv' as FileID, ? as BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments
   from ${schema}.failedmeasurements where FailedMeasurementID = ?;`;
   const clearQuery = `delete from ${schema}.failedmeasurements where FailedMeasurementID = ?`;
   const connectionManager = ConnectionManager.getInstance();

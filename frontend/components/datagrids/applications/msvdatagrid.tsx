@@ -58,7 +58,9 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
   const [dataReingested, setDataReingested] = useState(false);
-  const [isReingesting, setIsReingesting] = useState(false); // Track if we're in reingestion mode
+  const [isReingesting, setIsReingesting] = useState(false);
+  const [uploadCompleted, setUploadCompleted] = useState(false);
+  const [manualEntryCompleted, setManualEntryCompleted] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -128,32 +130,50 @@ export default function MeasurementsSummaryViewDataGrid() {
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
-          reloadMSV().then(() => {
+          if (uploadCompleted) {
+            reloadMSV().then(() => {
+              setIsUploadModalOpen(false);
+              setIsReingesting(false);
+              setUploadCompleted(false);
+              setOpenAlert(true);
+            });
+          } else {
             setIsUploadModalOpen(false);
-            setIsReingesting(false); // Reset reingestion flag when modal closes
-            setOpenAlert(true);
-          });
+            setIsReingesting(false);
+          }
         }}
         formType={FormType.measurements}
-        skipToProcessing={isReingesting} // Pass flag to skip file upload stage
+        skipToProcessing={isReingesting}
+        onUploadComplete={() => setUploadCompleted(true)}
       />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => {
-          reloadMSV().then(() => {
+          if (manualEntryCompleted) {
+            reloadMSV().then(() => {
+              setIsManualEntryFormOpen(false);
+              setManualEntryCompleted(false);
+              setOpenAlert(true);
+            });
+          } else {
             setIsManualEntryFormOpen(false);
-            setOpenAlert(true);
-          });
+          }
         }}
         formType={'measurements'}
+        onSubmitComplete={() => setManualEntryCompleted(true)}
       />
       <FailedMeasurementsModal
         open={openFSM}
         setReingested={setDataReingested}
         handleCloseModal={async () => {
-          reloadMSV().then(() => {
+          if (dataReingested) {
+            reloadMSV().then(() => {
+              setOpenFSM(false);
+              setDataReingested(false);
+            });
+          } else {
             setOpenFSM(false);
-          });
+          }
         }}
         onTriggerReingestion={() => {
           // Open upload modal in reingestion mode after failed measurements modal closes

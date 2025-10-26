@@ -55,6 +55,7 @@ import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, MoreHoriz } from '@mui/icons-material';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -1221,10 +1222,16 @@ export default function Sidebar(props: SidebarProps) {
             <DialogActions>
               <Button
                 onClick={async () => {
+                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+                  if (!currentSite?.schemaName || !censusID) {
+                    ailogger.error('Missing required context: schema or censusID');
+                    setIsClearDropdownOpen(false);
+                    return;
+                  }
                   setLoading(true, 'Deleting census measurements...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
                   try {
-                    await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=msmts`);
                     setManualReset(true);
                   } finally {
                     setLoading(false);
@@ -1235,10 +1242,16 @@ export default function Sidebar(props: SidebarProps) {
               </Button>
               <Button
                 onClick={async () => {
+                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+                  if (!currentSite?.schemaName || !censusID) {
+                    ailogger.error('Missing required context: schema or censusID');
+                    setIsClearDropdownOpen(false);
+                    return;
+                  }
                   setLoading(true, 'Deleting census measurements and fixed data...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
                   try {
-                    await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=full`);
                     setManualReset(true);
                   } finally {
                     setLoading(false);

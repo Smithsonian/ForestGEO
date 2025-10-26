@@ -1,6 +1,5 @@
 'use client';
 
-// isolated failedmeasurements datagrid
 import React, { RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 import { FailedMeasurementsGridColumns, preprocessor } from '@/components/client/datagridcolumns';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
@@ -115,20 +114,46 @@ export default function IsolatedFailedMeasurementsDataGrid() {
   }
 
   const onRowSave = useCallback(
-    async (updatedRow: GridRowModel) => {
-      // amended implementation to get full row out from function
-      const reasons = computeFailureReasons(updatedRow);
-      updatedRow = { ...updatedRow, failureReasons: reasons };
-      if (reasons.length === 0) {
-        // no reasons detected, so we can save the row
-        await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${updatedRow.failedMeasurementID}`);
-      } else {
-        // need to updated in-DB row with new reasons now that they've been found!
-        await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`) });
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      const reasons = computeFailureReasons(newRow);
+      const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons };
+
+      try {
+        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${newRow.failedMeasurementID}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newRow: updatedRow, oldRow: oldRow })
+        });
+
+        if (!updateResponse.ok) {
+          throw new Error(`Failed to save row edits: ${updateResponse.status}`);
+        }
+
+        if (reasons.length === 0) {
+          const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${newRow.failedMeasurementID}`);
+          if (!reingestResponse.ok) {
+            throw new Error(`Failed to reingest row: ${reingestResponse.status}`);
+          }
+
+          await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
+        } else {
+          const reviewResponse = await fetch(`/api/query`, {
+            method: 'POST',
+            body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`)
+          });
+          if (!reviewResponse.ok) {
+            throw new Error(`Failed to update validation reasons: ${reviewResponse.status}`);
+          }
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setRefresh(true);
+      } catch (error: any) {
+        ailogger.error('Failed to save row:', error);
+        setRefresh(true);
       }
-      setRefresh(true);
     },
-    [apiRef, currentSite, currentPlot, currentCensus, computeFailureReasons]
+    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts]
   );
 
   function displayFailureReason(params: any, column: GridColDef) {
@@ -136,20 +161,33 @@ export default function IsolatedFailedMeasurementsDataGrid() {
       .split('|')
       .map((reason: string) => reason.trim())
       .filter((reason: string) => reason !== '');
-    const visibleReasons = failureReasonsFromRow.filter((reason: string) => fieldToReasons[column.field]?.includes(reason));
-    if (visibleReasons && visibleReasons.length > 0) {
+    const visibleReasons = failureReasonsFromRow
+      .filter((reason: string) => fieldToReasons[column.field]?.includes(reason))
+      .filter((reason: string, index: number, array: string[]) => array.indexOf(reason) === index);
+
+    const displayReason = visibleReasons.length > 0 ? visibleReasons[0] : null;
+
+    if (displayReason) {
       return (
         <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
-          {visibleReasons.map((reason: string, index: number) => (
-            <Chip
-              key={index}
-              variant={'soft'}
-              color={'danger'}
-              sx={{ marginY: 0.5, display: 'flex', flex: 1, width: '100%', justifyContent: 'center', alignSelf: 'center' }}
-            >
-              {reason}
-            </Chip>
-          ))}
+          <Chip
+            variant={'soft'}
+            color={'danger'}
+            sx={{
+              marginY: 0.5,
+              display: 'flex',
+              flex: 1,
+              width: '100%',
+              justifyContent: 'center',
+              alignSelf: 'center',
+              fontSize: '0.75rem',
+              whiteSpace: 'normal',
+              minHeight: '24px',
+              height: 'auto'
+            }}
+          >
+            {displayReason}
+          </Chip>
         </Stack>
       );
     } else return null;
@@ -258,7 +296,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
       initialRow={initialFailedMeasurementsRow}
       fieldToFocus={'tag'}
       dynamicButtons={[]}
-      defaultHideEmpty={false} // override default true to false -- user should see any missing fields that need correcting
+      defaultHideEmpty={false}
       apiRef={apiRef as RefObject<GridApiCommunity>}
       onDataUpdate={onRowSave}
     />

@@ -466,10 +466,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         promiseArguments.resolve(updatedRow);
 
         if (props.onDataUpdate) {
-          await props.onDataUpdate({
-            ...Object.fromEntries(Object.entries(promiseArguments.oldRow).filter(([, val]) => val !== undefined)),
-            ...Object.fromEntries(Object.entries(updatedRow).filter(([, val]) => val !== undefined))
-          });
+          await props.onDataUpdate(updatedRow, promiseArguments.oldRow);
         }
       } catch (error) {
         promiseArguments.reject(error);

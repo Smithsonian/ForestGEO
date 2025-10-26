@@ -159,10 +159,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   // const [usingQuery, setUsingQuery] = useState('');
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
-  // visibility
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const [showPendingRows, setShowPendingRows] = useState<boolean>(true);
+  const showPendingRows = true;
+  const setShowPendingRows = () => {};
   // tree-stem-state
   const [showOT, setShowOT] = useState<boolean>(true);
   const [showMS, setShowMS] = useState<boolean>(true);
@@ -547,33 +547,27 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setShouldAddRowAfterFetch(false);
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
-    setLoading(false);
+
     if (reloadAttrs) {
-      const response = await fetch(`/api/query`, {
-        method: 'POST',
-        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
-      });
-      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
-      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
-      setReloadAttrs(false);
+      try {
+        const response = await fetch(`/api/query`, {
+          method: 'POST',
+          body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
+        });
+        const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+        setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+        setReloadAttrs(false);
+      } catch (e: any) {
+        ailogger.error('Failed to reload attributes:', e);
+      }
     }
+
     try {
-      setLoading(true, 'Refreshing Measurements Summary View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-      if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setLoading(true, 'Re-fetching paginated data...');
-      await fetchPaginatedData(paginationModel.page);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setLoading(true, 'Reloading validation errors');
       await fetchValidationErrors();
-      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (e: any) {
-      ailogger.error(e);
+      ailogger.error('Failed to fetch validation errors:', e);
     } finally {
-      await new Promise(resolve => setTimeout(resolve, 1000));
       setLoading(false);
-      setRefresh(true);
     }
   };
 

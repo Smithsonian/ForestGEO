@@ -32,13 +32,14 @@ export interface DetailedCMIDRow extends CMIDRow {
 }
 
 interface UploadParentProps {
-  onReset: () => void; // closes the modal
+  onReset: () => void;
   overrideUploadForm?: FormType;
-  skipToProcessing?: boolean; // Skip file upload and go directly to batch processing
+  skipToProcessing?: boolean;
+  onUploadComplete?: () => void;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, skipToProcessing } = props;
+  const { onReset, overrideUploadForm, skipToProcessing, onUploadComplete } = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -75,8 +76,8 @@ export default function UploadParent(props: UploadParentProps) {
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isDataUnsaved) {
-        event.preventDefault(); // Required to standardize behavior across browsers
-        event.returnValue = ''; // In modern browsers, the message is not customizable but setting returnValue is necessary
+        event.preventDefault();
+        event.returnValue = '';
       }
     };
 
@@ -85,7 +86,13 @@ export default function UploadParent(props: UploadParentProps) {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
+  }, [isDataUnsaved]);
+
+  useEffect(() => {
+    if (reviewState === ReviewStates.COMPLETE && onUploadComplete) {
+      onUploadComplete();
+    }
+  }, [reviewState, onUploadComplete]);
 
   function areHeadersValid(actualHeaders: string[]): {
     isValid: boolean;

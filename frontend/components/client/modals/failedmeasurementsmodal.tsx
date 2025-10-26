@@ -173,7 +173,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   }, [open, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges[0]?.censusID]);
 
   return (
-    <Modal open={open} onClose={() => {}}>
+    <Modal open={open} onClose={handleCloseModal}>
       <ModalDialog
         size="lg"
         sx={{

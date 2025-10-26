@@ -85,7 +85,12 @@ export default function DashboardPage() {
         )
       ).json();
       ailogger.info(JSON.stringify({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats }));
-      setProgressTacho({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats: UnpopulatedQuadrats.split(';') });
+      setProgressTacho({
+        TotalQuadrats,
+        PopulatedQuadrats,
+        PopulatedPercent,
+        UnpopulatedQuadrats: UnpopulatedQuadrats ? UnpopulatedQuadrats.split(';') : []
+      });
     } catch (e: any) {
       ailogger.error('ProgressTachometer: ', e);
     }
@@ -179,6 +184,27 @@ export default function DashboardPage() {
     }
   }
 
+  // Reset all dashboard data when contexts are cleared
+  useEffect(() => {
+    if (!currentSite || !currentPlot || !currentCensus) {
+      setProgressTacho({
+        TotalQuadrats: 0,
+        PopulatedPercent: 0,
+        PopulatedQuadrats: 0,
+        UnpopulatedQuadrats: []
+      });
+      setActiveUsers(0);
+      setCountStems(0);
+      setCountTrees(0);
+      setStemTypes({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 0
+      });
+      setChangelogHistory(Array(5));
+    }
+  }, [currentSite, currentPlot, currentCensus]);
+
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus) {
       loadProgressTachometer().catch(ailogger.error);
@@ -219,7 +245,7 @@ export default function DashboardPage() {
                   tabIndex={0}
                   aria-pressed={toggleSwitch}
                   aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-                  sx={{ height: '50%', width: '100%' }}
+                  sx={{ height: '300px', width: '100%', minHeight: '250px' }}
                   onClick={() => setToggleSwitch(!toggleSwitch)}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {

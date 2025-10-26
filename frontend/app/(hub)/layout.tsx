@@ -375,7 +375,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       >
         <Sidebar setCensusListLoaded={setCensusListLoaded} siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
       </Box>
-      <Box component="header" role="banner" aria-label="Application header">
+      <Box component="header" aria-label="Application header">
         <Header />
       </Box>
       <Box

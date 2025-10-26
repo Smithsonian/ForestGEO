@@ -81,7 +81,7 @@ async function moveFailedToTemporary(
 
   const shiftQuery = `
     INSERT IGNORE INTO ${schema}.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
     SELECT
       ? AS FileID,
       ? AS BatchID,
@@ -96,7 +96,8 @@ async function moveFailedToTemporary(
       fm.DBH,
       fm.HOM,
       fm.Date,
-      fm.Codes
+      fm.Codes,
+      fm.Comments
     FROM ${schema}.failedmeasurements fm
     WHERE fm.PlotID = ? AND fm.CensusID = ?;`;
 

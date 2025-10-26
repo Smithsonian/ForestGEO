@@ -314,14 +314,11 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </IconButton>
                   </Badge>
                 </Tooltip>
-                <Tooltip title={`Pending: (${pendingControls.count})`}>
+                <Tooltip
+                  title={`Pending: (${pendingControls.count}) - Always Shown\nPending rows must remain visible to prevent edited measurements from disappearing during validation`}
+                >
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!pendingControls.count}
-                      color={pendingControls.show ? 'primary' : 'neutral'}
-                      onClick={() => pendingControls.toggle(!pendingControls.show)}
-                    >
+                    <IconButton variant="soft" disabled={true} color={'primary'} sx={{ cursor: 'not-allowed', opacity: 0.9 }}>
                       <ScheduleIcon />
                     </IconButton>
                   </Badge>
