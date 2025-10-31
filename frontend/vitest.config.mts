@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: 'jsdom',
     setupFiles: ['setup.ts'],
+    css: {
+      include: []  // Disable CSS processing to avoid .css import errors
+    },
     env: loadEnv(mode, process.cwd(), ''),
     restoreMocks: true,
     clearMocks: true,
