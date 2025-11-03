@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Button, Checkbox, Input, Option, Select, Stack, Table } from '@mui/joy';
+import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import ailogger from '@/ailogger';
@@ -11,40 +11,61 @@ export default function UserSettingsPage() {
   const [users, setUsers] = useState<UserWithSite[]>([]);
   const baseUsers = useRef(users);
   const [sites, setSites] = useState<AdminSiteRDS[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchUsers() {
-      const userResponse = await fetch(`/api/administrative/fetch/users`);
-      const tempUsers: AdminUserRDS[] = await userResponse.json();
-      const sitesResponse = await fetch(`/api/administrative/fetch/sites`);
-      const tempSites: AdminSiteRDS[] = await sitesResponse.json();
-      setSites(tempSites);
+      try {
+        setLoading(true);
+        setError(null);
 
-      const siteMap: Record<number, AdminSiteRDS> = {};
-      tempSites.forEach(site => (siteMap[site.siteID ?? 0] = site));
+        const userResponse = await fetch(`/api/administrative/fetch/users`);
+        if (!userResponse.ok) {
+          throw new Error(`Failed to load users: ${userResponse.status} ${userResponse.statusText}`);
+        }
+        const tempUsers: AdminUserRDS[] = await userResponse.json();
 
-      const mappedUsers: UserWithSite[] = tempUsers.map(u => {
-        const ids =
-          u.userSites
-            ?.split(';')
-            .map(s => parseInt(s))
-            .filter(n => !isNaN(n)) ?? [];
-        return {
-          userID: u.userID,
-          lastName: u.lastName,
-          firstName: u.firstName,
-          email: u.email,
-          notifications: u.notifications,
-          userStatus: u.userStatus,
-          userSites: ids.map(i => siteMap[i]).filter(Boolean)
-        };
-      });
+        const sitesResponse = await fetch(`/api/administrative/fetch/sites`);
+        if (!sitesResponse.ok) {
+          throw new Error(`Failed to load sites: ${sitesResponse.status} ${sitesResponse.statusText}`);
+        }
+        const tempSites: AdminSiteRDS[] = await sitesResponse.json();
+        setSites(tempSites);
 
-      setUsers(mappedUsers);
-      baseUsers.current = mappedUsers;
+        const siteMap: Record<number, AdminSiteRDS> = {};
+        tempSites.forEach(site => (siteMap[site.siteID ?? 0] = site));
+
+        const mappedUsers: UserWithSite[] = tempUsers.map(u => {
+          const ids =
+            u.userSites
+              ?.split(';')
+              .map(s => parseInt(s))
+              .filter(n => !isNaN(n)) ?? [];
+          return {
+            userID: u.userID,
+            lastName: u.lastName,
+            firstName: u.firstName,
+            email: u.email,
+            notifications: u.notifications,
+            userStatus: u.userStatus,
+            userSites: ids.map(i => siteMap[i]).filter(Boolean)
+          };
+        });
+
+        setUsers(mappedUsers);
+        baseUsers.current = mappedUsers;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please try again.';
+        setError(errorMessage);
+        ailogger.error('Failed to fetch users', err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setLoading(false);
+      }
     }
 
-    fetchUsers().catch(ailogger.error);
+    fetchUsers();
   }, []);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {
@@ -85,35 +106,65 @@ export default function UserSettingsPage() {
   }, [users]);
 
   return (
-    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
-      <Stack direction={'row'} gap={1}>
-        <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers.current)}>
-          Discard Changes
-        </Button>
-        <Button
-          disabled={!foundChanges}
-          onClick={async () => {
-            const baseMap = new Map(baseUsers.current.map(u => [u.userID, u]));
-            const updates = await Promise.all(
-              users.map(async user => {
-                const oldUser = baseMap.get(user.userID);
-                if (JSON.stringify(user) !== JSON.stringify(oldUser)) {
-                  await fetch(`/api/administrative/fetch/users`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ newRow: user, oldRow: oldUser }),
-                    headers: { 'Content-Type': 'application/json' }
-                  });
-                  return user;
+    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', gap: 2 }}>
+      {loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 4 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      {error && (
+        <Alert color="danger" variant="soft">
+          {error}
+        </Alert>
+      )}
+
+      {saveError && (
+        <Alert color="danger" variant="soft">
+          {saveError}
+        </Alert>
+      )}
+
+      {!loading && !error && (
+        <>
+          <Stack direction={'row'} gap={1}>
+            <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers.current)}>
+              Discard Changes
+            </Button>
+            <Button
+              disabled={!foundChanges}
+              onClick={async () => {
+                try {
+                  setSaveError(null);
+                  const baseMap = new Map(baseUsers.current.map(u => [u.userID, u]));
+                  const updates = await Promise.all(
+                    users.map(async user => {
+                      const oldUser = baseMap.get(user.userID);
+                      if (JSON.stringify(user) !== JSON.stringify(oldUser)) {
+                        const response = await fetch(`/api/administrative/fetch/users`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ newRow: user, oldRow: oldUser }),
+                          headers: { 'Content-Type': 'application/json' }
+                        });
+                        if (!response.ok) {
+                          throw new Error(`Failed to save changes: ${response.status} ${response.statusText}`);
+                        }
+                        return user;
+                      }
+                      return oldUser;
+                    })
+                  );
+                  baseUsers.current = updates.filter((u): u is UserWithSite => !!u);
+                } catch (err) {
+                  const errorMessage = err instanceof Error ? err.message : 'Failed to save changes. Please try again.';
+                  setSaveError(errorMessage);
+                  ailogger.error('Failed to save user changes', err instanceof Error ? err : new Error(String(err)));
                 }
-                return oldUser;
-              })
-            );
-            baseUsers.current = updates.filter((u): u is UserWithSite => !!u);
-          }}
-        >
-          Save Changes
-        </Button>
-      </Stack>
+              }}
+            >
+              Save Changes
+            </Button>
+          </Stack>
       <Table>
         <thead>
           <tr>
@@ -196,6 +247,8 @@ export default function UserSettingsPage() {
           ))}
         </tbody>
       </Table>
+        </>
+      )}
     </Box>
   );
 }

@@ -148,9 +148,10 @@ export default function IsolatedFailedMeasurementsDataGrid() {
 
         await new Promise(resolve => setTimeout(resolve, 500));
         setRefresh(true);
+        return updatedRow;
       } catch (error: any) {
         ailogger.error('Failed to save row:', error);
-        setRefresh(true);
+        throw error;
       }
     },
     [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts]

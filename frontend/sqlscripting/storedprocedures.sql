@@ -1126,8 +1126,8 @@ BEGIN
            DBH,
            HOM,
            MeasurementDate,
-           max(case when Codes is not null and trim(Codes) != '' then Codes end) as Codes,
-           max(case when Comments is not null and trim(Comments) != '' then Comments end) as Comments
+           GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END ORDER BY Codes SEPARATOR ';') as Codes,
+           GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END ORDER BY Comments SEPARATOR ' | ') as Comments
     FROM temporarymeasurements
     WHERE FileID = vFileID
       AND BatchID = vBatchID
@@ -1277,8 +1277,9 @@ BEGIN
       AND s.StemCrossID IS NULL;
 
     -- Step 9: Optimized core measurements insertion
-    -- Use a single UNION query instead of multiple temp tables for better performance
-    INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, IsActive)
+    -- Use INSERT ON DUPLICATE KEY UPDATE to handle reingestion properly
+    -- This ensures attributes are added to existing measurements when reingested
+    INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, IsActive)
     SELECT f.CensusID,
            s.StemGUID,
            null as IsValidated,
@@ -1303,7 +1304,15 @@ BEGIN
                       AND s.StemTag = f.StemTag
                       AND s.QuadratID = f.QuadratID
                       AND s.CensusID = f.CensusID
-                      AND s.IsActive = 1;
+                      AND s.IsActive = 1
+    ON DUPLICATE KEY UPDATE
+        IsValidated = VALUES(IsValidated),
+        Description = VALUES(Description),
+        MeasuredDBH = VALUES(MeasuredDBH),
+        MeasuredHOM = VALUES(MeasuredHOM),
+        MeasurementDate = VALUES(MeasurementDate),
+        UserDefinedFields = VALUES(UserDefinedFields),
+        IsActive = VALUES(IsActive);
 
     -- Step 10: Clean up measurement nulls (batch operation)
     UPDATE coremeasurements

@@ -294,16 +294,24 @@ describe('ValidationRow - Functional Tests', () => {
   });
 
   describe('Switch Toggle Functionality', () => {
-    it('MUST call onSaveChanges when switch toggled', async () => {
+    it('MUST call onSaveChanges when switch toggled and confirmed', async () => {
       const user = userEvent.setup();
       mockOnSaveChanges.mockResolvedValue(undefined);
 
       render(<ValidationRow {...defaultProps} />);
 
+      // Click the switch to open confirmation dialog
       const switchElement = screen.getByRole('switch');
       await user.click(switchElement);
 
-      expect(mockOnSaveChanges).toHaveBeenCalledWith(expect.objectContaining({ isEnabled: false }));
+      // Wait for confirmation dialog and click Confirm button
+      const confirmButton = await screen.findByRole('button', { name: /confirm/i });
+      await user.click(confirmButton);
+
+      // Verify onSaveChanges was called with the toggled state
+      await waitFor(() => {
+        expect(mockOnSaveChanges).toHaveBeenCalledWith(expect.objectContaining({ isEnabled: false }));
+      });
     });
 
     it('MUST reflect current enabled state', () => {

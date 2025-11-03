@@ -9,7 +9,7 @@ import ailogger from '@/ailogger';
 
 interface VOMProps {
   isValidationOverrideModalOpen: boolean;
-  handleValidationOverrideModalClose: () => Promise<void>;
+  handleValidationOverrideModalClose: (overridePerformed: boolean) => Promise<void>;
 }
 
 export default function ValidationOverrideModal(props: VOMProps) {
@@ -65,7 +65,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
               clearInterval(interval);
               setTimeout(() => {
                 setStartOverride(false);
-                handleValidationOverrideModalClose().then(() => {});
+                handleValidationOverrideModalClose(true).then(() => {});
               }, 1000); // Wait 1 second before closing
             }
             progress += 20;
@@ -85,7 +85,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
   return (
     <Modal
       open={isValidationOverrideModalOpen}
-      onClose={handleValidationOverrideModalClose}
+      onClose={() => handleValidationOverrideModalClose(false)}
       sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}
     >
       <ModalDialog role={'alertdialog'}>
@@ -95,7 +95,10 @@ export default function ValidationOverrideModal(props: VOMProps) {
           {openConfirmOverrideModal && !isOverrideConfirmed && (
             <ConfirmationDialog
               open={openConfirmOverrideModal}
-              onClose={() => setOpenConfirmOverrideModal(false)}
+              onClose={() => {
+                setOpenConfirmOverrideModal(false);
+                handleValidationOverrideModalClose(false);
+              }}
               onConfirm={() => {
                 setOpenConfirmOverrideModal(false);
                 setIsOverrideConfirmed(true);

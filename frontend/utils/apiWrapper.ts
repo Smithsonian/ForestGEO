@@ -6,6 +6,7 @@ interface ApiWrapperOptions {
   showErrorAlert?: boolean;
   retryAttempts?: number;
   retryDelay?: number;
+  timeout?: number; // Timeout in milliseconds (default: 60000ms = 1 minute)
 }
 
 /**
@@ -21,10 +22,17 @@ export class ApiWrapper {
   }
 
   /**
-   * Wrapped fetch with automatic loading states
+   * Wrapped fetch with automatic loading states and timeout protection
    */
   static async fetch(url: string, init: RequestInit = {}, options: ApiWrapperOptions = {}): Promise<Response> {
-    const { loadingMessage = 'Loading...', category = 'api', showErrorAlert = true, retryAttempts = 1, retryDelay = 1000 } = options;
+    const {
+      loadingMessage = 'Loading...',
+      category = 'api',
+      showErrorAlert = true,
+      retryAttempts = 1,
+      retryDelay = 1000,
+      timeout = 60000 // Default 60 second timeout
+    } = options;
 
     if (!ApiWrapper.loadingContext) {
       console.warn('ApiWrapper not initialized with loading context. Loading states will not work.');
@@ -37,8 +45,17 @@ export class ApiWrapper {
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < retryAttempts; attempt++) {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
       try {
-        const response = await fetch(url, init);
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -47,7 +64,13 @@ export class ApiWrapper {
         endOperation(operationId);
         return response;
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+        clearTimeout(timeoutId);
+
+        if (error instanceof Error && error.name === 'AbortError') {
+          lastError = new Error(`Request timeout after ${timeout}ms`);
+        } else {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
 
         // If this is the last attempt or not a network error, break
         if (attempt === retryAttempts - 1 || !ApiWrapper.isRetryableError(lastError)) {

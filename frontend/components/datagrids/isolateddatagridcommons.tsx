@@ -474,7 +474,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         setLoading(false);
       }
 
-      triggerRefresh();
+      triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       setLoading(false);
       await fetchPaginatedData(paginationModel.page);
     },

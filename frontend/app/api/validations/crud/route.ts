@@ -34,20 +34,18 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
-    // Get the next available ValidationID
-    const maxIdQuery = format('SELECT COALESCE(MAX(ValidationID), 0) + 1 as nextValidationID FROM ??', [`${schema}.sitespecificvalidations`]);
-    const maxIdResult = await connectionManager.executeQuery(maxIdQuery);
-    const nextValidationID = maxIdResult[0].nextValidationID;
+    // Map the validation object to database format
+    const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
+    const [mappedData] = mapper.demapData([validationProcedure]);
 
-    // Set the ValidationID for the new procedure
-    validationProcedure.validationID = nextValidationID;
-    delete validationProcedure['id']; // Remove any 'id' field if present
+    // Remove ValidationID - let the database auto-increment handle it
+    delete mappedData['ValidationID'];
 
-    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, validationProcedure]);
+    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, mappedData]);
     const results = await connectionManager.executeQuery(insertQuery);
     const insertID = results.insertId;
     await connectionManager.commitTransaction(transactionID ?? '');
-    return NextResponse.json({ insertID, validationID: nextValidationID }, { status: HTTPResponses.OK });
+    return NextResponse.json({ insertID, validationID: insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
     await connectionManager.rollbackTransaction(transactionID ?? '');
@@ -65,10 +63,16 @@ export async function PATCH(request: NextRequest) {
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
-    delete validationProcedure['id'];
+    // Map the validation object to database format and exclude id/validationID from update
+    const mapper = MapperFactory.getMapper<ValidationProceduresRDS, any>('sitespecificvalidations');
+    const [mappedData] = mapper.demapData([validationProcedure]);
+
+    // Remove ValidationID from the update data (it's the WHERE clause, not SET)
+    delete mappedData['ValidationID'];
+
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
       `${schema}.sitespecificvalidations`,
-      validationProcedure,
+      mappedData,
       validationProcedure.validationID
     ]);
     await connectionManager.executeQuery(updateQuery);

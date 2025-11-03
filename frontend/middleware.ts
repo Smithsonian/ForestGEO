@@ -17,6 +17,15 @@ export default auth(async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname.includes('/api/customsignin')) return NextResponse.next();
 
+  // E2E TESTING BYPASS
+  // When running Cypress E2E tests, skip authentication middleware
+  // This allows E2E tests to mock authentication client-side with cy.intercept()
+  // ⚠️ SECURITY: This env var must NEVER be set in production
+  if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+    console.log('[E2E MODE] Middleware auth bypass active');
+    return NextResponse.next();
+  }
+
   const url = request.nextUrl.clone();
   const session = await nextAuthMiddleware(); // Fetch session once
 

@@ -1,6 +1,6 @@
 // measurementcommons datagrid
 'use client';
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -27,6 +27,7 @@ import {
   Autocomplete,
   Button,
   Chip,
+  CircularProgress,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -85,6 +86,13 @@ import ailogger from '@/ailogger';
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
   const [value, setValue] = useState(initialValue);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = event.target.value;
@@ -95,6 +103,7 @@ export function EditMeasurements({ params }: { params: GridRenderEditCellParams 
   };
 
   const handleBlur = () => {
+    if (!isMountedRef.current) return;
     const formattedValue = parseFloat(value).toFixed(2);
     params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(value) === 0 ? null : parseFloat(formattedValue) });
   };
@@ -150,6 +159,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
   const [cmvSelected, setCMVSelected] = useState(-1);
+  const [isClearingErrors, setIsClearingErrors] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
     reject: (reason?: any) => void;
@@ -869,7 +879,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     } catch (error: any) {
       ailogger.error('Error fetching validation errors:', error);
     }
-  }, [currentSite?.schemaName]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const validationStatusColumn: GridColDef = useMemo(
     () => ({
@@ -1158,8 +1168,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     });
   }
 
-  async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>) {
+  async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
     closeModal(false);
+    if (!shouldRefresh) return;
+
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
@@ -1174,38 +1186,51 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }
 
   async function handleResetValidations() {
-    const clearCMVQuery = `DELETE cmv
-                           FROM ${currentSite?.schemaName}.cmverrors AS cmv
-                                  JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-                                       ON cmv.CoreMeasurementID = cm.CoreMeasurementID
-                                  JOIN ${currentSite?.schemaName}.census AS c
-                                       ON c.CensusID = cm.CensusID
-                           WHERE c.CensusID IN (SELECT CensusID
-                                                from ${currentSite?.schemaName}.census
-                                                WHERE PlotID = ${currentPlot?.plotID}
-                                                  AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                             AND c.PlotID = ${currentPlot?.plotID}
-                             AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
-      JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-                   SET cm.IsValidated = NULL
-                   WHERE c.CensusID IN (SELECT CensusID
-                                        from ${currentSite?.schemaName}.census
-                                        WHERE PlotID = ${currentPlot?.plotID}
-                                          AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                     AND c.PlotID = ${currentPlot?.plotID}`;
-    const clearCMVResponse = await fetch(`/api/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(clearCMVQuery)
-    });
-    if (!clearCMVResponse.ok) throw new Error('clear cmverrors query failed!');
-    const response = await fetch(`/api/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(query)
-    });
-    if (!response.ok) throw new Error('validation override failed');
+    try {
+      const clearCMVQuery = `DELETE cmv
+                             FROM ${currentSite?.schemaName}.cmverrors AS cmv
+                                    JOIN ${currentSite?.schemaName}.coremeasurements AS cm
+                                         ON cmv.CoreMeasurementID = cm.CoreMeasurementID
+                                    JOIN ${currentSite?.schemaName}.census AS c
+                                         ON c.CensusID = cm.CensusID
+                             WHERE c.CensusID IN (SELECT CensusID
+                                                  from ${currentSite?.schemaName}.census
+                                                  WHERE PlotID = ${currentPlot?.plotID}
+                                                    AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                               AND c.PlotID = ${currentPlot?.plotID}
+                               AND (cm.IsValidated = 0 OR cm.IsValidated IS NULL);`;
+      const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
+        JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
+                     SET cm.IsValidated = NULL
+                     WHERE c.CensusID IN (SELECT CensusID
+                                          from ${currentSite?.schemaName}.census
+                                          WHERE PlotID = ${currentPlot?.plotID}
+                                            AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                       AND c.PlotID = ${currentPlot?.plotID}`;
+      const clearCMVResponse = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(clearCMVQuery)
+      });
+      if (!clearCMVResponse.ok) {
+        const errorData = await clearCMVResponse.json();
+        ailogger.error('Clear CMVErrors query failed:', errorData);
+        throw new Error(`Clear cmverrors query failed: ${errorData.error || 'Unknown error'}`);
+      }
+      const response = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(query)
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        ailogger.error('Validation reset query failed:', errorData);
+        throw new Error(`Validation reset failed: ${errorData.error || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      ailogger.error('Error in handleResetValidations:', error);
+      throw error;
+    }
   }
 
   if (!currentSite || !currentPlot || !currentCensus) {
@@ -1343,7 +1368,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           />
         )}
         {isValidationModalOpen && (
-          <Modal open={isValidationModalOpen} onClose={async () => await handleCloseModal(setIsValidationModalOpen)}>
+          <Modal open={isValidationModalOpen} onClose={async () => await handleCloseModal(setIsValidationModalOpen, false)}>
             <ModalDialog
               sx={{
                 width: '80%',
@@ -1356,18 +1381,18 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 alignItems: 'center'
               }}
             >
-              <ValidationCore onValidationComplete={() => handleCloseModal(setIsValidationModalOpen)} />
+              <ValidationCore onValidationComplete={() => handleCloseModal(setIsValidationModalOpen, true)} />
             </ModalDialog>
           </Modal>
         )}
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal
             isValidationOverrideModalOpen={isValidationOverrideModalOpen}
-            handleValidationOverrideModalClose={async () => await handleCloseModal(setIsValidationOverrideModalOpen)}
+            handleValidationOverrideModalClose={async (overridePerformed: boolean) => await handleCloseModal(setIsValidationOverrideModalOpen, overridePerformed)}
           />
         )}
         {isResetValidationModalOpen && (
-          <Modal open={isResetValidationModalOpen} onClose={async () => await handleCloseModal(setIsResetValidationModalOpen)}>
+          <Modal open={isResetValidationModalOpen} onClose={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
             <ModalDialog role={'alertdialog'}>
               <DialogTitle>Reset Validation States?</DialogTitle>
               <DialogContent>Are you sure you want to reset all validation states? </DialogContent>
@@ -1375,12 +1400,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 <Button
                   onClick={async () => {
                     await handleResetValidations();
-                    await handleCloseModal(setIsResetValidationModalOpen);
+                    await handleCloseModal(setIsResetValidationModalOpen, true);
                   }}
                 >
                   Yes
                 </Button>
-                <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen)}>No</Button>
+                <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>No</Button>
               </DialogActions>
             </ModalDialog>
           </Modal>
@@ -1408,7 +1433,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               <DialogActions>
                 <Button
                   onClick={async () => {
-                    await handleCloseModal(setIsSingleCMVErrorOpen);
+                    await handleCloseModal(setIsSingleCMVErrorOpen, false);
                     setCMVSelected(-1);
                   }}
                 >
@@ -1416,28 +1441,56 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 </Button>
                 <Button
                   onClick={async () => {
-                    await fetch(`/api/query`, {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        query: `DELETE FROM ${currentSite?.schemaName}.cmverrors WHERE CoreMeasurementID = ?`,
-                        params: [cmvSelected],
-                        format: true
-                      })
-                    });
-                    await fetch(`/api/query`, {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        query: `UPDATE ${currentSite?.schemaName}.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
-                        params: [cmvSelected],
-                        format: true
-                      })
-                    });
-                    await fetchValidationErrors();
-                    await handleCloseModal(setIsSingleCMVErrorOpen);
-                    setCMVSelected(-1);
+                    setIsClearingErrors(true);
+                    try {
+                      const deleteResponse = await fetch(`/api/query`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          query: `DELETE FROM ??.cmverrors WHERE CoreMeasurementID = ?`,
+                          params: [currentSite?.schemaName, cmvSelected],
+                          format: true
+                        })
+                      });
+
+                      if (!deleteResponse.ok) {
+                        throw new Error('Failed to delete validation errors');
+                      }
+
+                      const updateResponse = await fetch(`/api/query`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          query: `UPDATE ??.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
+                          params: [currentSite?.schemaName, cmvSelected],
+                          format: true
+                        })
+                      });
+
+                      if (!updateResponse.ok) {
+                        throw new Error('Failed to update validation status');
+                      }
+
+                      await fetchValidationErrors();
+                      await handleCloseModal(setIsSingleCMVErrorOpen, false);
+                      setCMVSelected(-1);
+
+                      setSnackbar({
+                        children: 'Validation errors cleared successfully',
+                        severity: 'success'
+                      });
+                    } catch (error: any) {
+                      ailogger.error('Clear errors failed:', error);
+                      setSnackbar({
+                        children: `Failed to clear errors: ${error.message || 'Unknown error'}`,
+                        severity: 'error'
+                      });
+                    } finally {
+                      setIsClearingErrors(false);
+                    }
                   }}
+                  disabled={isClearingErrors}
+                  startDecorator={isClearingErrors ? <CircularProgress size="sm" /> : undefined}
                 >
-                  Clear Errors
+                  {isClearingErrors ? 'Clearing...' : 'Clear Errors'}
                 </Button>
               </DialogActions>
             </ModalDialog>

@@ -5,6 +5,7 @@ import {
   AccordionDetails,
   AccordionGroup,
   AccordionSummary,
+  Alert,
   Box,
   Card,
   CardContent,
@@ -60,6 +61,7 @@ export default function DashboardPage() {
 
   const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [progressTacho, setProgressTacho] = useState<ProgressTachoType>({
     TotalQuadrats: 0,
     PopulatedPercent: 0,
@@ -79,11 +81,13 @@ export default function DashboardPage() {
   const loadProgressTachometer = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotName || !currentCensus?.dateRanges[0].censusID) return null;
     try {
-      const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats } = await (
-        await fetch(
-          `/api/dashboardmetrics/ProgressTachometer/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}?plot=${currentPlot?.plotName ?? ''}`
-        )
-      ).json();
+      const response = await fetch(
+        `/api/dashboardmetrics/ProgressTachometer/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}?plot=${currentPlot?.plotName ?? ''}`
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load dashboard data: ${response.status} ${response.statusText}`);
+      }
+      const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats } = await response.json();
       ailogger.info(JSON.stringify({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats }));
       setProgressTacho({
         TotalQuadrats,
@@ -92,6 +96,8 @@ export default function DashboardPage() {
         UnpopulatedQuadrats: UnpopulatedQuadrats ? UnpopulatedQuadrats.split(';') : []
       });
     } catch (e: any) {
+      const errorMessage = e instanceof Error ? e.message : 'Failed to load dashboard data. Please try again.';
+      setError(errorMessage);
       ailogger.error('ProgressTachometer: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
@@ -218,6 +224,12 @@ export default function DashboardPage() {
 
   return (
     <Box role="region" aria-label="Dashboard page container" sx={{ display: 'flex', flexGrow: 1, width: '99%', flexDirection: 'column', mb: 5 }}>
+      {error && (
+        <Alert color="danger" variant="soft" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
       <Card variant="plain" aria-labelledby="dashboard-header-title">
         <CardContent>
           <Typography id="dashboard-header-title" level="title-lg" component="h1">
@@ -245,7 +257,7 @@ export default function DashboardPage() {
                   tabIndex={0}
                   aria-pressed={toggleSwitch}
                   aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-                  sx={{ height: '300px', width: '100%', minHeight: '250px' }}
+                  sx={{ height: '600px', width: '100%', minHeight: '500px' }}
                   onClick={() => setToggleSwitch(!toggleSwitch)}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {

@@ -9,7 +9,15 @@ export default defineConfig(({ mode }) => ({
     environment: 'jsdom',
     setupFiles: ['setup.ts'],
     css: {
-      include: []  // Disable CSS processing to avoid .css import errors
+      modules: {
+        classNameStrategy: 'non-scoped'
+      }
+    },
+    server: {
+      deps: {
+        // Inline all MUI packages to avoid ESM directory import issues
+        inline: [/@mui\//]
+      }
     },
     env: loadEnv(mode, process.cwd(), ''),
     restoreMocks: true,

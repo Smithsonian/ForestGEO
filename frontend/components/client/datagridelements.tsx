@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -140,6 +141,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   const [openExportModal, setOpenExportModal] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
   const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
+  const [isExporting, setIsExporting] = useState(false);
   const apiRef = useGridApiContext();
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,29 +191,39 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   }
 
   const downloadExportedData = async () => {
-    // 2a) generic two-arg export
-    if (handleExport) {
-      const blob = new Blob([await handleExport(exportVisibility, exportType)], {
-        type: 'text/csv;charset=utf-8;'
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `measurements_${exportType}_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+    setIsExporting(true);
+    try {
+      // 2a) generic two-arg export
+      if (handleExport) {
+        const data = await handleExport(exportVisibility, exportType);
+        const blob = new Blob([data], {
+          type: 'text/csv;charset=utf-8;'
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `measurements_${exportType}_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+      // 2b) single-purpose CSV
+      else if (handleExportCSV) {
+        await handleExportCSV();
+      }
+      // 2c) "export all" fallback
+      else {
+        await handleExportAll!();
+      }
+    } catch (error: any) {
+      console.error('Export failed:', error);
+      // Could add a snackbar notification here if available in props
+      alert(`Export failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsExporting(false);
+      setOpenExportModal(false);
     }
-    // 2b) single-purpose CSV
-    else if (handleExportCSV) {
-      await handleExportCSV();
-    }
-    // 2c) “export all” fallback
-    else {
-      await handleExportAll!();
-    }
-
-    setOpenExportModal(false);
   };
 
   const handleChipToggle = (type: string) => {
@@ -263,7 +275,12 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     value={inputValue}
                     onKeyDown={handleKeyDown}
                     onChange={handleInputChange}
-                    slotProps={{ input: { endAdornment: null } }}
+                    slotProps={{
+                      input: {
+                        endAdornment: null,
+                        'aria-label': 'Quick search across all fields. Press Enter to apply filter.'
+                      }
+                    }}
                   />
                   <QuickFilterClear
                     aria-label={'clear filter'}
@@ -285,6 +302,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               color={'primary'}
               startDecorator={<RefreshIcon />}
               onClick={async () => await handleRefresh()}
+              data-testid="refresh-button"
             >
               Refresh
             </Button>
@@ -297,6 +315,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       variant="soft"
                       color={errorControls.show ? 'danger' : 'neutral'}
                       onClick={() => errorControls.toggle(!errorControls.show)}
+                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
+                      aria-pressed={errorControls.show}
+                      data-testid="filter-errors"
                     >
                       <CancelPresentationIcon />
                     </IconButton>
@@ -309,6 +330,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       disabled={!validControls.count}
                       color={validControls.show ? 'success' : 'neutral'}
                       onClick={() => validControls.toggle(!validControls.show)}
+                      aria-label={`${validControls.show ? 'Hide' : 'Show'} valid measurements (${validControls.count})`}
+                      aria-pressed={validControls.show}
+                      data-testid="filter-valid"
                     >
                       <VerifiedIcon />
                     </IconButton>
@@ -318,7 +342,14 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   title={`Pending: (${pendingControls.count}) - Always Shown\nPending rows must remain visible to prevent edited measurements from disappearing during validation`}
                 >
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
-                    <IconButton variant="soft" disabled={true} color={'primary'} sx={{ cursor: 'not-allowed', opacity: 0.9 }}>
+                    <IconButton
+                      variant="solid"
+                      color={'primary'}
+                      sx={{ cursor: 'default', pointerEvents: 'none' }}
+                      aria-label={`Pending measurements (${pendingControls.count}) - always visible to preserve edited measurements during validation`}
+                      aria-pressed={true}
+                      data-testid="filter-pending"
+                    >
                       <ScheduleIcon />
                     </IconButton>
                   </Badge>
@@ -330,6 +361,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       disabled={!otControls.count}
                       color={otControls.show ? 'primary' : 'neutral'}
                       onClick={() => otControls.toggle(!otControls.show)}
+                      aria-label={`${otControls.show ? 'Hide' : 'Show'} old trees (${otControls.count})`}
+                      aria-pressed={otControls.show}
+                      data-testid="filter-ot"
                     >
                       <Forest />
                     </IconButton>
@@ -342,6 +376,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       disabled={!msControls.count}
                       color={msControls.show ? 'primary' : 'neutral'}
                       onClick={() => msControls.toggle(!msControls.show)}
+                      aria-label={`${msControls.show ? 'Hide' : 'Show'} multi-stem trees (${msControls.count})`}
+                      aria-pressed={msControls.show}
+                      data-testid="filter-ms"
                     >
                       <CallSplit />
                     </IconButton>
@@ -354,6 +391,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       disabled={!nrControls.count}
                       color={nrControls.show ? 'primary' : 'neutral'}
                       onClick={() => nrControls.toggle(!nrControls.show)}
+                      aria-label={`${nrControls.show ? 'Hide' : 'Show'} new recruits (${nrControls.count})`}
+                      aria-pressed={nrControls.show}
+                      data-testid="filter-nr"
                     >
                       <Grass />
                     </IconButton>
@@ -366,6 +406,8 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       disabled={!failedControls.count}
                       color={failedControls.count ? 'primary' : 'neutral'}
                       onClick={failedControls.trigger}
+                      aria-label={`View unsubmitted measurements (${failedControls.count})`}
+                      data-testid="filter-unsubmitted"
                     >
                       <RuleOutlined />
                     </IconButton>
@@ -403,6 +445,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                         await handleExportAll!();
                       }
                     }}
+                    data-testid="export-button"
                   >
                     <CloudDownloadIcon />
                   </IconButton>
@@ -495,7 +538,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             }}
           >
             <ModalDialog
-              role={'alertdialog'}
+              role={'dialog'}
+              aria-labelledby={'exporting-data'}
+              aria-describedby={'export-description'}
               sx={{
                 width: '90%',
                 maxWidth: '60vh',
@@ -506,6 +551,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             >
               <DialogTitle id={'exporting-data'}>Exporting Data</DialogTitle>
               <DialogContent
+                id={'export-description'}
                 sx={{
                   mt: 1,
                   display: 'flex',
@@ -598,8 +644,10 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   }}
                 >
                   <Chip
-                    component={'div'}
-                    role={'button'}
+                    component={'button'}
+                    type={'button'}
+                    role={'checkbox'}
+                    aria-checked={exportVisibility.includes('valid')}
                     tabIndex={0}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -623,8 +671,10 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows passing validation
                   </Chip>
                   <Chip
-                    component={'div'}
-                    role={'button'}
+                    component={'button'}
+                    type={'button'}
+                    role={'checkbox'}
+                    aria-checked={exportVisibility.includes('errors')}
                     tabIndex={0}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -648,8 +698,10 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     Rows failing validation
                   </Chip>
                   <Chip
-                    component={'div'}
-                    role={'button'}
+                    component={'button'}
+                    type={'button'}
+                    role={'checkbox'}
+                    aria-checked={exportVisibility.includes('pending')}
                     tabIndex={0}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -676,15 +728,18 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </DialogContent>
               <DialogActions>
                 <Button
-                  onClick={async () => {
-                    await downloadExportedData();
-                    setOpenExportModal(false);
-                  }}
+                  onClick={downloadExportedData}
+                  disabled={isExporting}
+                  startDecorator={isExporting ? <CircularProgress size="sm" /> : undefined}
                   aria-label={'Export selected data/visibility and close the modal'}
                 >
-                  Export
+                  {isExporting ? 'Exporting...' : 'Export'}
                 </Button>
-                <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>
+                <Button
+                  aria-label={'Cancel the operation and close the modal'}
+                  onClick={() => setOpenExportModal(false)}
+                  disabled={isExporting}
+                >
                   Cancel
                 </Button>
               </DialogActions>
