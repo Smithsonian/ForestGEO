@@ -11,9 +11,7 @@ import Typography from '@mui/joy/Typography';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import ailogger from '@/ailogger';
-// @todo: look into using an ID other than plot name.
-// @todo: react router URL params to pass in the ID for Browse.
-// https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
+import { getContainerNameWithFallback } from '@/config/macros/containernames';
 interface LoadingFilesProps {
   currentPlot: Plot | null;
   currentCensus: OrgCensus;
@@ -26,10 +24,24 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
     refreshFiles();
   }, []); // on mount
 
+  // Generate container name for display
+  const getContainerDisplayName = () => {
+    try {
+      const { primary } = getContainerNameWithFallback(
+        currentPlot?.plotID,
+        currentPlot?.plotName,
+        currentCensus?.plotCensusNumber
+      );
+      return primary;
+    } catch {
+      return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
       <Typography level={'title-lg'}>
-        Accessing Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+        Accessing Container: {getContainerDisplayName()}
         <br />
         <Button sx={{ width: 'fit-content' }} onClick={refreshFiles}>
           Refresh Files
@@ -77,9 +89,21 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleDownload = async (containerName: string, filename: string) => {
+  const handleDownload = async (filename: string) => {
     try {
-      const response = await fetch(`/api/files/download?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`);
+      const { primary, legacy } = getContainerNameWithFallback(
+        currentPlot?.plotID,
+        currentPlot?.plotName,
+        currentCensus?.plotCensusNumber
+      );
+
+      const response = await fetch(
+        `/api/files/download?` +
+        `container=${encodeURIComponent(primary.toLowerCase())}&` +
+        `filename=${encodeURIComponent(filename)}` +
+        (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : '')
+      );
+
       if (!response.ok) throw new Error('Error getting download link');
 
       const data = await response.json();
@@ -91,11 +115,24 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     }
   };
 
-  const handleDelete = async (containerName: string, filename: string) => {
+  const handleDelete = async (filename: string) => {
     try {
-      const response = await fetch(`/api/files/delete?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`, {
-        method: 'DELETE'
-      });
+      const { primary, legacy } = getContainerNameWithFallback(
+        currentPlot?.plotID,
+        currentPlot?.plotName,
+        currentCensus?.plotCensusNumber
+      );
+
+      const response = await fetch(
+        `/api/files/delete?` +
+        `container=${encodeURIComponent(primary.toLowerCase())}&` +
+        `filename=${encodeURIComponent(filename)}` +
+        (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : ''),
+        {
+          method: 'DELETE'
+        }
+      );
+
       if (!response.ok) throw new Error('Error deleting file');
 
       // Refresh the file list after successful deletion
@@ -109,12 +146,22 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const getListOfFiles = useCallback(async () => {
     try {
-      const response = await fetch(
-        `/api/files/list?plot=${currentPlot?.plotName?.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`,
-        {
-          method: 'GET'
-        }
-      );
+      // Build query parameters with both new (plotID) and legacy (plotName) for backward compatibility
+      const params = new URLSearchParams();
+
+      if (currentPlot?.plotID) {
+        params.append('plotID', currentPlot.plotID.toString());
+      }
+      if (currentPlot?.plotName) {
+        params.append('plotName', currentPlot.plotName.trim());
+      }
+      if (currentCensus?.plotCensusNumber) {
+        params.append('census', currentCensus.plotCensusNumber.toString());
+      }
+
+      const response = await fetch(`/api/files/list?${params.toString()}`, {
+        method: 'GET'
+      });
 
       if (!response.ok) {
         const jsonOutput = await response.json();
@@ -180,7 +227,18 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', mb: 10 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
             <Typography level={'title-lg'} marginBottom={2}>
-              Accessing Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+              Accessing Container: {(() => {
+                try {
+                  const { primary } = getContainerNameWithFallback(
+                    currentPlot?.plotID,
+                    currentPlot?.plotName,
+                    currentCensus?.plotCensusNumber
+                  );
+                  return primary;
+                } catch {
+                  return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
+                }
+              })()}
             </Typography>
             <Button variant={'contained'} sx={{ width: 'fit-content', marginBottom: 2 }} onClick={refreshFiles}>
               Refresh Files
@@ -287,24 +345,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                             {new Date(row.date ? row.date : '').toString()}
                           </TableCell>
                           <TableCell align="center">
-                            <Button
-                              onClick={() =>
-                                handleDownload(
-                                  `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`,
-                                  row.name
-                                )
-                              }
-                            >
+                            <Button onClick={() => handleDownload(row.name)}>
                               <DownloadIcon />
                             </Button>
-                            <Button
-                              onClick={() =>
-                                handleDelete(
-                                  `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`,
-                                  row.name
-                                )
-                              }
-                            >
+                            <Button onClick={() => handleDelete(row.name)}>
                               <DeleteIcon />
                             </Button>
                           </TableCell>
@@ -396,27 +440,13 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                             {row.fileErrors}
                           </TableCell>
                           <TableCell align="center">
-                            <Button
-                              onClick={() =>
-                                handleDownload(
-                                  `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`,
-                                  row.name
-                                )
-                              }
-                            >
+                            <Button onClick={() => handleDownload(row.name)}>
                               <DownloadIcon />
                             </Button>
                             <Button>
                               <EditIcon />
                             </Button>
-                            <Button
-                              onClick={() =>
-                                handleDelete(
-                                  `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`,
-                                  row.name
-                                )
-                              }
-                            >
+                            <Button onClick={() => handleDelete(row.name)}>
                               <DeleteIcon />
                             </Button>
                           </TableCell>

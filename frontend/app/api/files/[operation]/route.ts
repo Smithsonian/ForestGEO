@@ -3,6 +3,7 @@ import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azu
 import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { getContainerNameWithFallback } from '@/config/macros/containernames';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -19,7 +20,10 @@ const VALID_OPERATIONS: Record<string, FileOperation> = {
 
 interface FileOperationParams {
   container?: string;
+  legacyContainer?: string;
   filename?: string;
+  plotID?: string;
+  plotName?: string;
   plot?: string;
   census?: string;
   user?: string;
@@ -122,8 +126,11 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
 
   return {
     container: searchParams.get('container')?.trim() || undefined,
+    legacyContainer: searchParams.get('legacyContainer')?.trim() || undefined,
     filename: searchParams.get('filename')?.trim() || undefined,
     fileName: searchParams.get('fileName')?.trim() || undefined,
+    plotID: searchParams.get('plotID')?.trim() || undefined,
+    plotName: searchParams.get('plotName')?.trim() || undefined,
     plot: searchParams.get('plot')?.trim() || undefined,
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
@@ -131,29 +138,67 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
   };
 }
 
-// Handle file download
+// Handle file download with backward compatibility
 async function handleDownload(params: FileOperationParams & { filename?: string }) {
-  const { container, filename } = params;
+  const { container, legacyContainer, filename } = params;
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 
-  if (!container || !filename || !storageAccountConnectionString) {
-    return new NextResponse(JSON.stringify({ error: 'Container name, filename, and storage connection string are required' }), {
+  if (!filename || !storageAccountConnectionString) {
+    return new NextResponse(JSON.stringify({ error: 'Filename and storage connection string are required' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
+  if (!container && !legacyContainer) {
+    return new NextResponse(JSON.stringify({ error: 'Container name is required' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
 
   try {
-    const containerClient = await getContainerClient(container.toLowerCase());
-    if (!containerClient) {
-      return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
+    const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+    let containerClient;
+    let actualContainerName = '';
+
+    // Try primary container first
+    if (container) {
+      containerClient = await getContainerClient(container.toLowerCase());
+      actualContainerName = container.toLowerCase();
+
+      // Check if container exists
+      const exists = await containerClient?.exists();
+      if (!exists) {
+        ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy...`);
+        containerClient = null;
+      }
     }
 
-    const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+    // Fall back to legacy container if primary doesn't exist
+    if (!containerClient && legacyContainer) {
+      containerClient = await getContainerClient(legacyContainer.toLowerCase());
+      actualContainerName = legacyContainer.toLowerCase();
+
+      const exists = await containerClient?.exists();
+      if (!exists) {
+        return new NextResponse(JSON.stringify({ error: `Container not found: ${container || legacyContainer}` }), {
+          status: HTTPResponses.NOT_FOUND
+        });
+      }
+
+      ailogger.warn(`Using legacy container "${actualContainerName}" for download. Consider migrating to ID-based naming.`);
+    }
+
+    if (!containerClient) {
+      return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
     const blobClient = containerClient.getBlobClient(filename);
 
     // Generate SAS token for secure download
     const sasOptions = {
-      containerName: container,
+      containerName: actualContainerName,
       blobName: filename,
       startsOn: new Date(),
       expiresOn: new Date(new Date().valueOf() + 3600 * 1000), // 1 hour expiration
@@ -182,16 +227,49 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
   }
 }
 
-// Handle file deletion
+// Handle file deletion with backward compatibility
 async function handleDelete(params: FileOperationParams & { filename?: string }) {
-  const { container, filename } = params;
+  const { container, legacyContainer, filename } = params;
 
-  if (!container || !filename) {
-    return new NextResponse(JSON.stringify({ error: 'Container name and filename are required' }), { status: HTTPResponses.INVALID_REQUEST });
+  if (!filename) {
+    return new NextResponse(JSON.stringify({ error: 'Filename is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  if (!container && !legacyContainer) {
+    return new NextResponse(JSON.stringify({ error: 'Container name is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   try {
-    const containerClient = await getContainerClient(container.toLowerCase());
+    let containerClient;
+    let actualContainerName = '';
+
+    // Try primary container first
+    if (container) {
+      containerClient = await getContainerClient(container.toLowerCase());
+      actualContainerName = container.toLowerCase();
+
+      const exists = await containerClient?.exists();
+      if (!exists) {
+        ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy...`);
+        containerClient = null;
+      }
+    }
+
+    // Fall back to legacy container if primary doesn't exist
+    if (!containerClient && legacyContainer) {
+      containerClient = await getContainerClient(legacyContainer.toLowerCase());
+      actualContainerName = legacyContainer.toLowerCase();
+
+      const exists = await containerClient?.exists();
+      if (!exists) {
+        return new NextResponse(JSON.stringify({ error: `Container not found: ${container || legacyContainer}` }), {
+          status: HTTPResponses.NOT_FOUND
+        });
+      }
+
+      ailogger.warn(`Using legacy container "${actualContainerName}" for deletion. Consider migrating to ID-based naming.`);
+    }
+
     if (!containerClient) {
       return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
     }
@@ -212,16 +290,61 @@ async function handleDelete(params: FileOperationParams & { filename?: string })
   }
 }
 
-// Handle file listing
+// Handle file listing with backward compatibility
 async function handleList(params: FileOperationParams) {
-  const { plot, census } = params;
+  const { plotID, plotName, census } = params;
 
-  if (!plot || !census) {
-    return new NextResponse(JSON.stringify({ error: 'Both plot and census parameters are required' }), { status: HTTPResponses.INVALID_REQUEST });
+  if (!census) {
+    return new NextResponse(JSON.stringify({ error: 'Census parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  if (!plotID && !plotName) {
+    return new NextResponse(JSON.stringify({ error: 'Either plotID or plotName parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   try {
-    const containerClient = await getContainerClient(`${plot}-${census}`);
+    // Generate container names with fallback
+    const censusNum = parseInt(census, 10);
+    const plotIdNum = plotID ? parseInt(plotID, 10) : undefined;
+
+    const { primary, legacy } = getContainerNameWithFallback(
+      plotIdNum,
+      plotName,
+      censusNum
+    );
+
+    let containerClient;
+    let actualContainerName = '';
+
+    // Try primary (ID-based) container first
+    containerClient = await getContainerClient(primary.toLowerCase());
+    actualContainerName = primary.toLowerCase();
+
+    let exists = await containerClient?.exists();
+    if (!exists && legacy) {
+      // Fall back to legacy container
+      ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy "${legacy}"...`);
+      containerClient = await getContainerClient(legacy.toLowerCase());
+      actualContainerName = legacy.toLowerCase();
+
+      exists = await containerClient?.exists();
+      if (exists) {
+        ailogger.warn(`Using legacy container "${actualContainerName}" for listing. Consider migrating to ID-based naming.`);
+      }
+    }
+
+    if (!exists) {
+      // Container doesn't exist - return empty list instead of error
+      ailogger.info(`Container "${actualContainerName}" not found. Returning empty file list.`);
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: 'No container found - empty list',
+          blobData: []
+        }),
+        { status: HTTPResponses.OK }
+      );
+    }
+
     if (!containerClient) {
       return new NextResponse(JSON.stringify({ error: 'Failed to get container client' }), { status: HTTPResponses.INVALID_REQUEST });
     }
@@ -252,7 +375,8 @@ async function handleList(params: FileOperationParams) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'List of files',
-        blobData: blobData
+        blobData: blobData,
+        containerName: actualContainerName // Include for debugging
       }),
       { status: HTTPResponses.OK }
     );
