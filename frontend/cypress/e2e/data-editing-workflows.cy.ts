@@ -178,9 +178,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
 
       cy.log('✏️ Clicking edit button for first row');
       // Find the first row and click edit button
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       cy.log('✍️ Modifying DBH value');
       // Mock the PATCH request for updating the row
@@ -211,9 +213,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Entering edit mode');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       const originalValue = mockMeasurements[0].dbh;
       cy.log(`📝 Original DBH value: ${originalValue}`);
@@ -236,9 +240,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Editing row');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock update that will trigger validation
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -280,9 +286,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Editing row with invalid data');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock failed update due to validation
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -473,9 +481,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait('@fetchAttributes');
 
       cy.log('🗑️ Clicking delete button for first row');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.log('✅ Verifying row has deleted class');
       cy.get('[role="row"]').eq(1).should('have.class', 'row--removed');
@@ -497,9 +507,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.get('input').first().clear().type('MODIFIED001');
 
       cy.log('🔄 Clicking restore button for the row');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Discard"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Discard"]').click();
+        });
 
       cy.log('✅ Verifying row is restored');
       cy.get('.row--edited').should('not.exist');
@@ -574,9 +586,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Editing row');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock update that changes validation status
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -628,9 +642,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Editing row with data that will fail validation');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock update that will have validation errors
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -705,9 +721,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('✏️ Step 2: Enter edit mode');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       cy.log('✍️ Step 3: Modify data');
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -768,9 +786,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.visit('/measurementshub/viewfulltable');
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock network error
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -792,9 +812,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.visit('/measurementshub/viewfulltable');
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock conflict error (row was modified by another user)
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
@@ -834,9 +856,11 @@ describe('Data Editing Workflows - Comprehensive Tests', () => {
       cy.visit('/measurementshub/viewfulltable');
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock update with null/empty value
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {

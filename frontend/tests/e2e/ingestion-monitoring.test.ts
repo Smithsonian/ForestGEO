@@ -116,10 +116,7 @@ class IngestionMonitor {
       HAVING COUNT(*) > 1
     `;
 
-    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [
-      this.report.fileID,
-      this.report.batchID
-    ]);
+    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [this.report.fileID, this.report.batchID]);
 
     this.report.duplicatesFound = rows.length;
 
@@ -149,10 +146,7 @@ class IngestionMonitor {
       HAVING COUNT(*) > 1
     `;
 
-    const [duplicates] = await this.connection.query<mysql.RowDataPacket[]>(query, [
-      this.report.fileID,
-      this.report.batchID
-    ]);
+    const [duplicates] = await this.connection.query<mysql.RowDataPacket[]>(query, [this.report.fileID, this.report.batchID]);
 
     if (duplicates.length === 0) {
       return true; // No duplicates to verify
@@ -161,7 +155,11 @@ class IngestionMonitor {
     // After bulkingestionprocess runs, verify codes were merged
     let allMerged = true;
     for (const dup of duplicates) {
-      const expectedCodes = dup.expected_merged_codes?.split(';').filter((c: string) => c).sort() || [];
+      const expectedCodes =
+        dup.expected_merged_codes
+          ?.split(';')
+          .filter((c: string) => c)
+          .sort() || [];
 
       if (expectedCodes.length > 1) {
         this.report.attributesMerged += expectedCodes.length;
@@ -191,10 +189,7 @@ class IngestionMonitor {
       AND Date >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
     `;
 
-    const count = await this.trackStage(
-      'Failed Validations',
-      countQuery.replace('?', `'${this.report.fileID}'`).replace('?', `'${this.report.batchID}'`)
-    );
+    const count = await this.trackStage('Failed Validations', countQuery.replace('?', `'${this.report.fileID}'`).replace('?', `'${this.report.batchID}'`));
 
     this.report.failedValidations = count;
     return count;
@@ -216,10 +211,7 @@ class IngestionMonitor {
       AND cm.IsActive = 1
     `;
 
-    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [
-      this.report.fileID,
-      this.report.batchID
-    ]);
+    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [this.report.fileID, this.report.batchID]);
 
     const count = rows[0]?.count || 0;
     this.report.successfulInsertions = count;
@@ -231,7 +223,7 @@ class IngestionMonitor {
   /**
    * Verify attribute codes were properly inserted
    */
-  async verifyAttributeCodes(): Promise<{matched: number, missing: number}> {
+  async verifyAttributeCodes(): Promise<{ matched: number; missing: number }> {
     const query = `
       SELECT
         t.TreeTag,
@@ -248,10 +240,7 @@ class IngestionMonitor {
       GROUP BY t.TreeTag, s.StemTag, cm.CoreMeasurementID
     `;
 
-    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [
-      this.report.fileID,
-      this.report.batchID
-    ]);
+    const [rows] = await this.connection.query<mysql.RowDataPacket[]>(query, [this.report.fileID, this.report.batchID]);
 
     let matched = 0;
     let missing = 0;
@@ -261,9 +250,7 @@ class IngestionMonitor {
         matched++;
       } else {
         missing++;
-        this.report.warnings.push(
-          `Missing attribute codes for TreeTag: ${row.TreeTag}, StemTag: ${row.StemTag}`
-        );
+        this.report.warnings.push(`Missing attribute codes for TreeTag: ${row.TreeTag}, StemTag: ${row.StemTag}`);
       }
     }
 
@@ -318,13 +305,13 @@ class IngestionMonitor {
 
     if (report.warnings.length > 0) {
       output += '⚠️  WARNINGS:\n';
-      report.warnings.forEach(w => output += `  - ${w}\n`);
+      report.warnings.forEach(w => (output += `  - ${w}\n`));
       output += '\n';
     }
 
     if (report.errors.length > 0) {
       output += '❌ ERRORS:\n';
-      report.errors.forEach(e => output += `  - ${e}\n`);
+      report.errors.forEach(e => (output += `  - ${e}\n`));
       output += '\n';
     }
 
@@ -372,23 +359,17 @@ describe('E2E Ingestion Monitoring', () => {
       dbAvailable = true;
 
       // Get valid test data references
-      const [plots] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT PlotID FROM plots WHERE IsActive = 1 LIMIT 1'
-      );
+      const [plots] = await connection.query<mysql.RowDataPacket[]>('SELECT PlotID FROM plots WHERE IsActive = 1 LIMIT 1');
 
-      const [census] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT CensusID FROM census WHERE PlotID = ? AND IsActive = 1 LIMIT 1',
-        [plots[0].PlotID]
-      );
+      const [census] = await connection.query<mysql.RowDataPacket[]>('SELECT CensusID FROM census WHERE PlotID = ? AND IsActive = 1 LIMIT 1', [
+        plots[0].PlotID
+      ]);
 
-      const [species] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1'
-      );
+      const [species] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesCode FROM species WHERE IsActive = 1 LIMIT 1');
 
-      const [quadrats] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1',
-        [plots[0].PlotID]
-      );
+      const [quadrats] = await connection.query<mysql.RowDataPacket[]>('SELECT QuadratName FROM quadrats WHERE PlotID = ? AND IsActive = 1 LIMIT 1', [
+        plots[0].PlotID
+      ]);
 
       testPlotID = plots[0].PlotID;
       testCensusID = census[0].CensusID;
@@ -446,12 +427,7 @@ describe('E2E Ingestion Monitoring', () => {
          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DS'),
          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'M'),
          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-        [
-          ...Object.values(baseData),
-          ...Object.values(baseData),
-          ...Object.values(baseData),
-          ...Object.values(baseData)
-        ]
+        [...Object.values(baseData), ...Object.values(baseData), ...Object.values(baseData), ...Object.values(baseData)]
       );
 
       await monitor.trackStage(
@@ -494,10 +470,7 @@ describe('E2E Ingestion Monitoring', () => {
       expect(matched).toBeGreaterThan(0); // Codes should be present
 
       // Clean up
-      await connection.query('DELETE FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?', [
-        testFileID,
-        testBatchID
-      ]);
+      await connection.query('DELETE FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?', [testFileID, testBatchID]);
     });
 
     it('should verify GROUP_CONCAT preserves all codes from duplicates', async () => {
@@ -506,12 +479,7 @@ describe('E2E Ingestion Monitoring', () => {
         return;
       }
 
-      const monitor = new IngestionMonitor(
-        connection,
-        'GROUP_CONCAT Verification',
-        testFileID,
-        testBatchID
-      );
+      const monitor = new IngestionMonitor(connection, 'GROUP_CONCAT Verification', testFileID, testBatchID);
 
       const treeTag = `VERIFY_${uuidv4().substring(0, 8)}`;
 
@@ -529,16 +497,26 @@ describe('E2E Ingestion Monitoring', () => {
             LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            testFileID, testBatchID, testPlotID, testCensusID, treeTag, '0001',
-            testSpeciesCode, testQuadratName, 10.5, 20.5, 15.5, 1.3,
-            '2024-06-15', meas.code, meas.comment
+            testFileID,
+            testBatchID,
+            testPlotID,
+            testCensusID,
+            treeTag,
+            '0001',
+            testSpeciesCode,
+            testQuadratName,
+            10.5,
+            20.5,
+            15.5,
+            1.3,
+            '2024-06-15',
+            meas.code,
+            meas.comment
           ]
         );
       }
 
-      await monitor.trackStage('Initial Upload',
-        `SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = '${testFileID}'`
-      );
+      await monitor.trackStage('Initial Upload', `SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = '${testFileID}'`);
 
       // Check what GROUP_CONCAT produces
       const [preIngestion] = await connection.query<mysql.RowDataPacket[]>(
@@ -603,12 +581,7 @@ describe('E2E Ingestion Monitoring', () => {
         return;
       }
 
-      const monitor = new IngestionMonitor(
-        connection,
-        'Full Pipeline Test',
-        testFileID,
-        testBatchID
-      );
+      const monitor = new IngestionMonitor(connection, 'Full Pipeline Test', testFileID, testBatchID);
 
       // Simulate realistic data with mix of valid, invalid, and duplicate records
       const records = [
@@ -633,18 +606,26 @@ describe('E2E Ingestion Monitoring', () => {
             LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            testFileID, testBatchID, testPlotID, testCensusID, rec.tag, rec.stem,
-            testSpeciesCode, testQuadratName, rec.x, rec.y, rec.dbh, 1.3,
-            '2024-06-15', rec.code
+            testFileID,
+            testBatchID,
+            testPlotID,
+            testCensusID,
+            rec.tag,
+            rec.stem,
+            testSpeciesCode,
+            testQuadratName,
+            rec.x,
+            rec.y,
+            rec.dbh,
+            1.3,
+            '2024-06-15',
+            rec.code
           ]
         );
       }
 
       // Monitor Stage 1: Initial Upload
-      const initialCount = await monitor.trackStage(
-        'Initial Upload',
-        `SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = '${testFileID}'`
-      );
+      const initialCount = await monitor.trackStage('Initial Upload', `SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = '${testFileID}'`);
       expect(initialCount).toBe(records.length);
 
       // Monitor Stage 2: Duplicate Detection

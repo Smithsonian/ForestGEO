@@ -126,9 +126,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
     console.log('✅ Stored procedures loaded successfully');
 
     // Verify bulkingestionprocess exists and uses GROUP_CONCAT
-    const [rows] = await connection.query<mysql.RowDataPacket[]>(
-      'SHOW CREATE PROCEDURE bulkingestionprocess'
-    );
+    const [rows] = await connection.query<mysql.RowDataPacket[]>('SHOW CREATE PROCEDURE bulkingestionprocess');
 
     if (rows.length > 0) {
       const procedureContent = rows[0]['Create Procedure'];
@@ -197,7 +195,8 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
   const speciesFile = path.join(sampleDataPath, 'species.txt');
   const speciesData = parseSampleDataFile(speciesFile);
 
-  for (const species of speciesData.slice(0, 50)) { // Limit to 50 for testing
+  for (const species of speciesData.slice(0, 50)) {
+    // Limit to 50 for testing
     await connection.query(
       `INSERT INTO species (SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, IsActive)
        VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -225,11 +224,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
       `INSERT INTO attributes (Code, Description, Status, IsActive)
        VALUES (?, ?, ?, 1)
        ON DUPLICATE KEY UPDATE Description = VALUES(Description)`,
-      [
-        attr.Code || attr.TSMCode,
-        attr.Description || attr.Meaning || 'Unknown',
-        attr.Status || 'alive'
-      ]
+      [attr.Code || attr.TSMCode, attr.Description || attr.Meaning || 'Unknown', attr.Status || 'alive']
     );
   }
 
@@ -247,10 +242,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
     [DEFAULT_TEST_CONFIG.database]
   );
 
-  const [siteRows] = await connection.query<mysql.RowDataPacket[]>(
-    'SELECT SiteID FROM sites WHERE SchemaName = ?',
-    [DEFAULT_TEST_CONFIG.database]
-  );
+  const [siteRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SiteID FROM sites WHERE SchemaName = ?', [DEFAULT_TEST_CONFIG.database]);
   const siteID = siteRows[0].SiteID;
   testData.sites = [{ siteID, siteName: 'Test Site', schemaName: DEFAULT_TEST_CONFIG.database }];
 
@@ -261,10 +253,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
     [siteID, quadratsData.length]
   );
 
-  const [plotRows] = await connection.query<mysql.RowDataPacket[]>(
-    'SELECT PlotID FROM plots WHERE SiteID = ?',
-    [siteID]
-  );
+  const [plotRows] = await connection.query<mysql.RowDataPacket[]>('SELECT PlotID FROM plots WHERE SiteID = ?', [siteID]);
   const plotID = plotRows[0].PlotID;
   testData.plots = [{ plotID, plotName: 'Test Plot', siteID, num_quadrats: quadratsData.length }];
 
@@ -295,18 +284,17 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
     [plotID]
   );
 
-  const [censusRows] = await connection.query<mysql.RowDataPacket[]>(
-    'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1',
-    [plotID]
-  );
+  const [censusRows] = await connection.query<mysql.RowDataPacket[]>('SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1', [plotID]);
   const censusID = censusRows[0].CensusID;
-  testData.census = [{
-    censusID,
-    plotCensusNumber: 1,
-    plotID,
-    startDate: '2024-01-01',
-    endDate: '2024-12-31'
-  }];
+  testData.census = [
+    {
+      censusID,
+      plotCensusNumber: 1,
+      plotID,
+      startDate: '2024-01-01',
+      endDate: '2024-12-31'
+    }
+  ];
 
   console.log('✅ Sample data seeded successfully');
 
@@ -389,10 +377,21 @@ export async function insertTestMeasurements(
         LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        fileID, batchID, plotID, censusID,
-        meas.treeTag, meas.stemTag, meas.speciesCode, meas.quadratName,
-        meas.x, meas.y, meas.dbh, meas.hom, meas.date,
-        meas.codes || null, meas.comments || null
+        fileID,
+        batchID,
+        plotID,
+        censusID,
+        meas.treeTag,
+        meas.stemTag,
+        meas.speciesCode,
+        meas.quadratName,
+        meas.x,
+        meas.y,
+        meas.dbh,
+        meas.hom,
+        meas.date,
+        meas.codes || null,
+        meas.comments || null
       ]
     );
   }
@@ -413,10 +412,7 @@ export async function runBulkIngestion(
   batch_failed: boolean;
 }> {
   try {
-    const [results] = await connection.query<mysql.RowDataPacket[]>(
-      'CALL bulkingestionprocess(?, ?)',
-      [fileID, batchID]
-    );
+    const [results] = await connection.query<mysql.RowDataPacket[]>('CALL bulkingestionprocess(?, ?)', [fileID, batchID]);
 
     // Get the result message
     const result = Array.isArray(results) ? results[0] : results;

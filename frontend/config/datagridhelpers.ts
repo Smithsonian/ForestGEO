@@ -25,7 +25,8 @@ export type FetchQueryFunction = (
   plotID?: number,
   plotCensusNumber?: number,
   quadratID?: number,
-  speciesID?: number
+  speciesID?: number,
+  filtered?: boolean
 ) => string;
 
 export type ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string, plotID?: number, censusID?: number) => string;
@@ -106,11 +107,14 @@ export const createFetchQuery: FetchQueryFunction = (
   plotID?,
   plotCensusNumber?,
   quadratID?: number,
-  speciesID?: number
+  speciesID?: number,
+  filtered: boolean = false
 ): string => {
-  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  const endpoint = filtered ? 'fixeddatafilter' : 'fixeddata';
+  return `/api/${endpoint}/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
+// Deprecated: Use createFetchQuery with filtered=true instead
 export const createQFFetchQuery: FetchQueryFunction = (
   siteSchema: string,
   gridType,
@@ -121,48 +125,16 @@ export const createQFFetchQuery: FetchQueryFunction = (
   quadratID?: number,
   speciesID?: number
 ): string => {
-  return `/api/fixeddatafilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  return createFetchQuery(siteSchema, gridType, page, pageSize, plotID, plotCensusNumber, quadratID, speciesID, true);
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
-export function getGridID(gridType: string): string {
-  switch (gridType.trim()) {
-    case 'coremeasurements':
-    case 'measurementssummaryview':
-    case 'viewfulltableview':
-    case 'measurementssummary':
-    case 'viewfulltable':
-      return 'coreMeasurementID';
-    case 'attributes':
-      return 'code';
-    case 'census':
-      return 'censusID';
-    case 'personnel':
-      return 'personnelID';
-    case 'quadrats':
-      return 'quadratID';
-    case 'quadratpersonnel':
-      return 'quadratPersonnelID';
-    case 'roles':
-      return 'roleID';
-    case 'subquadrats':
-      return 'subquadratID';
-    case 'alltaxonomiesview':
-    case 'species':
-      return 'speciesID';
-    case 'specieslimits':
-      return 'speciesLimitID';
-    case 'sitespecificvalidations':
-      return 'validationID';
-    case 'failedmeasurements':
-      return 'failedMeasurementID';
-    default:
-      return 'breakage';
-  }
-}
+// Re-export server-safe utilities for backward compatibility
+// Client components can import from here, server components should import from servergridhelpers
+export { getGridID } from './servergridhelpers';
 
 export type VisibleFilter = 'valid' | 'errors' | 'pending';
 export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';

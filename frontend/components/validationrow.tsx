@@ -334,22 +334,12 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
             {isEditing ? (
               <>
                 <Tooltip describeChild title="Save changes">
-                  <IconButton
-                    variant="solid"
-                    onClick={handleSaveChanges}
-                    disabled={isSaving}
-                    aria-label="Save validation changes"
-                  >
+                  <IconButton variant="solid" onClick={handleSaveChanges} disabled={isSaving} aria-label="Save validation changes">
                     {isSaving ? <CircularProgress size="sm" /> : <Save />}
                   </IconButton>
                 </Tooltip>
                 <Tooltip describeChild title="Cancel changes">
-                  <IconButton
-                    variant="solid"
-                    onClick={handleCancelChanges}
-                    disabled={isSaving}
-                    aria-label="Cancel validation changes"
-                  >
+                  <IconButton variant="solid" onClick={handleCancelChanges} disabled={isSaving} aria-label="Cancel validation changes">
                     <Cancel />
                   </IconButton>
                 </Tooltip>
@@ -382,13 +372,7 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
       />
 
       {/* Snackbar for user feedback */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-        color={snackbar.color}
-        variant="soft"
-      >
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} color={snackbar.color} variant="soft">
         {snackbar.message}
       </Snackbar>
     </>

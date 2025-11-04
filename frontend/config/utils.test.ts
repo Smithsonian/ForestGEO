@@ -151,7 +151,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should handle rows with null values', () => {
-      const rows = [
+      const rows: Array<{ id: number; name: string; email: string | null }> = [
         { id: 1, name: 'Alice', email: null },
         { id: 2, name: 'Bob', email: 'bob@example.com' }
       ];
@@ -178,7 +178,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should return new id for insert operation', async () => {
-      const data = { name: 'Test', age: 25 };
+      const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 123 });
 
       const result = await handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id');
@@ -188,7 +188,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should handle update operation when insertId is 0', async () => {
-      const data = { name: 'Test', age: 25 };
+      const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any)
         .mockResolvedValueOnce({ insertId: 0 }) // First call returns 0 (update case)
         .mockResolvedValueOnce([{ id: 456, name: 'Test', age: 25 }]); // Second call finds existing record
@@ -200,7 +200,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should throw error when record not found after update', async () => {
-      const data = { name: 'Test', age: 25 };
+      const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 0 }).mockResolvedValueOnce([]); // No record found
 
       await expect(handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id')).rejects.toThrow(
@@ -209,7 +209,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should filter out falsy values before upserting', async () => {
-      const data = { name: 'Test', age: 0, email: '', active: null };
+      const data: { id?: number; name: string; age: number; email: string; active: null } = { name: 'Test', age: 0, email: '', active: null };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 123 });
 
       await handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id');
@@ -220,7 +220,7 @@ describe('Database Query Utilities', () => {
     });
 
     it('should handle numeric strings in WHERE clause', async () => {
-      const data = { price: '19.99', quantity: '10' };
+      const data: { id?: number; price: string; quantity: string } = { price: '19.99', quantity: '10' };
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 0 }).mockResolvedValueOnce([{ id: 789, price: 19.99, quantity: 10 }]);
 
       const result = await handleUpsert(mockConnectionManager, 'testSchema', 'products', data, 'id');
@@ -234,14 +234,14 @@ describe('Database Query Utilities', () => {
 
     it('should throw error when query exceeds max_allowed_packet size', async () => {
       // Create a very large data object
-      const largeData = { name: 'Test', data: 'x'.repeat(5000000) }; // > 4MB
+      const largeData: { id?: number; name: string; data: string } = { name: 'Test', data: 'x'.repeat(5000000) }; // > 4MB
       (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 0 });
 
       await expect(handleUpsert(mockConnectionManager, 'testSchema', 'users', largeData, 'id')).rejects.toThrow('Query exceeds MySQL max_allowed_packet size');
     });
 
     it('should wrap database errors with createError', async () => {
-      const data = { name: 'Test' };
+      const data: { id?: number; name: string } = { name: 'Test' };
       const dbError = new Error('Database connection failed');
       (mockConnectionManager.executeQuery as any).mockRejectedValueOnce(dbError);
 
@@ -397,7 +397,7 @@ describe('String Transformation Utilities', () => {
 
     it('should handle null and undefined values', () => {
       const original = { name: 'John', age: 30, email: null };
-      const updated = { name: 'John', age: undefined, email: 'john@example.com' };
+      const updated = { name: 'John', age: undefined, email: 'john@example.com' } as any;
 
       const changes = getUpdatedValues(original, updated);
 

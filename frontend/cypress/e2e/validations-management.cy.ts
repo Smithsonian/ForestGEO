@@ -57,7 +57,7 @@ WHERE cm.IsValidated IS NULL
     cy.visit('/login');
 
     // Mock successful authentication for admin user
-    cy.window().then((win) => {
+    cy.window().then(win => {
       win.sessionStorage.setItem('next-auth.session-token', 'mock-admin-token');
     });
 
@@ -75,7 +75,7 @@ WHERE cm.IsValidated IS NULL
     }).as('session');
 
     // Mock site context (required for validation page)
-    cy.window().then((win) => {
+    cy.window().then(win => {
       win.localStorage.setItem('currentSite', JSON.stringify(testSite));
     });
 
@@ -144,8 +144,8 @@ WHERE cm.IsValidated IS NULL
       cy.log('⏳ Testing loading state');
 
       // Delay the API response to see loading state
-      cy.intercept('GET', `/api/validations/crud?schema=${testSite.schemaName}`, (req) => {
-        req.reply((res) => {
+      cy.intercept('GET', `/api/validations/crud?schema=${testSite.schemaName}`, req => {
+        req.reply(res => {
           res.delay = 1000;
           res.send({
             statusCode: 200,
@@ -191,7 +191,7 @@ WHERE cm.IsValidated IS NULL
       cy.log('⚠️ Testing no site selected state');
 
       // Clear site context
-      cy.window().then((win) => {
+      cy.window().then(win => {
         win.localStorage.removeItem('currentSite');
       });
 
@@ -632,8 +632,8 @@ WHERE cm.IsValidated IS NULL;`
       cy.log('⏳ Testing button disabled state');
 
       // Mock slow validation
-      cy.intercept('POST', `/api/validations/validate-query?schema=${testSite.schemaName}`, (req) => {
-        req.reply((res) => {
+      cy.intercept('POST', `/api/validations/validate-query?schema=${testSite.schemaName}`, req => {
+        req.reply(res => {
           res.delay = 2000;
           res.send({
             statusCode: 200,
@@ -957,8 +957,8 @@ WHERE cm.IsValidated IS NULL;`
       cy.log('⏳ Testing loading indicators');
 
       // Mock slow update
-      cy.intercept('PATCH', `/api/validations/crud?schema=${testSite.schemaName}`, (req) => {
-        req.reply((res) => {
+      cy.intercept('PATCH', `/api/validations/crud?schema=${testSite.schemaName}`, req => {
+        req.reply(res => {
           res.delay = 1000;
           res.send({ statusCode: 200, body: {} });
         });

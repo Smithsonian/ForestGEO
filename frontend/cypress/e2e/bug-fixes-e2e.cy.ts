@@ -55,9 +55,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.intercept('POST', '/api/fixeddatafilter/measurementssummary/test_schema', {
         statusCode: 200,
         body: {
-          output: [
-            { id: 1, coreMeasurementID: 1, treeTag: '001', stemTag: '1', measuredDBH: 10.5 }
-          ],
+          output: [{ id: 1, coreMeasurementID: 1, treeTag: '001', stemTag: '1', measuredDBH: 10.5 }],
           totalCount: 1
         }
       }).as('measurementsData');
@@ -262,10 +260,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait(['@session', '@sites', '@plots', '@census', '@dashboardData']);
 
       // Verify tachometer container has correct height
-      cy.get('[data-testid="tachometer-container"]')
-        .should('be.visible')
-        .and('have.css', 'height', '600px')
-        .and('have.css', 'min-height', '500px');
+      cy.get('[data-testid="tachometer-container"]').should('be.visible').and('have.css', 'height', '600px').and('have.css', 'min-height', '500px');
 
       // Verify it's larger than the old size (300px)
       cy.get('[data-testid="tachometer-container"]').then($el => {
@@ -320,9 +315,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait('@resetQueryFailed');
 
       // Verify error message is displayed
-      cy.get('[data-testid="error-message"]')
-        .should('be.visible')
-        .and('contain', 'Clear cmverrors query failed');
+      cy.get('[data-testid="error-message"]').should('be.visible').and('contain', 'Clear cmverrors query failed');
     });
   });
 
@@ -341,9 +334,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.get('[data-testid="slow-action-button"]').click();
 
       // Should show timeout error before 65 seconds
-      cy.get('[data-testid="error-message"]', { timeout: 70000 })
-        .should('be.visible')
-        .and('contain', 'timeout');
+      cy.get('[data-testid="error-message"]', { timeout: 70000 }).should('be.visible').and('contain', 'timeout');
     });
   });
 
@@ -446,9 +437,7 @@ describe('Bug Fixes E2E Verification', () => {
         req.reply({
           statusCode: 200,
           body: {
-            errors: [
-              { coreMeasurementID: 1, errorMessage: 'Plot 1 Error - Missing X' }
-            ]
+            errors: [{ coreMeasurementID: 1, errorMessage: 'Plot 1 Error - Missing X' }]
           }
         });
       }).as('plot1ValidationErrors');
@@ -459,9 +448,7 @@ describe('Bug Fixes E2E Verification', () => {
         req.reply({
           statusCode: 200,
           body: {
-            errors: [
-              { coreMeasurementID: 2, errorMessage: 'Plot 2 Error - Invalid DBH' }
-            ]
+            errors: [{ coreMeasurementID: 2, errorMessage: 'Plot 2 Error - Invalid DBH' }]
           }
         });
       }).as('plot2ValidationErrors');
@@ -506,9 +493,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.intercept('POST', '/api/fixeddatafilter/measurementssummary/test_schema', {
         statusCode: 200,
         body: {
-          output: [
-            { id: 1, coreMeasurementID: 1, treeTag: '001', stemTag: '1', measuredDBH: 10.5 }
-          ],
+          output: [{ id: 1, coreMeasurementID: 1, treeTag: '001', stemTag: '1', measuredDBH: 10.5 }],
           totalCount: 1
         }
       }).as('measurements');
@@ -521,8 +506,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait('@plot1ValidationErrors', { timeout: 10000 });
 
       // Verify Plot 1 errors are displayed
-      cy.get('[data-testid="validation-errors-section"]', { timeout: 5000 })
-        .should('contain', 'Plot 1 Error');
+      cy.get('[data-testid="validation-errors-section"]', { timeout: 5000 }).should('contain', 'Plot 1 Error');
 
       // Switch to Plot 2
       cy.get('[data-testid="plot-selector"]').select('Plot 2');
@@ -532,9 +516,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait('@plot2ValidationErrors', { timeout: 10000 });
 
       // Verify Plot 2 errors are displayed
-      cy.get('[data-testid="validation-errors-section"]')
-        .should('contain', 'Plot 2 Error')
-        .and('not.contain', 'Plot 1 Error');
+      cy.get('[data-testid="validation-errors-section"]').should('contain', 'Plot 2 Error').and('not.contain', 'Plot 1 Error');
 
       // Verify fetch counts
       cy.then(() => {
@@ -655,10 +637,7 @@ describe('Bug Fixes E2E Verification', () => {
         .and('not.contain', 'Invalid Code');
 
       // Verify Y field errors section exists and contains only Y-related
-      cy.get('[data-testid="error-section-y"]')
-        .should('contain', 'Missing Y')
-        .and('contain', 'Y outside plot')
-        .and('not.contain', 'Missing X');
+      cy.get('[data-testid="error-section-y"]').should('contain', 'Missing Y').and('contain', 'Y outside plot').and('not.contain', 'Missing X');
 
       console.log('✅ Bug #12 verified: Validation reasons correctly filtered by field');
     });
@@ -759,9 +738,7 @@ describe('Bug Fixes E2E Verification', () => {
         req.reply({
           statusCode: 200,
           body: {
-            errors: [
-              { coreMeasurementID: 1, errorMessage: 'Census 1 Error' }
-            ]
+            errors: [{ coreMeasurementID: 1, errorMessage: 'Census 1 Error' }]
           }
         });
       }).as('census1Errors');
@@ -772,9 +749,7 @@ describe('Bug Fixes E2E Verification', () => {
         req.reply({
           statusCode: 200,
           body: {
-            errors: [
-              { coreMeasurementID: 2, errorMessage: 'Census 2 Error' }
-            ]
+            errors: [{ coreMeasurementID: 2, errorMessage: 'Census 2 Error' }]
           }
         });
       }).as('census2Errors');
@@ -808,8 +783,7 @@ describe('Bug Fixes E2E Verification', () => {
       expect(census1FetchCount).to.be.greaterThan(0);
 
       // Verify Census 1 errors displayed
-      cy.get('[data-testid="validation-errors-section"]')
-        .should('contain', 'Census 1 Error');
+      cy.get('[data-testid="validation-errors-section"]').should('contain', 'Census 1 Error');
 
       // Change to Census 2
       cy.get('[data-testid="census-selector"]').select('Census 2');
@@ -818,9 +792,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait('@census2Errors', { timeout: 10000 });
 
       // Verify Census 2 errors displayed
-      cy.get('[data-testid="validation-errors-section"]')
-        .should('contain', 'Census 2 Error')
-        .and('not.contain', 'Census 1 Error');
+      cy.get('[data-testid="validation-errors-section"]').should('contain', 'Census 2 Error').and('not.contain', 'Census 1 Error');
 
       // Verify both censuses were fetched
       cy.then(() => {

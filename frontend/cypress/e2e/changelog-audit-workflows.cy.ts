@@ -571,9 +571,11 @@ describe('Changelog/Audit Trail Workflows - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
       cy.log('📍 Step 3: Edit a measurement');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       // Mock update
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {

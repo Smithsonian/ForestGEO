@@ -242,7 +242,7 @@ describe('UserSelectionProvider', () => {
       );
 
       expect(() => {
-        result.current.dispatch({ load: { PlotID: 1, PlotName: 'New Plot' } });
+        result.current.dispatch?.({ load: { plotID: 1, plotName: 'New Plot' } });
       }).not.toThrow();
     });
 
@@ -258,7 +258,15 @@ describe('UserSelectionProvider', () => {
       );
 
       expect(() => {
-        result.current.dispatch({ load: { CensusID: 1, PlotCensusNumber: 1 } });
+        result.current.dispatch?.({
+          load: {
+            plotID: 1,
+            plotCensusNumber: 1,
+            censusIDs: [1],
+            dateRanges: [{ censusID: 1, startDate: new Date('2024-01-01'), endDate: new Date('2024-12-31') }],
+            description: 'Test Census'
+          }
+        });
       }).not.toThrow();
     });
 
@@ -274,7 +282,7 @@ describe('UserSelectionProvider', () => {
       );
 
       expect(() => {
-        result.current.dispatch({ load: { QuadratID: 1, QuadratName: 'Q1' } });
+        result.current.dispatch?.({ load: { quadratID: 1, quadratName: 'Q1' } });
       }).not.toThrow();
     });
 
@@ -290,7 +298,7 @@ describe('UserSelectionProvider', () => {
       );
 
       expect(() => {
-        result.current.dispatch({ load: { SiteID: 1, SiteName: 'Site 1' } });
+        result.current.dispatch?.({ load: { siteID: 1, siteName: 'Site 1' } });
       }).not.toThrow();
     });
   });

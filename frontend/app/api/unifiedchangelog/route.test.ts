@@ -281,7 +281,8 @@ describe('Unified Changelog Tracking System', () => {
 
       const res = await SQLPACKETLOAD_POST(req);
 
-      expect(res.status).toBe(HTTPResponses.OK);
+      expect(res).toBeDefined();
+      expect(res!.status).toBe(HTTPResponses.OK);
 
       // For measurements, the code path includes:
       // 1. INSERT to temporarymeasurements
@@ -308,7 +309,7 @@ describe('Unified Changelog Tracking System', () => {
 
       // Verify the parameters structure
       if (changelogInsert) {
-        const params = changelogInsert[1];
+        const params = changelogInsert[1] as any[];
         expect(params).toBeDefined();
         expect(params[0]).toBe('file_upload'); // TableName
         expect(params[1]).toBe('measurements.csv'); // RecordID (fileName)
@@ -375,7 +376,8 @@ describe('Unified Changelog Tracking System', () => {
 
       const res = await SQLPACKETLOAD_POST(req);
 
-      expect(res.status).toBe(HTTPResponses.OK);
+      expect(res).toBeDefined();
+      expect(res!.status).toBe(HTTPResponses.OK);
 
       // Verify changelog UPDATE was called (not INSERT)
       const changelogUpdate = exec.mock.calls.find(call => String(call[0]).includes('UPDATE') && String(call[0]).includes('unifiedchangelog'));
@@ -383,7 +385,7 @@ describe('Unified Changelog Tracking System', () => {
 
       // Verify accumulated counts
       if (changelogUpdate) {
-        const [sql, params] = changelogUpdate;
+        const [sql, params] = changelogUpdate as [string, any[]];
         const metadata = JSON.parse(params[0]);
         expect(metadata.rowCount).toBe(2000); // 1200 + 800
         expect(metadata.batchCount).toBe(2); // 1 + 1
@@ -419,7 +421,8 @@ describe('Unified Changelog Tracking System', () => {
 
       const res = await SQLPACKETLOAD_POST(req);
 
-      expect(res.status).toBe(HTTPResponses.OK);
+      expect(res).toBeDefined();
+      expect(res!.status).toBe(HTTPResponses.OK);
 
       // Verify ONE changelog entry was created
       const changelogInsert = exec.mock.calls.find(call => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('unifiedchangelog'));
@@ -451,7 +454,8 @@ describe('Unified Changelog Tracking System', () => {
       });
 
       const res1 = await SQLPACKETLOAD_POST(req1);
-      expect(res1.status).toBe(HTTPResponses.OK);
+      expect(res1).toBeDefined();
+      expect(res1!.status).toBe(HTTPResponses.OK);
 
       vi.clearAllMocks();
 
@@ -477,7 +481,8 @@ describe('Unified Changelog Tracking System', () => {
       });
 
       const res2 = await SQLPACKETLOAD_POST(req2);
-      expect(res2.status).toBe(HTTPResponses.OK);
+      expect(res2).toBeDefined();
+      expect(res2!.status).toBe(HTTPResponses.OK);
 
       // Both files should create separate changelog entries
       // Each file gets its own INSERT into unifiedchangelog
@@ -581,7 +586,7 @@ describe('Unified Changelog Tracking System', () => {
       const res = await SQLPACKETLOAD_POST(req);
 
       // Upload should still succeed even if changelog fails
-      expect(res.status).toBe(HTTPResponses.OK);
+      expect(res!.status).toBe(HTTPResponses.OK);
     });
   });
 });

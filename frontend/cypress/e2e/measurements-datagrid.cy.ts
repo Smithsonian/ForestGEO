@@ -88,11 +88,14 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.wait(500);
 
       // Verify different data is shown
-      cy.get('.MuiDataGrid-row').first().invoke('attr', 'data-id').then((newId) => {
-        cy.get('@firstRowId').then((oldId) => {
-          expect(newId).to.not.equal(oldId);
+      cy.get('.MuiDataGrid-row')
+        .first()
+        .invoke('attr', 'data-id')
+        .then(newId => {
+          cy.get('@firstRowId').then(oldId => {
+            expect(newId).to.not.equal(oldId);
+          });
         });
-      });
 
       cy.log('✅ Pagination navigation works');
     });
@@ -107,9 +110,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.wait(500);
 
       // Verify sort indicator appears
-      cy.contains('[role="columnheader"]', 'Tree Tag')
-        .find('.MuiDataGrid-iconButtonContainer')
-        .should('be.visible');
+      cy.contains('[role="columnheader"]', 'Tree Tag').find('.MuiDataGrid-iconButtonContainer').should('be.visible');
 
       cy.log('✅ Column sorting works');
     });
@@ -117,7 +118,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should display loading state during data fetch', () => {
       cy.log('✨ Testing loading state');
 
-      cy.intercept('GET', '/api/fetchall/coremeasurements*', (req) => {
+      cy.intercept('GET', '/api/fetchall/coremeasurements*', req => {
         req.reply({
           delay: 1000,
           statusCode: 200,
@@ -197,9 +198,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should have accessible quick search field', () => {
       cy.log('✨ Testing quick search accessibility');
 
-      cy.get('input[placeholder*="Search All Fields"]')
-        .should('have.attr', 'aria-label')
-        .and('not.be.empty');
+      cy.get('input[placeholder*="Search All Fields"]').should('have.attr', 'aria-label').and('not.be.empty');
 
       cy.log('✅ Quick search is accessible');
     });
@@ -246,9 +245,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.log('✨ Testing pending filter state');
 
       // Pending filter should be disabled (always shown)
-      cy.get('[data-testid="filter-pending"]')
-        .find('button')
-        .should('have.attr', 'disabled');
+      cy.get('[data-testid="filter-pending"]').find('button').should('have.attr', 'disabled');
 
       cy.log('✅ Pending filter correctly disabled');
     });
@@ -288,15 +285,9 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should have accessible filter buttons', () => {
       cy.log('✨ Testing filter accessibility');
 
-      cy.get('[data-testid="filter-errors"]')
-        .find('button')
-        .should('have.attr', 'aria-label')
-        .and('include', 'invalid measurements');
+      cy.get('[data-testid="filter-errors"]').find('button').should('have.attr', 'aria-label').and('include', 'invalid measurements');
 
-      cy.get('[data-testid="filter-valid"]')
-        .find('button')
-        .should('have.attr', 'aria-label')
-        .and('include', 'valid measurements');
+      cy.get('[data-testid="filter-valid"]').find('button').should('have.attr', 'aria-label').and('include', 'valid measurements');
 
       cy.log('✅ Filter buttons are accessible');
     });
@@ -350,8 +341,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.contains('.MuiChip-root', 'Valid').click();
 
       // Verify chip visual state changed
-      cy.contains('.MuiChip-root', 'Valid')
-        .should('have.class', 'MuiChip-outlined');
+      cy.contains('.MuiChip-root', 'Valid').should('have.class', 'MuiChip-outlined');
 
       cy.log('✅ Chip toggle works');
     });
@@ -398,9 +388,7 @@ describe('Measurements DataGrid E2E Tests', () => {
 
       cy.contains('button', 'Export').click();
 
-      cy.get('[role="dialog"]')
-        .should('have.attr', 'aria-labelledby')
-        .and('equal', 'exporting-data');
+      cy.get('[role="dialog"]').should('have.attr', 'aria-labelledby').and('equal', 'exporting-data');
 
       cy.log('✅ Export modal is accessible');
     });
@@ -413,9 +401,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.get('.MuiDataGrid-root').should('be.visible');
 
       // Double-click on HOM cell to edit
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="hom"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="hom"]').dblclick();
 
       // Should show input field
       cy.get('.MuiDataGrid-cell--editing').should('be.visible');
@@ -427,9 +413,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should validate decimal input in measurements', () => {
       cy.log('✨ Testing decimal validation');
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="dbh"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="dbh"]').dblclick();
 
       // Try to enter invalid value
       cy.get('input[type="text"]').clear().type('abc');
@@ -447,17 +431,13 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should format decimal to 2 places on blur', () => {
       cy.log('✨ Testing decimal formatting');
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="dbh"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="dbh"]').dblclick();
 
       cy.get('input[type="text"]').clear().type('12.3{enter}');
       cy.wait(500);
 
       // Should format to 12.30
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="dbh"]')
-        .should('contain', '12.30');
+      cy.get('.MuiDataGrid-row').first().find('[data-field="dbh"]').should('contain', '12.30');
 
       cy.log('✅ Decimal formatting works');
     });
@@ -470,9 +450,7 @@ describe('Measurements DataGrid E2E Tests', () => {
         body: { message: 'Success' }
       }).as('saveRow');
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="hom"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="hom"]').dblclick();
 
       cy.get('input[type="text"]').clear().type('1.50{enter}');
 
@@ -491,9 +469,7 @@ describe('Measurements DataGrid E2E Tests', () => {
         body: { error: 'Database error' }
       }).as('saveFailed');
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="hom"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="hom"]').dblclick();
 
       cy.get('input[type="text"]').clear().type('1.50{enter}');
 
@@ -508,9 +484,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should cancel edit on Escape key', () => {
       cy.log('✨ Testing edit cancel');
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="hom"]')
-        .dblclick();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="hom"]').dblclick();
 
       cy.get('input[type="text"]').clear().type('1.50');
       cy.get('input[type="text"]').type('{esc}');
@@ -543,9 +517,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.wait(1000);
 
       // Click on error icon/button
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="validationStatus"]')
-        .click();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="validationStatus"]').click();
 
       // Should open modal with error details
       cy.get('[role="dialog"]').should('be.visible');
@@ -560,9 +532,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.get('[data-testid="filter-errors"]').click();
       cy.wait(1000);
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="validationStatus"]')
-        .click();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="validationStatus"]').click();
 
       // Should show error descriptions
       cy.get('[role="dialog"]').within(() => {
@@ -584,9 +554,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.get('[data-testid="filter-errors"]').click();
       cy.wait(1000);
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="validationStatus"]')
-        .click();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="validationStatus"]').click();
 
       // Click clear errors button
       cy.contains('button', 'Clear Errors').click();
@@ -613,9 +581,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.get('[data-testid="filter-errors"]').click();
       cy.wait(1000);
 
-      cy.get('.MuiDataGrid-row').first()
-        .find('[data-field="validationStatus"]')
-        .click();
+      cy.get('.MuiDataGrid-row').first().find('[data-field="validationStatus"]').click();
 
       cy.contains('button', 'Clear Errors').click();
       cy.contains('button', 'Confirm').click();
@@ -647,10 +613,7 @@ describe('Measurements DataGrid E2E Tests', () => {
       cy.get('button[aria-label*="column"]').click();
 
       // Find a column checkbox and toggle it
-      cy.get('.MuiDataGrid-columnsPanel')
-        .find('input[type="checkbox"]')
-        .first()
-        .click();
+      cy.get('.MuiDataGrid-columnsPanel').find('input[type="checkbox"]').first().click();
 
       // Column should hide
       cy.wait(500);
@@ -778,7 +741,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should handle network timeout', () => {
       cy.log('✨ Testing network timeout');
 
-      cy.intercept('GET', '/api/fetchall/coremeasurements*', (req) => {
+      cy.intercept('GET', '/api/fetchall/coremeasurements*', req => {
         req.reply({
           delay: 30000,
           statusCode: 408,
@@ -846,8 +809,7 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should have accessible data grid', () => {
       cy.log('✨ Testing data grid accessibility');
 
-      cy.get('.MuiDataGrid-root')
-        .should('have.attr', 'role', 'grid');
+      cy.get('.MuiDataGrid-root').should('have.attr', 'role', 'grid');
 
       cy.get('[role="columnheader"]').should('have.length.greaterThan', 0);
       cy.get('[role="row"]').should('have.length.greaterThan', 0);
@@ -873,13 +835,9 @@ describe('Measurements DataGrid E2E Tests', () => {
     it('should have accessible filter buttons', () => {
       cy.log('✨ Testing filter button accessibility');
 
-      cy.get('[data-testid="filter-errors"]')
-        .find('button')
-        .should('have.attr', 'aria-label');
+      cy.get('[data-testid="filter-errors"]').find('button').should('have.attr', 'aria-label');
 
-      cy.get('[data-testid="filter-pending"]')
-        .find('button')
-        .should('have.attr', 'aria-label');
+      cy.get('[data-testid="filter-pending"]').find('button').should('have.attr', 'aria-label');
 
       cy.log('✅ Filter buttons are accessible');
     });
@@ -889,8 +847,7 @@ describe('Measurements DataGrid E2E Tests', () => {
 
       cy.contains('button', 'Export').click();
 
-      cy.get('[role="dialog"]')
-        .should('have.attr', 'aria-labelledby');
+      cy.get('[role="dialog"]').should('have.attr', 'aria-labelledby');
 
       cy.get('[aria-label="close"]').should('exist');
 

@@ -1,7 +1,7 @@
 // cypress/e2e/responsive/ci-responsive-suite.cy.ts
 // CI-optimized responsive test suite for GitHub Actions
 
-import { CI_DEVICE_VIEWPORTS } from '../../support/ci-responsive-commands';
+import { CI_DEVICE_VIEWPORTS } from '../../support/responsive-commands';
 
 describe('CI Responsive Suite', () => {
   beforeEach(() => {

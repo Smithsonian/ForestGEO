@@ -1,7 +1,7 @@
 // cypress.config.cjs
 const path = require('path');
 const { defineConfig } = require('cypress');
-const { ProvidePlugin, DefinePlugin } = require('webpack');
+const { getSharedWebpackConfig, getLogTask } = require('./cypress/support/shared-config.cjs');
 
 module.exports = defineConfig({
   e2e: {
@@ -20,10 +20,7 @@ module.exports = defineConfig({
     setupNodeEvents(on, config) {
       // Add log task for ingestion report output
       on('task', {
-        log(message) {
-          console.log(message);
-          return null;
-        }
+        log: getLogTask()
       });
 
       // Set environment variable for Next.js dev server during E2E tests
@@ -36,33 +33,9 @@ module.exports = defineConfig({
     devServer: {
       framework: 'next',
       bundler: 'webpack',
-      webpackConfig: {
-        resolve: {
-          extensions: ['.js', '.jsx', '.ts', '.tsx'],
-          mainFields: ['main', 'module', 'browser'],
-          alias: {
-            '@/': path.resolve(__dirname, 'frontend/'),
-            'next-auth/react': path.resolve(__dirname, 'cypress/mocks/nextauthmock.js'),
-            'next/navigation': path.resolve(__dirname, 'cypress/mocks/nextNavMock.js'),
-            '@/ailogger': path.resolve(__dirname, 'cypress/mocks/ailoggerMock.js'),
-            '@/config/utils': path.resolve(__dirname, 'cypress/mocks/utilsMock.js')
-          },
-          fallback: {
-            process: require.resolve('process/browser')
-          }
-        },
-        plugins: [
-          new ProvidePlugin({
-            process: 'process/browser'
-          }),
-          new DefinePlugin({
-            'process.env': JSON.stringify({
-              NEXTAUTH_URL: 'http://localhost:3000',
-              NODE_ENV: 'development'
-            })
-          })
-        ]
-      }
+      webpackConfig: getSharedWebpackConfig(__dirname, {
+        NEXT_PUBLIC_E2E_TESTING: 'true'
+      })
     },
     supportFile: 'cypress/support/component.ts',
     specPattern: 'cypress/components/**/*.cy.{js,ts,jsx,tsx}'

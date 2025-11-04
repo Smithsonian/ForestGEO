@@ -19,9 +19,9 @@ describe('Error Recovery Workflows', () => {
 
     // Ignore uncaught exceptions from ailogger during error testing
     // When we force network errors, ailogger may fail to log them
-    cy.on('uncaught:exception', (err) => {
+    cy.on('uncaught:exception', err => {
       // Ignore ailogger-related errors during error recovery testing
-      if (err.message.includes('Cannot read properties of undefined (reading \'ai\')')) {
+      if (err.message.includes("Cannot read properties of undefined (reading 'ai')")) {
         return false;
       }
       // Ignore other network-related errors we're testing
@@ -165,7 +165,7 @@ describe('Error Recovery Workflows', () => {
       cy.contains('button', 'Save Changes').click();
 
       // Should either redirect to login or show auth error
-      cy.url({ timeout: 10000 }).should('satisfy', (url) => {
+      cy.url({ timeout: 10000 }).should('satisfy', url => {
         return url.includes('/login') || url.includes('/admin/users');
       });
 
@@ -219,7 +219,7 @@ describe('Error Recovery Workflows', () => {
       }).as('duplicateError');
 
       // Try to create a site (if the form is available)
-      cy.get('body').then(($body) => {
+      cy.get('body').then($body => {
         if ($body.find('button:contains("Add")').length > 0) {
           cy.contains('button', /add/i).click();
           cy.get('input[name="siteName"]', { timeout: 5000 }).type('Test Site');
@@ -450,7 +450,7 @@ describe('Error Recovery Workflows', () => {
 
       // Mock initial failure
       let attemptCount = 0;
-      cy.intercept('GET', '**/api/administrative/fetch/users**', (req) => {
+      cy.intercept('GET', '**/api/administrative/fetch/users**', req => {
         attemptCount++;
         if (attemptCount === 1) {
           req.reply({

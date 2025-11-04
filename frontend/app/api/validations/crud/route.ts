@@ -70,11 +70,7 @@ export async function PATCH(request: NextRequest) {
     // Remove ValidationID from the update data (it's the WHERE clause, not SET)
     delete mappedData['ValidationID'];
 
-    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
-      `${schema}.sitespecificvalidations`,
-      mappedData,
-      validationProcedure.validationID
-    ]);
+    const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, mappedData, validationProcedure.validationID]);
     await connectionManager.executeQuery(updateQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.OK });

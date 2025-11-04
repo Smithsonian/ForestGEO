@@ -19,8 +19,8 @@ describe('NewValidationRow - Functional Tests', () => {
     description: '',
     criteria: '',
     isEnabled: true,
-    dateCreated: undefined,
-    dateModified: undefined
+    createdAt: undefined,
+    updatedAt: undefined
   };
 
   const mockSchemaDetails = [

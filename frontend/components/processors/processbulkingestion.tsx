@@ -4,6 +4,7 @@ import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult, FailedMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export interface TemporaryMeasurement {
   id: number;
@@ -91,7 +92,7 @@ export async function processBulkIngestionProcessor(
 ): Promise<void> {
   try {
     if (temporaryMeasurements.length === 0) {
-      console.log('No temporary measurements provided for processing');
+      ailogger.info('No temporary measurements provided for processing', { context: 'processBulkIngestion' });
       return;
     }
 

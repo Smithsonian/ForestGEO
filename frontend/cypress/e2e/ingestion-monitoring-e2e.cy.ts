@@ -428,9 +428,7 @@ describe('Ingestion Monitoring E2E', () => {
       cy.wait('@ingestionError');
 
       // Verify error is displayed
-      cy.get('[data-testid="error-message"]')
-        .should('be.visible')
-        .and('contain', 'Database connection failed');
+      cy.get('[data-testid="error-message"]').should('be.visible').and('contain', 'Database connection failed');
 
       cy.log('✅ Error monitoring working correctly');
     });

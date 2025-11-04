@@ -134,7 +134,9 @@ describe('Admin Workflows', () => {
       cy.log('  📝 Clicked Edit button');
 
       // Modify site name
-      cy.get('input[name="siteName"]').clear().type(testSite.siteName + '_EDITED');
+      cy.get('input[name="siteName"]')
+        .clear()
+        .type(testSite.siteName + '_EDITED');
       cy.log('  📝 Modified site name');
 
       // Save changes

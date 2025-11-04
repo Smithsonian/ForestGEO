@@ -177,9 +177,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       cy.wait('@fetchAttributes');
 
       cy.log('🗑️ Clicking delete button for first attribute');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.log('✅ Verifying row marked for deletion');
       cy.get('.row--removed').should('exist');
@@ -349,9 +351,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       cy.wait(['@fetchSpecies', '@fetchSpeciesLimits']);
 
       cy.log('🗑️ Marking species for deletion');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.log('✅ Verifying row marked for deletion');
       cy.get('.row--removed').should('exist');
@@ -525,9 +529,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       cy.wait('@fetchQuadrats');
 
       cy.log('🗑️ Marking quadrat for deletion');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.log('✅ Verifying row marked for deletion');
       cy.get('.row--removed').should('exist');
@@ -735,9 +741,7 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
   });
 
   describe('Cascading Impact Validation', () => {
-    const mockAttributes = [
-      { id: 1, code: 'ATTR001', description: 'Test Attribute', status: 'active' }
-    ];
+    const mockAttributes = [{ id: 1, code: 'ATTR001', description: 'Test Attribute', status: 'active' }];
 
     const mockMeasurements = [
       {
@@ -779,9 +783,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       }).as('checkUsage');
 
       cy.log('🗑️ Attempting to delete in-use attribute');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       // Mock delete with warning
       cy.intercept('POST', '/api/bulkcrud', {
@@ -825,9 +831,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       }).as('checkSpeciesUsage');
 
       cy.log('🗑️ Attempting to delete in-use species');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.intercept('POST', '/api/bulkcrud', {
         statusCode: 400,
@@ -859,9 +867,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       cy.wait('@fetchQuadrats');
 
       cy.log('🗑️ Attempting to delete quadrat with measurements');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.intercept('POST', '/api/bulkcrud', {
         statusCode: 400,
@@ -886,9 +896,11 @@ describe('Fixed Data Management - Comprehensive Tests', () => {
       cy.wait('@fetchAttributes');
 
       cy.log('🗑️ Deleting in-use attribute');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       // Mock force delete option
       cy.intercept('POST', '/api/bulkcrud', req => {

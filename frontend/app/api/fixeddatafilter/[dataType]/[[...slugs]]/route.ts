@@ -5,7 +5,7 @@ import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
-import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
+import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility

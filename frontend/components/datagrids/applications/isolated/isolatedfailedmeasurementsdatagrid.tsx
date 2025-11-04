@@ -114,7 +114,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
   }
 
   const onRowSave = useCallback(
-    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons };
 
@@ -148,7 +148,6 @@ export default function IsolatedFailedMeasurementsDataGrid() {
 
         await new Promise(resolve => setTimeout(resolve, 500));
         setRefresh(true);
-        return updatedRow;
       } catch (error: any) {
         ailogger.error('Failed to save row:', error);
         throw error;

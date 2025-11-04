@@ -1388,7 +1388,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal
             isValidationOverrideModalOpen={isValidationOverrideModalOpen}
-            handleValidationOverrideModalClose={async (overridePerformed: boolean) => await handleCloseModal(setIsValidationOverrideModalOpen, overridePerformed)}
+            handleValidationOverrideModalClose={async (overridePerformed: boolean) =>
+              await handleCloseModal(setIsValidationOverrideModalOpen, overridePerformed)
+            }
           />
         )}
         {isResetValidationModalOpen && (

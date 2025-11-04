@@ -73,7 +73,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Accessibility - Semantic HTML', () => {
     it('MUST render sidebar container', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       // Sidebar renders as Stack without aside wrapper (multiple ForestGEO texts exist)
       const forestgeoElements = screen.getAllByText('ForestGEO');
@@ -81,14 +81,14 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST have heading for branding', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const heading = screen.getByRole('heading', { level: 1 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
     it('MUST have accessible site selection dropdown', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST have accessible census selection dropdown', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const censusSelect = screen.getByRole('combobox', { name: /select a census/i });
       expect(censusSelect).toBeInTheDocument();
@@ -106,21 +106,21 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Branding and Layout', () => {
     it('MUST render ForestGEO branding', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const forestgeoElements = screen.getAllByText('ForestGEO');
       expect(forestgeoElements.length).toBeGreaterThan(0);
     });
 
     it('MUST render site selection component', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByTestId('site-select-component');
       expect(siteSelect).toBeInTheDocument();
     });
 
     it('MUST include dividers to separate sections', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr');
       expect(dividers.length).toBeGreaterThan(0);
@@ -129,7 +129,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('LoginLogout Integration', () => {
     it('MUST render LoginLogout component', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       // LoginLogout should show user info when authenticated
       expect(screen.getByText('Test User')).toBeInTheDocument();
@@ -142,7 +142,7 @@ describe('Sidebar - Functional Tests', () => {
         status: 'unauthenticated'
       });
 
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       expect(screen.getByText('Login to access')).toBeInTheDocument();
     });
@@ -150,21 +150,21 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Selection Dropdowns', () => {
     it('MUST render site selection dropdown', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
     });
 
     it('MUST render census selection dropdown', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const censusSelect = screen.getByRole('combobox', { name: /select a census/i });
       expect(censusSelect).toBeInTheDocument();
     });
 
     it('MUST mark required fields with aria-required', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toHaveAttribute('aria-required', 'true');
@@ -173,21 +173,21 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Component Integrity', () => {
     it('MUST render without crashing', () => {
-      expect(() => render(<Sidebar />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST render consistently across multiple renders', () => {
-      const { rerender } = render(<Sidebar />);
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       const firstRender = screen.getAllByText('ForestGEO')[0].outerHTML;
 
-      rerender(<Sidebar />);
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       const secondRender = screen.getAllByText('ForestGEO')[0].outerHTML;
 
       expect(firstRender).toBe(secondRender);
     });
 
     it('MUST handle different authentication states', () => {
-      const { rerender } = render(<Sidebar />);
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       expect(screen.getByText('Test User')).toBeInTheDocument();
 
       (useSession as any).mockReturnValue({
@@ -195,24 +195,24 @@ describe('Sidebar - Functional Tests', () => {
         status: 'unauthenticated'
       });
 
-      rerender(<Sidebar />);
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       expect(screen.getByText('Login to access')).toBeInTheDocument();
     });
 
     it('MUST handle different route contexts', () => {
       (usePathname as any).mockReturnValue('/dashboard');
-      const { rerender } = render(<Sidebar />);
+      const { rerender } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
 
       (usePathname as any).mockReturnValue('/measurementshub');
-      rerender(<Sidebar />);
+      rerender(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
       expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     });
   });
 
   describe('Responsive Layout', () => {
     it('MUST render with proper layout structure', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const forestgeoElements = screen.getAllByText('ForestGEO');
       expect(forestgeoElements.length).toBeGreaterThan(0);
@@ -220,7 +220,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST organize selections vertically', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const selectionComponents = container.querySelectorAll('[data-testid*="select"]');
       expect(selectionComponents.length).toBeGreaterThanOrEqual(1);
@@ -229,7 +229,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('SimpleToggler Component', () => {
     it('MUST render toggler with children when open', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       // SimpleToggler is used for expanding/collapsing sections
       const togglers = container.querySelectorAll('[data-testid="simple-toggler"]');
@@ -237,7 +237,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST apply transition animation', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const togglers = container.querySelectorAll('[data-testid="simple-toggler"]');
       togglers.forEach(toggler => {
@@ -249,7 +249,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Screen Reader Experience', () => {
     it('MUST have accessible labels for all interactive elements', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const comboboxes = screen.getAllByRole('combobox');
       comboboxes.forEach(combobox => {
@@ -258,14 +258,14 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST have logical heading structure', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const heading = screen.getByRole('heading', { level: 1 });
       expect(heading).toHaveTextContent('ForestGEO');
     });
 
     it('MUST use semantic dividers for visual separation', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr[role="separator"]');
       expect(dividers.length).toBeGreaterThanOrEqual(0);
@@ -279,25 +279,25 @@ describe('Sidebar - Functional Tests', () => {
         status: 'loading'
       });
 
-      expect(() => render(<Sidebar />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST handle missing pathname gracefully', () => {
       (usePathname as any).mockReturnValue(null);
 
-      expect(() => render(<Sidebar />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
     });
 
     it('MUST handle missing router gracefully', () => {
       (useRouter as any).mockReturnValue(null);
 
-      expect(() => render(<Sidebar />)).not.toThrow();
+      expect(() => render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />)).not.toThrow();
     });
   });
 
   describe('CSS and Theming', () => {
     it('MUST render with proper styling classes', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       // MUI classes should be applied
       const muiElements = container.querySelectorAll('[class*="Mui"]');
@@ -305,7 +305,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST apply styles to selection components', () => {
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByTestId('site-select-component');
       expect(siteSelect).toHaveClass(/MuiSelect/);
@@ -315,7 +315,7 @@ describe('Sidebar - Functional Tests', () => {
   describe('User Interaction', () => {
     it('MUST allow interaction with selection dropdowns', async () => {
       const user = userEvent.setup();
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       expect(siteSelect).toBeInTheDocument();
@@ -324,7 +324,7 @@ describe('Sidebar - Functional Tests', () => {
 
     it('MUST support keyboard navigation', async () => {
       const user = userEvent.setup();
-      render(<Sidebar />);
+      render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
       siteSelect.focus();
@@ -334,13 +334,13 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('Visual Structure', () => {
     it('MUST organize content with proper spacing', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       expect(container.querySelector('hr')).toBeInTheDocument();
     });
 
     it('MUST use dividers to separate sections', () => {
-      const { container } = render(<Sidebar />);
+      const { container } = render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const dividers = container.querySelectorAll('hr');
       expect(dividers.length).toBeGreaterThan(0);

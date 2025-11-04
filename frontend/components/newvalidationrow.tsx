@@ -241,13 +241,7 @@ WHERE cm.IsValidated IS NULL
       </TableRow>
 
       {/* Snackbar for user feedback */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-        color={snackbar.color}
-        variant="soft"
-      >
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} color={snackbar.color} variant="soft">
         {snackbar.message}
       </Snackbar>
     </>

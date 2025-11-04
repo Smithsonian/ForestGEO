@@ -34,10 +34,7 @@ export default function ValidationsPage() {
     data: schemaData,
     error: schemaError,
     isLoading: schemaLoading
-  } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(
-    currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null,
-    fetcher
-  );
+  } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null, fetcher);
 
   const replacements = useMemo(
     () => ({
@@ -159,9 +156,7 @@ export default function ValidationsPage() {
   if (validationsError || schemaError) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error">
-          Failed to load validations: {validationsError?.message || schemaError?.message || 'Unknown error'}
-        </Alert>
+        <Alert severity="error">Failed to load validations: {validationsError?.message || schemaError?.message || 'Unknown error'}</Alert>
       </Box>
     );
   }
@@ -169,12 +164,7 @@ export default function ValidationsPage() {
   return (
     <Box>
       <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => setIsCreatingNew(true)}
-          disabled={isCreatingNew || !currentSite}
-        >
+        <Button variant="contained" startIcon={<Add />} onClick={() => setIsCreatingNew(true)} disabled={isCreatingNew || !currentSite}>
           Add New Validation
         </Button>
       </Box>

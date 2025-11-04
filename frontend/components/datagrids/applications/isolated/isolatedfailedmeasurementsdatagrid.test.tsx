@@ -21,33 +21,33 @@ vi.mock('@mui/x-data-grid', () => ({
 }));
 
 // Mock dependencies - use importOriginal to preserve all exports
-vi.mock('@/config/sqlrdsdefinitions/core', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/views', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/zones', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/personnel', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/taxonomies', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 
-vi.mock('@/config/sqlrdsdefinitions/unifiedchangelog', async (importOriginal) => {
-  const actual = await importOriginal() as any;
+vi.mock('@/config/sqlrdsdefinitions/unifiedchangelog', async importOriginal => {
+  const actual = (await importOriginal()) as any;
   return actual;
 });
 

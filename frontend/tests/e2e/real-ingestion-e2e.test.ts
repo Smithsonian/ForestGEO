@@ -106,13 +106,10 @@ describe('Real E2E Ingestion Tests', () => {
       ];
 
       // Step 1: Insert test measurements into temporarymeasurements
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements);
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
 
       // Verify 4 records were inserted
-      const [tempCount] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = ?',
-        [fileID]
-      );
+      const [tempCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = ?', [fileID]);
       expect(tempCount[0].count).toBe(4);
 
       // Step 2: Run the ACTUAL stored procedure
@@ -211,18 +208,14 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements);
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
 
       // Run ingestion
       const result = await runBulkIngestion(connection, fileID, batchID);
       expect(result.success).toBe(true);
 
       // Verify results
-      const ingestionResults = await verifyIngestionResults(
-        connection,
-        testData,
-        ['TREE002', 'TREE003']
-      );
+      const ingestionResults = await verifyIngestionResults(connection, testData, ['TREE002', 'TREE003']);
 
       // Should have 2 valid measurements (TREE004 failed validation)
       expect(ingestionResults.insertedCount).toBe(2);
@@ -236,10 +229,7 @@ describe('Real E2E Ingestion Tests', () => {
       expect(tree003Codes).toContain('P');
 
       // Verify failed measurement was captured
-      const [failedCount] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?',
-        ['TREE004']
-      );
+      const [failedCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?', ['TREE004']);
       expect(failedCount[0].count).toBeGreaterThan(0);
 
       console.log('✅ Complex deduplication verified');
@@ -272,11 +262,7 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID: fileID1, batchID: batchID1 } = await insertTestMeasurements(
-        connection,
-        testData,
-        initialMeasurements
-      );
+      const { fileID: fileID1, batchID: batchID1 } = await insertTestMeasurements(connection, testData, initialMeasurements as any);
 
       await runBulkIngestion(connection, fileID1, batchID1);
 
@@ -302,11 +288,7 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID: fileID2, batchID: batchID2 } = await insertTestMeasurements(
-        connection,
-        testData,
-        reingestionMeasurements
-      );
+      const { fileID: fileID2, batchID: batchID2 } = await insertTestMeasurements(connection, testData, reingestionMeasurements as any);
 
       await runBulkIngestion(connection, fileID2, batchID2);
 
@@ -354,7 +336,7 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements);
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
       await runBulkIngestion(connection, fileID, batchID);
 
       // Verify initial insertion
@@ -363,10 +345,7 @@ describe('Real E2E Ingestion Tests', () => {
       const initialMeasurement = results.measurements[0];
 
       // Simulate editing the measurement (update DBH)
-      await connection.query(
-        'UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?',
-        [20.5, initialMeasurement.CoreMeasurementID]
-      );
+      await connection.query('UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?', [20.5, initialMeasurement.CoreMeasurementID]);
 
       // Verify row is still visible
       results = await verifyIngestionResults(connection, testData, ['TREE006']);
@@ -398,28 +377,19 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements);
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
       await runBulkIngestion(connection, fileID, batchID);
 
       // Verify it went to failed measurements
-      const [failedRows] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT * FROM failedmeasurements WHERE Tag = ?',
-        ['TREE007']
-      );
+      const [failedRows] = await connection.query<mysql.RowDataPacket[]>('SELECT * FROM failedmeasurements WHERE Tag = ?', ['TREE007']);
       expect(failedRows.length).toBeGreaterThan(0);
       const failedID = failedRows[0].FailedMeasurementID;
 
       // Fix the coordinates
-      await connection.query(
-        'UPDATE failedmeasurements SET X = ?, Y = ? WHERE FailedMeasurementID = ?',
-        [15.5, 25.5, failedID]
-      );
+      await connection.query('UPDATE failedmeasurements SET X = ?, Y = ? WHERE FailedMeasurementID = ?', [15.5, 25.5, failedID]);
 
       // Verify update was reflected
-      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT X, Y FROM failedmeasurements WHERE FailedMeasurementID = ?',
-        [failedID]
-      );
+      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>('SELECT X, Y FROM failedmeasurements WHERE FailedMeasurementID = ?', [failedID]);
       expect(updatedRows[0].X).toBe(15.5);
       expect(updatedRows[0].Y).toBe(25.5);
 
@@ -490,13 +460,10 @@ describe('Real E2E Ingestion Tests', () => {
         }
       ];
 
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements);
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
 
       // Verify temporarymeasurements count
-      const [tempCount] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = ?',
-        [fileID]
-      );
+      const [tempCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM temporarymeasurements WHERE FileID = ?', [fileID]);
       expect(tempCount[0].count).toBe(measurements.length);
 
       // Run ingestion
@@ -516,10 +483,7 @@ describe('Real E2E Ingestion Tests', () => {
       expect(dupCodes).toContain('P');
 
       // Verify invalid went to failed
-      const [failedCount] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?',
-        ['BATCH_INVALID']
-      );
+      const [failedCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?', ['BATCH_INVALID']);
       expect(failedCount[0].count).toBe(1);
 
       console.log('✅ Complete pipeline verified');

@@ -165,88 +165,93 @@ export default function UserSettingsPage() {
               Save Changes
             </Button>
           </Stack>
-      <Table>
-        <thead>
-          <tr>
-            <th id={'first-name'}>First Name</th>
-            <th id={'last-name'}>Last Name</th>
-            <th id={'email'}>Email</th>
-            <th id={'notifications'}>Notifications</th>
-            <th id={'user-status'}>User Status</th>
-            {/*<th>Sites</th>*/}
-          </tr>
-        </thead>
-        <tbody>
-          {(users as UserWithSite[]).map(u => (
-            <tr key={u.userID!}>
-              <td aria-labelledby={'first-name'}>
-                <Input aria-label={'first name value'} name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
-              </td>
-              <td aria-labelledby={'last-name'}>
-                <Input aria-label={'last name value'} name={'lastName'} value={u.lastName} onChange={e => onTextFieldChange(e, u)} />
-              </td>
-              <td aria-labelledby={'email'}>
-                <Input aria-label={'email value'} name={'email'} value={u.email} onChange={e => onTextFieldChange(e, u)} />
-              </td>
-              <td aria-labelledby={'notifications'}>
-                <Checkbox aria-label={'notifications value'} name="notifications" checked={u.notifications ?? false} onChange={e => onTextFieldChange(e, u)} />
-              </td>
-              <td aria-labelledby={'user-status'}>
-                <Select
-                  aria-label={'user status value'}
-                  name={'userStatus'}
-                  value={u.userStatus}
-                  onChange={(_event, newValue) => {
-                    if (newValue) {
-                      setUsers(prev =>
-                        prev.map(i =>
-                          i.userID === u.userID
-                            ? {
-                                ...i,
-                                userStatus: newValue
-                              }
-                            : i
-                        )
-                      );
-                    }
-                  }}
-                >
-                  <Option value={'global'}>Global</Option>
-                  <Option value={'db admin'}>DB Admin</Option>
-                  <Option value={'lead technician'}>Lead Technician</Option>
-                  <Option value={'field crew'}>Field Crew</Option>
-                </Select>
-              </td>
-              {/*<td>*/}
-              {/*  <Select*/}
-              {/*    name={'userSites'}*/}
-              {/*    multiple*/}
-              {/*    value={u.userSites.map(s => s.siteID!)}*/}
-              {/*    onChange={(_event, value) => {*/}
-              {/*      const selectedSites = value.map(v => sites.find(s => s.siteID === v));*/}
-              {/*      setUsers(prev =>*/}
-              {/*        prev.map(i =>*/}
-              {/*          i.userID === u.userID*/}
-              {/*            ? {*/}
-              {/*                ...i,*/}
-              {/*                userSites: selectedSites.filter((s): s is AdminSiteRDS => !!s)*/}
-              {/*              }*/}
-              {/*            : i*/}
-              {/*        )*/}
-              {/*      );*/}
-              {/*    }}*/}
-              {/*  >*/}
-              {/*    {sites.map(s => (*/}
-              {/*      <Option key={s.siteID} value={s.siteID}>*/}
-              {/*        {s.siteName}*/}
-              {/*      </Option>*/}
-              {/*    ))}*/}
-              {/*  </Select>*/}
-              {/*</td>*/}
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+          <Table>
+            <thead>
+              <tr>
+                <th id={'first-name'}>First Name</th>
+                <th id={'last-name'}>Last Name</th>
+                <th id={'email'}>Email</th>
+                <th id={'notifications'}>Notifications</th>
+                <th id={'user-status'}>User Status</th>
+                {/*<th>Sites</th>*/}
+              </tr>
+            </thead>
+            <tbody>
+              {(users as UserWithSite[]).map(u => (
+                <tr key={u.userID!}>
+                  <td aria-labelledby={'first-name'}>
+                    <Input aria-label={'first name value'} name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
+                  </td>
+                  <td aria-labelledby={'last-name'}>
+                    <Input aria-label={'last name value'} name={'lastName'} value={u.lastName} onChange={e => onTextFieldChange(e, u)} />
+                  </td>
+                  <td aria-labelledby={'email'}>
+                    <Input aria-label={'email value'} name={'email'} value={u.email} onChange={e => onTextFieldChange(e, u)} />
+                  </td>
+                  <td aria-labelledby={'notifications'}>
+                    <Checkbox
+                      aria-label={'notifications value'}
+                      name="notifications"
+                      checked={u.notifications ?? false}
+                      onChange={e => onTextFieldChange(e, u)}
+                    />
+                  </td>
+                  <td aria-labelledby={'user-status'}>
+                    <Select
+                      aria-label={'user status value'}
+                      name={'userStatus'}
+                      value={u.userStatus}
+                      onChange={(_event, newValue) => {
+                        if (newValue) {
+                          setUsers(prev =>
+                            prev.map(i =>
+                              i.userID === u.userID
+                                ? {
+                                    ...i,
+                                    userStatus: newValue
+                                  }
+                                : i
+                            )
+                          );
+                        }
+                      }}
+                    >
+                      <Option value={'global'}>Global</Option>
+                      <Option value={'db admin'}>DB Admin</Option>
+                      <Option value={'lead technician'}>Lead Technician</Option>
+                      <Option value={'field crew'}>Field Crew</Option>
+                    </Select>
+                  </td>
+                  {/*<td>*/}
+                  {/*  <Select*/}
+                  {/*    name={'userSites'}*/}
+                  {/*    multiple*/}
+                  {/*    value={u.userSites.map(s => s.siteID!)}*/}
+                  {/*    onChange={(_event, value) => {*/}
+                  {/*      const selectedSites = value.map(v => sites.find(s => s.siteID === v));*/}
+                  {/*      setUsers(prev =>*/}
+                  {/*        prev.map(i =>*/}
+                  {/*          i.userID === u.userID*/}
+                  {/*            ? {*/}
+                  {/*                ...i,*/}
+                  {/*                userSites: selectedSites.filter((s): s is AdminSiteRDS => !!s)*/}
+                  {/*              }*/}
+                  {/*            : i*/}
+                  {/*        )*/}
+                  {/*      );*/}
+                  {/*    }}*/}
+                  {/*  >*/}
+                  {/*    {sites.map(s => (*/}
+                  {/*      <Option key={s.siteID} value={s.siteID}>*/}
+                  {/*        {s.siteName}*/}
+                  {/*      </Option>*/}
+                  {/*    ))}*/}
+                  {/*  </Select>*/}
+                  {/*</td>*/}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
         </>
       )}
     </Box>

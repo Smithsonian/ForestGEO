@@ -735,11 +735,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 >
                   {isExporting ? 'Exporting...' : 'Export'}
                 </Button>
-                <Button
-                  aria-label={'Cancel the operation and close the modal'}
-                  onClick={() => setOpenExportModal(false)}
-                  disabled={isExporting}
-                >
+                <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)} disabled={isExporting}>
                   Cancel
                 </Button>
               </DialogActions>

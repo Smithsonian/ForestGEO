@@ -69,9 +69,7 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
 
     cy.intercept('GET', '/api/fetchall/quadrats?schema=test_schema', {
       statusCode: 200,
-      body: [
-        { quadratID: 1, quadratName: 'Q0101', plotID: 1 }
-      ]
+      body: [{ quadratID: 1, quadratName: 'Q0101', plotID: 1 }]
     }).as('fetchQuadrats');
 
     // Visit dashboard to initialize context
@@ -150,14 +148,16 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
 
       cy.intercept('POST', '/api/query', {
         statusCode: 200,
-        body: [{
-          CountValid: 0,
-          CountErrors: 0,
-          CountPending: 2,
-          CountOldTrees: 2,
-          CountNewRecruits: 0,
-          CountMultiStems: 0
-        }]
+        body: [
+          {
+            CountValid: 0,
+            CountErrors: 0,
+            CountPending: 2,
+            CountOldTrees: 2,
+            CountNewRecruits: 0,
+            CountMultiStems: 0
+          }
+        ]
       }).as('validationCounts');
 
       cy.intercept('GET', '/api/validations/validationerrordisplay?*', {
@@ -236,9 +236,11 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
       cy.wait(['@fetchMeasurements', '@validationErrorsAfterRun']);
 
       // Edit the row with error
-      cy.get('[role="row"]').eq(2).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(2)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
         statusCode: 200,
@@ -674,9 +676,11 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
       cy.visit('/measurementshub/viewfulltable');
       cy.wait(['@fetchMeasurements', '@validationCounts', '@validationErrors']);
 
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       cy.log('📍 User 2 saves a change to the same row (simulated)');
 
@@ -943,9 +947,11 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
       cy.visit('/fixeddatainput/attributes');
       cy.wait('@fetchAttributes');
 
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label*="Delete"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label*="Delete"]').click();
+        });
 
       cy.intercept('POST', '/api/bulkcrud', {
         statusCode: 400,
@@ -1028,9 +1034,11 @@ describe('Cross-Feature Integration - Comprehensive Tests', () => {
       cy.log('✅ User sees error indicators on rows');
 
       cy.log('📍 PHASE 4: Fix first error');
-      cy.get('[role="row"]').eq(1).within(() => {
-        cy.get('[aria-label="Edit"]').click();
-      });
+      cy.get('[role="row"]')
+        .eq(1)
+        .within(() => {
+          cy.get('[aria-label="Edit"]').click();
+        });
 
       cy.intercept('PATCH', '/api/fixeddata/updatep/coremeasurements/test_schema', {
         statusCode: 200,

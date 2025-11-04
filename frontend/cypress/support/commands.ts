@@ -110,19 +110,21 @@ Cypress.Commands.add('setupCommonMocks', () => {
   cy.intercept('POST', '/api/fetchall/plots**', {
     statusCode: 200,
     body: {
-      output: [{
-        plotID: 1,
-        plotName: 'Test Plot',
-        locationName: 'Test Location',
-        countryName: 'Test Country',
-        dimensionX: 1000,
-        dimensionY: 500,
-        area: 50,
-        plotShape: 'square',
-        plotDescription: 'Test plot for E2E tests',
-        numQuadrats: 100,
-        coordUnit: 'm'
-      }],
+      output: [
+        {
+          plotID: 1,
+          plotName: 'Test Plot',
+          locationName: 'Test Location',
+          countryName: 'Test Country',
+          dimensionX: 1000,
+          dimensionY: 500,
+          area: 50,
+          plotShape: 'square',
+          plotDescription: 'Test plot for E2E tests',
+          numQuadrats: 100,
+          coordUnit: 'm'
+        }
+      ],
       totalCount: 1
     }
   }).as('fetchPlots');
@@ -131,14 +133,16 @@ Cypress.Commands.add('setupCommonMocks', () => {
   cy.intercept('POST', '/api/fetchall/census**', {
     statusCode: 200,
     body: {
-      output: [{
-        censusID: 1,
-        plotID: 1,
-        plotCensusNumber: 1,
-        startDate: '2024-01-01',
-        endDate: '2024-12-31',
-        description: 'Test census'
-      }],
+      output: [
+        {
+          censusID: 1,
+          plotID: 1,
+          plotCensusNumber: 1,
+          startDate: '2024-01-01',
+          endDate: '2024-12-31',
+          description: 'Test census'
+        }
+      ],
       totalCount: 1
     }
   }).as('fetchCensus');
@@ -164,10 +168,10 @@ Cypress.Commands.add('setupCommonMocks', () => {
 declare global {
   namespace Cypress {
     interface Chainable {
-      loginAsAdmin(): Chainable<void>
-      loginAsDBManager(): Chainable<void>
-      loginAsFieldCrew(): Chainable<void>
-      setupCommonMocks(): Chainable<void>
+      loginAsAdmin(): Chainable<void>;
+      loginAsDBManager(): Chainable<void>;
+      loginAsFieldCrew(): Chainable<void>;
+      setupCommonMocks(): Chainable<void>;
     }
   }
 }

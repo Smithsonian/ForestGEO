@@ -77,7 +77,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
   beforeEach(() => {
     // Setup authentication
     cy.visit('/login');
-    cy.window().then((win) => {
+    cy.window().then(win => {
       win.sessionStorage.setItem('next-auth.session-token', 'mock-token');
     });
 
@@ -96,35 +96,43 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
     // Mock site/plot/census context
     cy.intercept('GET', '/api/fetchall/sites?schema=*', {
       statusCode: 200,
-      body: [{
-        siteID: 1,
-        siteName: 'Test Site',
-        schemaName: 'test_schema'
-      }]
+      body: [
+        {
+          siteID: 1,
+          siteName: 'Test Site',
+          schemaName: 'test_schema'
+        }
+      ]
     }).as('fetchSites');
 
     cy.intercept('GET', '/api/fetchall/plots?schema=*', {
       statusCode: 200,
-      body: [{
-        plotID: 1,
-        plotName: 'Test Plot',
-        num_quadrats: 100
-      }]
+      body: [
+        {
+          plotID: 1,
+          plotName: 'Test Plot',
+          num_quadrats: 100
+        }
+      ]
     }).as('fetchPlots');
 
     cy.intercept('GET', '/api/fetchall/census/1/1?schema=*', {
       statusCode: 200,
-      body: [{
-        censusID: 1,
-        plotCensusNumber: 1,
-        startDate: '2024-01-01',
-        endDate: '2024-12-31',
-        dateRanges: [{
+      body: [
+        {
           censusID: 1,
+          plotCensusNumber: 1,
           startDate: '2024-01-01',
-          endDate: '2024-12-31'
-        }]
-      }]
+          endDate: '2024-12-31',
+          dateRanges: [
+            {
+              censusID: 1,
+              startDate: '2024-01-01',
+              endDate: '2024-12-31'
+            }
+          ]
+        }
+      ]
     }).as('fetchCensus');
 
     cy.visit('/dashboard');
@@ -219,7 +227,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
         isValidated: 1
       }));
 
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         const page = req.body.paginationModel?.page || 0;
         const pageSize = req.body.paginationModel?.pageSize || 25;
         const start = page * pageSize;
@@ -256,7 +264,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔄 Testing column sorting');
 
       // Mock sorted data
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         const sortModel = req.body.sortModel?.[0];
 
         let sorted = [...mockMeasurements];
@@ -297,7 +305,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔍 Testing search filtering');
 
       // Mock filtered data
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         const filterModel = req.body.filterModel;
         let filtered = mockMeasurements;
 
@@ -320,10 +328,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       }).as('fetchFilteredMeasurements');
 
       // Find and use search/filter input
-      cy.get('input[placeholder*="Search"]', { timeout: 5000 })
-        .or('input[type="text"]')
-        .first()
-        .type('TREE001');
+      cy.get('input[placeholder*="Search"]', { timeout: 5000 }).or('input[type="text"]').first().type('TREE001');
 
       cy.wait('@fetchFilteredMeasurements');
 
@@ -409,24 +414,26 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔄 Testing plot switching');
 
       // Mock plot 2 data
-      cy.intercept('POST', '/api/fixeddatafilter/measurementssummary/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/measurementssummary/test_schema*', req => {
         req.reply({
           statusCode: 200,
           body: {
-            output: [{
-              id: 10,
-              coreMeasurementID: 10,
-              treeTag: 'PLOT2_TREE001',
-              stemTag: '1',
-              speciesCode: 'SPCODE5',
-              quadratName: 'Q0201',
-              lx: 30.5,
-              ly: 40.5,
-              dbh: 25.5,
-              hom: 1.3,
-              measurementDate: '2024-07-01',
-              isValidated: 1
-            }],
+            output: [
+              {
+                id: 10,
+                coreMeasurementID: 10,
+                treeTag: 'PLOT2_TREE001',
+                stemTag: '1',
+                speciesCode: 'SPCODE5',
+                quadratName: 'Q0201',
+                lx: 30.5,
+                ly: 40.5,
+                dbh: 25.5,
+                hom: 1.3,
+                measurementDate: '2024-07-01',
+                isValidated: 1
+              }
+            ],
             totalCount: 1
           }
         });
@@ -445,11 +452,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.wait('@fetchPlotsWithMultiple');
 
       // Find and click plot selector
-      cy.get('[data-testid="plot-selector"]', { timeout: 5000 })
-        .or('select')
-        .contains('Plot')
-        .parent()
-        .select('Plot 2');
+      cy.get('[data-testid="plot-selector"]', { timeout: 5000 }).or('select').contains('Plot').parent().select('Plot 2');
 
       cy.wait('@fetchPlot2Data');
 
@@ -466,20 +469,22 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.intercept('POST', '/api/fixeddatafilter/measurementssummary/test_schema*', {
         statusCode: 200,
         body: {
-          output: [{
-            id: 20,
-            coreMeasurementID: 20,
-            treeTag: 'CENSUS2_TREE001',
-            stemTag: '1',
-            speciesCode: 'SPCODE6',
-            quadratName: 'Q0101',
-            lx: 15.5,
-            ly: 25.5,
-            dbh: 30.5,
-            hom: 1.3,
-            measurementDate: '2025-06-01',
-            isValidated: 1
-          }],
+          output: [
+            {
+              id: 20,
+              coreMeasurementID: 20,
+              treeTag: 'CENSUS2_TREE001',
+              stemTag: '1',
+              speciesCode: 'SPCODE6',
+              quadratName: 'Q0101',
+              lx: 15.5,
+              ly: 25.5,
+              dbh: 30.5,
+              hom: 1.3,
+              measurementDate: '2025-06-01',
+              isValidated: 1
+            }
+          ],
           totalCount: 1
         }
       }).as('fetchCensus2Data');
@@ -509,11 +514,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.wait('@fetchCensusWithMultiple');
 
       // Find and click census selector
-      cy.get('[data-testid="census-selector"]', { timeout: 5000 })
-        .or('select')
-        .contains('Census')
-        .parent()
-        .select('Census 2');
+      cy.get('[data-testid="census-selector"]', { timeout: 5000 }).or('select').contains('Census').parent().select('Census 2');
 
       cy.wait('@fetchCensus2Data');
 
@@ -543,7 +544,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('✅ Testing validated filter');
 
       // Mock filtered data for validated records
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         req.reply({
           statusCode: 200,
           body: {
@@ -569,7 +570,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('⏳ Testing pending filter');
 
       // Mock filtered data for pending records (isValidated = null or 0)
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         req.reply({
           statusCode: 200,
           body: {
@@ -595,7 +596,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('⚠️ Testing error filter');
 
       // Mock filtered data for records with errors
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         req.reply({
           statusCode: 200,
           body: {
@@ -621,14 +622,11 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔄 Testing multiple filter combination');
 
       // Mock filtered data for pending + errors
-      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', (req) => {
+      cy.intercept('POST', '/api/fixeddatafilter/viewfulltable/test_schema*', req => {
         req.reply({
           statusCode: 200,
           body: {
-            output: mockMeasurements.filter(m =>
-              (m.isValidated === null || m.isValidated === 0) &&
-              (m.errors !== null && m.errors !== '')
-            ),
+            output: mockMeasurements.filter(m => (m.isValidated === null || m.isValidated === 0) && m.errors !== null && m.errors !== ''),
             totalCount: 1
           }
         });
@@ -670,7 +668,8 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔍 Verifying export button exists');
 
       // Look for export button
-      cy.get('button').contains(/export/i, { timeout: 5000 })
+      cy.get('button')
+        .contains(/export/i, { timeout: 5000 })
         .or('button[aria-label*="export"]')
         .should('exist');
 
@@ -687,7 +686,9 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       }).as('exportData');
 
       // Click export button
-      cy.get('button').contains(/export/i).click();
+      cy.get('button')
+        .contains(/export/i)
+        .click();
 
       // Verify export was triggered (download should happen)
       cy.log('✅ Export triggered successfully');
@@ -715,7 +716,9 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       }).as('exportFilteredData');
 
       // Click export
-      cy.get('button').contains(/export/i).click();
+      cy.get('button')
+        .contains(/export/i)
+        .click();
 
       cy.log('✅ Filtered export works correctly');
     });
@@ -746,9 +749,7 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.log('🔍 Verifying error count badge');
 
       // Look for error count badge
-      cy.get('[data-testid="error-count-badge"]', { timeout: 5000 })
-        .or('.MuiBadge-badge')
-        .should('exist');
+      cy.get('[data-testid="error-count-badge"]', { timeout: 5000 }).or('.MuiBadge-badge').should('exist');
 
       cy.log('✅ Error count badge displayed');
     });
@@ -760,13 +761,15 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
       cy.intercept('POST', '/api/fixeddatafilter/failedmeasurements/test_schema*', {
         statusCode: 200,
         body: {
-          output: [{
-            id: 100,
-            treeTag: 'FAILED001',
-            stemTag: '1',
-            speciesCode: 'SPCODE',
-            failureReason: 'Missing X coordinate|Invalid DBH value'
-          }],
+          output: [
+            {
+              id: 100,
+              treeTag: 'FAILED001',
+              stemTag: '1',
+              speciesCode: 'SPCODE',
+              failureReason: 'Missing X coordinate|Invalid DBH value'
+            }
+          ],
           totalCount: 1
         }
       }).as('fetchFailedMeasurements');
@@ -796,12 +799,12 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
         statusCode: 200,
         body: {
           coreValidations: {
-            'MissingXCoordinate': {
+            MissingXCoordinate: {
               id: 1,
               description: 'Missing X Coordinate',
               definition: 'SELECT * FROM measurements WHERE lx IS NULL'
             },
-            'InvalidDBH': {
+            InvalidDBH: {
               id: 2,
               description: 'Invalid DBH',
               definition: 'SELECT * FROM measurements WHERE dbh > 1000'
@@ -906,7 +909,9 @@ describe('Data Viewing/Browsing Comprehensive Tests', () => {
 
       // STEP 7: Export filtered data
       cy.log('📍 STEP 7: Exporting filtered data');
-      cy.get('button').contains(/export/i).should('exist');
+      cy.get('button')
+        .contains(/export/i)
+        .should('exist');
       cy.log('  ✅ Export available');
 
       cy.log('✅ Complete viewing workflow verified');

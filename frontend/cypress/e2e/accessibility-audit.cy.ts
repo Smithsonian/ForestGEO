@@ -104,7 +104,7 @@ describe('Accessibility Audit', () => {
 
       // Tab order should follow visual layout
       let previousTabIndex = -1;
-      cy.get('input, button, [tabindex]').each(($el) => {
+      cy.get('input, button, [tabindex]').each($el => {
         const tabIndex = parseInt($el.attr('tabindex') || '0');
         if (tabIndex >= 0) {
           // Tab indices should generally increase
@@ -167,9 +167,9 @@ describe('Accessibility Audit', () => {
       cy.visit('/dashboard');
 
       // All images should have alt attribute (if images exist)
-      cy.get('body').then(($body) => {
+      cy.get('body').then($body => {
         if ($body.find('img').length > 0) {
-          cy.get('img').each(($img) => {
+          cy.get('img').each($img => {
             cy.wrap($img).should('have.attr', 'alt');
           });
           cy.log('✅ Image alt text present');
@@ -185,7 +185,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/dashboard');
 
       // Links should not just say "click here" or "read more"
-      cy.get('a').each(($link) => {
+      cy.get('a').each($link => {
         const text = $link.text().trim().toLowerCase();
         // Should have meaningful text (not empty and not generic)
         expect(text).to.not.be.empty;
@@ -232,7 +232,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/admin/users');
 
       // All inputs should have labels or aria-label
-      cy.get('input').each(($input) => {
+      cy.get('input').each($input => {
         const hasLabel = $input.attr('aria-label') || $input.attr('aria-labelledby') || $input.attr('name');
         expect(hasLabel).to.exist;
       });
@@ -282,7 +282,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/dashboard');
 
       // All buttons should have descriptive text or aria-label
-      cy.get('button').each(($button) => {
+      cy.get('button').each($button => {
         const hasLabel = $button.text().trim() || $button.attr('aria-label');
         expect(hasLabel).to.exist;
       });
@@ -434,7 +434,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/admin/users');
 
       // Labels should be associated with inputs via for/id or wrapping
-      cy.get('input').each(($input) => {
+      cy.get('input').each($input => {
         const id = $input.attr('id');
         const name = $input.attr('name');
         const hasAssociation = id || name || $input.attr('aria-label');
@@ -505,11 +505,13 @@ describe('Accessibility Audit', () => {
 
       // Check for focusable elements at the start of the page
       // Skip links are typically the first focusable element
-      cy.get('button, input, a, [tabindex="0"]').first().then(($el) => {
-        const text = $el.text().toLowerCase();
-        // Log first focusable element (could be skip link)
-        cy.log(`First focusable: ${text}`);
-      });
+      cy.get('button, input, a, [tabindex="0"]')
+        .first()
+        .then($el => {
+          const text = $el.text().toLowerCase();
+          // Log first focusable element (could be skip link)
+          cy.log(`First focusable: ${text}`);
+        });
 
       // Skip links are a nice-to-have, page is still navigable without them
       // Main requirement is that page has proper focus order
@@ -534,7 +536,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/dashboard');
 
       // Current page should be marked (aria-current="page" or active class)
-      cy.get('body').then(($body) => {
+      cy.get('body').then($body => {
         const hasAriaCurrent = $body.find('[aria-current="page"]').length > 0;
         const hasActiveClass = $body.find('.active, [class*="active"]').length > 0;
 
@@ -577,7 +579,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/admin/users');
 
       // Tables should have caption or aria-label
-      cy.get('table', { timeout: 10000 }).should(($table) => {
+      cy.get('table', { timeout: 10000 }).should($table => {
         const hasLabel = $table.attr('aria-label') || $table.find('caption').length > 0;
         expect(hasLabel).to.exist;
       });
@@ -647,7 +649,7 @@ describe('Accessibility Audit', () => {
       cy.visit('/admin/users');
 
       // Checkboxes should have proper labels
-      cy.get('input[type="checkbox"], [role="checkbox"]').each(($checkbox) => {
+      cy.get('input[type="checkbox"], [role="checkbox"]').each($checkbox => {
         const hasLabel = $checkbox.attr('aria-label') || $checkbox.attr('name');
         expect(hasLabel).to.exist;
       });

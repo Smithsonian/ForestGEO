@@ -25,8 +25,8 @@ describe('ValidationRow - Functional Tests', () => {
     description: 'Check DBH values;Verify HOM measurements',
     criteria: 'DBH > 0;HOM < 200',
     isEnabled: true,
-    dateCreated: new Date('2024-01-01'),
-    dateModified: new Date('2024-01-02')
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-02')
   };
 
   const mockReplacements = {
