@@ -122,9 +122,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography level="h4">
-              Some errors occurred during refresh:
-            </Typography>
+            <Typography level="h4">Some errors occurred during refresh:</Typography>
             <Typography color="danger">{refreshError}</Typography>
             <Button
               variant="solid"
@@ -150,9 +148,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography level="h4">
-              Upload Complete
-            </Typography>
+            <Typography level="h4">Upload Complete</Typography>
             {results.map(result => (
               <Typography key={result}>{result}</Typography>
             ))}

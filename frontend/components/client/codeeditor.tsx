@@ -8,7 +8,7 @@ import { format as sqlFormat } from 'sql-formatter';
 import { autocompletion, CompletionContext } from '@codemirror/autocomplete';
 import { linter, lintGutter } from '@codemirror/lint';
 import CodeMirror, { EditorView, ViewUpdate } from '@uiw/react-codemirror';
-import { Box, Alert, Button, CircularProgress } from '@mui/material';
+import { Box, Alert, Button, CircularProgress } from '@mui/joy';
 import { FormatAlignLeft, PlayArrow } from '@mui/icons-material';
 
 type CodeEditorProps = {
@@ -208,26 +208,25 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
       {!readOnly && (showFormatButton || showTestButton || enableValidation) && (
         <Box sx={{ mb: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
           {showFormatButton && (
-            <Button size="small" variant="outlined" startIcon={<FormatAlignLeft />} onClick={handleFormatQuery} sx={{ textTransform: 'none' }}>
+            <Button size="sm" variant="outlined" startDecorator={<FormatAlignLeft />} onClick={handleFormatQuery}>
               Format SQL
             </Button>
           )}
           {showTestButton && onTestQuery && (
             <Button
-              size="small"
-              variant="contained"
+              size="sm"
+              variant="solid"
               color="primary"
-              startIcon={<PlayArrow />}
+              startDecorator={<PlayArrow />}
               onClick={onTestQuery}
               disabled={isValidating}
-              sx={{ textTransform: 'none' }}
             >
               {testButtonLabel}
             </Button>
           )}
           {enableValidation && isValidating && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CircularProgress size={16} />
+              <CircularProgress size="sm" />
               <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Validating...</Box>
             </Box>
           )}
@@ -249,12 +248,12 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
       {enableValidation && (validationErrors.length > 0 || validationWarnings.length > 0) && (
         <Box sx={{ mt: 1 }}>
           {validationErrors.map((error, index) => (
-            <Alert key={`error-${index}`} severity="error" sx={{ mb: 0.5 }}>
+            <Alert key={`error-${index}`} color="danger" sx={{ mb: 0.5 }}>
               {error}
             </Alert>
           ))}
           {validationWarnings.map((warning, index) => (
-            <Alert key={`warning-${index}`} severity="warning" sx={{ mb: 0.5 }}>
+            <Alert key={`warning-${index}`} color="warning" sx={{ mb: 0.5 }}>
               {warning}
             </Alert>
           ))}
