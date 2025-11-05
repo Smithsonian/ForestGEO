@@ -123,11 +123,13 @@ export default [
       '@typescript-eslint/ban-types': 'off',
       '@typescript-eslint/no-inferrable-types': 'off',
       '@typescript-eslint/no-unused-vars': [
-        'off',
+        'warn',
         {
           vars: 'all',
           args: 'after-used',
-          ignoreRestSiblings: true
+          ignoreRestSiblings: true,
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_'
         }
       ],
       '@typescript-eslint/no-unused-expressions': 'off'
@@ -149,10 +151,19 @@ export default [
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
       '@typescript-eslint/no-inferrable-types': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          vars: 'all',
+          args: 'after-used',
+          ignoreRestSiblings: true,
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_'
+        }
+      ],
       '@typescript-eslint/no-unused-expressions': 'off',
-      'react-hooks/exhaustive-deps': 'off',
-      'react-hooks/rules-of-hooks': 'off',
+      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/rules-of-hooks': 'error',
       'import/no-anonymous-default-export': 'off',
       'jsx-a11y/control-has-associated-label': [
         'error',

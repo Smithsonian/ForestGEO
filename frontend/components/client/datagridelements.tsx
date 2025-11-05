@@ -124,6 +124,23 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
       count: 0
     }
   } = props;
+
+  // Hooks must be called before any early returns
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [openExportModal, setOpenExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
+  const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel?.visible || []);
+  const [isExporting, setIsExporting] = useState(false);
+  const apiRef = useGridApiContext();
+
+  useEffect(() => {
+    if (isTyping) {
+      const timeout = setTimeout(() => setIsTyping(false), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTyping, inputValue]);
+
   const hasAnyExport = typeof handleExport === 'function' || typeof handleExportAll === 'function' || typeof handleExportCSV === 'function';
 
   // only require add / refresh / quickFilter / model / columns
@@ -136,13 +153,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   ) {
     return null;
   }
-  const [inputValue, setInputValue] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [openExportModal, setOpenExportModal] = useState(false);
-  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
-  const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
-  const [isExporting, setIsExporting] = useState(false);
-  const apiRef = useGridApiContext();
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
@@ -169,13 +179,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     });
     setIsTyping(false);
   };
-
-  useEffect(() => {
-    if (isTyping) {
-      const timeout = setTimeout(() => setIsTyping(false), 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isTyping, inputValue]);
 
   function exportFilterModel() {
     const jsonData = JSON.stringify(filterModel, null, 2);

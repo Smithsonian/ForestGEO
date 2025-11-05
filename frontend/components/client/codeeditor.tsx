@@ -213,14 +213,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
             </Button>
           )}
           {showTestButton && onTestQuery && (
-            <Button
-              size="sm"
-              variant="solid"
-              color="primary"
-              startDecorator={<PlayArrow />}
-              onClick={onTestQuery}
-              disabled={isValidating}
-            >
+            <Button size="sm" variant="solid" color="primary" startDecorator={<PlayArrow />} onClick={onTestQuery} disabled={isValidating}>
               {testButtonLabel}
             </Button>
           )}

@@ -116,7 +116,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
   useSession();
 
-  const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
+  // Always call hooks unconditionally - hooks cannot be called conditionally
+  const internalApiRef = useGridApiRef();
+  const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
   useEffect(() => {
     if (rowCount < paginationModel.pageSize) setHidingEmpty(false);
