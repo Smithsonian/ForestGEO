@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle } from '@mui/material';
+import { Button, Modal, ModalDialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/joy';
 
 interface ConfirmationDialogProps {
   open: boolean;
@@ -12,20 +12,22 @@ interface ConfirmationDialogProps {
 
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({ open, onClose, onConfirm, title, content }) => {
   return (
-    <Dialog open={open} onClose={onClose} aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
-      <DialogTitle id="alert-dialog-title">{title}</DialogTitle>
-      <DialogContent>
-        <DialogContentText id="alert-dialog-description">{content}</DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} color="primary">
-          Cancel
-        </Button>
-        <Button onClick={onConfirm} color="primary">
-          Confirm
-        </Button>
-      </DialogActions>
-    </Dialog>
+    <Modal open={open} onClose={onClose}>
+      <ModalDialog aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
+        <DialogTitle id="alert-dialog-title">{title}</DialogTitle>
+        <DialogContent>
+          <Typography id="alert-dialog-description">{content}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose} variant="plain" color="neutral">
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} variant="solid" color="primary">
+            Confirm
+          </Button>
+        </DialogActions>
+      </ModalDialog>
+    </Modal>
   );
 };
 
