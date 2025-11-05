@@ -1,7 +1,6 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, LinearProgress, Typography } from '@mui/material';
-import CircularProgress from '@mui/joy/CircularProgress';
+import { Box, LinearProgress, Typography, CircularProgress } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import ailogger from '@/ailogger';
 
@@ -148,14 +147,14 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
       return (
         <Box key={validationProcedureName} sx={{ mb: 2 }} role="group" aria-labelledby={progressId}>
-          <Typography variant="subtitle1" id={progressId}>
+          <Typography level="body-md" id={progressId}>
             {validationProcedureName}
           </Typography>
-          <Typography variant="subtitle1" id={descId}>
+          <Typography level="body-md" id={descId}>
             {validationMessages[validationProcedureName]?.description}
           </Typography>
           <LinearProgress
-            variant="determinate"
+            determinate
             value={progress}
             aria-labelledby={progressId}
             aria-describedby={descId}
@@ -197,7 +196,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6" component="h2" id="validation-status">
+              <Typography level="title-lg" component="h2" id="validation-status">
                 Validating data...
               </Typography>
               <div role="progressbar" aria-describedby="validation-status">
@@ -214,7 +213,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               }}
             >
               <CircularProgress aria-label="Updating validated rows" />
-              <Typography variant="h6" component="h2">
+              <Typography level="title-lg" component="h2">
                 Updating validated rows...
               </Typography>
             </Box>
@@ -227,18 +226,18 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6" component="h2">
+              <Typography level="title-lg" component="h2">
                 Validation Results
               </Typography>
               {apiErrors.length > 0 && (
                 <Box sx={{ mb: 2 }} role="alert" aria-live="assertive">
-                  <Typography color="error" component="h3">
+                  <Typography color="danger" component="h3">
                     Some validations could not be performed:
                   </Typography>
                   <ul>
                     {apiErrors.map((error, index) => (
                       <li key={error}>
-                        <Typography color="error">{error}</Typography>
+                        <Typography color="danger">{error}</Typography>
                       </li>
                     ))}
                   </ul>

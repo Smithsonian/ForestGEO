@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/joy';
 import { ReviewStates, UploadUpdateValidationsProps } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import ailogger from '@/ailogger';
@@ -48,7 +48,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
             flex: 1
           }}
         >
-          <Typography variant="h6">Finalizing Validations{ellipsis}</Typography>
+          <Typography level="title-lg">Finalizing Validations{ellipsis}</Typography>
         </Box>
       ) : (
         <Box
@@ -60,8 +60,8 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
             flex: 1
           }}
         >
-          <Typography variant="h6">Complete!</Typography>
-          <Typography variant={'body1'}>Continuing to Azure upload.</Typography>
+          <Typography level="title-lg">Complete!</Typography>
+          <Typography level="body-md">Continuing to Azure upload.</Typography>
         </Box>
       )}
     </Box>

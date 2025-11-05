@@ -3,8 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
-import { Box, Button, Typography } from '@mui/material';
-import { Stack } from '@mui/joy';
+import { Box, Button, Typography, Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import ailogger from '@/ailogger';
@@ -108,7 +107,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'}>
-            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
+            <Typography level="title-lg">{`Total Operations: ${totalOperations}`}</Typography>
             <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
           </Stack>
         </Box>
@@ -123,12 +122,12 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography variant="h5" gutterBottom>
+            <Typography level="h4">
               Some errors occurred during refresh:
             </Typography>
-            <Typography color="error">{refreshError}</Typography>
+            <Typography color="danger">{refreshError}</Typography>
             <Button
-              variant="contained"
+              variant="solid"
               onClick={() => {
                 setRefreshError(null); // Clear the error
                 setContinueDisabled(true); // Enable the continuation
@@ -151,7 +150,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography variant="h5" gutterBottom>
+            <Typography level="h4">
               Upload Complete
             </Typography>
             {results.map(result => (

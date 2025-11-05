@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Sheet, Typography } from '@mui/joy';
 import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import '@/styles/validationtable.css';
 import moment from 'moment';
@@ -107,7 +107,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                         {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
                       </Typography>
                       <Divider orientation="horizontal" sx={{ marginY: 0.5 }} />
-                      <Typography variant={'caption'} className="auto-fill-correction">
+                      <Typography level="body-xs" className="auto-fill-correction">
                         {cellError}
                       </Typography>
                     </>
@@ -238,7 +238,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
   );
 
   return (
-    <Paper style={{ height: '100%', width: '100%' }}>
+    <Sheet sx={{ height: '100%', width: '100%', p: 2 }}>
       {!saveCorrections ? (
         <>
           {validRows.length > 0 && (
@@ -260,7 +260,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
           )}
           {invalidRows.length > 0 && (
             <Box sx={{ mt: 2 }}>
-              <Typography color="gold">
+              <Typography color="warning">
                 The following rows have been autocorrected to fit the schema. Please review the corrected rows and make sure they are correct.
                 <br />
                 <span style={{ color: 'red' }}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
@@ -314,6 +314,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         onChange={event => setSaveCorrections(event.target.checked)}
         label={!saveCorrections ? 'Save Autocorrected Values to Data' : 'Autocorrected Data Saved!'}
       />
-    </Paper>
+    </Sheet>
   );
 };
