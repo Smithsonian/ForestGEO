@@ -77,9 +77,9 @@ export function getLegacyContainerName(plotName: string, censusNumber: number): 
 function sanitizePlotNameForContainer(plotName: string): string {
   return plotName
     .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')  // Replace invalid chars with hyphen
-    .replace(/-+/g, '-')            // Remove consecutive hyphens
-    .replace(/^-|-$/g, '');         // Remove leading/trailing hyphens
+    .replace(/[^a-z0-9-]/g, '-') // Replace invalid chars with hyphen
+    .replace(/-+/g, '-') // Remove consecutive hyphens
+    .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
 }
 
 /**
@@ -164,13 +164,13 @@ export function getContainerNameWithFallback(
         try {
           legacy = getLegacyContainerName(plotName, censusNumber);
         } catch (error) {
-          ailogger.warn(`Could not generate legacy container name for plot "${plotName}":`, error);
+          ailogger.warn(`Could not generate legacy container name for plot "${plotName}": ${error instanceof Error ? error.message : String(error)}`);
         }
       }
 
       return { primary, legacy, usesLegacy: false };
     } catch (error) {
-      ailogger.error(`Error generating ID-based container name:`, error);
+      ailogger.error(`Error generating ID-based container name: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -181,13 +181,13 @@ export function getContainerNameWithFallback(
       ailogger.warn(`Using legacy container naming for plot "${plotName}". Consider migrating to ID-based naming.`);
       return { primary: legacy, usesLegacy: true };
     } catch (error) {
-      ailogger.error(`Error generating legacy container name:`, error);
+      ailogger.error(`Error generating legacy container name: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   throw new Error(
     `Cannot generate container name. Need either (plotID: ${plotID}, censusNumber: ${censusNumber}) ` +
-    `or (plotName: "${plotName}", censusNumber: ${censusNumber})`
+      `or (plotName: "${plotName}", censusNumber: ${censusNumber})`
   );
 }
 

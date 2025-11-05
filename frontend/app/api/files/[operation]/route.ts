@@ -307,11 +307,7 @@ async function handleList(params: FileOperationParams) {
     const censusNum = parseInt(census, 10);
     const plotIdNum = plotID ? parseInt(plotID, 10) : undefined;
 
-    const { primary, legacy } = getContainerNameWithFallback(
-      plotIdNum,
-      plotName,
-      censusNum
-    );
+    const { primary, legacy } = getContainerNameWithFallback(plotIdNum, plotName, censusNum);
 
     let containerClient;
     let actualContainerName = '';

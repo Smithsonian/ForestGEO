@@ -27,11 +27,7 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
   // Generate container name for display
   const getContainerDisplayName = () => {
     try {
-      const { primary } = getContainerNameWithFallback(
-        currentPlot?.plotID,
-        currentPlot?.plotName,
-        currentCensus?.plotCensusNumber
-      );
+      const { primary } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
       return primary;
     } catch {
       return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
@@ -91,17 +87,13 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDownload = async (filename: string) => {
     try {
-      const { primary, legacy } = getContainerNameWithFallback(
-        currentPlot?.plotID,
-        currentPlot?.plotName,
-        currentCensus?.plotCensusNumber
-      );
+      const { primary, legacy } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
 
       const response = await fetch(
         `/api/files/download?` +
-        `container=${encodeURIComponent(primary.toLowerCase())}&` +
-        `filename=${encodeURIComponent(filename)}` +
-        (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : '')
+          `container=${encodeURIComponent(primary.toLowerCase())}&` +
+          `filename=${encodeURIComponent(filename)}` +
+          (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : '')
       );
 
       if (!response.ok) throw new Error('Error getting download link');
@@ -117,17 +109,13 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDelete = async (filename: string) => {
     try {
-      const { primary, legacy } = getContainerNameWithFallback(
-        currentPlot?.plotID,
-        currentPlot?.plotName,
-        currentCensus?.plotCensusNumber
-      );
+      const { primary, legacy } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
 
       const response = await fetch(
         `/api/files/delete?` +
-        `container=${encodeURIComponent(primary.toLowerCase())}&` +
-        `filename=${encodeURIComponent(filename)}` +
-        (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : ''),
+          `container=${encodeURIComponent(primary.toLowerCase())}&` +
+          `filename=${encodeURIComponent(filename)}` +
+          (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : ''),
         {
           method: 'DELETE'
         }
@@ -227,13 +215,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', mb: 10 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
             <Typography level={'title-lg'} marginBottom={2}>
-              Accessing Container: {(() => {
+              Accessing Container:{' '}
+              {(() => {
                 try {
-                  const { primary } = getContainerNameWithFallback(
-                    currentPlot?.plotID,
-                    currentPlot?.plotName,
-                    currentCensus?.plotCensusNumber
-                  );
+                  const { primary } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
                   return primary;
                 } catch {
                   return `${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString() ?? 'none'}`;
