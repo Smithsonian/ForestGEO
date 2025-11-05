@@ -1,8 +1,8 @@
 'use client';
 
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Pagination } from '@mui/material';
+import { Pagination } from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { Box, Checkbox, Modal, ModalClose, Typography } from '@mui/joy';
+import { Box, Button, Checkbox, Modal, ModalDialog, ModalClose, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/joy';
 import { DisplayParsedDataGridInline } from '@/components/uploadsystemhelpers/displayparseddatagrid';
 import Divider from '@mui/joy/Divider';
 import React, { useEffect, useState } from 'react';
@@ -148,7 +148,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
           <CircularProgress />
         ) : (
           <>
-            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)} sx={{ mb: 2, width: 'fit-content' }}>
+            <Button variant="solid" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)} sx={{ mb: 2, width: 'fit-content' }}>
               Back
             </Button>
             <Grid container spacing={2}>
@@ -162,7 +162,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     alignItems: 'center'
                   }}
                 >
-                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)} sx={{ width: 'fit-content' }}>
+                  <Button variant="solid" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)} sx={{ width: 'fit-content' }}>
                     Remove Current File
                   </Button>
                   <Box sx={{ display: 'flex', flexDirection: 'row', mb: 2 }}>
@@ -228,7 +228,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     alignItems: 'center'
                   }}
                 >
-                  <Button variant={'contained'} disabled={!isFileUploadAllowed() || requireReupload} onClick={handleApproveClick} sx={{ width: 'fit-content' }}>
+                  <Button variant="solid" disabled={!isFileUploadAllowed() || requireReupload} onClick={handleApproveClick} sx={{ width: 'fit-content' }}>
                     Confirm Changes
                   </Button>
                 </Box>
@@ -239,41 +239,43 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
         )}
       </Box>
       <Modal open={isReuploadDialogOpen || requireReupload || !acceptedFiles[dataViewActive - 1].useStreaming} onClose={() => setIsReuploadDialogOpen(false)}>
-        <Box>
+        <ModalDialog>
           <ModalClose onClick={() => setIsReuploadDialogOpen(false)} />
           <DialogTitle>{requireReupload ? 'Headers Missing or Corrupted' : 'Re-upload Corrected File'}</DialogTitle>
           <DialogContent>
-            <DialogContentText>
+            <Typography>
               {requireReupload
                 ? 'The selected file is missing required headers or the headers cannot be read. Please upload a corrected version of the file.'
                 : `Please upload the corrected version of the file: ${currentFileName}`}
-            </DialogContentText>
+            </Typography>
             <DropzoneLogic onChange={handleReUploadFileChange} />
           </DialogContent>
           <DialogActions>{!requireReupload && <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>}</DialogActions>
-        </Box>
+        </ModalDialog>
       </Modal>
-      <Dialog open={confirmationDialogOpen} onClose={handleCancel} aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
-        <DialogTitle id="alert-dialog-title">{'Do your files look correct?'}</DialogTitle>
-        <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            {missingHeaders.length > 0 ? (
-              <>
-                The following required headers are missing: {missingHeaders.join(', ')}.<br />
-                You can still proceed with the upload, but consider re-uploading the files with the required headers.
-                <br />
-                If you would like to re-upload a corrected file, you can do so by clicking &quot;Re-upload Corrected File&quot;.
-              </>
-            ) : (
-              'Please press Confirm to upload your files to storage.'
-            )}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleConfirm}>Confirm</Button>
-        </DialogActions>
-      </Dialog>
+      <Modal open={confirmationDialogOpen} onClose={handleCancel}>
+        <ModalDialog aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
+          <DialogTitle id="alert-dialog-title">Do your files look correct?</DialogTitle>
+          <DialogContent>
+            <Typography id="alert-dialog-description">
+              {missingHeaders.length > 0 ? (
+                <>
+                  The following required headers are missing: {missingHeaders.join(', ')}.<br />
+                  You can still proceed with the upload, but consider re-uploading the files with the required headers.
+                  <br />
+                  If you would like to re-upload a corrected file, you can do so by clicking &quot;Re-upload Corrected File&quot;.
+                </>
+              ) : (
+                'Please press Confirm to upload your files to storage.'
+              )}
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleCancel} variant="plain">Cancel</Button>
+            <Button onClick={handleConfirm} variant="solid">Confirm</Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
     </>
   );
 }
