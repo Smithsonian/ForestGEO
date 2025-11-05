@@ -11,9 +11,6 @@ import {
   CardContent,
   Chip,
   Divider,
-  List,
-  ListItem,
-  ListItemDecorator,
   Skeleton,
   Stack,
   Step,
@@ -179,7 +176,7 @@ export default function DashboardPage() {
         }
 
         setChangelogHistory(paddedResults);
-      } catch (e) {
+      } catch (_e) {
         ailogger.warn('changeloghistory - no json response');
       }
     } catch (error: any) {
