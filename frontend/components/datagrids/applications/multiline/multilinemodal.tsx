@@ -69,7 +69,7 @@ export default function MultilineModal(props: MultilineModalProps) {
       setOpenValidations(false);
       setOpenUpdateValidations(true);
     }
-  }, [tempReviewState]);
+  }, [tempReviewState, openValidations]);
 
   return (
     <Modal

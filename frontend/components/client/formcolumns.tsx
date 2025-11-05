@@ -55,7 +55,7 @@ export const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: st
 
   useEffect(() => {
     setError(!(isArea ? getClosestAreaUnit(value) : getClosestUnit(value)));
-  }, [value]);
+  }, [value, isArea]);
 
   const handleCommit = () => {
     const isValid = isArea ? getClosestAreaUnit(value) : getClosestUnit(value);

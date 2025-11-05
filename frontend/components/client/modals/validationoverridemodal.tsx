@@ -76,7 +76,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
           setStartOverride(false);
         });
     }
-  }, [startOverride]);
+  }, [startOverride, handleValidationOverrideModalClose, triggerOverride]);
 
   useEffect(() => {
     if (isOverrideConfirmed) setStartOverride(true); // need to add toggle otherwise system will never get going

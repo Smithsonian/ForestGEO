@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Box, LinearProgress, Typography, CircularProgress } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import ailogger from '@/ailogger';
@@ -51,20 +51,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       });
   }, [currentSite?.schemaName]);
 
-  useEffect(() => {
-    if (Object.keys(validationMessages).length > 0) {
-      performValidations().catch(ailogger.error);
-    }
-  }, [validationMessages]);
-
-  // Only call onValidationComplete when validation is truly complete and not updating rows
-  useEffect(() => {
-    if (isValidationComplete && !isUpdatingRows && onValidationComplete) {
-      onValidationComplete();
-    }
-  }, [isValidationComplete, isUpdatingRows, onValidationComplete]);
-
-  const performValidations = async () => {
+  const performValidations = useCallback(async () => {
     try {
       const validationProcedureNames = Object.keys(validationMessages);
 
@@ -137,7 +124,20 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       setIsUpdatingRows(false);
       setIsValidationComplete(true);
     }
-  };
+  }, [validationMessages, currentSite, currentCensus, plotID]);
+
+  useEffect(() => {
+    if (Object.keys(validationMessages).length > 0) {
+      performValidations().catch(ailogger.error);
+    }
+  }, [validationMessages, performValidations]);
+
+  // Only call onValidationComplete when validation is truly complete and not updating rows
+  useEffect(() => {
+    if (isValidationComplete && !isUpdatingRows && onValidationComplete) {
+      onValidationComplete();
+    }
+  }, [isValidationComplete, isUpdatingRows, onValidationComplete]);
 
   const renderProgressBars = () => {
     return Object.keys(validationMessages).map(validationProcedureName => {

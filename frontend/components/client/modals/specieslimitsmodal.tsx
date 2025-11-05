@@ -64,7 +64,7 @@ export default function SpeciesLimitsModal(props: {
       min: Math.min(range.min, lower - BUFFER),
       max: Math.max(range.max, upper + BUFFER)
     });
-  }, [originalLimit, defaultLower, defaultUpper]);
+  }, [originalLimit, defaultLower, defaultUpper, range.min, range.max]);
 
   function handleSliderChange(_: Event, newValue: number | number[]) {
     if (Array.isArray(newValue) && newValue.length === 2) {
