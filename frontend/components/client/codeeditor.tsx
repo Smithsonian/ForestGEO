@@ -1,7 +1,7 @@
 // codeeditor.tsx
 'use client';
 
-import React, { Dispatch, SetStateAction, useEffect, useState, useRef } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useState, useRef, useCallback } from 'react';
 import { basicSetup } from 'codemirror';
 import { sql } from '@codemirror/lang-sql';
 import { format as sqlFormat } from 'sql-formatter';
@@ -82,7 +82,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   };
 
   // Debounced validation function
-  const validateQuery = async (query: string) => {
+  const validateQuery = useCallback(async (query: string) => {
     if (!enableValidation || !schema || !query.trim()) {
       if (isMountedRef.current) {
         setValidationErrors([]);
@@ -117,7 +117,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
     } finally {
       if (isMountedRef.current) setIsValidating(false);
     }
-  };
+  }, [enableValidation, schema]);
 
   // Debounced validation on value change
   useEffect(() => {
@@ -134,7 +134,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
         clearTimeout(validationTimeoutRef.current);
       }
     };
-  }, [editorValue, enableValidation, schema]);
+  }, [editorValue, enableValidation, schema, validateQuery]);
 
   const autoHeightExt = EditorView.updateListener.of((update: ViewUpdate) => {
     if (update.docChanged || update.viewportChanged) {
