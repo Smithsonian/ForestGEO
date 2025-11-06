@@ -237,7 +237,8 @@ const InnerInput = React.forwardRef<
   );
 });
 
-const _EditStatusCell = (params: GridRenderEditCellParams) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const EditStatusCell = (params: GridRenderEditCellParams) => {
   const apiRef = useGridApiContext();
   const { id, hasFocus } = params;
   const [value, setValue] = React.useState<string>(params.row['status']);
