@@ -25,7 +25,7 @@ export default function IsolatedQuadratsDataGrid() {
     quadratShape: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
+  const { data: _session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 

@@ -85,7 +85,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
   });
   const [loading, setLoading] = useState(false);
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
-  const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [_shouldAddRowAfterFetch, _setShouldAddRowAfterFetch] = useState(false);
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);

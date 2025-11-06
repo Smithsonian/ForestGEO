@@ -19,13 +19,13 @@ export default function IsolatedQuadratPersonnelDataGrid() {
     censusID: 0
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
-  const router = useRouter();
+  const { data: _session } = useSession();
+  const _router = useRouter();
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
+  const [_isUploadModalOpen, _setIsUploadModalOpen] = useState(false);
+  const [_isManualEntryFormOpen, _setIsManualEntryFormOpen] = useState(false);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();

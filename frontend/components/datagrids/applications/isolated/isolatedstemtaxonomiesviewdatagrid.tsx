@@ -33,7 +33,7 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const { data: session } = useSession();
+  const { data: _session } = useSession();
 
   return (
     <>
