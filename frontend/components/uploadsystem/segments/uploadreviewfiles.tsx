@@ -271,8 +271,12 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
             </Typography>
           </DialogContent>
           <DialogActions>
-            <Button onClick={handleCancel} variant="plain">Cancel</Button>
-            <Button onClick={handleConfirm} variant="solid">Confirm</Button>
+            <Button onClick={handleCancel} variant="plain">
+              Cancel
+            </Button>
+            <Button onClick={handleConfirm} variant="solid">
+              Confirm
+            </Button>
           </DialogActions>
         </ModalDialog>
       </Modal>
