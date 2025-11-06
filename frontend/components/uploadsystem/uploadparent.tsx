@@ -55,22 +55,22 @@ export default function UploadParent(props: UploadParentProps) {
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
-  const [errors, setErrors] = useState<FileCollectionRowSet>({});
+  const [_errors, setErrors] = useState<FileCollectionRowSet>({});
   // Confirmation menu states:
-  const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
-  const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
+  const [_currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
+  const [_expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
   const [allFileHeaders, setAllFileHeaders] = useState<Record<string, string[]>>({});
   const [isDataUnsaved, setIsDataUnsaved] = useState(false);
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
+  const _currentPlot = usePlotContext();
+  const _currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { data: session } = useSession();
-  const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
-  const [isStreaming, setIsStreaming] = useState(false);
+  const _PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
+  const [_isStreaming, setIsStreaming] = useState(false);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -94,7 +94,7 @@ export default function UploadParent(props: UploadParentProps) {
     }
   }, [reviewState, onUploadComplete]);
 
-  function areHeadersValid(actualHeaders: string[]): {
+  function _areHeadersValid(actualHeaders: string[]): {
     isValid: boolean;
     missingHeaders: string[];
   } {

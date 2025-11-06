@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';

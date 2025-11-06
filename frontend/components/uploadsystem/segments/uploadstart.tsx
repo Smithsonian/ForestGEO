@@ -28,7 +28,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const quadratDispatch = useQuadratDispatch();
   const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(!!currentQuadrat);
 
-  const handleChange = (_event: React.SyntheticEvent | null, dispatcher: Dispatch<SetStateAction<string>>, newValue: string | null) => {
+  const _handleChange = (_event: React.SyntheticEvent | null, dispatcher: Dispatch<SetStateAction<string>>, newValue: string | null) => {
     if (newValue) {
       dispatcher(newValue);
     }
