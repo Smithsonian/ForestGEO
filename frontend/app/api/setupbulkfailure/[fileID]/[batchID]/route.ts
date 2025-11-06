@@ -44,7 +44,7 @@ export async function GET(
     query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
     await connectionManager.commitTransaction(transactionID);
-  } catch (e) {
+  } catch (_e) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     throw new Error('failure transfer to failedmeasurements --> error detected.');
   }
