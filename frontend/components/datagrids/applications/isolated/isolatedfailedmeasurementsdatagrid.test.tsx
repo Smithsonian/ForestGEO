@@ -278,7 +278,7 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       // The function filters reasons to only show unique messages per column
       // Rendering logic ensures only the first relevant reason is displayed
 
-      const mockRow = {
+      const _mockRow = {
         failureReasons: 'Missing Codes and DBH|Missing Codes and HOM|SpCode invalid'
       };
 
