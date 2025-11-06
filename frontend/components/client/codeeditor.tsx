@@ -82,42 +82,45 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   };
 
   // Debounced validation function
-  const validateQuery = useCallback(async (query: string) => {
-    if (!enableValidation || !schema || !query.trim()) {
-      if (isMountedRef.current) {
-        setValidationErrors([]);
-        setValidationWarnings([]);
-        setIsValidating(false);
+  const validateQuery = useCallback(
+    async (query: string) => {
+      if (!enableValidation || !schema || !query.trim()) {
+        if (isMountedRef.current) {
+          setValidationErrors([]);
+          setValidationWarnings([]);
+          setIsValidating(false);
+        }
+        return;
       }
-      return;
-    }
 
-    if (isMountedRef.current) setIsValidating(true);
-    try {
-      const response = await fetch(`/api/validations/validate-query?schema=${schema}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
+      if (isMountedRef.current) setIsValidating(true);
+      try {
+        const response = await fetch(`/api/validations/validate-query?schema=${schema}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
 
-      if (!isMountedRef.current) return; // Prevent state updates after unmount
+        if (!isMountedRef.current) return; // Prevent state updates after unmount
 
-      if (response.ok) {
-        const result = await response.json();
-        setValidationErrors(result.errors || []);
-        setValidationWarnings(result.warnings || []);
-      } else {
-        setValidationErrors(['Failed to validate query']);
+        if (response.ok) {
+          const result = await response.json();
+          setValidationErrors(result.errors || []);
+          setValidationWarnings(result.warnings || []);
+        } else {
+          setValidationErrors(['Failed to validate query']);
+        }
+      } catch (error) {
+        console.error('Validation error:', error);
+        if (isMountedRef.current) {
+          setValidationErrors(['Error connecting to validation service']);
+        }
+      } finally {
+        if (isMountedRef.current) setIsValidating(false);
       }
-    } catch (error) {
-      console.error('Validation error:', error);
-      if (isMountedRef.current) {
-        setValidationErrors(['Error connecting to validation service']);
-      }
-    } finally {
-      if (isMountedRef.current) setIsValidating(false);
-    }
-  }, [enableValidation, schema]);
+    },
+    [enableValidation, schema]
+  );
 
   // Debounced validation on value change
   useEffect(() => {

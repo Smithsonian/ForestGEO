@@ -123,7 +123,7 @@ describe('ConfirmationDialog - Functional Tests', () => {
     });
 
     it('MUST NOT call handlers when dialog is closed', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       const { rerender } = render(<ConfirmationDialog {...defaultProps} />);
 
       // Close the dialog
@@ -292,7 +292,7 @@ describe('ConfirmationDialog - Functional Tests', () => {
 
   describe('Multiple Instances', () => {
     it('MUST support multiple dialog instances with different props', () => {
-      const { container } = render(
+      const { container: _container } = render(
         <>
           <ConfirmationDialog open={true} onClose={vi.fn()} onConfirm={vi.fn()} title="Dialog 1" content="Content 1" />
           <ConfirmationDialog open={true} onClose={vi.fn()} onConfirm={vi.fn()} title="Dialog 2" content="Content 2" />
