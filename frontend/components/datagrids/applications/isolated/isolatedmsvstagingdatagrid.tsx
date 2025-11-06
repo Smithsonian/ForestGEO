@@ -38,7 +38,7 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [_isManualEntryFormOpen, _setIsManualEntryFormOpen] = useState(false);
+  const [_isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   return (
     <>

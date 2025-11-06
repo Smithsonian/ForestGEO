@@ -24,8 +24,8 @@ export default function IsolatedQuadratPersonnelDataGrid() {
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
-  const [_isUploadModalOpen, _setIsUploadModalOpen] = useState(false);
-  const [_isManualEntryFormOpen, _setIsManualEntryFormOpen] = useState(false);
+  const [_isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [_isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
