@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
-  const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
+  const [dataType, _plotIDParam, pcnParam] = params.slugs ?? [];
 
   // Validate contextual values first
   const validation = await validateContextualValues(request, {

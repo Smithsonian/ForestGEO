@@ -18,7 +18,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
     const response = await fetch(
       `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.dateRanges[0].censusID.toString()}`
     );
-    const result = await response.json();
+    const _result = await response.json();
     setIsUpdateValidationComplete(true);
   };
 

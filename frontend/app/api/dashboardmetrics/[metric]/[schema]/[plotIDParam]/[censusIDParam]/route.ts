@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
-import { getContainerClient } from '@/config/macros/azurestorage';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
@@ -55,7 +54,7 @@ export async function GET(
   return await processMetrics(metric, schema!, plotID!, censusID!, plotName);
 }
 
-async function processMetrics(metric: string, schema: string, plotID: number, censusID: number, plotName: string): Promise<NextResponse> {
+async function processMetrics(metric: string, schema: string, plotID: number, censusID: number, _plotName: string): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   // count active users?

@@ -103,7 +103,7 @@ class TransactionAwarePQueue extends PQueue {
    * Create a batch-aware task that processes files sequentially but batches within files concurrently
    */
   async addBatchTask<T>(fileId: string, batchTasks: (() => Promise<T>)[], options: TaskOptions = {}): Promise<T[]> {
-    const batchId = uuidv4();
+    const _batchId = uuidv4();
     const resourceLocks = [
       `file:${fileId}`, // File-level lock
       'temporarymeasurements', // Table-level lock for uploads
@@ -116,7 +116,7 @@ class TransactionAwarePQueue extends PQueue {
 
         // Process all batch tasks concurrently within the file lock
         const results = await Promise.all(
-          batchTasks.map((batchTask, index) =>
+          batchTasks.map((batchTask) =>
             this.executeWithDeadlockRetry(batchTask, options.maxRetries || this.MAX_DEADLOCK_RETRIES, options.retryDelayMs || this.DEADLOCK_RETRY_BASE_DELAY)
           )
         );

@@ -163,7 +163,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   );
 
-  const fetchSiteList = useCallback(async () => {
+  const _fetchSiteList = useCallback(async () => {
     const now = Date.now();
     if (lastExecutedRef.current && now - lastExecutedRef.current < debounceDelay + 200) {
       return;
@@ -182,7 +182,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           if (siteListDispatch) await siteListDispatch({ siteList: sites });
         }
       }
-    } catch (e: any) {
+    } catch {
       const allsites = await (
         await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
       ).json();

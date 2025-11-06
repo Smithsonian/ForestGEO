@@ -1,7 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { FileListProps } from '@/config/macros/formdetails';
-import { Box, Button, Card, CardContent, Chip, Divider, IconButton, Stack, Tab, TabList, TabPanel, Tabs, Typography } from '@mui/joy';
+import { Box, Button, Card, CardContent, Chip, Divider, Stack, Tab, TabList, TabPanel, Tabs, Typography } from '@mui/joy';
 import FilePreviewCompact from './filepreviewcompact';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';

@@ -35,7 +35,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
     if (typeof value === 'object') {
       try {
         return JSON.stringify(value);
-      } catch (_error) {
+      } catch {
         return '[Circular Object]';
       }
     }
@@ -53,7 +53,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
               if (typeof raw === 'string') {
                 try {
                   raw = JSON.parse(raw);
-                } catch (_e) {
+                } catch {
                   return <Typography>Invalid JSON</Typography>;
                 }
               }

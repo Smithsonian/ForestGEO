@@ -49,7 +49,7 @@ export async function GET(
   return await processReset(gridType, schema!, plotID!, censusID!);
 }
 
-async function processReset(gridType: string, schema: string, plotID: number, censusID: number): Promise<NextResponse> {
+async function processReset(gridType: string, schema: string, _plotID: number, _censusID: number): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {

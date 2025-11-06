@@ -112,7 +112,7 @@ export async function handleUpsertForSlices<Result>(
 }
 
 // Helper function to get the immediate previous slice based on dependencies
-function getPreviousSlice(currentSlice: string, slices: Record<string, any>): string | null {
+function getPreviousSlice(currentSlice: string, _slices: Record<string, any>): string | null {
   const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
   const currentIndex = dependencyOrder.indexOf(currentSlice);
 
@@ -198,7 +198,7 @@ export const allTaxonomiesFields = [
   'Description'
 ];
 
-const stemTaxonomiesViewFields = [
+const _stemTaxonomiesViewFields = [
   'StemTag',
   'TreeTag',
   'SpeciesCode',
@@ -214,7 +214,7 @@ const stemTaxonomiesViewFields = [
   'FieldFamily'
 ];
 
-const measurementSummaryViewFields = [
+const _measurementSummaryViewFields = [
   'PlotID',
   'CensusID',
   'QuadratName', // needs custom handling -- context values plot/census needed

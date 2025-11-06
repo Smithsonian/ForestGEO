@@ -49,7 +49,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     if (formData === null || formData === undefined || formData.entries().next().done) {
       throw new Error('No form data provided');
     }
-  } catch (error) {
+  } catch {
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 

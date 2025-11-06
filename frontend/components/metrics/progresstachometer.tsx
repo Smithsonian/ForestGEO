@@ -13,7 +13,7 @@ export interface ProgressTachoType {
 }
 
 export default function ProgressTachometer(props: ProgressTachoType) {
-  const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats } = props;
+  const { TotalQuadrats: _TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats: _UnpopulatedQuadrats } = props;
   const [displayValue, setDisplayValue] = useState(0);
   const animationRef = useRef<number | undefined>(undefined);
 

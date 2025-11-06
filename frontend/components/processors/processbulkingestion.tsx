@@ -279,7 +279,7 @@ async function validateSpecies(connectionManager: ConnectionManager, schema: str
 async function validateAttributeCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<number> {
   if (codes.length === 0) return 0;
 
-  const placeholders = codes.map(() => '?').join(',');
+  const _placeholders = codes.map(() => '?').join(',');
   const result = await connectionManager.executeQuery(
     `SELECT COUNT(*) as invalid FROM (${codes.map(() => 'SELECT ? as code').join(' UNION ')}) temp 
      LEFT JOIN ${schema}.attributes a ON a.Code = temp.code

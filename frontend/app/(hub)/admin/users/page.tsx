@@ -10,7 +10,7 @@ type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[
 export default function UserSettingsPage() {
   const [users, setUsers] = useState<UserWithSite[]>([]);
   const baseUsers = useRef(users);
-  const [sites, setSites] = useState<AdminSiteRDS[]>([]);
+  const [_sites, setSites] = useState<AdminSiteRDS[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);

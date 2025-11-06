@@ -1274,7 +1274,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event).then(r => {});
+                handleEnterKeyNavigation(params, event).then(() => {});
               }
             }}
             paginationModel={paginationModel}

@@ -70,7 +70,7 @@ export default function UploadParent(props: UploadParentProps) {
   const currentSite = useSiteContext();
   const { data: session } = useSession();
   const _PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
-  const [_isStreaming, setIsStreaming] = useState(false);
+  const [_isStreaming, _setIsStreaming] = useState(false);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
 
   useEffect(() => {

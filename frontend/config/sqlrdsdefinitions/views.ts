@@ -35,7 +35,7 @@ export function getAllTaxonomiesViewHCs(): ColumnStates {
   };
 }
 
-export const validateMeasurementsRow: ValidationFunction = row => {
+export const validateMeasurementsRow: ValidationFunction = _row => {
   const errors: RowValidationErrors = {};
   return Object.keys(errors).length > 0 ? errors : null;
 };

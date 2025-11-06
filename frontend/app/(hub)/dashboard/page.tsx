@@ -176,7 +176,7 @@ export default function DashboardPage() {
         }
 
         setChangelogHistory(paddedResults);
-      } catch (_e) {
+      } catch {
         ailogger.warn('changeloghistory - no json response');
       }
     } catch (error: any) {

@@ -3,7 +3,7 @@ import { buildBulkUpsertQuery } from '@/config/utils';
 import { format } from 'mysql2/promise';
 
 export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingProps>): Promise<void> {
-  const { connectionManager, rowDataSet, schema, census } = props;
+  const { connectionManager, rowDataSet, schema, census: _census } = props;
 
   const bulkSpeciesData = Object.values(rowDataSet).map(row => ({
     Family: row.family ?? '',

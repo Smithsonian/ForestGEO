@@ -149,7 +149,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const chunkStartTime = useRef(0);
   const chunkProcessStartTime = useRef(0);
 
-  const generateErrorRowId = (row: FileRow) =>
+  const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;

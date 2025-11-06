@@ -139,7 +139,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
       setHasUnsavedRows(false);
       setIsSaving(false);
-    } catch (error) {
+    } catch {
       setIsSaving(false);
     }
   }, [apiRef, setRows]);
@@ -243,7 +243,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     }
 
     const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const response = await fetch(`/api/bulkcrud`, {
+    const _response = await fetch(`/api/bulkcrud`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

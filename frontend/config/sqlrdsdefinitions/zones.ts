@@ -35,8 +35,8 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
     }));
   }
 
-  mapData(results: SitesResult[], indexOffset = 1): SitesRDS[] {
-    return results.map((item, index) => ({
+  mapData(results: SitesResult[], _indexOffset = 1): SitesRDS[] {
+    return results.map((item) => ({
       siteID: item.SiteID != null ? Number(item.SiteID) : undefined,
       siteName: item.SiteName != null ? String(item.SiteName) : undefined,
       schemaName: item.SchemaName != null ? String(item.SchemaName) : undefined,
@@ -93,7 +93,7 @@ export interface QuadratRDS {
 
 export type QuadratResult = ResultType<QuadratRDS>;
 export type Quadrat = QuadratRDS | undefined;
-export const validateQuadratsRow: ValidationFunction = row => {
+export const validateQuadratsRow: ValidationFunction = _row => {
   const errors: RowValidationErrors = {};
   return Object.keys(errors).length > 0 ? errors : null;
 };

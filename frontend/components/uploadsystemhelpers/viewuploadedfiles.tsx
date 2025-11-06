@@ -82,7 +82,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const { currentPlot, currentCensus, refreshFileList, setRefreshFileList } = props;
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
-  const [openSnackbar, setOpenSnackbar] = useState(false);
+  const [_openSnackbar, setOpenSnackbar] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleDownload = async (filename: string) => {
@@ -176,7 +176,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     getListOfFiles().then();
   };
 
-  const handleCloseSnackbar = () => {
+  const _handleCloseSnackbar = () => {
     setOpenSnackbar(false);
   };
 

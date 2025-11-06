@@ -70,7 +70,7 @@ const RADIAN = Math.PI / 180;
 const COLORS = ['#4D90FE', '#1ABC9C', '#FFC758', '#FF8F5A'];
 
 export default function ProgressPieChart(props: ProgressTachoType & { stemTypes?: StemTypesType }) {
-  const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats, stemTypes } = props;
+  const { TotalQuadrats: _TotalQuadrats, PopulatedQuadrats, PopulatedPercent: _PopulatedPercent, UnpopulatedQuadrats, stemTypes } = props;
 
   const data = stemTypes
     ? [

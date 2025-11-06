@@ -31,7 +31,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
     }
     const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(type).mapData(results)), { status: HTTPResponses.OK });
-  } catch (_e) {
+  } catch {
     return new NextResponse(JSON.stringify({ message: 'BREAKAGE' }), { status: HTTPResponses.CONFLICT });
   }
 }
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
     transactionID = await connectionManager.beginTransaction();
     await connectionManager.executeQuery(`INSERT IGNORE INTO ?? SET ?`, [`catalog.${type}`, newRow]);
     await connectionManager.commitTransaction(transactionID);
-  } catch (_e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Insertion into catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -89,7 +89,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
     const { UserSites, ...remaining } = mappedNewRow;
     await connectionManager.executeQuery(`UPDATE ?? SET ? WHERE ?? = ?`, [`catalog.${type}`, remaining, gridID, mappedOldRow[gridID]]);
     await connectionManager.commitTransaction(transactionID);
-  } catch (_e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Update of catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -111,7 +111,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
     await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
     await connectionManager.commitTransaction(transactionID);
     return new NextResponse(JSON.stringify({ message: 'Successfully deleted' }), { status: HTTPResponses.OK });
-  } catch (_e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Deletion failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }

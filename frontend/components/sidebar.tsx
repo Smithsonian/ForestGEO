@@ -165,7 +165,7 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
+  const { siteListLoaded: _siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
