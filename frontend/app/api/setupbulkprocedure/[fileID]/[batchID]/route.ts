@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -18,6 +19,16 @@ export async function GET(
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
+
+  // Validate schema to prevent SQL injection
+  let procedureSQL: string;
+  try {
+    procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in setupbulkprocedure: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const maxAttempts = 10;
 
   const connectionManager = ConnectionManager.getInstance();
@@ -41,7 +52,8 @@ export async function GET(
           }
 
           const queryStart = Date.now();
-          const procedureResult = await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID], transactionID);
+          // Use pre-validated and formatted SQL to prevent injection
+          const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, batchID], transactionID);
           const queryDuration = Date.now() - queryStart;
 
           // Check if the procedure handled a batch failure internally

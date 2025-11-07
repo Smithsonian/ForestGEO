@@ -14,24 +14,11 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
+import { isValidSchema, formatWithSchema } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
-
-// Whitelist of allowed schemas to prevent SQL injection
-const ALLOWED_SCHEMAS = [
-  'forestgeo',
-  'forestgeo_testing',
-  'forestgeo_testing_alternate',
-  'catalog'
-] as const;
-
-type AllowedSchema = (typeof ALLOWED_SCHEMAS)[number];
-
-function isValidSchema(schema: string): schema is AllowedSchema {
-  return ALLOWED_SCHEMAS.includes(schema as AllowedSchema);
-}
 
 export async function POST(request: NextRequest) {
   // Authentication check
@@ -66,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   // SQL Injection Prevention: Validate schema against whitelist
   if (!isValidSchema(schema)) {
-    ailogger.error(`Invalid schema provided: ${schema}`);
+    ailogger.error(`Invalid schema provided: ${schema}. Allowed schemas: forestgeo, forestgeo_testing, forestgeo_testing_alternate, catalog`);
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Invalid schema',
