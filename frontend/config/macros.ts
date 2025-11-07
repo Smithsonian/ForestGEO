@@ -89,18 +89,9 @@ export interface DropzoneProps {
   onChange(acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]): void;
 }
 
-export function bitToBoolean(bitField: any): boolean {
-  if (Buffer.isBuffer(bitField)) {
-    // Ensure non-zero bytes are considered `true`
-    return bitField[0] !== 0;
-  } else if (bitField instanceof Uint8Array) {
-    return bitField[0] !== 0;
-  } else {
-    return Boolean(bitField);
-  }
-}
-
-export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
+// Re-export bit conversion functions for backwards compatibility
+// These are in a separate file to avoid importing heavy dependencies in middleware
+export { bitToBoolean, booleanToBit } from './macros/bitconversion';
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
