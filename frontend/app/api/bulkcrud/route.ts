@@ -7,6 +7,8 @@ import ConnectionManager from '@/config/connectionmanager';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { v4 } from 'uuid';
+import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -25,33 +27,46 @@ export async function POST(request: NextRequest) {
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
+
+  // Validate schema to prevent SQL injection
+  let insertSQL: string, bulkProcessSQL: string;
+  try {
+    insertSQL = safeFormatQuery(
+      schema,
+      `INSERT INTO ??.temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      VALUES ?`
+    );
+    bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in bulkcrud: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
     if (['measurementssummary', 'measurementssummaryview'].includes(dataType)) {
       const batchID = v4();
-      await connectionManager.executeQuery(`INSERT INTO ?? SET ?`, [
-        `${schema}.temporarymeasurements`,
-        Object.values(rows).map(row => ({
-          FileID: 'sample_bulk_insert.csv',
-          BatchID: batchID,
-          PlotID: plot.plotID,
-          CensusID: census.dateRanges[0].censusID,
-          TreeTag: row.tag,
-          StemTag: row.stemtag,
-          SpeciesCode: row.spcode,
-          QuadratName: row.quadrat,
-          LocalX: row.lx,
-          LocalY: row.ly,
-          DBH: row.dbh,
-          HOM: row.hom,
-          MeasurementDate: row.date,
-          Codes: row.codes,
-          Comments: row.description
-        }))
+      const values = Object.values(rows).map(row => [
+        'sample_bulk_insert.csv',
+        batchID,
+        plot.plotID,
+        census.dateRanges[0].censusID,
+        row.tag,
+        row.stemtag,
+        row.spcode,
+        row.quadrat,
+        row.lx,
+        row.ly,
+        row.dbh,
+        row.hom,
+        row.date,
+        row.codes,
+        row.description
       ]);
-      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, ['sample_bulk_insert.csv', batchID]);
+      await connectionManager.executeQuery(insertSQL, [values], transactionID);
+      await connectionManager.executeQuery(bulkProcessSQL, ['sample_bulk_insert.csv', batchID], transactionID);
     } else {
       for (const rowID in rows) {
         const rowData = rows[rowID];

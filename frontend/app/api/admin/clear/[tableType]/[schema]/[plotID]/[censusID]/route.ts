@@ -3,6 +3,8 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
+import { format } from 'mysql2/promise';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -75,6 +77,19 @@ export async function DELETE(
   }
 
   const tableName = VALID_TABLE_TYPES[tableType as TableType];
+
+  // Validate schema to prevent SQL injection
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in admin/clear: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // Construct safe SQL queries with validated and escaped identifiers
+  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+  const deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
@@ -82,11 +97,7 @@ export async function DELETE(
     transactionID = await connectionManager.beginTransaction();
 
     // First, get count of records that will be deleted for confirmation
-    const countResult = await connectionManager.executeQuery(
-      `SELECT COUNT(*) as total FROM ${schema}.${tableName} WHERE PlotID = ? AND CensusID = ?`,
-      [plotID, censusID],
-      transactionID
-    );
+    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID], transactionID);
     const totalRecords = countResult[0]?.total || 0;
 
     if (totalRecords === 0) {
@@ -101,7 +112,7 @@ export async function DELETE(
     }
 
     // Delete all records for this plot/census from the specified table
-    await connectionManager.executeQuery(`DELETE FROM ${schema}.${tableName} WHERE PlotID = ? AND CensusID = ?`, [plotID, censusID], transactionID);
+    await connectionManager.executeQuery(deleteSQL, [plotID, censusID], transactionID);
 
     await connectionManager.commitTransaction(transactionID);
 
@@ -154,14 +165,23 @@ export async function GET(
   }
 
   const tableName = VALID_TABLE_TYPES[tableType as TableType];
+
+  // Validate schema to prevent SQL injection
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in admin/clear GET: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // Construct safe SQL query with validated and escaped identifiers
+  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+
   const connectionManager = ConnectionManager.getInstance();
 
   try {
     // Get count of records for this plot/census from the specified table
-    const countResult = await connectionManager.executeQuery(`SELECT COUNT(*) as total FROM ${schema}.${tableName} WHERE PlotID = ? AND CensusID = ?`, [
-      plotID,
-      censusID
-    ]);
+    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID]);
 
     return new NextResponse(
       JSON.stringify({

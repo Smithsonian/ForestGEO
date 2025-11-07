@@ -4,6 +4,7 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import { v4 } from 'uuid';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -63,12 +64,12 @@ async function moveFailedToTemporary(
   plotID: number,
   censusID: number
 ): Promise<{ totalRows: number; fileID: string; batchID: string }> {
+  // Validate schema to prevent SQL injection
+  validateSchemaOrThrow(schema);
+
   // Count total failed measurements
-  const countResult = await connectionManager.executeQuery(
-    `SELECT COUNT(*) as total FROM ${schema}.failedmeasurements WHERE PlotID = ? AND CensusID = ?`,
-    [plotID, censusID],
-    transactionID
-  );
+  const countSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as total FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+  const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID], transactionID);
   const totalRows = countResult[0]?.total || 0;
 
   if (totalRows === 0) {
@@ -79,8 +80,9 @@ async function moveFailedToTemporary(
   const fileID = 'reingestion.csv';
   const batchID = v4();
 
-  const shiftQuery = `
-    INSERT IGNORE INTO ${schema}.temporarymeasurements
+  const shiftQuery = safeFormatQuery(
+    schema,
+    `INSERT IGNORE INTO ??.temporarymeasurements
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
     SELECT
       ? AS FileID,
@@ -98,15 +100,18 @@ async function moveFailedToTemporary(
       fm.Date,
       fm.Codes,
       fm.Comments
-    FROM ${schema}.failedmeasurements fm
-    WHERE fm.PlotID = ? AND fm.CensusID = ?;`;
+    FROM ??.failedmeasurements fm
+    WHERE fm.PlotID = ? AND fm.CensusID = ?`
+  );
 
   // Clear temp table and move failed measurements
-  await connectionManager.executeQuery(`DELETE FROM ${schema}.temporarymeasurements WHERE PlotID = ? AND CensusID = ?`, [plotID, censusID], transactionID);
+  const deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteTempSQL, [plotID, censusID], transactionID);
   await connectionManager.executeQuery(shiftQuery, [fileID, batchID, plotID, censusID], transactionID);
 
   // Clear failed measurements (they're now in temp table)
-  await connectionManager.executeQuery(`DELETE FROM ${schema}.failedmeasurements WHERE PlotID = ? AND CensusID = ?`, [plotID, censusID], transactionID);
+  const deleteFailedSQL = safeFormatQuery(schema, 'DELETE FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteFailedSQL, [plotID, censusID], transactionID);
 
   return { totalRows, fileID, batchID };
 }
@@ -221,19 +226,18 @@ export async function GET(
     }
 
     // Run ingestion process (may move some back to failed measurements)
-    await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?)`, [fileID, batchID], transactionID);
+    const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+    await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
 
     // Step 4: Count remaining failures and successes
-    const remainingFailuresResult = await connectionManager.executeQuery(
-      `SELECT COUNT(*) as remaining FROM ${schema}.failedmeasurements WHERE PlotID = ? AND CensusID = ?`,
-      [plotID, censusID],
-      transactionID
-    );
+    const countRemainingSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as remaining FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+    const remainingFailuresResult = await connectionManager.executeQuery(countRemainingSQL, [plotID, censusID], transactionID);
     const remainingFailures = remainingFailuresResult[0]?.remaining || 0;
     const successfulReingestions = totalRows - remainingFailures;
 
     // Step 5: Update failure reasons for any remaining failures
-    await connectionManager.executeQuery(`CALL ${schema}.reviewfailed()`, [], transactionID);
+    const reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
+    await connectionManager.executeQuery(reviewFailedSQL, [], transactionID);
 
     await connectionManager.commitTransaction(transactionID);
 
@@ -254,7 +258,8 @@ export async function GET(
 
     // Try to run reviewfailed to update any failure reasons
     try {
-      await connectionManager.executeQuery(`CALL ${schema}.reviewfailed()`);
+      const reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
+      await connectionManager.executeQuery(reviewFailedSQL);
     } catch (reviewError: any) {
       ailogger.error('Failed to update failure reasons:', reviewError);
     }
