@@ -12,12 +12,41 @@ import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
+import { auth } from '@/auth';
+import { format } from 'mysql2/promise';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+// Whitelist of allowed schemas to prevent SQL injection
+const ALLOWED_SCHEMAS = [
+  'forestgeo',
+  'forestgeo_testing',
+  'forestgeo_testing_alternate',
+  'catalog'
+] as const;
+
+type AllowedSchema = (typeof ALLOWED_SCHEMAS)[number];
+
+function isValidSchema(schema: string): schema is AllowedSchema {
+  return ALLOWED_SCHEMAS.includes(schema as AllowedSchema);
+}
+
 export async function POST(request: NextRequest) {
+  // Authentication check
+  const session = await auth();
+  if (!session?.user) {
+    ailogger.warn('Unauthorized upload attempt - no session');
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: 'Unauthorized - authentication required',
+        error: 'You must be logged in to upload data'
+      }),
+      { status: 401 } // 401 Unauthorized
+    );
+  }
+
   let body;
 
   try {
@@ -34,6 +63,18 @@ export async function POST(request: NextRequest) {
   }
 
   const schema: string = body.schema;
+
+  // SQL Injection Prevention: Validate schema against whitelist
+  if (!isValidSchema(schema)) {
+    ailogger.error(`Invalid schema provided: ${schema}`);
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: 'Invalid schema',
+        error: 'The provided schema is not allowed'
+      }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
   const formType: string = body.formType;
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
@@ -62,29 +103,32 @@ export async function POST(request: NextRequest) {
       try {
         transactionID = await connectionManager.beginTransaction();
 
-        const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements
+        // Use format() for safe identifier escaping (schema + table name)
+        const insertSQL = format(
+          `INSERT IGNORE INTO ??.temporarymeasurements
         (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
-        VALUES ${placeholders}`;
+        VALUES ${placeholders}`,
+          [schema]
+        );
 
         await connectionManager.executeQuery(insertSQL, values, transactionID);
         await connectionManager.commitTransaction(transactionID);
 
-        // Log successful insertion count
-        const countResult = await connectionManager.executeQuery(
-          `SELECT COUNT(*) as count FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`,
-          [fileName, batchID]
-        );
+        // Log successful insertion count - use format() for schema identifier
+        const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
+        const countResult = await connectionManager.executeQuery(countSQL, [fileName, batchID]);
         ailogger.info(`Successfully inserted ${countResult[0]?.count || 0} rows for ${fileName}-${batchID}`);
 
         // Track file upload in unifiedchangelog (single row per file, not per batch)
         try {
-          // Check if we've already logged this file upload
-          const existingEntry = await connectionManager.executeQuery(
-            `SELECT ChangeID, NewRowState FROM ${schema}.unifiedchangelog
+          // Check if we've already logged this file upload - use format() for schema
+          const existingEntrySQL = format(
+            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
              WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
              ORDER BY ChangeID DESC LIMIT 1`,
-            [fileName, censusCookie]
+            [schema]
           );
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusCookie]);
 
           if (existingEntry.length === 0) {
             // First batch for this file - insert new entry
@@ -94,23 +138,20 @@ export async function POST(request: NextRequest) {
               rowCount: countResult[0]?.count || 0,
               batchCount: 1
             });
-            await connectionManager.executeQuery(
-              `INSERT INTO ${schema}.unifiedchangelog
+            const insertChangelogSQL = format(
+              `INSERT INTO ??.unifiedchangelog
               (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
               VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie]
+              [schema]
             );
+            await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie]);
           } else {
             // Subsequent batch - update the existing entry with accumulated count
             const metadata = JSON.parse(existingEntry[0].NewRowState);
             metadata.rowCount = (metadata.rowCount || 0) + (countResult[0]?.count || 0);
             metadata.batchCount = (metadata.batchCount || 1) + 1;
-            await connectionManager.executeQuery(
-              `UPDATE ${schema}.unifiedchangelog
-               SET NewRowState = ?, ChangeTimestamp = NOW()
-               WHERE ChangeID = ?`,
-              [JSON.stringify(metadata), existingEntry[0].ChangeID]
-            );
+            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
+            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
           }
         } catch (logError: any) {
           // Log but don't fail the upload if changelog tracking fails
@@ -226,13 +267,14 @@ export async function POST(request: NextRequest) {
         const batchRowCount = Object.keys(fileRowSet).length;
         const censusID = census?.dateRanges[0]?.censusID;
 
-        // Check if we've already logged this file upload
-        const existingEntry = await connectionManager.executeQuery(
-          `SELECT ChangeID, NewRowState FROM ${schema}.unifiedchangelog
+        // Check if we've already logged this file upload - use format() for schema
+        const existingEntrySQL = format(
+          `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
            WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
            ORDER BY ChangeID DESC LIMIT 1`,
-          [fileName, censusID]
+          [schema]
         );
+        const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID]);
 
         if (existingEntry.length === 0) {
           // First batch for this file - insert new entry
@@ -242,23 +284,20 @@ export async function POST(request: NextRequest) {
             rowCount: batchRowCount,
             batchCount: 1
           });
-          await connectionManager.executeQuery(
-            `INSERT INTO ${schema}.unifiedchangelog
+          const insertChangelogSQL = format(
+            `INSERT INTO ??.unifiedchangelog
             (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
             VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-            ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]
+            [schema]
           );
+          await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
         } else {
           // Subsequent batch - update the existing entry with accumulated count
           const metadata = JSON.parse(existingEntry[0].NewRowState);
           metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
           metadata.batchCount = (metadata.batchCount || 1) + 1;
-          await connectionManager.executeQuery(
-            `UPDATE ${schema}.unifiedchangelog
-             SET NewRowState = ?, ChangeTimestamp = NOW()
-             WHERE ChangeID = ?`,
-            [JSON.stringify(metadata), existingEntry[0].ChangeID]
-          );
+          const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
+          await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
         }
       } catch (logError: any) {
         // Log but don't fail the upload if changelog tracking fails

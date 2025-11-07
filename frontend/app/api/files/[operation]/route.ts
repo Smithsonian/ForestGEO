@@ -4,10 +4,33 @@ import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, 
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { getContainerNameWithFallback } from '@/config/macros/containernames';
+import { auth } from '@/auth';
+import path from 'path';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Security: Allowed file extensions and MIME types
+const ALLOWED_FILE_EXTENSIONS = ['.csv', '.txt', '.xlsx'] as const;
+const ALLOWED_MIME_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as const;
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit
+
+function sanitizeFileName(fileName: string): string {
+  // Remove path separators and special characters
+  const baseName = path.basename(fileName);
+  // Allow only alphanumeric, dots, hyphens, underscores
+  return baseName.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function isValidFileExtension(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return ALLOWED_FILE_EXTENSIONS.includes(ext as any);
+}
+
+function isValidMimeType(mimeType: string): boolean {
+  return ALLOWED_MIME_TYPES.includes(mimeType as any);
+}
 
 type FileOperation = 'upload' | 'download' | 'delete' | 'list';
 
@@ -37,6 +60,13 @@ interface FileOperationParams {
 
 // POST: Upload file
 export async function POST(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
+  // Authentication check
+  const session = await auth();
+  if (!session?.user) {
+    ailogger.warn('Unauthorized file upload attempt - no session');
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: 401 }); // 401 Unauthorized
+  }
+
   const { operation } = await props.params;
 
   if (operation !== 'upload') {
@@ -65,8 +95,51 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     });
   }
 
+  // Security validations
+  // 1. File size check
+  if (file.size > MAX_FILE_SIZE) {
+    ailogger.warn(`File too large: ${file.size} bytes (max: ${MAX_FILE_SIZE})`);
+    return new NextResponse(JSON.stringify({ error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB` }), {
+      status: 413 // 413 Payload Too Large
+    });
+  }
+
+  // 2. File extension validation
+  if (!isValidFileExtension(fileName)) {
+    ailogger.warn(`Invalid file extension: ${fileName}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid file type. Only .csv, .txt, and .xlsx files are allowed' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
+  // 3. MIME type validation
+  if (!isValidMimeType(file.type)) {
+    ailogger.warn(`Invalid MIME type: ${file.type} for file ${fileName}`);
+    return new NextResponse(
+      JSON.stringify({
+        error: 'Invalid file type. Only CSV, TXT, and XLSX files are allowed',
+        details: `Received MIME type: ${file.type}`
+      }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  // 4. Sanitize filename to prevent path traversal
+  const sanitizedFileName = sanitizeFileName(fileName);
+  if (sanitizedFileName !== fileName) {
+    ailogger.warn(`File name sanitized: ${fileName} -> ${sanitizedFileName}`);
+  }
+
+  // 5. Validate container name components (plot and census)
+  const plotSanitized = plot.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+  const censusSanitized = census.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
+
+  if (plotSanitized.length === 0 || censusSanitized.length === 0) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid plot or census identifier' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   try {
-    const containerClient = await getContainerClient(`${plot.toLowerCase()}-${census.toLowerCase()}`);
+    const containerClient = await getContainerClient(`${plotSanitized}-${censusSanitized}`);
     if (!containerClient) {
       throw new Error('Failed to get container client');
     }
@@ -76,13 +149,14 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
       throw new Error('Upload failed: Response status not between 200 & 299');
     }
 
+    ailogger.info(`File uploaded successfully: ${sanitizedFileName} by ${session.user.email}`);
     return new NextResponse(JSON.stringify({ message: 'File uploaded successfully' }), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('File upload error:', error);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to upload file',
-        details: error.message || 'Unknown error'
+        error: 'Failed to upload file'
+        // Do not expose internal error details to client
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
