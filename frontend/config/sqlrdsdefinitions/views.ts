@@ -1,4 +1,4 @@
-import { ColumnStates } from '@/config/macros';
+import type { ColumnStates } from '@/config/macros';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 

@@ -1,4 +1,5 @@
 import moment from 'moment';
+import { Buffer } from 'buffer';
 import { bitToBoolean, booleanToBit } from './macros/bitconversion';
 import {
   FamilyRDS,

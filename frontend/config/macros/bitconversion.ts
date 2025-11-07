@@ -5,6 +5,8 @@
  * to prevent importing heavy dependencies in middleware/edge runtime.
  */
 
+import { Buffer } from 'buffer';
+
 export function bitToBoolean(bitField: any): boolean {
   if (Buffer.isBuffer(bitField)) {
     // Ensure non-zero bytes are considered `true`

@@ -1,7 +1,8 @@
 import { IDataMapper } from '@/config/datamapper';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { bitToBoolean, booleanToBit, ColumnStates } from '@/config/macros';
+import { bitToBoolean, booleanToBit } from '@/config/macros/bitconversion';
+import type { ColumnStates } from '@/config/macros';
 
 export interface SitesRDS {
   siteID?: number;

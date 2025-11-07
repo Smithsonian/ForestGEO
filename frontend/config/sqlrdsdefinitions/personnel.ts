@@ -1,6 +1,6 @@
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { ResultType } from '@/config/utils';
-import { ColumnStates } from '@/config/macros';
+import type { ColumnStates } from '@/config/macros';
 
 export interface PersonnelRDS {
   id?: number;
