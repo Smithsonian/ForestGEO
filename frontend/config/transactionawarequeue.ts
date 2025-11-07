@@ -116,7 +116,7 @@ class TransactionAwarePQueue extends PQueue {
 
         // Process all batch tasks concurrently within the file lock
         const results = await Promise.all(
-          batchTasks.map((batchTask) =>
+          batchTasks.map(batchTask =>
             this.executeWithDeadlockRetry(batchTask, options.maxRetries || this.MAX_DEADLOCK_RETRIES, options.retryDelayMs || this.DEADLOCK_RETRY_BASE_DELAY)
           )
         );

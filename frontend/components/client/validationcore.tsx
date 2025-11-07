@@ -235,7 +235,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                     Some validations could not be performed:
                   </Typography>
                   <ul>
-                    {apiErrors.map((error) => (
+                    {apiErrors.map(error => (
                       <li key={error}>
                         <Typography color="danger">{error}</Typography>
                       </li>

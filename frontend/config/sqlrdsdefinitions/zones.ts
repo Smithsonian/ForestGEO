@@ -36,7 +36,7 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
   }
 
   mapData(results: SitesResult[], _indexOffset = 1): SitesRDS[] {
-    return results.map((item) => ({
+    return results.map(item => ({
       siteID: item.SiteID != null ? Number(item.SiteID) : undefined,
       siteName: item.SiteName != null ? String(item.SiteName) : undefined,
       schemaName: item.SchemaName != null ? String(item.SchemaName) : undefined,
