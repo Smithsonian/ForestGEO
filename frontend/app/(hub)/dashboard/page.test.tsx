@@ -20,6 +20,16 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 vi.mock('next-auth/react');
 vi.mock('@/app/contexts/userselectionprovider');
 vi.mock('@/app/contexts/lockanimationcontext');
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn()
+  })
+}));
 vi.mock('@/components/metrics/progresstachometer', () => ({
   default: ({ PopulatedPercent }: any) => <div data-testid="tachometer">{PopulatedPercent}%</div>
 }));
@@ -168,8 +178,8 @@ describe('Enhanced Dashboard Page', () => {
       await waitFor(() => {
         expect(screen.getByText('1,234')).toBeInTheDocument(); // Trees
         expect(screen.getByText('2,468')).toBeInTheDocument(); // Stems
-        expect(screen.getByText('5')).toBeInTheDocument(); // Active users
-        expect(screen.getByText('968')).toBeInTheDocument(); // New recruits
+        expect(screen.getAllByText('5').length).toBeGreaterThan(0); // Active users (may appear multiple times)
+        expect(screen.getAllByText('968').length).toBeGreaterThan(0); // New recruits (appears in metric card and chips)
       });
     });
   });
@@ -215,8 +225,8 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('NEW RECRUITS')).toBeInTheDocument();
-        expect(screen.getByText('968')).toBeInTheDocument();
+        expect(screen.getByText('New Recruits')).toBeInTheDocument(); // Metric card title uses regular case
+        expect(screen.getAllByText('968').length).toBeGreaterThan(0); // Value may appear in multiple places
       });
     });
 
@@ -591,7 +601,8 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('No recent activity')).toBeInTheDocument();
+        // Updated to match EmptyState component text
+        expect(screen.getByText('No Recent Activity')).toBeInTheDocument();
       });
     });
   });
