@@ -149,17 +149,17 @@ describe('SQL Injection Attack Vectors', () => {
     "' AND SLEEP(5)--",
 
     // Null byte injection
-    "admin\0",
+    'admin\0',
 
     // Encoded injection attempts
-    "%27%20OR%201=1--",
+    '%27%20OR%201=1--',
 
     // Schema enumeration
-    "'; SELECT schema_name FROM information_schema.schemata--",
+    "'; SELECT schema_name FROM information_schema.schemata--"
   ];
 
   describe('isValidSchema should reject all attack vectors', () => {
-    maliciousInputs.forEach((input) => {
+    maliciousInputs.forEach(input => {
       it(`should reject: ${input.substring(0, 50)}...`, () => {
         expect(isValidSchema(input)).toBe(false);
       });
@@ -167,7 +167,7 @@ describe('SQL Injection Attack Vectors', () => {
   });
 
   describe('validateSchemaOrThrow should throw for all attack vectors', () => {
-    maliciousInputs.forEach((input) => {
+    maliciousInputs.forEach(input => {
       it(`should throw for: ${input.substring(0, 50)}...`, () => {
         expect(() => validateSchemaOrThrow(input)).toThrow();
       });
@@ -237,10 +237,7 @@ describe('Endpoint-Specific Security Tests', () => {
     it('should format INSERT with JOIN safely', () => {
       // safeFormatQuery uses formatWithSchema which counts ?? placeholders
       // and fills each with the schema name
-      const insertSQL = safeFormatQuery(
-        'forestgeo',
-        "INSERT IGNORE INTO ??.temporarymeasurements SELECT 'file' AS FileID, fm.* FROM ??.failedmeasurements fm"
-      );
+      const insertSQL = safeFormatQuery('forestgeo', "INSERT IGNORE INTO ??.temporarymeasurements SELECT 'file' AS FileID, fm.* FROM ??.failedmeasurements fm");
       const matches = insertSQL.match(/`forestgeo`/g);
       expect(matches).toHaveLength(2);
       expect(insertSQL).toContain('`forestgeo`.temporarymeasurements');
@@ -252,10 +249,7 @@ describe('Endpoint-Specific Security Tests', () => {
     it('should format queries with table name identifier', () => {
       // Simulating the format call with both schema and table name
       const { format } = require('mysql2/promise');
-      const result = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [
-        'forestgeo',
-        'failedmeasurements'
-      ]);
+      const result = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', ['forestgeo', 'failedmeasurements']);
       expect(result).toContain('`forestgeo`');
       expect(result).toContain('`failedmeasurements`');
     });
@@ -265,19 +259,14 @@ describe('Endpoint-Specific Security Tests', () => {
     const validCensusTypes = ['measurements', 'attributes', 'personnel', 'quadrats'];
 
     it('should accept valid census types', () => {
-      validCensusTypes.forEach((type) => {
+      validCensusTypes.forEach(type => {
         expect(validCensusTypes.includes(type)).toBe(true);
       });
     });
 
     it('should reject invalid census types', () => {
-      const invalidTypes = [
-        'malicious',
-        "'; DROP TABLE",
-        'measurements OR 1=1',
-        'measurements; DELETE',
-      ];
-      invalidTypes.forEach((type) => {
+      const invalidTypes = ['malicious', "'; DROP TABLE", 'measurements OR 1=1', 'measurements; DELETE'];
+      invalidTypes.forEach(type => {
         expect(validCensusTypes.includes(type)).toBe(false);
       });
     });

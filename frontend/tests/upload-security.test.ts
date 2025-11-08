@@ -57,11 +57,7 @@ describe('File Upload Security', () => {
   });
 
   describe('MIME Type Validation', () => {
-    const ALLOWED_MIME_TYPES = [
-      'text/csv',
-      'text/plain',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    ];
+    const ALLOWED_MIME_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
 
     function isValidMimeType(mimeType: string): boolean {
       return ALLOWED_MIME_TYPES.includes(mimeType);
@@ -470,10 +466,10 @@ describe('File Upload Security', () => {
 
     const maliciousSchemas = [
       "forestgeo'; DROP TABLE users--",
-      "forestgeo OR 1=1",
-      "forestgeo; DELETE FROM measurements",
+      'forestgeo OR 1=1',
+      'forestgeo; DELETE FROM measurements',
       "forestgeo' UNION SELECT * FROM passwords",
-      "forestgeo`; TRUNCATE TABLE census--"
+      'forestgeo`; TRUNCATE TABLE census--'
     ];
 
     it('should block SQL injection attempts in schema parameter', () => {
@@ -540,13 +536,7 @@ describe('Upload Integration Scenarios', () => {
       error?: string;
     }
 
-    function simulateUploadFlow(params: {
-      hasSession: boolean;
-      filename: string;
-      fileSize: number;
-      mimeType: string;
-      schema: string;
-    }): UploadFlowResult {
+    function simulateUploadFlow(params: { hasSession: boolean; filename: string; fileSize: number; mimeType: string; schema: string }): UploadFlowResult {
       const result: UploadFlowResult = {
         authenticated: false,
         fileValidated: false,

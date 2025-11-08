@@ -8,12 +8,7 @@
 import { format } from 'mysql2/promise';
 
 // Whitelist of allowed schemas - MUST match production database schemas
-export const ALLOWED_SCHEMAS = [
-  'forestgeo',
-  'forestgeo_testing',
-  'forestgeo_testing_alternate',
-  'catalog'
-] as const;
+export const ALLOWED_SCHEMAS = ['forestgeo', 'forestgeo_testing', 'forestgeo_testing_alternate', 'catalog'] as const;
 
 export type AllowedSchema = (typeof ALLOWED_SCHEMAS)[number];
 

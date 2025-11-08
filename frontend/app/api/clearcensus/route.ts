@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
   // Construct safe procedure name and call
   const procedureName = `clearcensus${type}`;
-  const callSQL = format('CALL ??.??(?)' , [schema, procedureName, censusIDParam]);
+  const callSQL = format('CALL ??.??(?)', [schema, procedureName, censusIDParam]);
 
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
