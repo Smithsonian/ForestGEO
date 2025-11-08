@@ -42,7 +42,7 @@ vi.mock('@/lib/contextvalidation', () => ({
 }));
 
 function makeRequest(method = 'GET') {
-  return new Request(`http://localhost/api/reingest/testschema/1/1`, {
+  return new Request(`http://localhost/api/reingest/forestgeo_testing/1/1`, {
     method,
     headers: { 'content-type': 'application/json' }
   }) as any;
@@ -51,7 +51,7 @@ function makeRequest(method = 'GET') {
 function makeParams() {
   return {
     params: Promise.resolve({
-      schema: 'testschema',
+      schema: 'forestgeo_testing',
       plotID: '1',
       censusID: '1'
     })
@@ -79,7 +79,7 @@ describe('reingest API routes', () => {
     mockValidateContextualValues.mockResolvedValue({
       success: true,
       values: {
-        schema: 'testschema',
+        schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 1
       }
