@@ -255,7 +255,7 @@ describe('MetricCard Component', () => {
         />
       );
 
-      const card = container.querySelector('.MuiCard-root');
+      const card = container.querySelector('.MuiCard-root') as HTMLElement;
       card?.click();
 
       expect(handleClick).toHaveBeenCalledTimes(1);

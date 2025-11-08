@@ -39,7 +39,13 @@ import ProgressPieChart from '@/components/metrics/progresspiechart';
 // Enhanced Visual Components
 import MetricCard from '@/components/dashboard/metriccard';
 import ProgressCard from '@/components/dashboard/progresscard';
+import EmptyState from '@/components/emptystate';
 import { designTokens } from '@/config/design-tokens';
+import AddIcon from '@mui/icons-material/Add';
+import HelpIcon from '@mui/icons-material/Help';
+import DatasetIcon from '@mui/icons-material/Dataset';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import { useRouter } from 'next/navigation';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -55,6 +61,7 @@ interface StemTypesType {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { triggerPulse, isPulsing } = useLockAnimation();
   const { data: session } = useSession();
   const currentSite = useSiteContext();
@@ -221,7 +228,39 @@ export default function DashboardPage() {
         </Typography>
       </Box>
 
-      {/* Main Metrics Grid - Modern Gradient Cards */}
+      {/* Empty State: No Site/Plot/Census Selected */}
+      {!currentSite || !currentPlot || !currentCensus ? (
+        <EmptyState
+          icon={<AssessmentIcon />}
+          title="No Census Selected"
+          description="Please select a site, plot, and census from the sidebar to view your dashboard metrics and data"
+          iconColor="primary"
+        />
+      ) : !hasData && !isLoading ? (
+        /* Empty State: Context selected but no data */
+        <EmptyState
+          icon={<DatasetIcon />}
+          title="No Census Data Yet"
+          description="You haven't uploaded any measurements for this census yet. Start by uploading your field data or creating measurement entries."
+          primaryAction={{
+            label: 'Upload Data',
+            onClick: () => router.push('/measurementshub'),
+            startDecorator: <AddIcon />,
+            variant: 'solid',
+            color: 'primary'
+          }}
+          secondaryAction={{
+            label: 'View Guide',
+            onClick: () => window.open('https://docs.forestgeo.si.edu', '_blank'),
+            startDecorator: <HelpIcon />,
+            variant: 'outlined',
+            color: 'neutral'
+          }}
+          iconColor="warning"
+        />
+      ) : (
+        <>
+          {/* Main Metrics Grid - Modern Gradient Cards */}
       <Box
         sx={{
           display: 'grid',
@@ -694,21 +733,19 @@ export default function DashboardPage() {
                   ))}
               </Stack>
             ) : (
-              <Box
-                sx={{
-                  textAlign: 'center',
-                  py: 6,
-                  color: 'neutral.400'
-                }}
-              >
-                <Typography level="body-md" color="neutral">
-                  No recent activity
-                </Typography>
-              </Box>
+              <EmptyState
+                icon={<AssessmentIcon />}
+                title="No Recent Activity"
+                description="There haven't been any changes to your census data recently. Activity will appear here when data is added, updated, or validated."
+                iconColor="neutral"
+                sx={{ py: 4 }}
+              />
             )}
           </CardContent>
         </Card>
       </Box>
+        </>
+      )}
     </Box>
   );
 }
