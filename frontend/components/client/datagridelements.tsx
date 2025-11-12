@@ -421,17 +421,13 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
             <Stack
               direction={'row'}
-              spacing={1}
+              spacing={1.5}
               sx={{
                 display: 'flex',
                 flex: 0.5,
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                '& > *': {
-                  flex: '1 1 0px',
-                  display: 'flex',
-                  justifyContent: 'center'
-                }
+                justifyContent: 'flex-end',
+                gap: 1.5
               }}
             >
               {hasAnyExport && (
@@ -448,6 +444,17 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                         await handleExportAll!();
                       }
                     }}
+                    sx={theme => ({
+                      width: theme.spacing(6),
+                      height: theme.spacing(6),
+                      minWidth: theme.spacing(6),
+                      padding: theme.spacing(0.5),
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)'
+                      }
+                    })}
+                    aria-label="Export data as CSV"
                     data-testid="export-button"
                   >
                     <CloudDownloadIcon />
@@ -457,72 +464,74 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               {dynamicButtons.map(
                 (button: any, index: number) =>
                   button.tooltip && (
-                    <Tooltip key={index} title={button.tooltip} placement="top" arrow color={'primary'} size={'lg'} variant={'solid'}>
+                    <Tooltip key={index} title={button.tooltip} placement="top" arrow>
                       {button.count ? (
-                        <Badge badgeContent={button.count}>
-                          {button.icon ? (
-                            <IconButton
-                              onClick={button.onClick}
-                              variant="soft"
-                              color="primary"
-                              sx={theme => ({
-                                flex: 1,
-                                display: 'flex',
-                                justifyContent: 'center',
-                                width: theme.spacing(5),
-                                height: theme.spacing(5),
-                                padding: 0
-                              })}
-                            >
-                              {button.icon}
-                            </IconButton>
-                          ) : (
-                            <Button onClick={button.onClick} variant="soft" color="primary">
-                              {button.label}
-                            </Button>
-                          )}
+                        <Badge badgeContent={button.count} size="sm">
+                          <Button
+                            onClick={button.onClick}
+                            variant="soft"
+                            color="primary"
+                            size="sm"
+                            startDecorator={button.icon}
+                            sx={{
+                              minWidth: '130px',
+                              whiteSpace: 'nowrap',
+                              fontSize: '0.875rem',
+                              height: theme => theme.spacing(6),
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                transform: 'translateY(-2px)',
+                                boxShadow: 'sm'
+                              }
+                            }}
+                          >
+                            {button.label}
+                          </Button>
                         </Badge>
                       ) : (
-                        <Box>
-                          {button.icon ? (
-                            <IconButton
-                              onClick={button.onClick}
-                              variant="soft"
-                              color="primary"
-                              sx={theme => ({
-                                flex: 1,
-                                display: 'flex',
-                                justifyContent: 'center',
-                                width: theme.spacing(5),
-                                height: theme.spacing(5),
-                                padding: 0
-                              })}
-                            >
-                              {button.icon}
-                            </IconButton>
-                          ) : (
-                            <Button onClick={button.onClick} variant="soft" color="primary">
-                              {button.label}
-                            </Button>
-                          )}
-                        </Box>
+                        <Button
+                          onClick={button.onClick}
+                          variant="soft"
+                          color="primary"
+                          size="sm"
+                          startDecorator={button.icon}
+                          sx={{
+                            minWidth: '130px',
+                            whiteSpace: 'nowrap',
+                            fontSize: '0.875rem',
+                            height: theme => theme.spacing(6),
+                            transition: 'all 0.2s ease',
+                            '&:hover': {
+                              transform: 'translateY(-2px)',
+                              boxShadow: 'sm'
+                            }
+                          }}
+                        >
+                          {button.label}
+                        </Button>
                       )}
                     </Tooltip>
                   )
               )}
-              <Tooltip title={hidingEmpty ? `Click to show empty columns!` : `Click to hide empty columns!`}>
+              <Tooltip title={hidingEmpty ? `Show empty columns` : `Hide empty columns`} placement="top" arrow>
                 <IconButton
                   variant="soft"
                   color={'primary'}
                   onClick={() => (setHidingEmpty ? setHidingEmpty(!hidingEmpty) : undefined)}
                   sx={theme => ({
-                    flex: 1,
                     display: 'flex',
                     justifyContent: 'center',
-                    width: theme.spacing(5),
-                    height: theme.spacing(5),
-                    padding: 0
+                    alignItems: 'center',
+                    width: theme.spacing(6),
+                    height: theme.spacing(6),
+                    minWidth: theme.spacing(6),
+                    padding: theme.spacing(0.5),
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      transform: 'translateY(-2px)'
+                    }
                   })}
+                  aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
                 >
                   {hidingEmpty ? <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} /> : <UnfoldMore sx={{ transform: 'rotate(90deg)' }} />}
                 </IconButton>

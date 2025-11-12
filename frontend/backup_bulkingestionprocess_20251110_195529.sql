@@ -1,0 +1,251 @@
+mariadb from 12.0.2-MariaDB, client 15.2 for osx10.19 (x86_64) using  EditLine wrapper
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Usage: mariadb [OPTIONS] [database]
+
+Default options are read from the following files in the given order:
+/usr/local/etc/my.cnf ~/.my.cnf 
+The following groups are read: mysql mariadb-client client client-server client-mariadb
+The following options may be given as the first argument:
+--print-defaults          Print the program argument list and exit.
+--no-defaults             Don't read default options from any option file.
+The following specify which files/extra groups are read (specified before remaining options):
+--defaults-file=#         Only read default options from the given file #.
+--defaults-extra-file=#   Read this file after the global files are read.
+--defaults-group-suffix=# Additionally read default groups with # appended as a suffix.
+
+  -?, --help          Display this help and exit.
+  -I, --help          Synonym for -?
+  --abort-source-on-error 
+                      Abort 'source filename' operations in case of errors
+  --auto-rehash       Enable automatic rehashing. One doesn't need to use
+                      'rehash' to get table and field completion, but startup
+                      and reconnecting may take a longer time.
+                      (Defaults to on; use --skip-auto-rehash to disable.)
+  -A, --no-auto-rehash 
+                      No automatic rehashing. One has to use 'rehash' to get
+                      table and field completion. This gives a quicker start of
+                      mysql and disables rehashing on reconnect.
+  --auto-vertical-output 
+                      Automatically switch to vertical output mode if the
+                      result is wider than the terminal width.
+  -B, --batch         Don't use history file. Disable interactive behavior.
+                      (Enables --silent.)
+  --binary-as-hex     Print binary data as hex
+  --binary-mode       Binary mode allows certain character sequences to be
+                      processed as data that would otherwise be treated with a
+                      special meaning by the parser. Specifically, this switch
+                      turns off parsing of all client commands except \C and
+                      DELIMITER in non-interactive mode (i.e., when binary mode
+                      is combined with either 1) piped input, 2) the --batch
+                      mysql option, or 3) the 'source' command). Also, in
+                      binary mode, occurrences of '\r\n' and ASCII '\0' are
+                      preserved within strings, whereas by default, '\r\n' is
+                      translated to '\n' and '\0' is disallowed in user input.
+  --character-sets-dir=name 
+                      Directory for character set files.
+  --column-names      Write column names in results.
+                      (Defaults to on; use --skip-column-names to disable.)
+  -N, --skip-column-names 
+                      Don't write column names in results.
+  --column-type-info  Display column type information.
+  -c, --comments      Preserve comments. Send comments to the server. The
+                      default is --skip-comments (discard comments), enable
+                      with --comments.
+  -C, --compress      Use compression in server/client protocol.
+  --connect-expired-password 
+                      Notify the server that this client is prepared to handle
+                      expired password sandbox mode even if --batch was
+                      specified.
+  --connect-timeout=# Number of seconds before connection timeout.
+  -D, --database=name Database to use.
+  -#, --debug[=#]     This is a non-debug version. Catch this and exit.
+  --debug-check       Check memory and open file usage at exit.
+  -T, --debug-info    Print some debug info at exit.
+  --default-auth=name Default authentication client-side plugin to use.
+  --default-character-set=name 
+                      Set the default character set.
+  --delimiter=name    Delimiter to be used.
+  --enable-cleartext-plugin 
+                      Obsolete option. Exists only for MySQL compatibility.
+  -e, --execute=name  Execute command and quit. (Disables --force and history
+                      file.)
+  -f, --force         Continue even if we get an SQL error. Sets
+                      abort-source-on-error to 0
+  -h, --host=name     Connect to host. Defaults in the following order:
+                      $MARIADB_HOST, $MYSQL_HOST, and then localhost
+  -H, --html          Produce HTML output.
+  -i, --ignore-spaces Ignore space after function names.
+  --init-command=name SQL Command to execute when connecting to MariaDB server.
+                      Will automatically be re-executed when reconnecting.
+  --line-numbers      Write line numbers for errors.
+                      (Defaults to on; use --skip-line-numbers to disable.)
+  -L, --skip-line-numbers 
+                      Don't write line number for errors.
+  --local-infile      Enable LOAD DATA LOCAL INFILE.
+  --max-allowed-packet=# 
+                      The maximum packet length to send to or receive from
+                      server.
+  --max-join-size=#   Automatic limit for rows in a join when using
+                      --safe-updates.
+  -G, --named-commands 
+                      Enable named commands. Named commands mean this program's
+                      internal commands; see mysql> help . When enabled, the
+                      named commands can be used from any line of the query,
+                      otherwise only from the first line, before an enter.
+                      Disable with --disable-named-commands. This option is
+                      disabled by default.
+  --net-buffer-length=# 
+                      The buffer size for TCP/IP and socket communication.
+  -b, --no-beep       Turn off beep on error.
+  -o, --one-database  Ignore statements except those that occur while the
+                      default database is the one named at the command line.
+  --pager[=name]      Pager to use to display results. If you don't supply an
+                      option, the default pager is taken from your ENV variable
+                      PAGER. Valid pagers are less, more, cat [> filename],
+                      etc. See interactive help (\h) also. This option does not
+                      work in batch mode. Disable with --disable-pager. This
+                      option is disabled by default.
+  -p, --password[=name] 
+                      Password to use when connecting to server. If password is
+                      not given it's asked from the tty.
+  --plugin-dir=name   Directory for client-side plugins.
+  -P, --port=#        Port number to use for connection or 0 for default to, in
+                      order of preference, my.cnf, $MYSQL_TCP_PORT,
+                      /etc/services, built-in default (3306).
+  --print-query-on-error 
+                      Print the query if there was an error. Is only enabled in
+                      --batch mode if verbose is not set (as then the query
+                      would be printed anyway)
+                      (Defaults to on; use --skip-print-query-on-error to disable.)
+  --progress-reports  Get progress reports for long running commands (like
+                      ALTER TABLE)
+                      (Defaults to on; use --skip-progress-reports to disable.)
+  --prompt=name       Set the command line prompt to this value.
+  --protocol=name     The protocol to use for connection (tcp, socket, pipe).
+  -q, --quick         Don't cache result, print it row by row. This may slow
+                      down the server if the output is suspended. Doesn't use
+                      history file.
+  --quick-max-column-width=# 
+                      Maximum number of characters displayed in a column header
+                      when using --quick
+  -r, --raw           Write fields without conversion. Used with --batch.
+  --reconnect         Reconnect if the connection is lost.
+                      (Defaults to on; use --skip-reconnect to disable.)
+  -U, --safe-updates  Only allow UPDATE and DELETE that uses keys.
+  -U, --i-am-a-dummy  Synonym for option --safe-updates, -U.
+  --sandbox           Disallow commands that access the file system (except \P
+                      without an argument and \e).
+  --script-dir=name   Set an alternative directory path for searching scripts
+                      invoked via the source command.
+  --secure-auth       Refuse client connecting to server if it uses old
+                      (pre-4.1.1) protocol.
+  --select-limit=#    Automatic limit for SELECT when using --safe-updates.
+  --server-arg=name   Send embedded server this as a parameter.
+  --show-query-costs  Show query cost after every statement.
+  --show-warnings     Show warnings after every statement.
+  --sigint-ignore     Ignore SIGINT (CTRL-C).
+  -s, --silent        Be more silent. Print results with a tab as separator,
+                      each row on new line.
+  -S, --socket=name   The socket file to use for connection.
+  --ssl               Enable SSL for connection (automatically enabled with
+                      other flags).
+                      (Defaults to on; use --skip-ssl to disable.)
+  --ssl-ca=name       CA file in PEM format (check OpenSSL docs, implies
+                      --ssl).
+  --ssl-capath=name   CA directory (check OpenSSL docs, implies --ssl).
+  --ssl-cert=name     X509 cert in PEM format (implies --ssl).
+  --ssl-cipher=name   SSL cipher to use (implies --ssl).
+  --ssl-key=name      X509 key in PEM format (implies --ssl).
+  --ssl-crl=name      Certificate revocation list (implies --ssl).
+  --ssl-crlpath=name  Certificate revocation list path (implies --ssl).
+  --tls-version=name  TLS protocol version for secure connection.
+  --ssl-fp=name       Server certificate fingerprint (implies --ssl).
+  --ssl-fplist=name   File with accepted server certificate fingerprints, one
+                      per line (implies --ssl).
+  --ssl-verify-server-cert 
+                      Verify server's certificate to prevent man-in-the-middle
+                      attacks
+                      (Defaults to on; use --skip-ssl-verify-server-cert to disable.)
+  -t, --table         Output in table format.
+  --tee=name          Append everything into outfile. See interactive help (\h)
+                      also. Does not work in batch mode. Disable with
+                      --disable-tee. This option is disabled by default.
+  -n, --unbuffered    Flush buffer after each query.
+  -u, --user=name     User for login if not current user.
+  -v, --verbose       Write more. (-v -v -v gives the table output format).
+  -V, --version       Output version information and exit.
+  -E, --vertical      Print the output of a query (rows) vertically.
+  -w, --wait          Wait and retry if connection is down.
+  -X, --xml           Produce XML output.
+
+Variables (--variable-name=value)
+and boolean options {FALSE|TRUE}  Value (after reading options)
+--------------------------------- ----------------------------------------
+abort-source-on-error             FALSE
+auto-rehash                       TRUE
+auto-vertical-output              FALSE
+binary-as-hex                     FALSE
+binary-mode                       FALSE
+character-sets-dir                (No default value)
+column-names                      TRUE
+column-type-info                  FALSE
+comments                          FALSE
+compress                          FALSE
+connect-expired-password          FALSE
+connect-timeout                   0
+database                          (No default value)
+debug-check                       FALSE
+debug-info                        FALSE
+default-auth                      (No default value)
+default-character-set             auto
+delimiter                         ;
+force                             FALSE
+host                              forestgeo-mysqldataserver.mysql.database.azure.com
+html                              FALSE
+ignore-spaces                     FALSE
+init-command                      (No default value)
+line-numbers                      TRUE
+local-infile                      FALSE
+max-allowed-packet                16777216
+max-join-size                     1000000
+named-commands                    FALSE
+net-buffer-length                 16384
+no-beep                           FALSE
+plugin-dir                        (No default value)
+port                              3306
+print-query-on-error              TRUE
+progress-reports                  FALSE
+prompt                            \N [\d]> 
+protocol                          
+quick                             FALSE
+quick-max-column-width            9223372036854775807
+raw                               FALSE
+reconnect                         FALSE
+safe-updates                      FALSE
+i-am-a-dummy                      FALSE
+sandbox                           FALSE
+script-dir                        (No default value)
+secure-auth                       FALSE
+select-limit                      1000
+show-query-costs                  FALSE
+show-warnings                     FALSE
+sigint-ignore                     FALSE
+socket                            (No default value)
+ssl                               TRUE
+ssl-ca                            (No default value)
+ssl-capath                        (No default value)
+ssl-cert                          (No default value)
+ssl-cipher                        (No default value)
+ssl-key                           (No default value)
+ssl-crl                           (No default value)
+ssl-crlpath                       (No default value)
+tls-version                       (No default value)
+ssl-fp                            (No default value)
+ssl-fplist                        (No default value)
+ssl-verify-server-cert            TRUE
+table                             FALSE
+unbuffered                        FALSE
+user                              azureroot
+vertical                          FALSE
+xml                               FALSE

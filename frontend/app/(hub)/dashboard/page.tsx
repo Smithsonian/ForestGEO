@@ -261,489 +261,489 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* Main Metrics Grid - Modern Gradient Cards */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(2, 1fr)',
-            lg: 'repeat(4, 1fr)'
-          },
-          gap: 3
-        }}
-      >
-        {/* Trees Count */}
-        <MetricCard
-          title="Total Trees"
-          value={countTrees}
-          icon={<ParkIcon sx={{ fontSize: 32 }} />}
-          gradient="primary"
-          isLoading={isLoading}
-          trend={{
-            value: hasData ? 'Current census' : 'No data',
-            direction: 'neutral'
-          }}
-        />
-
-        {/* Stems Count */}
-        <MetricCard
-          title="Total Stems"
-          value={countStems}
-          icon={<NatureIcon sx={{ fontSize: 32 }} />}
-          gradient="success"
-          isLoading={isLoading}
-          trend={{
-            value: hasData ? `${(countStems / Math.max(countTrees, 1)).toFixed(1)} per tree` : 'No data',
-            direction: 'neutral'
-          }}
-        />
-
-        {/* Active Personnel */}
-        <MetricCard
-          title="Active Personnel"
-          value={activeUsers}
-          icon={<PeopleIcon sx={{ fontSize: 32 }} />}
-          gradient="info"
-          isLoading={isLoading}
-          trend={{
-            value: activeUsers > 0 ? 'Currently active' : 'No activity',
-            direction: activeUsers > 0 ? 'up' : 'neutral'
-          }}
-        />
-
-        {/* New Recruits */}
-        <MetricCard
-          title="New Recruits"
-          value={stemTypes.CountNewRecruits}
-          icon={<CategoryIcon sx={{ fontSize: 32 }} />}
-          gradient="warning"
-          isLoading={isLoading}
-          trend={{
-            value: hasData ? 'This census' : 'No data',
-            direction: 'neutral'
-          }}
-        />
-      </Box>
-
-      {/* Progress and Detailed Statistics Section */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            lg: '1fr 2fr'
-          },
-          gap: 3
-        }}
-      >
-        {/* Modern Progress Card */}
-        <ProgressCard
-          totalQuadrats={progressTacho.TotalQuadrats}
-          populatedQuadrats={progressTacho.PopulatedQuadrats}
-          populatedPercent={progressTacho.PopulatedPercent}
-          unpopulatedQuadrats={progressTacho.UnpopulatedQuadrats}
-          isLoading={isLoading}
-        />
-
-        {/* Census Statistics - Interactive Charts */}
-        <Card
-          variant="outlined"
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              boxShadow: designTokens.shadows.md,
-              borderColor: 'primary.outlinedBorder'
-            }
-          }}
-          aria-labelledby="census-statistics-heading"
-        >
-          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Box>
-              <Typography id="census-statistics-heading" level="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-                Census Visualization
-              </Typography>
-              <Typography level="body-sm" color="neutral">
-                {toggleSwitch ? 'Tachometer View' : 'Pie Chart View'} - Click to toggle
-              </Typography>
-            </Box>
-
-            {/* Only show chart if there are measurements */}
-            {hasData ? (
-              <Box
-                role="button"
-                tabIndex={0}
-                aria-pressed={toggleSwitch}
-                aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-                sx={{
-                  height: '400px',
-                  width: '100%',
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s ease',
-                  '&:hover': {
-                    transform: 'scale(1.02)'
-                  }
-                }}
-                onClick={() => setToggleSwitch(!toggleSwitch)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setToggleSwitch(!toggleSwitch);
-                  }
-                }}
-              >
-                {toggleSwitch ? (
-                  <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
-                ) : (
-                  <ProgressPieChart {...progressTacho} stemTypes={stemTypes} aria-label="Stem types pie chart" />
-                )}
-              </Box>
-            ) : (
-              <Box sx={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Typography level="body-lg" color="neutral" textAlign="center">
-                  No measurements recorded for this census yet.
-                </Typography>
-              </Box>
-            )}
-
-            <Divider orientation="horizontal" />
-
-            {/* Detailed Statistics Grid */}
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, 1fr)',
-                gap: 2,
-                mt: 1
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                sm: 'repeat(2, 1fr)',
+                md: 'repeat(2, 1fr)',
+                lg: 'repeat(4, 1fr)'
+              },
+              gap: 3
+            }}
+          >
+            {/* Trees Count */}
+            <MetricCard
+              title="Total Trees"
+              value={countTrees}
+              icon={<ParkIcon sx={{ fontSize: 32 }} />}
+              gradient="primary"
+              isLoading={isLoading}
+              trend={{
+                value: hasData ? 'Current census' : 'No data',
+                direction: 'neutral'
               }}
-            >
-              <Box
-                sx={{
-                  p: 2,
-                  borderRadius: 'sm',
-                  bgcolor: 'background.level1',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    bgcolor: 'background.level2'
-                  }
-                }}
-              >
-                <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
-                  Stem Type Breakdown
-                </Typography>
-                <Stack spacing={1}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">Old Stems:</Typography>
-                    <Chip size="sm" variant="soft" color="neutral">
-                      {stemTypes.CountOldStems.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">Multi Stems:</Typography>
-                    <Chip size="sm" variant="soft" color="primary">
-                      {stemTypes.CountMultiStems.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">New Recruits:</Typography>
-                    <Chip size="sm" variant="soft" color="success">
-                      {stemTypes.CountNewRecruits.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                </Stack>
-              </Box>
+            />
 
-              <Box
-                sx={{
-                  p: 2,
-                  borderRadius: 'sm',
-                  bgcolor: 'background.level1',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    bgcolor: 'background.level2'
-                  }
-                }}
-              >
-                <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
-                  Quadrat Coverage
-                </Typography>
-                <Stack spacing={1}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">With Data:</Typography>
-                    <Chip size="sm" variant="soft" color="success">
-                      {progressTacho.PopulatedQuadrats.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">Without Data:</Typography>
-                    <Chip size="sm" variant="soft" color="warning">
-                      {progressTacho.UnpopulatedQuadrats.length.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <Typography level="body-sm">Total Quadrats:</Typography>
-                    <Chip size="sm" variant="soft" color="neutral">
-                      {progressTacho.TotalQuadrats.toLocaleString()}
-                    </Chip>
-                  </Stack>
-                </Stack>
-              </Box>
-            </Box>
+            {/* Stems Count */}
+            <MetricCard
+              title="Total Stems"
+              value={countStems}
+              icon={<NatureIcon sx={{ fontSize: 32 }} />}
+              gradient="success"
+              isLoading={isLoading}
+              trend={{
+                value: hasData ? `${(countStems / Math.max(countTrees, 1)).toFixed(1)} per tree` : 'No data',
+                direction: 'neutral'
+              }}
+            />
 
-            <Divider orientation="horizontal" />
+            {/* Active Personnel */}
+            <MetricCard
+              title="Active Personnel"
+              value={activeUsers}
+              icon={<PeopleIcon sx={{ fontSize: 32 }} />}
+              gradient="info"
+              isLoading={isLoading}
+              trend={{
+                value: activeUsers > 0 ? 'Currently active' : 'No activity',
+                direction: activeUsers > 0 ? 'up' : 'neutral'
+              }}
+            />
 
-            <Tooltip title={isPulsing ? undefined : 'This form creates and submits a Github issue!'}>
-              <Chip
-                component="div"
-                role="button"
-                tabIndex={0}
-                aria-label="Open feedback form"
-                variant="soft"
-                color="primary"
-                size="lg"
-                startDecorator={<HelpOutlineOutlinedIcon fontSize="medium" />}
-                onClick={triggerPulse}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    triggerPulse();
-                  }
-                }}
-                sx={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: designTokens.shadows.sm
-                  }
-                }}
-              >
-                <Typography level="body-md">Have feedback? Click here!</Typography>
-              </Chip>
-            </Tooltip>
-          </CardContent>
-        </Card>
-      </Box>
+            {/* New Recruits */}
+            <MetricCard
+              title="New Recruits"
+              value={stemTypes.CountNewRecruits}
+              icon={<CategoryIcon sx={{ fontSize: 32 }} />}
+              gradient="warning"
+              isLoading={isLoading}
+              trend={{
+                value: hasData ? 'This census' : 'No data',
+                direction: 'neutral'
+              }}
+            />
+          </Box>
 
-      {/* User Info and Recent Activity Section */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: '1fr',
-            lg: '1fr 2fr'
-          },
-          gap: 3
-        }}
-      >
-        {/* User-Specific Info Card */}
-        <Card
-          variant="outlined"
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              boxShadow: designTokens.shadows.md,
-              borderColor: 'primary.outlinedBorder'
-            }
-          }}
-          aria-labelledby="user-info-heading"
-        >
-          <CardContent sx={{ gap: 2 }}>
-            <Typography id="user-info-heading" level="h4" sx={{ fontWeight: 600, mb: 1 }}>
-              Your Profile
-            </Typography>
+          {/* Progress and Detailed Statistics Section */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                lg: '1fr 2fr'
+              },
+              gap: 3
+            }}
+          >
+            {/* Modern Progress Card */}
+            <ProgressCard
+              totalQuadrats={progressTacho.TotalQuadrats}
+              populatedQuadrats={progressTacho.PopulatedQuadrats}
+              populatedPercent={progressTacho.PopulatedPercent}
+              unpopulatedQuadrats={progressTacho.UnpopulatedQuadrats}
+              isLoading={isLoading}
+            />
 
-            <Box
+            {/* Census Statistics - Interactive Charts */}
+            <Card
+              variant="outlined"
               sx={{
-                p: 2,
-                borderRadius: 'sm',
-                bgcolor: 'background.level1',
-                transition: 'all 0.2s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                transition: 'all 0.3s ease',
                 '&:hover': {
-                  bgcolor: 'background.level2'
+                  boxShadow: designTokens.shadows.md,
+                  borderColor: 'primary.outlinedBorder'
                 }
               }}
+              aria-labelledby="census-statistics-heading"
             >
-              <Stack spacing={2}>
+              <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Box>
-                  <Typography level="body-xs" color="neutral">
-                    Assigned Role
+                  <Typography id="census-statistics-heading" level="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
+                    Census Visualization
                   </Typography>
-                  <Typography level="title-md" fontWeight="bold">
-                    {userRole}
+                  <Typography level="body-sm" color="neutral">
+                    {toggleSwitch ? 'Tachometer View' : 'Pie Chart View'} - Click to toggle
                   </Typography>
                 </Box>
-                <Divider />
-                <Box>
-                  <Typography level="body-xs" color="neutral">
-                    Registered Email
-                  </Typography>
-                  <Typography level="body-md" fontWeight="bold">
-                    {userEmail}
-                  </Typography>
-                </Box>
-              </Stack>
-            </Box>
 
-            <Divider />
-
-            <Box>
-              <Typography level="body-sm" color="neutral" sx={{ mb: 1 }}>
-                Site Access
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {allowedSites?.map(site => (
-                  <Chip
-                    key={site.schemaName}
-                    variant="soft"
-                    color="success"
-                    size="sm"
-                    startDecorator={<CheckIcon />}
+                {/* Only show chart if there are measurements */}
+                {hasData ? (
+                  <Box
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={toggleSwitch}
+                    aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
                     sx={{
-                      transition: 'all 0.2s ease',
+                      height: '400px',
+                      width: '100%',
+                      cursor: 'pointer',
+                      transition: 'transform 0.2s ease',
                       '&:hover': {
-                        transform: 'translateY(-2px)'
+                        transform: 'scale(1.02)'
+                      }
+                    }}
+                    onClick={() => setToggleSwitch(!toggleSwitch)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setToggleSwitch(!toggleSwitch);
                       }
                     }}
                   >
-                    {site.siteName}
+                    {toggleSwitch ? (
+                      <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
+                    ) : (
+                      <ProgressPieChart {...progressTacho} stemTypes={stemTypes} aria-label="Stem types pie chart" />
+                    )}
+                  </Box>
+                ) : (
+                  <Box sx={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography level="body-lg" color="neutral" textAlign="center">
+                      No measurements recorded for this census yet.
+                    </Typography>
+                  </Box>
+                )}
+
+                <Divider orientation="horizontal" />
+
+                {/* Detailed Statistics Grid */}
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: 2,
+                    mt: 1
+                  }}
+                >
+                  <Box
+                    sx={{
+                      p: 2,
+                      borderRadius: 'sm',
+                      bgcolor: 'background.level1',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        bgcolor: 'background.level2'
+                      }
+                    }}
+                  >
+                    <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
+                      Stem Type Breakdown
+                    </Typography>
+                    <Stack spacing={1}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">Old Stems:</Typography>
+                        <Chip size="sm" variant="soft" color="neutral">
+                          {stemTypes.CountOldStems.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">Multi Stems:</Typography>
+                        <Chip size="sm" variant="soft" color="primary">
+                          {stemTypes.CountMultiStems.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">New Recruits:</Typography>
+                        <Chip size="sm" variant="soft" color="success">
+                          {stemTypes.CountNewRecruits.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                    </Stack>
+                  </Box>
+
+                  <Box
+                    sx={{
+                      p: 2,
+                      borderRadius: 'sm',
+                      bgcolor: 'background.level1',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        bgcolor: 'background.level2'
+                      }
+                    }}
+                  >
+                    <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
+                      Quadrat Coverage
+                    </Typography>
+                    <Stack spacing={1}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">With Data:</Typography>
+                        <Chip size="sm" variant="soft" color="success">
+                          {progressTacho.PopulatedQuadrats.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">Without Data:</Typography>
+                        <Chip size="sm" variant="soft" color="warning">
+                          {progressTacho.UnpopulatedQuadrats.length.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography level="body-sm">Total Quadrats:</Typography>
+                        <Chip size="sm" variant="soft" color="neutral">
+                          {progressTacho.TotalQuadrats.toLocaleString()}
+                        </Chip>
+                      </Stack>
+                    </Stack>
+                  </Box>
+                </Box>
+
+                <Divider orientation="horizontal" />
+
+                <Tooltip title={isPulsing ? undefined : 'This form creates and submits a Github issue!'}>
+                  <Chip
+                    component="div"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Open feedback form"
+                    variant="soft"
+                    color="primary"
+                    size="lg"
+                    startDecorator={<HelpOutlineOutlinedIcon fontSize="medium" />}
+                    onClick={triggerPulse}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        triggerPulse();
+                      }
+                    }}
+                    sx={{
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: designTokens.shadows.sm
+                      }
+                    }}
+                  >
+                    <Typography level="body-md">Have feedback? Click here!</Typography>
                   </Chip>
-                ))}
-              </Box>
-            </Box>
+                </Tooltip>
+              </CardContent>
+            </Card>
+          </Box>
 
-            <Chip
+          {/* User Info and Recent Activity Section */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                lg: '1fr 2fr'
+              },
+              gap: 3
+            }}
+          >
+            {/* User-Specific Info Card */}
+            <Card
               variant="outlined"
-              color="warning"
-              size="sm"
-              startDecorator={<WarningIcon />}
-              sx={{ cursor: 'pointer', transition: 'all 0.2s ease', '&:hover': { bgcolor: 'warning.softBg' } }}
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                transition: 'all 0.3s ease',
+                '&:hover': {
+                  boxShadow: designTokens.shadows.md,
+                  borderColor: 'primary.outlinedBorder'
+                }
+              }}
+              aria-labelledby="user-info-heading"
             >
-              Report incorrect info
-            </Chip>
-          </CardContent>
-        </Card>
+              <CardContent sx={{ gap: 2 }}>
+                <Typography id="user-info-heading" level="h4" sx={{ fontWeight: 600, mb: 1 }}>
+                  Your Profile
+                </Typography>
 
-        {/* Recent Changes Card */}
-        <Card
-          variant="outlined"
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              boxShadow: designTokens.shadows.md,
-              borderColor: 'primary.outlinedBorder'
-            }
-          }}
-          aria-labelledby="recent-changes-heading"
-        >
-          <CardContent sx={{ gap: 2 }}>
-            <Box>
-              <Typography id="recent-changes-heading" level="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-                Recent Activity
-              </Typography>
-              <Typography level="body-sm" color="neutral">
-                Latest changes to census data
-              </Typography>
-            </Box>
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 'sm',
+                    bgcolor: 'background.level1',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      bgcolor: 'background.level2'
+                    }
+                  }}
+                >
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography level="body-xs" color="neutral">
+                        Assigned Role
+                      </Typography>
+                      <Typography level="title-md" fontWeight="bold">
+                        {userRole}
+                      </Typography>
+                    </Box>
+                    <Divider />
+                    <Box>
+                      <Typography level="body-xs" color="neutral">
+                        Registered Email
+                      </Typography>
+                      <Typography level="body-md" fontWeight="bold">
+                        {userEmail}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
 
-            {changelogHistory.filter(log => log.changeID).length > 0 ? (
-              <Stack spacing={2}>
-                {changelogHistory
-                  .filter(log => log.changeID)
-                  .slice(0, 5)
-                  .map((log, index) => (
-                    <AccordionGroup key={index}>
-                      <Accordion>
-                        <AccordionSummary>
-                          <Stack direction="row" spacing={2} alignItems="center" sx={{ width: '100%' }}>
-                            <Avatar
-                              size="sm"
-                              sx={{
-                                bgcolor: 'primary.softBg',
-                                color: 'primary.solidBg'
-                              }}
-                            >
-                              {log.changeID}
-                            </Avatar>
-                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography level="body-sm" sx={{ fontWeight: 600 }}>
-                                {log.operation || 'Update'} on {log.tableName || 'Data'}
-                              </Typography>
-                              <Typography level="body-xs" color="neutral">
-                                {moment(log.changeTimestamp).fromNow()}
-                              </Typography>
-                            </Box>
-                            <Chip size="sm" variant="soft" color="primary">
-                              {log.tableName || 'Data'}
-                            </Chip>
-                          </Stack>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                            <Box sx={{ flex: 1, p: 2, borderRadius: 'sm', bgcolor: 'background.level1' }}>
-                              <Typography level="body-xs" fontWeight="bold" color="neutral" sx={{ mb: 1 }}>
-                                Previous State
-                              </Typography>
-                              {log.oldRowState && Object.keys(log.oldRowState).length > 0 ? (
-                                <Stack spacing={0.5}>
-                                  {Object.entries(log.oldRowState)
-                                    .slice(0, 3)
-                                    .map(([key, value]) => (
-                                      <Typography key={key} level="body-xs">
-                                        <strong>{key}:</strong> {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
-                                      </Typography>
-                                    ))}
-                                </Stack>
-                              ) : (
-                                <Typography level="body-xs" color="neutral">
-                                  No previous data
-                                </Typography>
-                              )}
-                            </Box>
-                            <Box sx={{ flex: 1, p: 2, borderRadius: 'sm', bgcolor: 'background.level1' }}>
-                              <Typography level="body-xs" fontWeight="bold" color="neutral" sx={{ mb: 1 }}>
-                                New State
-                              </Typography>
-                              {log.newRowState && Object.keys(log.newRowState).length > 0 ? (
-                                <Stack spacing={0.5}>
-                                  {Object.entries(log.newRowState)
-                                    .slice(0, 3)
-                                    .map(([key, value]) => (
-                                      <Typography key={key} level="body-xs">
-                                        <strong>{key}:</strong> {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
-                                      </Typography>
-                                    ))}
-                                </Stack>
-                              ) : (
-                                <Typography level="body-xs" color="neutral">
-                                  No new data
-                                </Typography>
-                              )}
-                            </Box>
-                          </Stack>
-                        </AccordionDetails>
-                      </Accordion>
-                    </AccordionGroup>
-                  ))}
-              </Stack>
-            ) : (
-              <EmptyState
-                icon={<AssessmentIcon />}
-                title="No Recent Activity"
-                description="There haven't been any changes to your census data recently. Activity will appear here when data is added, updated, or validated."
-                iconColor="neutral"
-                sx={{ py: 4 }}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </Box>
+                <Divider />
+
+                <Box>
+                  <Typography level="body-sm" color="neutral" sx={{ mb: 1 }}>
+                    Site Access
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {allowedSites?.map(site => (
+                      <Chip
+                        key={site.schemaName}
+                        variant="soft"
+                        color="success"
+                        size="sm"
+                        startDecorator={<CheckIcon />}
+                        sx={{
+                          transition: 'all 0.2s ease',
+                          '&:hover': {
+                            transform: 'translateY(-2px)'
+                          }
+                        }}
+                      >
+                        {site.siteName}
+                      </Chip>
+                    ))}
+                  </Box>
+                </Box>
+
+                <Chip
+                  variant="outlined"
+                  color="warning"
+                  size="sm"
+                  startDecorator={<WarningIcon />}
+                  sx={{ cursor: 'pointer', transition: 'all 0.2s ease', '&:hover': { bgcolor: 'warning.softBg' } }}
+                >
+                  Report incorrect info
+                </Chip>
+              </CardContent>
+            </Card>
+
+            {/* Recent Changes Card */}
+            <Card
+              variant="outlined"
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                transition: 'all 0.3s ease',
+                '&:hover': {
+                  boxShadow: designTokens.shadows.md,
+                  borderColor: 'primary.outlinedBorder'
+                }
+              }}
+              aria-labelledby="recent-changes-heading"
+            >
+              <CardContent sx={{ gap: 2 }}>
+                <Box>
+                  <Typography id="recent-changes-heading" level="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
+                    Recent Activity
+                  </Typography>
+                  <Typography level="body-sm" color="neutral">
+                    Latest changes to census data
+                  </Typography>
+                </Box>
+
+                {changelogHistory.filter(log => log.changeID).length > 0 ? (
+                  <Stack spacing={2}>
+                    {changelogHistory
+                      .filter(log => log.changeID)
+                      .slice(0, 5)
+                      .map((log, index) => (
+                        <AccordionGroup key={index}>
+                          <Accordion>
+                            <AccordionSummary>
+                              <Stack direction="row" spacing={2} alignItems="center" sx={{ width: '100%' }}>
+                                <Avatar
+                                  size="sm"
+                                  sx={{
+                                    bgcolor: 'primary.softBg',
+                                    color: 'primary.solidBg'
+                                  }}
+                                >
+                                  {log.changeID}
+                                </Avatar>
+                                <Box sx={{ flex: 1, minWidth: 0 }}>
+                                  <Typography level="body-sm" sx={{ fontWeight: 600 }}>
+                                    {log.operation || 'Update'} on {log.tableName || 'Data'}
+                                  </Typography>
+                                  <Typography level="body-xs" color="neutral">
+                                    {moment(log.changeTimestamp).fromNow()}
+                                  </Typography>
+                                </Box>
+                                <Chip size="sm" variant="soft" color="primary">
+                                  {log.tableName || 'Data'}
+                                </Chip>
+                              </Stack>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+                                <Box sx={{ flex: 1, p: 2, borderRadius: 'sm', bgcolor: 'background.level1' }}>
+                                  <Typography level="body-xs" fontWeight="bold" color="neutral" sx={{ mb: 1 }}>
+                                    Previous State
+                                  </Typography>
+                                  {log.oldRowState && Object.keys(log.oldRowState).length > 0 ? (
+                                    <Stack spacing={0.5}>
+                                      {Object.entries(log.oldRowState)
+                                        .slice(0, 3)
+                                        .map(([key, value]) => (
+                                          <Typography key={key} level="body-xs">
+                                            <strong>{key}:</strong> {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
+                                          </Typography>
+                                        ))}
+                                    </Stack>
+                                  ) : (
+                                    <Typography level="body-xs" color="neutral">
+                                      No previous data
+                                    </Typography>
+                                  )}
+                                </Box>
+                                <Box sx={{ flex: 1, p: 2, borderRadius: 'sm', bgcolor: 'background.level1' }}>
+                                  <Typography level="body-xs" fontWeight="bold" color="neutral" sx={{ mb: 1 }}>
+                                    New State
+                                  </Typography>
+                                  {log.newRowState && Object.keys(log.newRowState).length > 0 ? (
+                                    <Stack spacing={0.5}>
+                                      {Object.entries(log.newRowState)
+                                        .slice(0, 3)
+                                        .map(([key, value]) => (
+                                          <Typography key={key} level="body-xs">
+                                            <strong>{key}:</strong> {typeof value === 'object' && value !== null ? JSON.stringify(value) : (value ?? 'NULL')}
+                                          </Typography>
+                                        ))}
+                                    </Stack>
+                                  ) : (
+                                    <Typography level="body-xs" color="neutral">
+                                      No new data
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+                        </AccordionGroup>
+                      ))}
+                  </Stack>
+                ) : (
+                  <EmptyState
+                    icon={<AssessmentIcon />}
+                    title="No Recent Activity"
+                    description="There haven't been any changes to your census data recently. Activity will appear here when data is added, updated, or validated."
+                    iconColor="neutral"
+                    sx={{ py: 4 }}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </Box>
         </>
       )}
     </Box>

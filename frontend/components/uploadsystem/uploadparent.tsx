@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { FileWithStream, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -17,6 +17,9 @@ import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure'
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import ailogger from '@/ailogger';
+import { useFileManagement } from '@/app/hooks/useFileManagement';
+import { useUploadState } from '@/app/hooks/useUploadState';
+import { useErrorHandling } from '@/app/hooks/useErrorHandling';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -40,42 +43,26 @@ interface UploadParentProps {
 
 export default function UploadParent(props: UploadParentProps) {
   const { onReset, overrideUploadForm, skipToProcessing, onUploadComplete } = props;
-  /**
-   * this will be the new parent upload function that will then pass data to child components being called within
-   */
-  // select schema table that file should be uploaded to --> state
-  const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
-  const [personnelRecording, setPersonnelRecording] = useState('');
 
-  // core enum to handle state progression
-  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
-  // dropped file storage
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithStream[]>([]);
-  // pagination counter to manage validation table view/allow scroll through files in REVIEW
-  const [dataViewActive, setDataViewActive] = useState(1);
-  // for REVIEW --> storage of parsed data for display
+  // Custom hooks for state management
+  const fileManagement = useFileManagement();
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing);
+  const errorHandling = useErrorHandling();
+
+  // Remaining local state (not managed by custom hooks)
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
-  const [_errors, setErrors] = useState<FileCollectionRowSet>({});
-  // Confirmation menu states:
-  const [_currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
-  const [_expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
-  const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
-  const [allFileHeaders, setAllFileHeaders] = useState<Record<string, string[]>>({});
-  const [isDataUnsaved, setIsDataUnsaved] = useState(false);
-  const [uploadError, setUploadError] = useState<any>();
-  const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
+  const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
+
+  // Context and session
   const _currentPlot = usePlotContext();
   const _currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { data: session } = useSession();
-  const _PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
-  const [_isStreaming, _setIsStreaming] = useState(false);
-  const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (isDataUnsaved) {
+      if (uploadState.state.isDataUnsaved) {
         event.preventDefault();
         event.returnValue = '';
       }
@@ -86,20 +73,20 @@ export default function UploadParent(props: UploadParentProps) {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isDataUnsaved]);
+  }, [uploadState.state.isDataUnsaved]);
 
   useEffect(() => {
-    if (reviewState === ReviewStates.COMPLETE && onUploadComplete) {
+    if (uploadState.state.reviewState === ReviewStates.COMPLETE && onUploadComplete) {
       onUploadComplete();
     }
-  }, [reviewState, onUploadComplete]);
+  }, [uploadState.state.reviewState, onUploadComplete]);
 
   function _areHeadersValid(actualHeaders: string[]): {
     isValid: boolean;
     missingHeaders: string[];
   } {
-    if (!uploadForm) throw new Error('No upload form set!');
-    const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+    if (!uploadState.state.uploadForm) throw new Error('No upload form set!');
+    const requiredHeaders = RequiredTableHeadersByFormType[uploadState.state.uploadForm];
     const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
 
@@ -112,96 +99,70 @@ export default function UploadParent(props: UploadParentProps) {
   }
 
   async function handleReturnToStart() {
-    setDataViewActive(1);
-    setAcceptedFiles([]);
+    uploadState.resetToStart();
+    fileManagement.clearFiles();
     setParsedData({});
-    setErrors({});
-    setUploadForm(undefined);
-    setPersonnelRecording('');
-    setReviewState(ReviewStates.START);
   }
 
   async function resetError() {
-    setUploadError(null);
-    setErrorComponent('');
+    errorHandling.clearError();
   }
 
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
-    // setAcceptedFiles(prevFiles => [...prevFiles, parseStreamCheck(newFile, setAllFileHeaders)]);
-    setAcceptedFiles(prevFiles => [...prevFiles, new FileWithStream(newFile, true, newFile.path)]);
+    fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
-    const fileToRemove = acceptedFiles[fileIndex];
-    setAcceptedFiles(prevFiles => prevFiles.filter((_, index) => index !== fileIndex));
-
-    // Remove the headers of the deleted file
-    setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
-      delete updatedHeaders[fileToRemove.name];
-      return updatedHeaders;
-    });
+    fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
-    const fileToReplace = acceptedFiles[fileIndex];
-    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
-
-    // Update headers after replacement
-    setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
-      delete updatedHeaders[fileToReplace.name];
-      return updatedHeaders;
-    });
+    fileManagement.replaceFile(fileIndex, newFile);
   };
 
   async function handleInitialSubmit() {
-    // setReviewState(ReviewStates.REVIEW);
-    setReviewState(ReviewStates.UPLOAD_SQL);
+    uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
   }
 
   useEffect(() => {
-    if (acceptedFiles.length > 0 && dataViewActive <= acceptedFiles.length) {
-      const currentFile = acceptedFiles[dataViewActive - 1];
-      if (currentFile && allFileHeaders[currentFile.name]) {
-        setCurrentFileHeaders(allFileHeaders[currentFile.name]);
-      } else {
-        setCurrentFileHeaders([]);
-      }
+    // If the user removes all files, move back to file drop phase
+    if (fileManagement.fileCount === 0 && uploadState.state.reviewState === ReviewStates.REVIEW) {
+      uploadState.setReviewState(ReviewStates.UPLOAD_FILES);
     }
-    if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
-  }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
+  }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState]);
 
   // Check if we should start with reingestion processing
   useEffect(() => {
-    if (skipToProcessing && uploadForm === FormType.measurements) {
+    if (skipToProcessing && uploadState.state.uploadForm === FormType.measurements) {
       ailogger.info('Skipping to reingestion processing stage');
-      setReviewState(ReviewStates.UPLOAD_SQL);
+      uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
     }
-  }, [skipToProcessing, uploadForm]);
+  }, [skipToProcessing, uploadState]);
 
   const renderStateContent = () => {
-    if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(ailogger.error);
-    switch (reviewState) {
+    if (!uploadState.state.uploadForm && uploadState.state.reviewState !== ReviewStates.START) {
+      handleReturnToStart().catch(ailogger.error);
+    }
+    switch (uploadState.state.reviewState) {
       case ReviewStates.START:
         return (
           <UploadStart
-            uploadForm={uploadForm}
-            setUploadForm={setUploadForm}
-            setExpectedHeaders={setExpectedHeaders}
-            setReviewState={setReviewState}
-            personnelRecording={personnelRecording}
-            setPersonnelRecording={setPersonnelRecording}
+            uploadForm={uploadState.state.uploadForm}
+            setUploadForm={uploadState.setUploadForm}
+            setExpectedHeaders={() => {}} // Deprecated - no longer needed
+            setReviewState={uploadState.setReviewState}
+            personnelRecording={uploadState.state.personnelRecording}
+            setPersonnelRecording={uploadState.setPersonnelRecording}
           />
         );
       case ReviewStates.UPLOAD_FILES:
         return (
           <UploadParseFiles
-            uploadForm={uploadForm}
-            acceptedFiles={acceptedFiles}
-            dataViewActive={dataViewActive}
-            setDataViewActive={setDataViewActive}
+            uploadForm={uploadState.state.uploadForm}
+            acceptedFiles={fileManagement.files}
+            dataViewActive={uploadState.state.dataViewActive}
+            setDataViewActive={uploadState.setDataViewActive}
             handleInitialSubmit={handleInitialSubmit}
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}
@@ -212,53 +173,63 @@ export default function UploadParent(props: UploadParentProps) {
         );
       case ReviewStates.UPLOAD_SQL:
         // If skipToProcessing is true and there are no files, use reingestion component
-        if (skipToProcessing && acceptedFiles.length === 0) {
-          return <UploadReingestion schema={currentSite?.schemaName || ''} setReviewState={setReviewState} setIsDataUnsaved={setIsDataUnsaved} />;
+        if (skipToProcessing && fileManagement.fileCount === 0) {
+          return (
+            <UploadReingestion
+              schema={currentSite?.schemaName || ''}
+              setReviewState={uploadState.setReviewState}
+              setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            />
+          );
         }
         return (
           <UploadFireSQL
-            personnelRecording={personnelRecording}
-            acceptedFiles={acceptedFiles}
-            uploadForm={uploadForm}
+            personnelRecording={uploadState.state.personnelRecording}
+            acceptedFiles={fileManagement.files}
+            uploadForm={uploadState.state.uploadForm}
             parsedData={parsedData}
-            setReviewState={setReviewState}
-            setIsDataUnsaved={setIsDataUnsaved}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
-            uploadCompleteMessage={uploadCompleteMessage}
-            setUploadCompleteMessage={setUploadCompleteMessage}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
+            uploadCompleteMessage={uploadState.state.uploadCompleteMessage}
+            setUploadCompleteMessage={uploadState.setUploadCompleteMessage}
+            setUploadError={(error: any) => errorHandling.setError(error)}
+            setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
           />
         );
       case ReviewStates.VALIDATE:
-        return <UploadValidation setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
+        return <UploadValidation setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPDATE:
-        return <UploadUpdateValidations setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
+        return <UploadUpdateValidations setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPLOAD_AZURE:
         return (
           <UploadFireAzure
-            acceptedFiles={acceptedFiles}
-            uploadForm={uploadForm}
-            setReviewState={setReviewState}
-            setIsDataUnsaved={setIsDataUnsaved}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
+            acceptedFiles={fileManagement.files}
+            uploadForm={uploadState.state.uploadForm}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            setUploadError={(error: any) => errorHandling.setError(error)}
+            setErrorComponent={errorHandling.setErrorComponent}
             user={session?.user?.name ? session?.user?.name : ''}
             allRowToCMID={allRowToCMID}
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} />;
       default:
         return (
           <UploadError
-            error={uploadError}
-            component={errorComponent}
-            acceptedFiles={acceptedFiles}
-            setAcceptedFiles={setAcceptedFiles}
-            setReviewState={setReviewState}
+            error={errorHandling.error}
+            component={errorHandling.errorComponent}
+            acceptedFiles={fileManagement.files}
+            setAcceptedFiles={value => {
+              const files = typeof value === 'function' ? value(fileManagement.files) : value;
+              fileManagement.clearFiles();
+              files.forEach((file: any) => fileManagement.addFile(file));
+            }}
+            setReviewState={uploadState.setReviewState}
             handleReturnToStart={handleReturnToStart}
             resetError={resetError}
           />

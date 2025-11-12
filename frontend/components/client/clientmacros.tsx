@@ -11,17 +11,45 @@ import { Plot, QuadratRDS, QuadratResult, Site } from '@/config/sqlrdsdefinition
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Autocomplete } from '@mui/joy';
 
-export function LinearProgressWithLabel(props: LinearProgressProps & { value?: number; currentlyrunningmsg?: string }) {
+export function LinearProgressWithLabel(
+  props: LinearProgressProps & {
+    value?: number;
+    currentlyrunningmsg?: string;
+    'aria-label'?: string;
+    'aria-describedby'?: string;
+  }
+) {
+  const percentage = props.value ? Math.round(props.value) : 0;
+  const progressLabel = props['aria-label'] || 'Upload progress';
+  const progressText = props.value ? `${percentage}% complete. ${props.currentlyrunningmsg || ''}` : props.currentlyrunningmsg || 'Processing...';
+
   return (
-    <Box sx={{ display: 'flex', flex: 1, alignItems: 'center', flexDirection: 'column' }}>
-      <Box sx={{ width: '100%', mr: 1 }}>
-        {props.value ? <LinearProgress variant="determinate" {...props} /> : <LinearProgress variant={'indeterminate'} {...props} />}
-      </Box>
-      <Box sx={{ minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column' }}>
+    <Box sx={{ display: 'flex', flex: 1, alignItems: 'center', flexDirection: 'column', width: '100%' }}>
+      <Box sx={{ width: '100%' }}>
         {props.value ? (
-          <Typography variant="body2" color="text.secondary">{`${Math.round(props?.value)}% --> ${props?.currentlyrunningmsg}`}</Typography>
+          <LinearProgress
+            variant="determinate"
+            sx={{ width: '100%' }}
+            {...props}
+            aria-label={progressLabel}
+            aria-valuenow={percentage}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={progressText}
+          />
         ) : (
-          <Typography variant="body2" color="text.secondary">{`${props?.currentlyrunningmsg}`}</Typography>
+          <LinearProgress variant="indeterminate" sx={{ width: '100%' }} {...props} aria-label={progressLabel} aria-valuetext={progressText} />
+        )}
+      </Box>
+      <Box sx={{ minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column', width: '100%', mt: 1 }} aria-live="polite" aria-atomic="true">
+        {props.value ? (
+          <Typography variant="body2" color="text.secondary">
+            {`${percentage}% --> ${props.currentlyrunningmsg}`}
+          </Typography>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            {`${props.currentlyrunningmsg}`}
+          </Typography>
         )}
       </Box>
     </Box>

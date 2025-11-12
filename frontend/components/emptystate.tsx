@@ -71,15 +71,7 @@ export interface EmptyStateProps {
  * />
  * ```
  */
-export default function EmptyState({
-  icon,
-  title,
-  description,
-  primaryAction,
-  secondaryAction,
-  iconColor = 'primary',
-  sx
-}: EmptyStateProps) {
+export default function EmptyState({ icon, title, description, primaryAction, secondaryAction, iconColor = 'primary', sx }: EmptyStateProps) {
   return (
     <Box
       sx={{
@@ -125,11 +117,7 @@ export default function EmptyState({
 
       {/* Actions */}
       {(primaryAction || secondaryAction) && (
-        <Stack
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={2}
-          justifyContent="center"
-        >
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
           {primaryAction && (
             <Button
               variant={primaryAction.variant || 'solid'}

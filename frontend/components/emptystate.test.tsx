@@ -9,13 +9,7 @@ const TestIcon = () => <span data-testid="test-icon">📊</span>;
 describe('EmptyState', () => {
   describe('rendering', () => {
     it('renders icon, title, and description', () => {
-      render(
-        <EmptyState
-          icon={<TestIcon />}
-          title="No Data Available"
-          description="There is currently no data to display"
-        />
-      );
+      render(<EmptyState icon={<TestIcon />} title="No Data Available" description="There is currently no data to display" />);
 
       expect(screen.getByTestId('test-icon')).toBeInTheDocument();
       expect(screen.getByText('No Data Available')).toBeInTheDocument();
@@ -23,12 +17,7 @@ describe('EmptyState', () => {
     });
 
     it('renders without action buttons when not provided', () => {
-      render(
-        <EmptyState
-          icon={<TestIcon />}
-          title="Empty State"
-          description="No actions available"
-        />      );
+      render(<EmptyState icon={<TestIcon />} title="Empty State" description="No actions available" />);
 
       expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
@@ -43,7 +32,8 @@ describe('EmptyState', () => {
             label: 'Create New',
             onClick: vi.fn()
           }}
-        />      );
+        />
+      );
 
       expect(screen.getByRole('button', { name: 'Create New' })).toBeInTheDocument();
     });
@@ -62,7 +52,8 @@ describe('EmptyState', () => {
             label: 'Secondary Action',
             onClick: vi.fn()
           }}
-        />      );
+        />
+      );
 
       expect(screen.getByRole('button', { name: 'Primary Action' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Secondary Action' })).toBeInTheDocument();
@@ -83,7 +74,8 @@ describe('EmptyState', () => {
             label: 'Click Me',
             onClick: handleClick
           }}
-        />      );
+        />
+      );
 
       await user.click(screen.getByRole('button', { name: 'Click Me' }));
       expect(handleClick).toHaveBeenCalledTimes(1);
@@ -102,7 +94,8 @@ describe('EmptyState', () => {
             label: 'Help',
             onClick: handleClick
           }}
-        />      );
+        />
+      );
 
       await user.click(screen.getByRole('button', { name: 'Help' }));
       expect(handleClick).toHaveBeenCalledTimes(1);
@@ -126,7 +119,8 @@ describe('EmptyState', () => {
             label: 'Secondary',
             onClick: handleSecondary
           }}
-        />      );
+        />
+      );
 
       await user.click(screen.getByRole('button', { name: 'Primary' }));
       expect(handlePrimary).toHaveBeenCalledTimes(1);
@@ -140,13 +134,7 @@ describe('EmptyState', () => {
 
   describe('customization', () => {
     it('applies custom icon color', () => {
-      const { container } = render(
-        <EmptyState
-          icon={<TestIcon />}
-          title="Custom Color"
-          description="With custom icon color"
-          iconColor="success"
-        />      );
+      const { container } = render(<EmptyState icon={<TestIcon />} title="Custom Color" description="With custom icon color" iconColor="success" />);
 
       // Avatar should have success color classes
       const avatar = container.querySelector('[class*="Avatar"]');
@@ -171,7 +159,8 @@ describe('EmptyState', () => {
             variant: 'soft',
             color: 'warning'
           }}
-        />      );
+        />
+      );
 
       expect(screen.getByRole('button', { name: 'Primary' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Secondary' })).toBeInTheDocument();
@@ -196,7 +185,8 @@ describe('EmptyState', () => {
             onClick: vi.fn(),
             startDecorator: <SecondaryIcon />
           }}
-        />      );
+        />
+      );
 
       expect(screen.getByTestId('primary-icon')).toBeInTheDocument();
       expect(screen.getByTestId('secondary-icon')).toBeInTheDocument();
@@ -205,12 +195,7 @@ describe('EmptyState', () => {
 
   describe('accessibility', () => {
     it('has proper heading hierarchy with h3', () => {
-      render(
-        <EmptyState
-          icon={<TestIcon />}
-          title="Accessible Title"
-          description="Description text"
-        />      );
+      render(<EmptyState icon={<TestIcon />} title="Accessible Title" description="Description text" />);
 
       const heading = screen.getByText('Accessible Title');
       expect(heading.tagName).toBe('H3');
@@ -230,7 +215,8 @@ describe('EmptyState', () => {
             label: 'Secondary Action',
             onClick: vi.fn()
           }}
-        />      );
+        />
+      );
 
       const buttons = screen.getAllByRole('button');
       expect(buttons).toHaveLength(2);

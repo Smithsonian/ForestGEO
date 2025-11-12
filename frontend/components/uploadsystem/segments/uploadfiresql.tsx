@@ -1151,18 +1151,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             mt: 4
           }}
         >
-          <Stack direction="column" spacing={3} sx={{ width: '100%', maxWidth: '600px', alignItems: 'center' }}>
+          <Stack direction="column" spacing={3} sx={{ width: '100%', maxWidth: '600px', alignItems: 'center' }} role="status" aria-live="polite">
             <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-              <Typography level="title-lg">Upload Progress</Typography>
-              <Typography level="body-sm" color="neutral">
+              <Typography level="title-lg" id="upload-progress-title">
+                Upload Progress
+              </Typography>
+              <Typography level="body-sm" color="neutral" aria-label={`${totalOperations} operations, ${totalChunks} chunks total`}>
                 {totalOperations} operations, {totalChunks} chunks total
               </Typography>
             </Stack>
 
             <Box sx={{ width: '100%' }}>
               <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                <Typography level="body-sm">File Progress</Typography>
-                <Typography level="body-sm" color="primary">
+                <Typography level="body-sm" id="file-progress-label">
+                  File Progress
+                </Typography>
+                <Typography level="body-sm" color="primary" aria-live="polite">
                   {completedOperations}/{totalOperations}
                 </Typography>
               </Stack>
@@ -1173,20 +1177,41 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 value={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
                 determinate
                 sx={{ width: '100%' }}
+                aria-label="File upload progress"
+                aria-labelledby="file-progress-label"
+                aria-valuenow={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuetext={`${completedOperations} of ${totalOperations} files uploaded`}
               />
             </Box>
 
             {totalChunks !== 0 && (
               <Box sx={{ width: '100%' }}>
                 <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm">Data Processing</Typography>
-                  <Typography level="body-sm" color="primary">
+                  <Typography level="body-sm" id="data-processing-label">
+                    Data Processing
+                  </Typography>
+                  <Typography level="body-sm" color="primary" aria-live="polite">
                     {completedChunks}/{totalChunks} chunks
                   </Typography>
                 </Stack>
-                <LinearProgress determinate variant="soft" color="primary" size="lg" value={(completedChunks / totalChunks) * 100} sx={{ width: '100%' }} />
+                <LinearProgress
+                  determinate
+                  variant="soft"
+                  color="primary"
+                  size="lg"
+                  value={(completedChunks / totalChunks) * 100}
+                  sx={{ width: '100%' }}
+                  aria-label="Data processing progress"
+                  aria-labelledby="data-processing-label"
+                  aria-valuenow={(completedChunks / totalChunks) * 100}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuetext={`${completedChunks} of ${totalChunks} chunks processed. ${etc !== 'Calculating...' ? etc : ''}`}
+                />
                 {completedChunks < totalChunks && etc !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
                     {((completedChunks / totalChunks) * 100).toFixed(1)}% complete • {etc}
                   </Typography>
                 )}
@@ -1196,14 +1221,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             {uploadForm === 'measurements' && totalBatches !== 0 && (
               <Box sx={{ width: '100%' }}>
                 <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm">Batch Processing</Typography>
-                  <Typography level="body-sm" color="primary">
+                  <Typography level="body-sm" id="batch-processing-label">
+                    Batch Processing
+                  </Typography>
+                  <Typography level="body-sm" color="primary" aria-live="polite">
                     {processedChunks}/{totalBatches} batches
                   </Typography>
                 </Stack>
-                <LinearProgress determinate variant="soft" color="success" size="lg" value={(processedChunks / totalBatches) * 100} sx={{ width: '100%' }} />
+                <LinearProgress
+                  determinate
+                  variant="soft"
+                  color="success"
+                  size="lg"
+                  value={(processedChunks / totalBatches) * 100}
+                  sx={{ width: '100%' }}
+                  aria-label="Batch processing progress"
+                  aria-labelledby="batch-processing-label"
+                  aria-valuenow={(processedChunks / totalBatches) * 100}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuetext={`${processedChunks} of ${totalBatches} batches processed. ${processETC !== 'Calculating...' ? processETC : ''}`}
+                />
                 {processedChunks < totalBatches && processETC !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
                     {((processedChunks / totalBatches) * 100).toFixed(1)}% complete • {processETC}
                   </Typography>
                 )}
@@ -1213,8 +1253,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             {isVerifying && totalVerificationSteps > 0 && (
               <Box sx={{ width: '100%' }}>
                 <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm">Verification Process</Typography>
-                  <Typography level="body-sm" color="warning">
+                  <Typography level="body-sm" id="verification-label">
+                    Verification Process
+                  </Typography>
+                  <Typography level="body-sm" color="warning" aria-live="polite">
                     {verificationStep}/{totalVerificationSteps} steps
                   </Typography>
                 </Stack>
@@ -1225,9 +1267,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   size="lg"
                   value={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
                   sx={{ width: '100%' }}
+                  aria-label="Verification progress"
+                  aria-labelledby="verification-label"
+                  aria-valuenow={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuetext={`${verificationStep} of ${totalVerificationSteps} verification steps complete. ${verificationStatus || ''}`}
                 />
                 {verificationStatus && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
+                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
                     {verificationStatus}
                   </Typography>
                 )}

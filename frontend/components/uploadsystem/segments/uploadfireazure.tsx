@@ -105,10 +105,20 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             alignItems: 'center',
             mt: 4
           }}
+          role="status"
+          aria-live="polite"
         >
-          <Stack direction={'column'}>
-            <Typography level="title-lg">{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+          <Stack direction={'column'} sx={{ width: '100%' }}>
+            <Typography level="title-lg" id="upload-operations-label">
+              {`Total Operations: ${totalOperations}`}
+            </Typography>
+            <LinearProgressWithLabel
+              variant={'determinate'}
+              value={(completedOperations / totalOperations) * 100}
+              currentlyrunningmsg={currentlyRunning}
+              aria-label="File upload progress"
+              aria-describedby="upload-operations-label"
+            />
           </Stack>
         </Box>
       ) : refreshError ? (

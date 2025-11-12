@@ -175,10 +175,12 @@ export default function ProgressCard({
                 fontSize: '0.875rem',
                 cursor: onViewUnpopulated ? 'pointer' : 'default',
                 transition: 'all 0.2s ease',
-                '&:hover': onViewUnpopulated ? {
-                  transform: 'translateY(-2px)',
-                  boxShadow: designTokens.shadows.sm
-                } : {}
+                '&:hover': onViewUnpopulated
+                  ? {
+                      transform: 'translateY(-2px)',
+                      boxShadow: designTokens.shadows.sm
+                    }
+                  : {}
               }}
             >
               {unpopulatedCount} Pending
@@ -197,12 +199,7 @@ export default function ProgressCard({
             {unpopulatedQuadrats
               .filter(q => q.trim().length > 0)
               .map((quadrat, index) => (
-                <Chip
-                  key={index}
-                  variant="outlined"
-                  size="sm"
-                  sx={{ fontSize: '0.75rem' }}
-                >
+                <Chip key={index} variant="outlined" size="sm" sx={{ fontSize: '0.75rem' }}>
                   {quadrat}
                 </Chip>
               ))}

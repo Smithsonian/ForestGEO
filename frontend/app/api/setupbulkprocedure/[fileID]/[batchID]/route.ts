@@ -51,6 +51,24 @@ export async function GET(
             throw new Error(`Failed to acquire application lock for file ${fileID}`);
           }
 
+          // Get plotID and censusID for plot+census-level locking
+          const plotCensusQuery = safeFormatQuery(
+            schema,
+            'SELECT DISTINCT PlotID, CensusID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? LIMIT 1'
+          );
+          const plotCensusResult = await connectionManager.executeQuery(plotCensusQuery, [fileID, batchID], transactionID);
+
+          if (plotCensusResult && plotCensusResult.length > 0) {
+            const { PlotID, CensusID } = plotCensusResult[0];
+
+            // Acquire plot+census-level lock to prevent concurrent uploads to same plot/census
+            const plotCensusLockAcquired = await connectionManager.acquireApplicationLock(`plot:${PlotID}:census:${CensusID}`, transactionID, 60000);
+            if (!plotCensusLockAcquired) {
+              throw new Error(`Another upload is in progress for Plot ${PlotID}, Census ${CensusID}. Please wait for it to complete.`);
+            }
+            ailogger.info(`Acquired plot+census lock for Plot ${PlotID}, Census ${CensusID}`);
+          }
+
           const queryStart = Date.now();
           // Use pre-validated and formatted SQL to prevent injection
           const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, batchID], transactionID);

@@ -16,13 +16,7 @@ import ParkIcon from '@mui/icons-material/Park';
 describe('MetricCard Component', () => {
   describe('Rendering', () => {
     it('should render with basic props', () => {
-      render(
-        <MetricCard
-          title="Total Trees"
-          value={1234}
-          icon={<ParkIcon data-testid="park-icon" />}
-        />
-      );
+      render(<MetricCard title="Total Trees" value={1234} icon={<ParkIcon data-testid="park-icon" />} />);
 
       expect(screen.getByText('Total Trees')).toBeInTheDocument();
       expect(screen.getByText('1,234')).toBeInTheDocument();
@@ -30,37 +24,19 @@ describe('MetricCard Component', () => {
     });
 
     it('should render with string value', () => {
-      render(
-        <MetricCard
-          title="Status"
-          value="Active"
-          icon={<ParkIcon />}
-        />
-      );
+      render(<MetricCard title="Status" value="Active" icon={<ParkIcon />} />);
 
       expect(screen.getByText('Active')).toBeInTheDocument();
     });
 
     it('should format number values with locale string', () => {
-      render(
-        <MetricCard
-          title="Large Number"
-          value={1234567}
-          icon={<ParkIcon />}
-        />
-      );
+      render(<MetricCard title="Large Number" value={1234567} icon={<ParkIcon />} />);
 
       expect(screen.getByText('1,234,567')).toBeInTheDocument();
     });
 
     it('should render zero value', () => {
-      render(
-        <MetricCard
-          title="Count"
-          value={0}
-          icon={<ParkIcon />}
-        />
-      );
+      render(<MetricCard title="Count" value={0} icon={<ParkIcon />} />);
 
       expect(screen.getByText('0')).toBeInTheDocument();
     });
@@ -68,13 +44,7 @@ describe('MetricCard Component', () => {
 
   describe('Gradient Variants', () => {
     it('should apply primary gradient by default', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
@@ -82,56 +52,28 @@ describe('MetricCard Component', () => {
     });
 
     it('should apply success gradient', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          gradient="success"
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} gradient="success" />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
     });
 
     it('should apply warning gradient', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          gradient="warning"
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} gradient="warning" />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
     });
 
     it('should apply info gradient', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          gradient="info"
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} gradient="info" />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
     });
 
     it('should apply neutral gradient', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          gradient="neutral"
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} gradient="neutral" />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
@@ -198,13 +140,7 @@ describe('MetricCard Component', () => {
     });
 
     it('should not render trend section when trend prop is undefined', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} />);
 
       // Check that there's no trend-related text
       const card = container.querySelector('.MuiCard-root');
@@ -214,14 +150,7 @@ describe('MetricCard Component', () => {
 
   describe('Loading State', () => {
     it('should render skeleton when isLoading is true', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          isLoading={true}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} isLoading={true} />);
 
       // Should render MetricCardSkeleton instead
       const skeletons = container.querySelectorAll('.MuiSkeleton-root');
@@ -229,14 +158,7 @@ describe('MetricCard Component', () => {
     });
 
     it('should render content when isLoading is false', () => {
-      render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          isLoading={false}
-        />
-      );
+      render(<MetricCard title="Test" value={100} icon={<ParkIcon />} isLoading={false} />);
 
       expect(screen.getByText('Test')).toBeInTheDocument();
       expect(screen.getByText('100')).toBeInTheDocument();
@@ -246,14 +168,7 @@ describe('MetricCard Component', () => {
   describe('Click Handler', () => {
     it('should call onClick when card is clicked', () => {
       const handleClick = vi.fn();
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          onClick={handleClick}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} onClick={handleClick} />);
 
       const card = container.querySelector('.MuiCard-root') as HTMLElement;
       card?.click();
@@ -262,27 +177,14 @@ describe('MetricCard Component', () => {
     });
 
     it('should have pointer cursor when onClick is provided', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-          onClick={() => {}}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} onClick={() => {}} />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toHaveStyle({ cursor: 'pointer' });
     });
 
     it('should have default cursor when onClick is not provided', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toHaveStyle({ cursor: 'default' });
@@ -291,13 +193,7 @@ describe('MetricCard Component', () => {
 
   describe('Accessibility', () => {
     it('should have proper text hierarchy', () => {
-      render(
-        <MetricCard
-          title="Total Trees"
-          value={1234}
-          icon={<ParkIcon />}
-        />
-      );
+      render(<MetricCard title="Total Trees" value={1234} icon={<ParkIcon />} />);
 
       const title = screen.getByText('Total Trees');
       const value = screen.getByText('1,234');
@@ -307,13 +203,7 @@ describe('MetricCard Component', () => {
     });
 
     it('should display title text', () => {
-      render(
-        <MetricCard
-          title="total trees"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      render(<MetricCard title="total trees" value={100} icon={<ParkIcon />} />);
 
       // Title is rendered as-is, CSS handles text-transform
       expect(screen.getByText('total trees')).toBeInTheDocument();
@@ -322,39 +212,21 @@ describe('MetricCard Component', () => {
 
   describe('Styling', () => {
     it('should render card element', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} />);
 
       const card = container.querySelector('.MuiCard-root');
       expect(card).toBeInTheDocument();
     });
 
     it('should use solid variant for card', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} />);
 
       const card = container.querySelector('.MuiCard-variantSolid');
       expect(card).toBeInTheDocument();
     });
 
     it('should render icon in Avatar', () => {
-      const { container } = render(
-        <MetricCard
-          title="Test"
-          value={100}
-          icon={<ParkIcon data-testid="icon" />}
-        />
-      );
+      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon data-testid="icon" />} />);
 
       const avatar = container.querySelector('.MuiAvatar-root');
       expect(avatar).toBeInTheDocument();

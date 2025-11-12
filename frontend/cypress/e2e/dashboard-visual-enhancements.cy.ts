@@ -18,27 +18,35 @@ describe('Dashboard Visual Enhancements E2E', () => {
     // Set up authenticated user with data
     cy.setupForestGEOUser('standardUser');
     cy.visit('/login');
-    cy.get('[aria-label="Login button"]').click();
-    cy.url().should('include', '/dashboard');
+
+    // Wait for login button to be visible before clicking
+    cy.get('[aria-label="Login button"]', { timeout: 10000 })
+      .should('be.visible')
+      .click();
+
+    cy.url().should('include', '/dashboard', { timeout: 10000 });
     cy.wait('@getSession');
 
     // Select site and plot to populate dashboard
     cy.selectSiteAndPlot('Luquillo', 'Luquillo Main Plot');
     cy.wait('@getCensus');
+
+    // Wait for dashboard data to load
+    cy.wait('@getDashboardMetrics', { timeout: 10000 });
   });
 
   describe('Metric Cards Display', () => {
     it('should display all four gradient metric cards', () => {
       // Verify all metric cards are visible
-      cy.contains('TOTAL TREES').should('be.visible');
-      cy.contains('TOTAL STEMS').should('be.visible');
-      cy.contains('ACTIVE PERSONNEL').should('be.visible');
-      cy.contains('NEW RECRUITS').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
+      cy.contains('Total Stems').should('be.visible');
+      cy.contains('Active Personnel').should('be.visible');
+      cy.contains('New Recruits').should('be.visible');
     });
 
     it('should display metric values with proper formatting', () => {
       // Verify numbers are displayed with locale formatting (commas)
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .within(() => {
@@ -48,14 +56,14 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display trend indicators on metric cards', () => {
       // Verify trend text is present
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .within(() => {
           cy.contains(/Current census|No data/).should('be.visible');
         });
 
-      cy.contains('ACTIVE PERSONNEL')
+      cy.contains('Active Personnel')
         .parent()
         .parent()
         .within(() => {
@@ -65,25 +73,25 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display icons on metric cards', () => {
       // Verify all metric cards have icons (MUI icons render as SVG)
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .find('svg')
         .should('exist');
 
-      cy.contains('TOTAL STEMS')
+      cy.contains('Total Stems')
         .parent()
         .parent()
         .find('svg')
         .should('exist');
 
-      cy.contains('ACTIVE PERSONNEL')
+      cy.contains('Active Personnel')
         .parent()
         .parent()
         .find('svg')
         .should('exist');
 
-      cy.contains('NEW RECRUITS')
+      cy.contains('New Recruits')
         .parent()
         .parent()
         .find('svg')
@@ -98,7 +106,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.get('[data-testid*="skeleton"]', { timeout: 100 }).should('exist');
 
       // Then real data should appear
-      cy.contains('TOTAL TREES', { timeout: 5000 }).should('be.visible');
+      cy.contains('Total Trees', { timeout: 5000 }).should('be.visible');
     });
 
     it('should calculate stems per tree correctly', () => {
@@ -106,7 +114,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       let treeCount: number;
       let stemCount: number;
 
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .find('[class*="MuiTypography"][class*="h2"]')
@@ -114,7 +122,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
         .then(text => {
           treeCount = parseInt(text.replace(/,/g, ''));
 
-          cy.contains('TOTAL STEMS')
+          cy.contains('Total Stems')
             .parent()
             .parent()
             .find('[class*="MuiTypography"][class*="h2"]')
@@ -392,8 +400,8 @@ describe('Dashboard Visual Enhancements E2E', () => {
   describe('Data Loading and Error Handling', () => {
     it('should load dashboard data when context is selected', () => {
       // Data should be visible after site/plot selection
-      cy.contains('TOTAL TREES').should('be.visible');
-      cy.contains('TOTAL STEMS').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
+      cy.contains('Total Stems').should('be.visible');
       cy.contains('Census Progress').should('be.visible');
     });
 
@@ -401,7 +409,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       // Note current tree count
       let firstTreeCount: string;
 
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .find('[class*="h2"]')
@@ -418,7 +426,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
               cy.contains(secondSite.siteName).click();
 
               // Data should refresh (may or may not be different)
-              cy.contains('TOTAL TREES').should('be.visible');
+              cy.contains('Total Trees').should('be.visible');
             }
           });
         });
@@ -438,30 +446,30 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.viewport(1440, 900);
 
       // All four metric cards should be in one row on large screens
-      cy.contains('TOTAL TREES').should('be.visible');
-      cy.contains('TOTAL STEMS').should('be.visible');
-      cy.contains('ACTIVE PERSONNEL').should('be.visible');
-      cy.contains('NEW RECRUITS').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
+      cy.contains('Total Stems').should('be.visible');
+      cy.contains('Active Personnel').should('be.visible');
+      cy.contains('New Recruits').should('be.visible');
     });
 
     it('should stack metrics on tablet', () => {
       cy.viewport(768, 1024);
 
       // Metrics should still be visible but may wrap
-      cy.contains('TOTAL TREES').should('be.visible');
-      cy.contains('TOTAL STEMS').should('be.visible');
-      cy.contains('ACTIVE PERSONNEL').should('be.visible');
-      cy.contains('NEW RECRUITS').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
+      cy.contains('Total Stems').should('be.visible');
+      cy.contains('Active Personnel').should('be.visible');
+      cy.contains('New Recruits').should('be.visible');
     });
 
     it('should stack metrics vertically on mobile', () => {
       cy.viewport(375, 667);
 
       // All metrics should still be visible in single column
-      cy.contains('TOTAL TREES').should('be.visible');
-      cy.contains('TOTAL STEMS').should('be.visible');
-      cy.contains('ACTIVE PERSONNEL').should('be.visible');
-      cy.contains('NEW RECRUITS').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
+      cy.contains('Total Stems').should('be.visible');
+      cy.contains('Active Personnel').should('be.visible');
+      cy.contains('New Recruits').should('be.visible');
 
       // Scroll to see all content
       cy.scrollTo('bottom');
@@ -479,7 +487,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
         cy.viewport(width, height);
 
         // Verify key elements are accessible
-        cy.contains('TOTAL TREES').should('be.visible');
+        cy.contains('Total Trees').should('be.visible');
         cy.contains('Census Progress').should('be.visible');
 
         // Census toggle should work on all sizes
@@ -498,10 +506,10 @@ describe('Dashboard Visual Enhancements E2E', () => {
   describe('Visual Polish and Animations', () => {
     it('should apply hover effects on metric cards', () => {
       // Hover over first metric card
-      cy.contains('TOTAL TREES').parent().parent().trigger('mouseover');
+      cy.contains('Total Trees').parent().parent().trigger('mouseover');
 
       // Card should have hover state (can verify via CSS or visual regression)
-      cy.contains('TOTAL TREES').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
     });
 
     it('should have smooth transitions on interactive elements', () => {
@@ -519,7 +527,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display gradient backgrounds on metric cards', () => {
       // Verify metric cards have styled backgrounds (gradient)
-      cy.contains('TOTAL TREES')
+      cy.contains('Total Trees')
         .parent()
         .parent()
         .should('have.css', 'background')
@@ -574,7 +582,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should have sufficient color contrast', () => {
       // Verify text is readable (basic check)
-      cy.contains('TOTAL TREES').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
       cy.contains('Census Progress').should('be.visible');
     });
   });
@@ -593,7 +601,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       // Data loads
 
       // 4. User views metric cards
-      cy.contains('TOTAL TREES').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
 
       // 5. User checks progress
       cy.contains('Census Progress').should('be.visible');
@@ -618,13 +626,13 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should handle site/plot changes correctly', () => {
       // Initial data loaded
-      cy.contains('TOTAL TREES').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
 
       // Change census
       cy.get('[data-testid="census-selector"]').click();
 
       // Data should refresh
-      cy.contains('TOTAL TREES').should('be.visible');
+      cy.contains('Total Trees').should('be.visible');
       cy.contains('Census Progress').should('be.visible');
     });
 

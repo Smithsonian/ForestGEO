@@ -34,15 +34,7 @@ const gradients = {
   neutral: 'linear-gradient(135deg, #57534e 0%, #44403c 100%)'
 };
 
-export default function MetricCard({
-  title,
-  value,
-  icon,
-  gradient = 'primary',
-  trend,
-  isLoading = false,
-  onClick
-}: MetricCardProps) {
+export default function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading = false, onClick }: MetricCardProps) {
   if (isLoading) {
     return <MetricCardSkeleton />;
   }
@@ -72,14 +64,14 @@ export default function MetricCard({
           boxShadow: designTokens.shadows.xl,
 
           '& .metric-icon': {
-            transform: 'scale(1.1) rotate(5deg)',
+            transform: 'scale(1.1) rotate(5deg)'
           }
         },
 
         // Active state
         '&:active': {
           transform: 'translateY(-1px)',
-          boxShadow: designTokens.shadows.lg,
+          boxShadow: designTokens.shadows.lg
         },
 
         // Subtle pattern overlay
@@ -152,12 +144,8 @@ export default function MetricCard({
             zIndex: 1
           }}
         >
-          {trend.direction === 'up' && (
-            <TrendingUpIcon sx={{ fontSize: 18, opacity: 0.9 }} />
-          )}
-          {trend.direction === 'down' && (
-            <TrendingDownIcon sx={{ fontSize: 18, opacity: 0.9 }} />
-          )}
+          {trend.direction === 'up' && <TrendingUpIcon sx={{ fontSize: 18, opacity: 0.9 }} />}
+          {trend.direction === 'down' && <TrendingDownIcon sx={{ fontSize: 18, opacity: 0.9 }} />}
           <Typography
             level="body-sm"
             sx={{

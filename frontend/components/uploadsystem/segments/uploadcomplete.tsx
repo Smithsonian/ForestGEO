@@ -125,17 +125,68 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }}
     >
       {!allLoadsCompleted ? (
-        <>
+        <Box role="status" aria-live="polite" sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <Typography variant={'solid'} level={'h1'} color={'success'}>
             Upload Complete!
           </Typography>
-          <LinearProgress determinate value={progress.census} sx={{ width: '80%', margin: '1rem 0' }} />
-          <Typography>{progressText.census}</Typography>
-          <LinearProgress determinate value={progress.plots} sx={{ width: '80%', margin: '1rem 0' }} />
-          <Typography>{progressText.plots}</Typography>
-          <LinearProgress determinate value={progress.quadrats} sx={{ width: '80%', margin: '1rem 0' }} />
-          <Typography>{progressText.quadrats}</Typography>
-        </>
+          <Box sx={{ width: '80%', mt: 3 }}>
+            <Typography level="body-sm" id="census-progress-label" sx={{ mb: 1 }}>
+              Census Data
+            </Typography>
+            <LinearProgress
+              determinate
+              value={progress.census}
+              sx={{ width: '100%', mb: 1 }}
+              aria-label="Census data loading progress"
+              aria-labelledby="census-progress-label"
+              aria-valuenow={progress.census}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuetext={progressText.census}
+            />
+            <Typography level="body-xs" aria-live="polite">
+              {progressText.census}
+            </Typography>
+          </Box>
+          <Box sx={{ width: '80%', mt: 2 }}>
+            <Typography level="body-sm" id="plots-progress-label" sx={{ mb: 1 }}>
+              Plots Data
+            </Typography>
+            <LinearProgress
+              determinate
+              value={progress.plots}
+              sx={{ width: '100%', mb: 1 }}
+              aria-label="Plots data loading progress"
+              aria-labelledby="plots-progress-label"
+              aria-valuenow={progress.plots}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuetext={progressText.plots}
+            />
+            <Typography level="body-xs" aria-live="polite">
+              {progressText.plots}
+            </Typography>
+          </Box>
+          <Box sx={{ width: '80%', mt: 2 }}>
+            <Typography level="body-sm" id="quadrats-progress-label" sx={{ mb: 1 }}>
+              Quadrats Data
+            </Typography>
+            <LinearProgress
+              determinate
+              value={progress.quadrats}
+              sx={{ width: '100%', mb: 1 }}
+              aria-label="Quadrats data loading progress"
+              aria-labelledby="quadrats-progress-label"
+              aria-valuenow={progress.quadrats}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuetext={progressText.quadrats}
+            />
+            <Typography level="body-xs" aria-live="polite">
+              {progressText.quadrats}
+            </Typography>
+          </Box>
+        </Box>
       ) : (
         <>
           <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'success'}>

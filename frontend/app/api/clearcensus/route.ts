@@ -9,8 +9,8 @@ import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid census clear types
-const VALID_CENSUS_TYPES = ['measurements', 'attributes', 'personnel', 'quadrats'] as const;
+// Valid census clear types - must match actual stored procedure names
+const VALID_CENSUS_TYPES = ['msmts', 'full', 'measurements', 'attributes', 'personnel', 'quadrats'] as const;
 type CensusType = (typeof VALID_CENSUS_TYPES)[number];
 
 export async function GET(request: NextRequest) {

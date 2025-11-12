@@ -93,9 +93,7 @@ export default function EnhancedDashboardPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(
-        `/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`
-      );
+      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`);
 
       if (!response.ok) {
         throw new Error(`Failed to load dashboard data: ${response.status} ${response.statusText}`);

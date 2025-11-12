@@ -414,9 +414,7 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith(
-          expect.stringContaining('/api/dashboardmetrics/all/testsite/1/1')
-        );
+        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/dashboardmetrics/all/testsite/1/1'));
       });
     });
 
@@ -424,9 +422,7 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith(
-          expect.stringContaining('/api/changelog/overview/unifiedchangelog/1/1?schema=testsite')
-        );
+        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/changelog/overview/unifiedchangelog/1/1?schema=testsite'));
       });
     });
 
@@ -517,9 +513,7 @@ describe('Enhanced Dashboard Page', () => {
       rerender(<DashboardPage />);
 
       await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith(
-          expect.stringContaining('/api/dashboardmetrics/all/testsite/1/2')
-        );
+        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/dashboardmetrics/all/testsite/1/2'));
       });
     });
   });

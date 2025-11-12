@@ -1,0 +1,310 @@
+================================================================================
+FORESTGEO INFRASTRUCTURE DEPLOYMENT GUIDE
+================================================================================
+
+Date: November 11, 2025
+Server: forestgeo-mysqldataserver.mysql.database.azure.com:3306
+User: azureroot
+
+================================================================================
+OVERVIEW
+================================================================================
+
+This deployment addresses:
+✓ Critical bug fixes for clearcensusmsmts and bulkingestionprocess
+✓ Missing logging tables (uploadmetrics, uploadintegrityalerts)
+✓ Missing stored procedures in some schemas
+✓ Infrastructure consistency across all 5 forestgeo_* schemas
+
+================================================================================
+PRE-DEPLOYMENT CHECKLIST
+================================================================================
+
+Tools Required:
+☐ MySQL Workbench (recommended) or similar GUI tool
+☐ Database credentials (already configured in .env.local)
+
+Files Required:
+☐ create-missing-logging-tables.sql
+☐ sqlscripting/storedprocedures.sql
+
+Backup Created:
+☐ sqlscripting/storedprocedures.sql.backup
+
+================================================================================
+DEPLOYMENT SEQUENCE
+================================================================================
+
+Complete the following steps FOR EACH schema in priority order:
+1. forestgeo_panama     (HIGHEST PRIORITY - active users with bug reports)
+2. forestgeo_testing    (Development/testing)
+3. forestgeo_harvard    (Production site)
+4. forestgeo_mpala      (Production site)
+5. forestgeo_serc       (Production site)
+
+================================================================================
+STEP-BY-STEP DEPLOYMENT (per schema)
+================================================================================
+
+For each schema, perform these steps:
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 1: Connect to Schema
+─────────────────────────────────────────────────────────────────────────────
+
+1. Open MySQL Workbench
+2. Create new connection:
+   - Hostname: forestgeo-mysqldataserver.mysql.database.azure.com
+   - Port: 3306
+   - Username: azureroot
+   - Password: [from .env.local - P@ssw0rd]
+3. Connect and select schema (e.g., forestgeo_panama)
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 2: Create Missing Logging Tables
+─────────────────────────────────────────────────────────────────────────────
+
+REQUIRED FOR: forestgeo_panama, forestgeo_harvard, forestgeo_mpala, forestgeo_serc
+(forestgeo_testing already has these tables)
+
+Execute: create-missing-logging-tables.sql
+
+This creates:
+- uploadmetrics
+- uploadintegrityalerts
+
+Verification:
+```sql
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = '<current_schema>'
+  AND TABLE_NAME IN ('uploadmetrics', 'uploadintegrityalerts');
+```
+
+Expected: 2 rows returned
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 3: Deploy All Stored Procedures
+─────────────────────────────────────────────────────────────────────────────
+
+REQUIRED FOR: ALL 5 schemas
+
+Execute: sqlscripting/storedprocedures.sql
+
+This will:
+1. DROP existing procedures (if any)
+2. CREATE 10 procedures with latest fixes:
+   - RefreshMeasurementsSummary
+   - RefreshViewFullTable
+   - bulkingestioncollapser
+   - clearcensusfull
+   - clearcensusmsmts (✅ FIXED)
+   - reingestfailedrows
+   - reinsertdefaultpostvalidations
+   - reinsertdefaultvalidations
+   - reviewfailed
+   - bulkingestionprocess (✅ ENHANCED)
+
+Verification:
+```sql
+SELECT ROUTINE_NAME
+FROM INFORMATION_SCHEMA.ROUTINES
+WHERE ROUTINE_SCHEMA = '<current_schema>'
+  AND ROUTINE_TYPE = 'PROCEDURE'
+ORDER BY ROUTINE_NAME;
+```
+
+Expected: 10 procedures
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 4: Verify Critical Fixes
+─────────────────────────────────────────────────────────────────────────────
+
+Verify clearcensusmsmts fix:
+```sql
+SHOW CREATE PROCEDURE clearcensusmsmts\G
+```
+
+Should contain:
+- "delete from coremeasurements where CensusID = targetCensusID"
+- "delete from stems where CensusID = targetCensusID"
+- "delete from trees where CensusID = targetCensusID"
+
+Verify bulkingestionprocess enhancement:
+```sql
+SHOW CREATE PROCEDURE bulkingestionprocess\G
+```
+
+Should contain:
+- "uploadmetrics"
+- "uploadintegrityalerts"
+- "vDataLossCount"
+- "SET collation_connection = 'utf8mb4_0900_ai_ci'"
+
+─────────────────────────────────────────────────────────────────────────────
+STEP 5: Final Verification
+─────────────────────────────────────────────────────────────────────────────
+
+Count tables (should be 28):
+```sql
+SELECT COUNT(*) as table_count
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = '<current_schema>'
+  AND TABLE_TYPE = 'BASE TABLE';
+```
+
+Count procedures (should be 10):
+```sql
+SELECT COUNT(*) as procedure_count
+FROM INFORMATION_SCHEMA.ROUTINES
+WHERE ROUTINE_SCHEMA = '<current_schema>'
+  AND ROUTINE_TYPE = 'PROCEDURE';
+```
+
+================================================================================
+QUICK DEPLOYMENT SCRIPT (for reference)
+================================================================================
+
+If using command-line MySQL client (may require password workaround):
+
+```bash
+# For each schema
+SCHEMA="forestgeo_panama"
+
+# Step 1: Create logging tables
+mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
+      -u azureroot -p -P 3306 $SCHEMA \
+      < create-missing-logging-tables.sql
+
+# Step 2: Deploy procedures
+mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
+      -u azureroot -p -P 3306 $SCHEMA \
+      < sqlscripting/storedprocedures.sql
+
+# Repeat for other schemas
+```
+
+================================================================================
+POST-DEPLOYMENT TESTING
+================================================================================
+
+After deployment to forestgeo_panama (PRIORITY):
+
+Test Case 1: Census Deletion (Bug #2 Fix)
+──────────────────────────────────────────
+1. Create a test census with sample data
+2. Execute: CALL clearcensusmsmts(<test_census_id>);
+3. Verify ALL data deleted from:
+   - coremeasurements
+   - stems
+   - trees
+   - cmattributes
+   - cmverrors
+
+Test Case 2: File Upload with Logging
+──────────────────────────────────────
+1. Upload test file via application
+2. Check uploadmetrics table:
+   ```sql
+   SELECT * FROM uploadmetrics ORDER BY startTime DESC LIMIT 5;
+   ```
+3. Check uploadintegrityalerts table:
+   ```sql
+   SELECT * FROM uploadintegrityalerts ORDER BY createdAt DESC LIMIT 5;
+   ```
+
+Test Case 3: Error Editing (Bug #1)
+───────────────────────────────────
+1. Upload file with intentional errors
+2. Edit errors in failed measurements grid
+3. Save and verify successful reingestion
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: "Table 'uploadmetrics' doesn't exist"
+Solution: Execute create-missing-logging-tables.sql first
+
+Issue: "Foreign key constraint fails"
+Solution: Ensure uploadmetrics is created BEFORE uploadintegrityalerts
+
+Issue: Stored procedure has old version
+Solution: Drop procedure manually and re-run storedprocedures.sql
+
+Issue: MySQL client password authentication fails
+Solution: Use MySQL Workbench GUI instead
+
+================================================================================
+ROLLBACK PROCEDURE
+================================================================================
+
+If critical issues occur after deployment:
+
+1. Restore procedures from backup:
+   ```bash
+   mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
+         -u azureroot -p -P 3306 <schema> \
+         < sqlscripting/storedprocedures.sql.backup
+   ```
+
+2. Drop new logging tables if needed:
+   ```sql
+   DROP TABLE IF EXISTS uploadintegrityalerts;
+   DROP TABLE IF EXISTS uploadmetrics;
+   ```
+
+================================================================================
+DEPLOYMENT TRACKING
+================================================================================
+
+Use this checklist to track progress:
+
+Schema: forestgeo_panama
+  ☐ Logging tables created
+  ☐ Stored procedures deployed
+  ☐ Verification passed
+  ☐ Testing completed
+  Date: ___________  By: ___________
+
+Schema: forestgeo_testing
+  ☐ Logging tables created (already exists)
+  ☐ Stored procedures deployed
+  ☐ Verification passed
+  ☐ Testing completed
+  Date: ___________  By: ___________
+
+Schema: forestgeo_harvard
+  ☐ Logging tables created
+  ☐ Stored procedures deployed
+  ☐ Verification passed
+  ☐ Testing completed
+  Date: ___________  By: ___________
+
+Schema: forestgeo_mpala
+  ☐ Logging tables created
+  ☐ Stored procedures deployed
+  ☐ Verification passed
+  ☐ Testing completed
+  Date: ___________  By: ___________
+
+Schema: forestgeo_serc
+  ☐ Logging tables created
+  ☐ Stored procedures deployed
+  ☐ Verification passed
+  ☐ Testing completed
+  Date: ___________  By: ___________
+
+================================================================================
+SUMMARY
+================================================================================
+
+This deployment will:
+✓ Fix critical bug preventing census deletion (clearcensusmsmts)
+✓ Add comprehensive logging and validation (bulkingestionprocess)
+✓ Ensure all schemas have consistent infrastructure (28 tables, 10 procedures)
+✓ Enable data loss tracking and integrity monitoring across all sites
+
+Total Time Estimate: 30-45 minutes for all 5 schemas
+
+================================================================================
