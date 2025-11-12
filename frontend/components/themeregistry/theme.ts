@@ -145,7 +145,7 @@ const theme = extendTheme({
     // Card
     JoyCard: {
       styleOverrides: {
-        root: ({ theme }) => ({
+        root: ({ theme: _theme }) => ({
           borderRadius: designTokens.components.card.borderRadius,
           boxShadow: designTokens.shadows.sm,
           transition: `box-shadow ${designTokens.transitions.normal} ${designTokens.transitions.easing}`,

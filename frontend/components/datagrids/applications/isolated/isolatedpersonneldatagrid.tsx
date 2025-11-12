@@ -40,7 +40,7 @@ export default function IsolatedPersonnelDataGrid() {
     }
 
     fetchRoles().catch(ailogger.error);
-  }, [refresh]);
+  }, [refresh, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
   const roleIDColumn: GridColDef = {
     field: 'roleID',

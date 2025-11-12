@@ -1,7 +1,7 @@
 'use client';
 
 import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import ailogger from '@/ailogger';
 
@@ -81,29 +81,35 @@ export default function UserSettingsPage() {
     );
   }
 
-  const safeJoin = (arr?: { siteID?: number }[]) =>
-    (arr ?? [])
-      .map(s => s.siteID ?? -1)
-      .sort((a, b) => a - b)
-      .join(',');
+  const safeJoin = useCallback(
+    (arr?: { siteID?: number }[]) =>
+      (arr ?? [])
+        .map(s => s.siteID ?? -1)
+        .sort((a, b) => a - b)
+        .join(','),
+    []
+  );
 
-  function isUserChanged(u: UserWithSite, b?: UserWithSite): boolean {
-    if (!b) return true;
-    return (
-      u.firstName !== b.firstName ||
-      u.lastName !== b.lastName ||
-      u.email !== b.email ||
-      u.notifications !== b.notifications ||
-      u.userStatus !== b.userStatus ||
-      safeJoin(u.userSites) !== safeJoin(b.userSites)
-    );
-  }
+  const isUserChanged = useCallback(
+    (u: UserWithSite, b?: UserWithSite): boolean => {
+      if (!b) return true;
+      return (
+        u.firstName !== b.firstName ||
+        u.lastName !== b.lastName ||
+        u.email !== b.email ||
+        u.notifications !== b.notifications ||
+        u.userStatus !== b.userStatus ||
+        safeJoin(u.userSites) !== safeJoin(b.userSites)
+      );
+    },
+    [safeJoin]
+  );
 
-  const baseUsersMap = useMemo(() => new Map(baseUsers.current.map(u => [u.userID, u])), [users]);
+  const baseUsersMap = useMemo(() => new Map(baseUsers.current.map(u => [u.userID, u])), []);
 
   const foundChanges = useMemo(() => {
     return users.some(u => isUserChanged(u, baseUsersMap.get(u.userID)));
-  }, [users]);
+  }, [users, baseUsersMap, isUserChanged]);
 
   return (
     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', gap: 2 }}>

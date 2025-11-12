@@ -14,7 +14,7 @@ async function getCookiesSafely() {
       return await cookies();
     }
     return null;
-  } catch (_error) {
+  } catch {
     // Return null if cookies can't be accessed (e.g., in client context)
     return null;
   }

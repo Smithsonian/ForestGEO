@@ -42,6 +42,18 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
     return `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }, []);
 
+  // End an operation
+  const endOperation = useCallback((operationId: string) => {
+    setActiveOperations(prev => prev.filter(op => op.id !== operationId));
+
+    // Clear timeout
+    const timeoutId = operationTimeoutRefs.current.get(operationId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      operationTimeoutRefs.current.delete(operationId);
+    }
+  }, []);
+
   // Start a new operation
   const startOperation = useCallback(
     (message: string, category: LoadingOperation['category'] = 'general') => {
@@ -66,20 +78,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
 
       return operationId;
     },
-    [generateOperationId]
+    [generateOperationId, endOperation]
   );
-
-  // End an operation
-  const endOperation = useCallback((operationId: string) => {
-    setActiveOperations(prev => prev.filter(op => op.id !== operationId));
-
-    // Clear timeout
-    const timeoutId = operationTimeoutRefs.current.get(operationId);
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      operationTimeoutRefs.current.delete(operationId);
-    }
-  }, []);
 
   // Check if operation is active
   const isOperationActive = useCallback(
@@ -217,12 +217,14 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
 
   // Cleanup timeouts and legacy operations on unmount
   useEffect(() => {
+    const timeoutRefs = operationTimeoutRefs.current;
+    const legacyRefs = legacyOperationsRef.current;
     return () => {
-      operationTimeoutRefs.current.forEach(timeoutId => {
+      timeoutRefs.forEach(timeoutId => {
         clearTimeout(timeoutId);
       });
-      operationTimeoutRefs.current.clear();
-      legacyOperationsRef.current.clear();
+      timeoutRefs.clear();
+      legacyRefs.clear();
     };
   }, []);
 

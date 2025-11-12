@@ -36,6 +36,13 @@ export default function ProgressCard({
   const percentValue = typeof populatedPercent === 'string' ? parseFloat(populatedPercent) : populatedPercent;
   const unpopulatedCount = unpopulatedQuadrats.filter(q => q.trim().length > 0).length;
 
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (onViewUnpopulated && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      onViewUnpopulated();
+    }
+  };
+
   return (
     <Card
       variant="outlined"
@@ -162,12 +169,15 @@ export default function ProgressCard({
 
         {unpopulatedCount > 0 && (
           <Tooltip title="Quadrats without measurements" arrow>
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
             <Chip
               variant="soft"
               color="warning"
               size="lg"
+              component={onViewUnpopulated ? 'button' : 'div'}
               startDecorator={<PendingIcon />}
               onClick={onViewUnpopulated}
+              onKeyDown={handleKeyDown}
               sx={{
                 px: 2,
                 py: 1,

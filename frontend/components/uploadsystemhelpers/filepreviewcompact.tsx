@@ -59,7 +59,7 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
     };
 
     analyzeFile();
-  }, [file.name, file.size, file.lastModified]);
+  }, [file, expectedHeaders, initialDelimiter, onDelimiterChange]);
 
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
     };
 
     validateCurrentDelimiter();
-  }, [selectedDelimiter]);
+  }, [selectedDelimiter, file, expectedHeaders, isAnalyzing, onDelimiterChange]);
 
   const handleDelimiterChange = useCallback((newDelimiter: string | null) => {
     if (newDelimiter) {

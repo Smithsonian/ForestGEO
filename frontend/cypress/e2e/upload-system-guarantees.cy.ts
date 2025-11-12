@@ -88,7 +88,7 @@ describe('Upload System Guarantees', () => {
           AND cm.CensusID = ${censusID}
           ORDER BY t.TreeTag
         `
-      }).then((results) => {
+      }).then(results => {
         expect(results).to.have.length(3);
 
         // Verify first record
@@ -128,7 +128,7 @@ describe('Upload System Guarantees', () => {
           SELECT * FROM ${schema}.uploaddatalossreport
           WHERE FileID LIKE 'TEST-VALID%'
         `
-      }).then((lossRecords) => {
+      }).then(lossRecords => {
         expect(lossRecords).to.have.length(0, 'No data loss should be detected');
       });
     });
@@ -160,7 +160,7 @@ describe('Upload System Guarantees', () => {
           WHERE t.TreeTag LIKE 'TESTINVALID%'
           AND cm.CensusID = ${censusID}
         `
-      }).then((results) => {
+      }).then(results => {
         expect(results[0].count).to.equal(1, 'Should have 1 valid record');
       });
 
@@ -173,7 +173,7 @@ describe('Upload System Guarantees', () => {
           AND CensusID = ${censusID}
           ORDER BY Tag
         `
-      }).then((failedRecords) => {
+      }).then(failedRecords => {
         expect(failedRecords).to.have.length(3, 'Should have 3 failed records');
 
         // Verify failed records
@@ -192,7 +192,7 @@ describe('Upload System Guarantees', () => {
             (SELECT COUNT(*) FROM ${schema}.failedmeasurements
              WHERE Tag LIKE 'TESTINVALID%' AND CensusID = ${censusID}) as total
         `
-      }).then((results) => {
+      }).then(results => {
         expect(results[0].total).to.equal(4, 'All 4 records should be accounted for');
       });
     });
@@ -231,7 +231,7 @@ describe('Upload System Guarantees', () => {
           AND cm.CensusID = ${censusID}
           ORDER BY t.TreeTag
         `
-      }).then((results) => {
+      }).then(results => {
         expect(results).to.have.length(4, 'Should have 4 records');
 
         // All records processed (validation state categorization is handled by stored procedure)
@@ -272,7 +272,7 @@ describe('Upload System Guarantees', () => {
       let attemptCount = 0;
 
       // Intercept first call to fail, second to succeed
-      cy.intercept('POST', '/api/sqlpacketload', (req) => {
+      cy.intercept('POST', '/api/sqlpacketload', req => {
         attemptCount++;
         if (attemptCount === 1) {
           req.reply({
@@ -310,11 +310,14 @@ describe('Upload System Guarantees', () => {
       // Upload file with all invalid data
       const invalidData = 'tag,stemtag,spcode,quadrat,lx,ly,dbh,codes,hom,date\nINVALID001,1,DOESNOTEXIST,9999,0,0,999999,X,0,2020-01-01';
 
-      cy.get('[data-testid="file-dropzone"]').selectFile({
-        contents: Cypress.Buffer.from(invalidData),
-        fileName: 'invalid-test.csv',
-        mimeType: 'text/csv'
-      }, { action: 'drag-drop' });
+      cy.get('[data-testid="file-dropzone"]').selectFile(
+        {
+          contents: Cypress.Buffer.from(invalidData),
+          fileName: 'invalid-test.csv',
+          mimeType: 'text/csv'
+        },
+        { action: 'drag-drop' }
+      );
 
       cy.contains('invalid-test.csv').should('be.visible');
       cy.get('[data-testid="continue-upload-btn"]').click();
@@ -329,7 +332,7 @@ describe('Upload System Guarantees', () => {
           FROM ${schema}.failedmeasurements
           WHERE Tag = 'INVALID001'
         `
-      }).then((results) => {
+      }).then(results => {
         expect(results[0].count).to.be.greaterThan(0, 'Invalid record should be in failedmeasurements');
       });
     });
@@ -378,7 +381,7 @@ describe('Upload System Guarantees', () => {
           WHERE Tag LIKE 'TEST%'
           AND CensusID = ${censusID}
         `
-      }).then((results) => {
+      }).then(results => {
         const validCount = results.find(r => r.Category === 'Valid records')?.Count || 0;
         const failedCount = results.find(r => r.Category === 'Failed records')?.Count || 0;
 

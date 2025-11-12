@@ -47,11 +47,11 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
   const { parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType } = props;
   const [autoCorrectedParsedData, setAutoCorrectedParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
   const [tempParsedData, setTempParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
-  const singleFileData = tempParsedData[fileName] || {};
+  const singleFileData = useMemo(() => tempParsedData[fileName] || {}, [tempParsedData, fileName]);
 
   const currentPlot = usePlotContext();
 
-  const tableHeaders = getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [];
+  const tableHeaders = useMemo(() => getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [], [formType, currentPlot?.usesSubquadrats]);
   const [validRows, setValidRows] = useState<GridRowsProp>([]);
   const [correctedValidRows, setCorrectedValidRows] = useState<GridRowsProp>([]);
   const [invalidRows, setInvalidRows] = useState<GridRowsProp>([]);
@@ -133,7 +133,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         },
         editable: false
       })),
-    [tableHeaders, errors, fileName]
+    [tableHeaders, errors, fileName, saveCorrections]
   );
 
   useEffect(() => {
@@ -193,12 +193,12 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
       [fileName]: tempErrors
     }));
     setAutoCorrectedParsedData(correctedDataCopy);
-  }, [singleFileData, fileName, formType, setErrors]);
+  }, [singleFileData, fileName, formType, setErrors, tempParsedData]);
 
   useEffect(() => {
     if (saveCorrections) setParsedData(autoCorrectedParsedData);
     else setParsedData(tempParsedData);
-  }, [saveCorrections]);
+  }, [saveCorrections, autoCorrectedParsedData, setParsedData, tempParsedData]);
 
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
@@ -234,7 +234,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
 
       return updatedRow;
     },
-    [setErrorRows, setTempParsedData, fileName, formType, validateRowByFormType]
+    [setErrorRows, setTempParsedData, fileName, formType, errorRows]
   );
 
   return (

@@ -41,7 +41,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
     }
 
     getRoles().catch(ailogger.error);
-  }, []);
+  }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
   const filter = createFilterOptions<ExtendedRoleRDS>();
 

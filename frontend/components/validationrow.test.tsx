@@ -425,7 +425,7 @@ describe('ValidationRow - Functional Tests', () => {
     });
 
     it('MUST split description by semicolons into chips', () => {
-      const { container } = render(<ValidationRow {...defaultProps} />);
+      const { container: _container } = render(<ValidationRow {...defaultProps} />);
 
       const descriptionList = screen.getByLabelText('Validation description list');
       const chips = descriptionList.querySelectorAll('.MuiChip-root');
@@ -434,7 +434,7 @@ describe('ValidationRow - Functional Tests', () => {
     });
 
     it('MUST split criteria by semicolons into chips', () => {
-      const { container } = render(<ValidationRow {...defaultProps} />);
+      const { container: _container } = render(<ValidationRow {...defaultProps} />);
 
       const criteriaList = screen.getByLabelText('Validation criteria list');
       const chips = criteriaList.querySelectorAll('.MuiChip-root');
@@ -554,7 +554,7 @@ describe('ValidationRow - Functional Tests', () => {
 
   describe('Tooltips', () => {
     it('MUST have tooltip for switch', () => {
-      const { container } = render(<ValidationRow {...defaultProps} />);
+      const { container: _container } = render(<ValidationRow {...defaultProps} />);
 
       const switchElement = screen.getByRole('switch');
       const tooltip = switchElement.closest('[title]');

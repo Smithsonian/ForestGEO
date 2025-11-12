@@ -99,7 +99,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
         }
         return col;
       }),
-    [UnifiedChangelogGridColumns]
+    []
   );
 
   return (

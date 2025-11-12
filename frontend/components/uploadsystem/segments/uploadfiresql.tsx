@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 // Note: TransactionAwarePQueue moved to server-side to avoid client-side MySQL imports
@@ -36,19 +36,16 @@ import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhel
  * parallel processing caused duplicate insertions and race conditions.
  */
 const UploadFireSQL: React.FC<UploadFireProps> = ({
-  personnelRecording,
   acceptedFiles,
   uploadForm,
   setIsDataUnsaved,
   schema,
   setUploadError,
   setReviewState,
-  setAllRowToCMID,
   selectedDelimiters
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const currentQuadrat = useQuadratContext();
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [totalChunks, setTotalChunks] = useState(0);
@@ -154,49 +151,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
 
-  const pushErrorRowsToFailedMeasurements = async (errorRows: FileRow[], fileName: string) => {
-    if (errorRows.length === 0) return;
-
-    try {
-      const failedMeasurementsData = errorRows.map(row => ({
-        plotID: currentPlot?.plotID ?? -1,
-        censusID: currentCensus?.dateRanges[0].censusID ?? -1,
-        tag: row.tag || null,
-        stemTag: row.stemtag || null,
-        spCode: row.spcode || null,
-        quadrat: row.quadrat || null,
-        x: row.lx || null,
-        y: row.ly || null,
-        dbh: row.dbh || null,
-        hom: row.hom || null,
-        date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-        codes: row.codes || null,
-        comments: row.comments || null,
-        failureReasons: row.failureReason || 'Unknown error'
-      }));
-
-      const response = await fetchWithTimeout(
-        `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(failedMeasurementsData)
-        },
-        30000
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
-      }
-
-      ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
-    } catch (error: any) {
-      ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, error);
-      // Don't throw - we don't want to stop the upload process because of error row insertion failures
-    }
-  };
-
-  const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
+  const fetchWithTimeout = useCallback(async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       ailogger.warn(`Request timeout after ${timeout}ms for ${url}`);
@@ -222,24 +177,72 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     } finally {
       clearTimeout(timer);
     }
-  };
+  }, []);
+
+  const pushErrorRowsToFailedMeasurements = useCallback(
+    async (errorRows: FileRow[], fileName: string) => {
+      if (errorRows.length === 0) return;
+
+      try {
+        const failedMeasurementsData = errorRows.map(row => ({
+          plotID: currentPlot?.plotID ?? -1,
+          censusID: currentCensus?.dateRanges[0].censusID ?? -1,
+          tag: row.tag || null,
+          stemTag: row.stemtag || null,
+          spCode: row.spcode || null,
+          quadrat: row.quadrat || null,
+          x: row.lx || null,
+          y: row.ly || null,
+          dbh: row.dbh || null,
+          hom: row.hom || null,
+          date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+          codes: row.codes || null,
+          comments: row.comments || null,
+          failureReasons: row.failureReason || 'Unknown error'
+        }));
+
+        const response = await fetchWithTimeout(
+          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(failedMeasurementsData)
+          },
+          30000
+        );
+
+        if (!response.ok) {
+          throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
+        }
+
+        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
+      } catch (error: any) {
+        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, error);
+        // Don't throw - we don't want to stop the upload process because of error row insertion failures
+      }
+    },
+    [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
+  );
 
   // Usage:
-  const countTotalChunks = (file: File): Promise<number> => {
-    return new Promise((resolve, reject) => {
-      let chunkCount = 0;
+  const countTotalChunks = useCallback(
+    (file: File): Promise<number> => {
+      return new Promise((resolve, reject) => {
+        let chunkCount = 0;
 
-      parse<File>(file, {
-        worker: true,
-        header: true,
-        skipEmptyLines: true,
-        chunkSize: chunkSize,
-        chunk: () => (chunkCount += 1),
-        complete: () => resolve(chunkCount),
-        error: err => reject(err)
+        parse<File>(file, {
+          worker: true,
+          header: true,
+          skipEmptyLines: true,
+          chunkSize: chunkSize,
+          chunk: () => (chunkCount += 1),
+          complete: () => resolve(chunkCount),
+          error: err => reject(err)
+        });
       });
-    });
-  };
+    },
+    [chunkSize]
+  );
 
   useEffect(() => {
     if (uploadForm === 'measurements' && !uploaded && !processed) {
@@ -273,7 +276,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       totalProcessCompletionTimeRef.current += elapsed;
       chunkProcessStartTime.current = now;
     }
-  }, [processedChunks]);
+  }, [processedChunks, uploaded, processed, uploadForm]);
 
   useEffect(() => {
     if (uploadForm === 'measurements' && uploaded && !processed) {
@@ -296,359 +299,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       );
     }
   }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
-
-  const parseFileInChunks = async (file: File, delimiter: string) => {
-    queue.clear();
-    const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
-    const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
-    const parsingInvalidRows: FileRow[] = [];
-
-    if (!expectedHeaders || !requiredHeaders) {
-      ailogger.error(`No headers defined for form type: ${uploadForm}`);
-      setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-      return;
-    }
-
-    // Validate delimiter and headers before parsing
-    try {
-      const validation = await validateDelimiter(
-        file,
-        delimiter,
-        expectedHeaders.map(h => h.label)
-      );
-      if (!validation.isValid) {
-        ailogger.warn(`Delimiter validation issues for file ${file.name}:`, validation.issues);
-        // Log issues but continue parsing - user may have non-standard format that still works
-      }
-
-      // Enhanced header validation with mapping feedback
-      if (validation.preview && validation.preview.length > 0) {
-        const csvHeaders = validation.preview[0];
-        const requiredHeaderLabels = requiredHeaders.map(h => h.label);
-        const mappingResults: string[] = [];
-        const missingRequired: string[] = [];
-
-        // Check which required headers can be mapped
-        for (const requiredHeader of requiredHeaderLabels) {
-          const normalizedRequired = requiredHeader.toLowerCase().replace(/[_\s-]/g, '');
-          const found = csvHeaders.some(csvHeader => {
-            const normalizedCsv = csvHeader.toLowerCase().replace(/[_\s-]/g, '');
-            return normalizedCsv === normalizedRequired || normalizedCsv.includes(normalizedRequired) || normalizedRequired.includes(normalizedCsv);
-          });
-
-          if (found) {
-            mappingResults.push(`✓ ${requiredHeader}`);
-          } else {
-            missingRequired.push(requiredHeader);
-            mappingResults.push(`✗ ${requiredHeader} (not found)`);
-          }
-        }
-
-        ailogger.info(`Header mapping preview for ${file.name}:`, mappingResults);
-
-        if (missingRequired.length > 0) {
-          ailogger.warn(`Missing required headers in ${file.name}: ${missingRequired.join(', ')}`);
-          ailogger.info(`Available headers: ${csvHeaders.join(', ')}`);
-          // Don't fail here - let the processing continue and handle missing fields during validation
-        } else {
-          ailogger.info(`All required headers found in ${file.name} - proceeding with enhanced parsing`);
-        }
-      }
-    } catch (error) {
-      ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
-    }
-
-    const transformHeader = (header: string) => {
-      const normalizedHeader = header
-        .trim()
-        .toLowerCase()
-        .replace(/[_\s-]/g, '');
-
-      // Map common header variations to expected field names
-      const headerMappings: Record<string, string> = {
-        tag: 'tag',
-        treetag: 'tag',
-        stemtag: 'stemtag',
-        stem: 'stemtag',
-        spcode: 'spcode',
-        species: 'spcode',
-        speciescode: 'spcode',
-        sp: 'spcode',
-        quadrat: 'quadrat',
-        quad: 'quadrat',
-        quadratname: 'quadrat',
-        lx: 'lx',
-        localx: 'lx',
-        x: 'lx',
-        xcoord: 'lx',
-        ly: 'ly',
-        localy: 'ly',
-        y: 'ly',
-        ycoord: 'ly',
-        dbh: 'dbh',
-        diameter: 'dbh',
-        hom: 'hom',
-        height: 'hom',
-        heightofmeasurement: 'hom',
-        date: 'date',
-        measurementdate: 'date',
-        dateof: 'date',
-        codes: 'codes',
-        code: 'codes',
-        attributes: 'codes',
-        attributecodes: 'codes',
-        comments: 'comments',
-        comment: 'comments',
-        description: 'comments',
-        notes: 'comments'
-      };
-
-      const mappedHeader = headerMappings[normalizedHeader];
-      if (mappedHeader) {
-        ailogger.info(`Header mapping: "${header}" -> "${mappedHeader}"`);
-        return mappedHeader;
-      }
-
-      // If no mapping found, return original trimmed header
-      ailogger.warn(`No mapping found for header: "${header}". Using as-is.`);
-      return header.trim();
-    };
-    const validateRow = (row: FileRow): boolean => {
-      const errors: string[] = [];
-      let extraData = false;
-
-      const missingFields = requiredHeaders.filter(header => {
-        const value = row[header.label];
-        return value === null || value === '' || value === 'NA' || value === 'NULL';
-      });
-      if (missingFields.length > 0) {
-        errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
-      }
-
-      if (row['__parsed_extra'] !== undefined) {
-        errors.push(
-          `Extra columns detected: "${row['__parsed_extra']}". This may indicate delimiter mismatch or improperly quoted fields. Expected delimiter: "${delimiter}"`
-        );
-        extraData = true;
-      }
-
-      // Enhanced duplicate detection reporting
-      if (uploadForm === 'measurements') {
-        const { tag, stemtag } = row;
-        if (tag && stemtag) {
-          // Check for suspicious tag values that might indicate parsing issues
-          const tagStr = String(tag);
-          const stemtagStr = String(stemtag);
-
-          if (tagStr.includes(delimiter) || stemtagStr.includes(delimiter)) {
-            errors.push(`Tag values contain delimiter character "${delimiter}": tag="${tagStr}", stemtag="${stemtagStr}". This suggests parsing error.`);
-          }
-
-          if (tagStr.length > 50 || stemtagStr.length > 50) {
-            errors.push(
-              `Unusually long tag values detected: tag="${tagStr.slice(0, 30)}...", stemtag="${stemtagStr.slice(0, 30)}...". This may indicate concatenated fields due to parsing error.`
-            );
-          }
-        }
-      }
-
-      for (const [key, value] of Object.entries(row)) {
-        if (value !== null && !['tag', 'stemtag'].includes(key)) {
-          // tags and stemtags are NOT decimals
-          const num = parseFloat(value);
-          if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
-            errors.push(`Decimal value for ${key} is out of range: ${value}`);
-          }
-        }
-      }
-
-      const rejectRow = errors.length > 0;
-      if (rejectRow) {
-        parsingInvalidRows.push({
-          ...row,
-          failureReason: errors.join('|'),
-          ...(extraData ? { excessData: row['__parsed_extra'] } : {})
-        });
-      }
-
-      return !rejectRow;
-    };
-
-    const transform = (value: string, field: string) => {
-      if (value === 'NA' || value === 'NULL' || value === '') return null;
-
-      // Enhanced date handling with multiple format support
-      if (uploadForm === FormType.measurements && field === 'date') {
-        const dateFormats = [
-          'YYYY-MM-DD',
-          'MM/DD/YYYY',
-          'DD/MM/YYYY',
-          'YYYY/MM/DD',
-          'MM-DD-YYYY',
-          'DD-MM-YYYY',
-          'YYYY.MM.DD',
-          'MM.DD.YYYY',
-          'DD.MM.YYYY',
-          'MMMM DD, YYYY',
-          'MMM DD, YYYY',
-          'DD MMM YYYY',
-          'DD MMMM YYYY',
-          'YYYY-MM-DD HH:mm:ss',
-          'MM/DD/YYYY HH:mm:ss',
-          'DD/MM/YYYY HH:mm:ss',
-          'YYYY-MM-DDTHH:mm:ss',
-          'YYYY-MM-DDTHH:mm:ss.SSS',
-          'YYYY-MM-DDTHH:mm:ss.SSSZ'
-        ];
-
-        // Try each format
-        for (const format of dateFormats) {
-          const parsed = moment(value.trim(), format, true);
-          if (parsed.isValid()) {
-            ailogger.info(`Date "${value}" parsed successfully with format "${format}"`);
-            return parsed.toDate();
-          }
-        }
-
-        // Try moment's flexible parsing as fallback
-        const flexible = moment(value.trim());
-        if (flexible.isValid()) {
-          ailogger.info(`Date "${value}" parsed with flexible format detection`);
-          return flexible.toDate();
-        }
-
-        ailogger.error(`Unable to parse date "${value}" with any known format`);
-        return value; // Return original value if parsing fails
-      }
-
-      // Enhanced coordinate precision handling
-      if (uploadForm === FormType.measurements && (field === 'lx' || field === 'ly')) {
-        const numValue = parseFloat(value);
-        if (!isNaN(numValue)) {
-          // Round to 6 decimal places for coordinate precision
-          const rounded = Math.round(numValue * 1000000) / 1000000;
-          if (rounded !== numValue) {
-            ailogger.info(`Coordinate ${field} value ${numValue} rounded to ${rounded} for precision`);
-          }
-          return rounded;
-        }
-      }
-
-      // Enhanced numeric field handling
-      if (uploadForm === FormType.measurements && (field === 'dbh' || field === 'hom')) {
-        const numValue = parseFloat(value);
-        if (!isNaN(numValue)) {
-          // Round to 2 decimal places for measurement precision
-          const rounded = Math.round(numValue * 100) / 100;
-          if (rounded !== numValue) {
-            ailogger.info(`Measurement ${field} value ${numValue} rounded to ${rounded} for precision`);
-          }
-          return rounded;
-        }
-      }
-
-      return value;
-    };
-
-    let totalRows = 0;
-
-    await new Promise<void>((resolve, reject) => {
-      Papa.parse<FileRow>(file, {
-        delimiter: delimiter,
-        header: true,
-        skipEmptyLines: true,
-        chunkSize: chunkSize,
-        transformHeader,
-        transform,
-        async chunk(results: ParseResult<FileRow>, parser) {
-          chunkStartTime.current = performance.now();
-          totalRows += results.data.length;
-          try {
-            if (queue.size >= connectionLimit * 2) {
-              ailogger.info(`Queue size ${queue.size} exceeded threshold (${connectionLimit * 2}). Pausing parser.`);
-              parser.pause();
-              // Wait until the queue has room before resuming
-              while (queue.size >= connectionLimit) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-              }
-              parser.resume();
-            }
-
-            const validRows: FileRow[] = [];
-            results.data.forEach(row => {
-              if (validateRow(row)) {
-                validRows.push(row);
-              }
-            });
-
-            if (validRows.length === 0) {
-              // Increment completedChunks even if there is nothing to upload.
-              setCompletedChunks(prev => prev + 1);
-              parser.resume();
-              return;
-            }
-
-            const fileRowSet: FileRowSet = {};
-            validRows.forEach(row => {
-              const rowId = `row-${v4()}`;
-              fileRowSet[rowId] = row;
-            });
-
-            const fileCollectionRowSet: FileCollectionRowSet = {
-              [file.name]: fileRowSet
-            };
-
-            queue.add(async () => {
-              try {
-                await uploadToSql(fileCollectionRowSet, file.name);
-              } catch (error: any) {
-                ailogger.error(`Chunk upload failed for ${file.name}:`, error);
-                // Still increment progress to prevent UI from hanging
-                // The error will be handled at a higher level
-              } finally {
-                // Always increment completed chunks to ensure progress updates
-                setCompletedChunks(prev => prev + 1);
-              }
-            });
-          } catch (err: any) {
-            ailogger.error('Error processing chunk:', err);
-            parser.abort();
-            throw err;
-          }
-        },
-        complete: async () => {
-          await queue.onEmpty();
-          // Wait for all database operations to complete
-          await waitForAllOperationsToComplete();
-          ailogger.info(`All database operations completed for ${file.name}`);
-          if (parsingInvalidRows.length > 0) {
-            ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
-            // Push error rows directly to failedmeasurements table instead of storing in component state
-            await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
-          }
-
-          // Enhanced processing summary
-          const validRowsCount = totalRows - parsingInvalidRows.length;
-          const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
-
-          ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
-          ailogger.info(`  • Total rows processed: ${totalRows}`);
-          ailogger.info(`  • Valid rows: ${validRowsCount}`);
-          ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
-          ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
-          ailogger.info(`  • Header mapping: Enhanced (order-independent)`);
-          ailogger.info(`  • Date format support: Multi-format enabled`);
-          ailogger.info(`  • Coordinate precision: Auto-normalized`);
-
-          resolve();
-        },
-        error: (err: any) => {
-          ailogger.error('Error parsing file:', err);
-          reject(err);
-        }
-      });
-    });
-  };
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string, retryCount = 0) => {
@@ -754,16 +404,373 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       }
     },
+    [uploadForm, currentPlot, currentCensus, userID, schema, fetchWithTimeout]
+  );
+
+  const parseFileInChunks = useCallback(
+    async (file: File, delimiter: string) => {
+      queue.clear();
+      const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
+      const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
+      const parsingInvalidRows: FileRow[] = [];
+
+      if (!expectedHeaders || !requiredHeaders) {
+        ailogger.error(`No headers defined for form type: ${uploadForm}`);
+        setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+        return;
+      }
+
+      // Validate delimiter and headers before parsing
+      try {
+        const validation = await validateDelimiter(
+          file,
+          delimiter,
+          expectedHeaders.map(h => h.label)
+        );
+        if (!validation.isValid) {
+          ailogger.warn(`Delimiter validation issues for file ${file.name}:`, validation.issues);
+          // Log issues but continue parsing - user may have non-standard format that still works
+        }
+
+        // Enhanced header validation with mapping feedback
+        if (validation.preview && validation.preview.length > 0) {
+          const csvHeaders = validation.preview[0];
+          const requiredHeaderLabels = requiredHeaders.map(h => h.label);
+          const mappingResults: string[] = [];
+          const missingRequired: string[] = [];
+
+          // Check which required headers can be mapped
+          for (const requiredHeader of requiredHeaderLabels) {
+            const normalizedRequired = requiredHeader.toLowerCase().replace(/[_\s-]/g, '');
+            const found = csvHeaders.some(csvHeader => {
+              const normalizedCsv = csvHeader.toLowerCase().replace(/[_\s-]/g, '');
+              return normalizedCsv === normalizedRequired || normalizedCsv.includes(normalizedRequired) || normalizedRequired.includes(normalizedCsv);
+            });
+
+            if (found) {
+              mappingResults.push(`✓ ${requiredHeader}`);
+            } else {
+              missingRequired.push(requiredHeader);
+              mappingResults.push(`✗ ${requiredHeader} (not found)`);
+            }
+          }
+
+          ailogger.info(`Header mapping preview for ${file.name}:`, mappingResults);
+
+          if (missingRequired.length > 0) {
+            ailogger.warn(`Missing required headers in ${file.name}: ${missingRequired.join(', ')}`);
+            ailogger.info(`Available headers: ${csvHeaders.join(', ')}`);
+            // Don't fail here - let the processing continue and handle missing fields during validation
+          } else {
+            ailogger.info(`All required headers found in ${file.name} - proceeding with enhanced parsing`);
+          }
+        }
+      } catch (error) {
+        ailogger.error(`Error validating delimiter for file ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
+      }
+
+      const transformHeader = (header: string) => {
+        const normalizedHeader = header
+          .trim()
+          .toLowerCase()
+          .replace(/[_\s-]/g, '');
+
+        // Map common header variations to expected field names
+        const headerMappings: Record<string, string> = {
+          tag: 'tag',
+          treetag: 'tag',
+          stemtag: 'stemtag',
+          stem: 'stemtag',
+          spcode: 'spcode',
+          species: 'spcode',
+          speciescode: 'spcode',
+          sp: 'spcode',
+          quadrat: 'quadrat',
+          quad: 'quadrat',
+          quadratname: 'quadrat',
+          lx: 'lx',
+          localx: 'lx',
+          x: 'lx',
+          xcoord: 'lx',
+          ly: 'ly',
+          localy: 'ly',
+          y: 'ly',
+          ycoord: 'ly',
+          dbh: 'dbh',
+          diameter: 'dbh',
+          hom: 'hom',
+          height: 'hom',
+          heightofmeasurement: 'hom',
+          date: 'date',
+          measurementdate: 'date',
+          dateof: 'date',
+          codes: 'codes',
+          code: 'codes',
+          attributes: 'codes',
+          attributecodes: 'codes',
+          comments: 'comments',
+          comment: 'comments',
+          description: 'comments',
+          notes: 'comments'
+        };
+
+        const mappedHeader = headerMappings[normalizedHeader];
+        if (mappedHeader) {
+          ailogger.info(`Header mapping: "${header}" -> "${mappedHeader}"`);
+          return mappedHeader;
+        }
+
+        // If no mapping found, return original trimmed header
+        ailogger.warn(`No mapping found for header: "${header}". Using as-is.`);
+        return header.trim();
+      };
+      const validateRow = (row: FileRow): boolean => {
+        const errors: string[] = [];
+        let extraData = false;
+
+        const missingFields = requiredHeaders.filter(header => {
+          const value = row[header.label];
+          return value === null || value === '' || value === 'NA' || value === 'NULL';
+        });
+        if (missingFields.length > 0) {
+          errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
+        }
+
+        if (row['__parsed_extra'] !== undefined) {
+          errors.push(
+            `Extra columns detected: "${row['__parsed_extra']}". This may indicate delimiter mismatch or improperly quoted fields. Expected delimiter: "${delimiter}"`
+          );
+          extraData = true;
+        }
+
+        // Enhanced duplicate detection reporting
+        if (uploadForm === 'measurements') {
+          const { tag, stemtag } = row;
+          if (tag && stemtag) {
+            // Check for suspicious tag values that might indicate parsing issues
+            const tagStr = String(tag);
+            const stemtagStr = String(stemtag);
+
+            if (tagStr.includes(delimiter) || stemtagStr.includes(delimiter)) {
+              errors.push(`Tag values contain delimiter character "${delimiter}": tag="${tagStr}", stemtag="${stemtagStr}". This suggests parsing error.`);
+            }
+
+            if (tagStr.length > 50 || stemtagStr.length > 50) {
+              errors.push(
+                `Unusually long tag values detected: tag="${tagStr.slice(0, 30)}...", stemtag="${stemtagStr.slice(0, 30)}...". This may indicate concatenated fields due to parsing error.`
+              );
+            }
+          }
+        }
+
+        for (const [key, value] of Object.entries(row)) {
+          if (value !== null && !['tag', 'stemtag'].includes(key)) {
+            // tags and stemtags are NOT decimals
+            const num = parseFloat(value);
+            if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
+              errors.push(`Decimal value for ${key} is out of range: ${value}`);
+            }
+          }
+        }
+
+        const rejectRow = errors.length > 0;
+        if (rejectRow) {
+          parsingInvalidRows.push({
+            ...row,
+            failureReason: errors.join('|'),
+            ...(extraData ? { excessData: row['__parsed_extra'] } : {})
+          });
+        }
+
+        return !rejectRow;
+      };
+
+      const transform = (value: string, field: string) => {
+        if (value === 'NA' || value === 'NULL' || value === '') return null;
+
+        // Enhanced date handling with multiple format support
+        if (uploadForm === FormType.measurements && field === 'date') {
+          const dateFormats = [
+            'YYYY-MM-DD',
+            'MM/DD/YYYY',
+            'DD/MM/YYYY',
+            'YYYY/MM/DD',
+            'MM-DD-YYYY',
+            'DD-MM-YYYY',
+            'YYYY.MM.DD',
+            'MM.DD.YYYY',
+            'DD.MM.YYYY',
+            'MMMM DD, YYYY',
+            'MMM DD, YYYY',
+            'DD MMM YYYY',
+            'DD MMMM YYYY',
+            'YYYY-MM-DD HH:mm:ss',
+            'MM/DD/YYYY HH:mm:ss',
+            'DD/MM/YYYY HH:mm:ss',
+            'YYYY-MM-DDTHH:mm:ss',
+            'YYYY-MM-DDTHH:mm:ss.SSS',
+            'YYYY-MM-DDTHH:mm:ss.SSSZ'
+          ];
+
+          // Try each format
+          for (const format of dateFormats) {
+            const parsed = moment(value.trim(), format, true);
+            if (parsed.isValid()) {
+              ailogger.info(`Date "${value}" parsed successfully with format "${format}"`);
+              return parsed.toDate();
+            }
+          }
+
+          // Try moment's flexible parsing as fallback
+          const flexible = moment(value.trim());
+          if (flexible.isValid()) {
+            ailogger.info(`Date "${value}" parsed with flexible format detection`);
+            return flexible.toDate();
+          }
+
+          ailogger.error(`Unable to parse date "${value}" with any known format`);
+          return value; // Return original value if parsing fails
+        }
+
+        // Enhanced coordinate precision handling
+        if (uploadForm === FormType.measurements && (field === 'lx' || field === 'ly')) {
+          const numValue = parseFloat(value);
+          if (!isNaN(numValue)) {
+            // Round to 6 decimal places for coordinate precision
+            const rounded = Math.round(numValue * 1000000) / 1000000;
+            if (rounded !== numValue) {
+              ailogger.info(`Coordinate ${field} value ${numValue} rounded to ${rounded} for precision`);
+            }
+            return rounded;
+          }
+        }
+
+        // Enhanced numeric field handling
+        if (uploadForm === FormType.measurements && (field === 'dbh' || field === 'hom')) {
+          const numValue = parseFloat(value);
+          if (!isNaN(numValue)) {
+            // Round to 2 decimal places for measurement precision
+            const rounded = Math.round(numValue * 100) / 100;
+            if (rounded !== numValue) {
+              ailogger.info(`Measurement ${field} value ${numValue} rounded to ${rounded} for precision`);
+            }
+            return rounded;
+          }
+        }
+
+        return value;
+      };
+
+      let totalRows = 0;
+
+      await new Promise<void>((resolve, reject) => {
+        Papa.parse<FileRow>(file, {
+          delimiter: delimiter,
+          header: true,
+          skipEmptyLines: true,
+          chunkSize: chunkSize,
+          transformHeader,
+          transform,
+          async chunk(results: ParseResult<FileRow>, parser) {
+            chunkStartTime.current = performance.now();
+            totalRows += results.data.length;
+            try {
+              if (queue.size >= connectionLimit * 2) {
+                ailogger.info(`Queue size ${queue.size} exceeded threshold (${connectionLimit * 2}). Pausing parser.`);
+                parser.pause();
+                // Wait until the queue has room before resuming
+                while (queue.size >= connectionLimit) {
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                parser.resume();
+              }
+
+              const validRows: FileRow[] = [];
+              results.data.forEach(row => {
+                if (validateRow(row)) {
+                  validRows.push(row);
+                }
+              });
+
+              if (validRows.length === 0) {
+                // Increment completedChunks even if there is nothing to upload.
+                setCompletedChunks(prev => prev + 1);
+                parser.resume();
+                return;
+              }
+
+              const fileRowSet: FileRowSet = {};
+              validRows.forEach(row => {
+                const rowId = `row-${v4()}`;
+                fileRowSet[rowId] = row;
+              });
+
+              const fileCollectionRowSet: FileCollectionRowSet = {
+                [file.name]: fileRowSet
+              };
+
+              queue.add(async () => {
+                try {
+                  await uploadToSql(fileCollectionRowSet, file.name);
+                } catch (error: any) {
+                  ailogger.error(`Chunk upload failed for ${file.name}:`, error);
+                  // Still increment progress to prevent UI from hanging
+                  // The error will be handled at a higher level
+                } finally {
+                  // Always increment completed chunks to ensure progress updates
+                  setCompletedChunks(prev => prev + 1);
+                }
+              });
+            } catch (err: any) {
+              ailogger.error('Error processing chunk:', err);
+              parser.abort();
+              throw err;
+            }
+          },
+          complete: async () => {
+            await queue.onEmpty();
+            // Wait for all database operations to complete
+            await waitForAllOperationsToComplete();
+            ailogger.info(`All database operations completed for ${file.name}`);
+            if (parsingInvalidRows.length > 0) {
+              ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
+              // Push error rows directly to failedmeasurements table instead of storing in component state
+              await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+            }
+
+            // Enhanced processing summary
+            const validRowsCount = totalRows - parsingInvalidRows.length;
+            const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
+
+            ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
+            ailogger.info(`  • Total rows processed: ${totalRows}`);
+            ailogger.info(`  • Valid rows: ${validRowsCount}`);
+            ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
+            ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
+            ailogger.info(`  • Header mapping: Enhanced (order-independent)`);
+            ailogger.info(`  • Date format support: Multi-format enabled`);
+            ailogger.info(`  • Coordinate precision: Auto-normalized`);
+
+            resolve();
+          },
+          error: (err: any) => {
+            ailogger.error('Error parsing file:', err);
+            reject(err);
+          }
+        });
+      });
+    },
     [
       uploadForm,
-      currentPlot?.plotID,
-      currentCensus?.dateRanges[0].censusID,
-      personnelRecording,
-      setAllRowToCMID,
-      setUploadError,
+      currentPlot?.usesSubquadrats,
       setReviewState,
-      schema,
-      currentQuadrat?.quadratID
+      queue,
+      connectionLimit,
+      chunkSize,
+      uploadToSql,
+      setCompletedChunks,
+      pushErrorRowsToFailedMeasurements,
+      waitForAllOperationsToComplete
     ]
   );
 
@@ -900,7 +907,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [acceptedFiles, uploadForm, currentPlot, currentCensus, schema]);
+  }, [
+    acceptedFiles,
+    uploadForm,
+    currentPlot,
+    currentCensus,
+    schema,
+    session?.user.name,
+    selectedDelimiters,
+    countTotalChunks,
+    parseFileInChunks,
+    queue,
+    setReviewState,
+    setUploadError,
+    waitForAllOperationsToComplete
+  ]);
 
   useEffect(() => {
     if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
@@ -1105,7 +1126,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setReviewState(ReviewStates.ERRORS);
       });
     }
-  }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
+  }, [
+    uploaded,
+    uploadForm,
+    completedChunks,
+    totalChunks,
+    schema,
+    currentPlot,
+    currentCensus,
+    processed,
+    queue,
+    setReviewState,
+    setUploadError,
+    fetchWithTimeout
+  ]);
 
   useEffect(() => {
     if (uploadForm === FormType.measurements) {

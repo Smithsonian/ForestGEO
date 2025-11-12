@@ -45,7 +45,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   };
   useEffect(() => {
     if (quadratDispatch) quadratDispatch({ quadrat: undefined }).then(() => {}); // deselect quadrat at start of execution
-  }, []);
+  }, [quadratDispatch]);
 
   useEffect(() => {
     const loadQuadratsData = async () => {
@@ -72,11 +72,11 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         })
         .catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite, currentPlot, currentCensus, quadratListContext, quadratListDispatch]);
 
   useEffect(() => {
     if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
-  }, [finish]);
+  }, [finish, setReviewState]);
 
   const handleQuadratSelection = async (selectedQuadrat: Quadrat | undefined) => {
     setQuadrat(selectedQuadrat);

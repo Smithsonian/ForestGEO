@@ -52,12 +52,15 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     }
   };
 
-  const handleDelimiterChange = useCallback((fileName: string, delimiter: string) => {
-    setSelectedDelimiters(prev => ({
-      ...prev,
-      [fileName]: delimiter
-    }));
-  }, []);
+  const handleDelimiterChange = useCallback(
+    (fileName: string, delimiter: string) => {
+      setSelectedDelimiters(prev => ({
+        ...prev,
+        [fileName]: delimiter
+      }));
+    },
+    [setSelectedDelimiters]
+  );
 
   const expectedHeaders = useMemo(() => {
     if (!uploadForm) return undefined;

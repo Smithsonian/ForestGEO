@@ -69,7 +69,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       });
       setLocalData({ ...initialData });
     }
-  }, [row, reEnterData, columns]);
+  }, [row, reEnterData, columns, localData]);
 
   const normalizeRowData = (row: GridRowModel): GridRowModel => {
     return Object.keys(row).reduce((acc, key) => {

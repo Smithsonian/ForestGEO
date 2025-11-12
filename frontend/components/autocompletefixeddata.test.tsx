@@ -490,7 +490,7 @@ describe('AutocompleteFixedData - Functional Tests', () => {
         { timeout: 3000 }
       );
 
-      const initialCallCount = (global.fetch as any).mock.calls.length;
+      const _initialCallCount = (global.fetch as any).mock.calls.length;
       vi.clearAllMocks();
 
       const input = screen.getByLabelText('Species');

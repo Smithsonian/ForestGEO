@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within as _within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Header from './header';
 import * as utils from '@/config/utils';
@@ -209,7 +209,7 @@ describe('Header - Functional Tests', () => {
 
       // z-index should be high enough to be visible above content
       // Component specifies 9995
-      const style = header?.getAttribute('style');
+      const _style = header?.getAttribute('style');
 
       // At minimum, z-index should be present
       expect(header).toBeInTheDocument();
@@ -260,13 +260,13 @@ describe('Header - Functional Tests', () => {
     });
 
     it('MUST use appropriate size for mobile interaction (minimum 44px touch target)', () => {
-      const { container } = render(<Header />);
+      const { container: _container } = render(<Header />);
 
       const menuButton = screen.getByRole('button');
 
       // Should be easily tappable on mobile
       // MUI IconButton size="sm" should still meet minimum touch target size
-      const rect = menuButton.getBoundingClientRect();
+      const _rect = menuButton.getBoundingClientRect();
 
       // WCAG recommends minimum 44x44px for touch targets
       // This is a soft check since we can't perfectly measure rendered size in tests

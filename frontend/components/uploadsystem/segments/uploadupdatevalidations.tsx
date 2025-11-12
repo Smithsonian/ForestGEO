@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Typography } from '@mui/joy';
 import { ReviewStates, UploadUpdateValidationsProps } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
@@ -13,18 +13,18 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  const updateValidations = async () => {
+  const updateValidations = useCallback(async () => {
     setIsUpdateValidationComplete(false);
     const response = await fetch(
       `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.dateRanges[0].censusID.toString()}`
     );
     const _result = await response.json();
     setIsUpdateValidationComplete(true);
-  };
+  }, [schema, currentPlot?.id, currentCensus?.dateRanges]);
 
   useEffect(() => {
     updateValidations().catch(ailogger.error);
-  }, []);
+  }, [updateValidations]);
 
   useEffect(() => {
     if (!isUpdateValidationComplete) {
@@ -34,7 +34,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
 
       return () => clearInterval(ellipsisTimer);
     } else setReviewState(ReviewStates.UPLOAD_AZURE);
-  }, [isUpdateValidationComplete]);
+  }, [isUpdateValidationComplete, setReviewState]);
 
   return (
     <Box sx={{ display: 'flex', flex: 1, width: '100%', p: 2 }}>

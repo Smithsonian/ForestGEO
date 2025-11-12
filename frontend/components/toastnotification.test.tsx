@@ -11,7 +11,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ToastProvider, useToast } from './toastnotification';
-import { ReactNode } from 'react';
+import { ReactNode as _ReactNode } from 'react';
 
 // Test component that uses the toast hook
 function TestComponent() {

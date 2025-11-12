@@ -64,54 +64,60 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     return m;
   }, []);
 
-  function countInvalidCodes(codes?: string): number {
-    if (!codes?.trim()) return 0;
-    return codes
-      .trim()
-      .split(/\s*;\s*/)
-      .filter(Boolean)
-      .reduce((cnt, code) => (selectableOpts.codes.includes(code) ? cnt : cnt + 1), 0);
-  }
+  const countInvalidCodes = useCallback(
+    (codes?: string): number => {
+      if (!codes?.trim()) return 0;
+      return codes
+        .trim()
+        .split(/\s*;\s*/)
+        .filter(Boolean)
+        .reduce((cnt, code) => (selectableOpts.codes.includes(code) ? cnt : cnt + 1), 0);
+    },
+    [selectableOpts.codes]
+  );
 
-  function computeFailureReasons(row: FailedMeasurementsRDS): string {
-    const reasons: string[] = [];
+  const computeFailureReasons = useCallback(
+    (row: FailedMeasurementsRDS): string => {
+      const reasons: string[] = [];
 
-    if (!row.spCode?.trim()) {
-      reasons.push('SpCode missing');
-    } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
-      reasons.push('SpCode invalid');
-    }
+      if (!row.spCode?.trim()) {
+        reasons.push('SpCode missing');
+      } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
+        reasons.push('SpCode invalid');
+      }
 
-    if (!row.quadrat?.trim()) {
-      reasons.push('Quadrat missing');
-    } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
-      reasons.push('Quadrat invalid');
-    }
+      if (!row.quadrat?.trim()) {
+        reasons.push('Quadrat missing');
+      } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
+        reasons.push('Quadrat invalid');
+      }
 
-    if (row.x == null || row.x === 0 || row.x === -1) reasons.push('Missing X');
-    if (row.y == null || row.y === 0 || row.y === -1) reasons.push('Missing Y');
+      if (row.x == null || row.x === 0 || row.x === -1) reasons.push('Missing X');
+      if (row.y == null || row.y === 0 || row.y === -1) reasons.push('Missing Y');
 
-    const hasCodes = !!row.codes?.trim();
-    if (!hasCodes && (row.dbh == null || row.dbh === 0 || row.dbh === -1)) {
-      reasons.push('Missing Codes and DBH');
-    }
-    if (!hasCodes && (row.hom == null || row.hom === 0 || row.hom === -1)) {
-      reasons.push('Missing Codes and HOM');
-    }
+      const hasCodes = !!row.codes?.trim();
+      if (!hasCodes && (row.dbh == null || row.dbh === 0 || row.dbh === -1)) {
+        reasons.push('Missing Codes and DBH');
+      }
+      if (!hasCodes && (row.hom == null || row.hom === 0 || row.hom === -1)) {
+        reasons.push('Missing Codes and HOM');
+      }
 
-    const sentinel = new Date('1900-01-01');
-    const actualDate = row.date instanceof Date ? row.date : new Date(row.date as any);
+      const sentinel = new Date('1900-01-01');
+      const actualDate = row.date instanceof Date ? row.date : new Date(row.date as any);
 
-    if (!actualDate || actualDate.getTime() === sentinel.getTime()) {
-      reasons.push('Missing Date');
-    }
+      if (!actualDate || actualDate.getTime() === sentinel.getTime()) {
+        reasons.push('Missing Date');
+      }
 
-    if (countInvalidCodes(row.codes) > 0) {
-      reasons.push('Invalid Codes');
-    }
+      if (countInvalidCodes(row.codes) > 0) {
+        reasons.push('Invalid Codes');
+      }
 
-    return reasons.join('|');
-  }
+      return reasons.join('|');
+    },
+    [selectableOpts, countInvalidCodes]
+  );
 
   const onRowSave = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
@@ -156,42 +162,45 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts]
   );
 
-  function displayFailureReason(params: any, column: GridColDef) {
-    const failureReasonsFromRow = (params.row.failureReasons ?? '')
-      .split('|')
-      .map((reason: string) => reason.trim())
-      .filter((reason: string) => reason !== '');
-    const visibleReasons = failureReasonsFromRow
-      .filter((reason: string) => fieldToReasons[column.field]?.includes(reason))
-      .filter((reason: string, index: number, array: string[]) => array.indexOf(reason) === index);
+  const displayFailureReason = useCallback(
+    (params: any, column: GridColDef) => {
+      const failureReasonsFromRow = (params.row.failureReasons ?? '')
+        .split('|')
+        .map((reason: string) => reason.trim())
+        .filter((reason: string) => reason !== '');
+      const visibleReasons = failureReasonsFromRow
+        .filter((reason: string) => fieldToReasons[column.field]?.includes(reason))
+        .filter((reason: string, index: number, array: string[]) => array.indexOf(reason) === index);
 
-    const displayReason = visibleReasons.length > 0 ? visibleReasons[0] : null;
+      const displayReason = visibleReasons.length > 0 ? visibleReasons[0] : null;
 
-    if (displayReason) {
-      return (
-        <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
-          <Chip
-            variant={'soft'}
-            color={'danger'}
-            sx={{
-              marginY: 0.5,
-              display: 'flex',
-              flex: 1,
-              width: '100%',
-              justifyContent: 'center',
-              alignSelf: 'center',
-              fontSize: '0.75rem',
-              whiteSpace: 'normal',
-              minHeight: '24px',
-              height: 'auto'
-            }}
-          >
-            {displayReason}
-          </Chip>
-        </Stack>
-      );
-    } else return null;
-  }
+      if (displayReason) {
+        return (
+          <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
+            <Chip
+              variant={'soft'}
+              color={'danger'}
+              sx={{
+                marginY: 0.5,
+                display: 'flex',
+                flex: 1,
+                width: '100%',
+                justifyContent: 'center',
+                alignSelf: 'center',
+                fontSize: '0.75rem',
+                whiteSpace: 'normal',
+                minHeight: '24px',
+                height: 'auto'
+              }}
+            >
+              {displayReason}
+            </Chip>
+          </Stack>
+        );
+      } else return null;
+    },
+    [fieldToReasons]
+  );
 
   const columns: GridColDef[] = useMemo(() => {
     return [
@@ -283,7 +292,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
         };
       })
     ];
-  }, [selectableOpts, refresh]);
+  }, [selectableOpts, displayFailureReason]);
 
   return Object.keys(selectableOpts)
     .filter(i => !['tag', 'stemTag'].includes(i))

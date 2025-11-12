@@ -89,7 +89,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     ];
 
     return baseColumns;
-  }, [gridColumns, gridType, unsavedChangesRef, apiRef, setHasUnsavedRows]);
+  }, [gridColumns, apiRef]);
 
   const processRowUpdate = useCallback<NonNullable<DataGridProps['processRowUpdate']>>((newRow, oldRow) => {
     const rowId = newRow.id;
@@ -142,7 +142,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     } catch {
       setIsSaving(false);
     }
-  }, [apiRef, setRows]);
+  }, []);
 
   const getRowClassName = useCallback<NonNullable<DataGridProps['getRowClassName']>>(({ id, row }) => {
     const unsavedRow = unsavedChangesRef.current.unsavedRows[id];

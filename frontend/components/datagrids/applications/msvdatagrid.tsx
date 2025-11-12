@@ -76,7 +76,7 @@ export default function MeasurementsSummaryViewDataGrid() {
 
   useEffect(() => {
     if (openFSM) fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(ailogger.error);
-  }, [openFSM]);
+  }, [openFSM, currentSite?.schemaName]);
 
   const addNewRowToGrid = () => {
     const id = randomId();

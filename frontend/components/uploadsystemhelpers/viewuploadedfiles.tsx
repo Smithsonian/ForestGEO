@@ -22,7 +22,7 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
   const { currentPlot, currentCensus, refreshFiles } = props;
   useEffect(() => {
     refreshFiles();
-  }, []); // on mount
+  }, [refreshFiles]); // on mount
 
   // Generate container name for display
   const getContainerDisplayName = () => {
@@ -172,9 +172,9 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     }
   }, [refreshFileList, currentPlot, currentCensus, getListOfFiles, setRefreshFileList]);
 
-  const refreshFiles = () => {
+  const refreshFiles = useCallback(() => {
     getListOfFiles().then();
-  };
+  }, [getListOfFiles]);
 
   const _handleCloseSnackbar = () => {
     setOpenSnackbar(false);
@@ -195,7 +195,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       // Clear the timer if the component unmounts
       return () => clearTimeout(timer);
     }
-  }, [errorMessage]);
+  }, [errorMessage, refreshFiles]);
 
   if (!isLoaded || !fileRows) {
     return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles} />;

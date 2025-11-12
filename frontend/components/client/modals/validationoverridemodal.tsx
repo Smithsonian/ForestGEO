@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
@@ -22,7 +22,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  async function triggerOverride() {
+  const triggerOverride = useCallback(async () => {
     const clearCMVQuery = `DELETE cmv
       FROM ${currentSite?.schemaName}.cmverrors AS cmv
       JOIN ${currentSite?.schemaName}.coremeasurements AS cm
@@ -32,7 +32,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
       WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
         AND c.PlotID = ${currentPlot?.plotID}
         AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm 
+    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
       JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
       SET cm.IsValidated = TRUE
       WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber}) AND c.PlotID = ${currentPlot?.plotID} AND cm.IsValidated = FALSE OR cm.IsValidated IS NULL`;
@@ -50,7 +50,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
     });
     const resultPacket = await response.json();
     if (resultPacket.affectedRows === 0) throw new Error('validation override failed');
-  }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   useEffect(() => {
     if (startOverride) {

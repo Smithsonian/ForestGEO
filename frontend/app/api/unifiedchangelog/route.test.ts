@@ -153,7 +153,7 @@ describe('Unified Changelog Tracking System', () => {
     it('should create ONE changelog entry for personnel row update', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-2');
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-2');
       const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
@@ -209,8 +209,8 @@ describe('Unified Changelog Tracking System', () => {
     it('should NOT create changelog entries during full census deletion', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-4');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
 
       const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=5&type=full');
@@ -228,14 +228,14 @@ describe('Unified Changelog Tracking System', () => {
 
       // The stored procedure sets @disable_triggers = 1
       // This prevents changelog entries from being created during bulk deletion
-      expect(commit).toHaveBeenCalledWith('tx-4');
+      expect(_commit).toHaveBeenCalledWith('tx-4');
     });
 
     it('should NOT create changelog entries during partial census deletion (measurements only)', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-5');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
 
       const req = makeRequest('http://localhost/api/clearcensus?schema=testschema&censusID=7&type=msmts');
@@ -250,7 +250,7 @@ describe('Unified Changelog Tracking System', () => {
       expect(params).toEqual([]);
 
       // The stored procedure sets @disable_triggers = 1
-      expect(commit).toHaveBeenCalledWith('tx-5');
+      expect(_commit).toHaveBeenCalledWith('tx-5');
     });
   });
 
@@ -258,8 +258,8 @@ describe('Unified Changelog Tracking System', () => {
     it('should create ONE changelog entry for measurements file upload (first batch)', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-6');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-6');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence for measurements upload path:
       // 1. INSERT to temporarymeasurements
@@ -346,8 +346,8 @@ describe('Unified Changelog Tracking System', () => {
     it('should UPDATE same changelog entry for subsequent batches of same file', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-7');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-7');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence: INSERT temporarymeasurements, COUNT rows, SELECT changelog (found), UPDATE changelog
       const exec = vi
@@ -405,7 +405,7 @@ describe('Unified Changelog Tracking System', () => {
 
       // Verify accumulated counts
       if (changelogUpdate) {
-        const [sql, params] = changelogUpdate as [string, any[]];
+        const [_sql, params] = changelogUpdate as [string, any[]];
         const metadata = JSON.parse(params[0]);
         expect(metadata.rowCount).toBe(2000); // 1200 + 800
         expect(metadata.batchCount).toBe(2); // 1 + 1
@@ -415,8 +415,8 @@ describe('Unified Changelog Tracking System', () => {
     it('should create ONE changelog entry for supporting data file upload (attributes)', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-8');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-8');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       const exec = vi
         .spyOn(cm, 'executeQuery')
@@ -453,10 +453,10 @@ describe('Unified Changelog Tracking System', () => {
       const cm = (ConnectionManager as any).getInstance();
 
       // First file upload
-      let begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9a');
-      let commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      let _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9a');
+      let _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      let exec = vi
+      let _exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 500 }])
@@ -480,10 +480,10 @@ describe('Unified Changelog Tracking System', () => {
       vi.clearAllMocks();
 
       // Second file upload
-      begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
-      commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
+      _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      exec = vi
+      _exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 300 }])
@@ -514,8 +514,8 @@ describe('Unified Changelog Tracking System', () => {
       // Test that multiple users editing different rows doesn't cause conflicts
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-10a').mockResolvedValueOnce('tx-10b');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce({ affectedRows: 1 })
@@ -550,8 +550,8 @@ describe('Unified Changelog Tracking System', () => {
     it('should track WHO made the change via ChangedBy field', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-11');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-11');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce({})
@@ -583,11 +583,11 @@ describe('Unified Changelog Tracking System', () => {
     it('should not fail upload if changelog tracking fails', async () => {
       const cm = (ConnectionManager as any).getInstance();
 
-      const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-12');
-      const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+      const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-12');
+      const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock changelog insert failure but upload succeeds
-      const exec = vi
+      const _exec = vi
         .spyOn(cm, 'executeQuery')
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
         .mockResolvedValueOnce([{ count: 50 }]) // COUNT succeeds

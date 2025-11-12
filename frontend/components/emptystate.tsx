@@ -83,6 +83,7 @@ export default function EmptyState({ icon, title, description, primaryAction, se
     >
       {/* Icon */}
       <Avatar
+        alt={title}
         sx={{
           width: 80,
           height: 80,

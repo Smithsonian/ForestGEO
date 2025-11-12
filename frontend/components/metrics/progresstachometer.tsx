@@ -95,7 +95,7 @@ export default function ProgressTachometer(props: ProgressTachoType) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       timeouts.forEach(timeout => clearTimeout(timeout));
     };
-  }, [PopulatedPercent]);
+  }, [PopulatedPercent, displayValue]);
 
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%' }}>

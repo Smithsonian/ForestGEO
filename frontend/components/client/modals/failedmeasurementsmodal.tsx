@@ -2,7 +2,7 @@
 
 import { Button, CircularProgress, DialogActions, DialogContent, DialogTitle, Divider, Modal, ModalDialog, Sheet, Stack, Typography } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import ailogger from '@/ailogger';
 
@@ -26,7 +26,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
 
-  const fetchRecordCounts = async () => {
+  const fetchRecordCounts = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
       return;
     }
@@ -54,7 +54,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     } catch (error: any) {
       ailogger.error('Failed to fetch record counts:', error);
     }
-  };
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
 
   const handleClearFailedMeasurements = async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
@@ -170,7 +170,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     if (open) {
       fetchRecordCounts();
     }
-  }, [open, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges[0]?.censusID]);
+  }, [open, fetchRecordCounts]);
 
   return (
     <Modal open={open} onClose={() => {}}>

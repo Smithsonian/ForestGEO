@@ -37,11 +37,13 @@ describe('Upload System - Refactored Integration Tests', () => {
     }).as('getPlots');
     cy.intercept('GET', '/api/fetchall/census**', {
       statusCode: 200,
-      body: [{
-        censusID: 1,
-        plotCensusNumber: 1,
-        dateRanges: [{ censusID: 1, startDate: '2020-01-01', endDate: '2020-12-31' }]
-      }]
+      body: [
+        {
+          censusID: 1,
+          plotCensusNumber: 1,
+          dateRanges: [{ censusID: 1, startDate: '2020-01-01', endDate: '2020-12-31' }]
+        }
+      ]
     }).as('getCensus');
     cy.intercept('GET', '/api/fetchall/personnel**', {
       statusCode: 200,
@@ -190,17 +192,22 @@ describe('Upload System - Refactored Integration Tests', () => {
 100002,1,LIST2,1011,201.6,101.1,59.6,,1.30,2010-03-17
 100003,1,CACA18,1011,203.5,102,6,,1.30,2010-03-17`;
 
-      cy.contains('replace-test.csv').parent().find('[data-cy="replace-file-button"]').then(replaceBtn => {
-        const file = new File([replacementContent], 'replacement.csv', { type: 'text/csv' });
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
+      cy.contains('replace-test.csv')
+        .parent()
+        .find('[data-cy="replace-file-button"]')
+        .then(replaceBtn => {
+          const file = new File([replacementContent], 'replacement.csv', { type: 'text/csv' });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
 
-        cy.wrap(replaceBtn).click();
-        cy.get('input[type="file"]').last().then(input => {
-          input[0].files = dataTransfer.files;
-          input[0].dispatchEvent(new Event('change', { bubbles: true }));
+          cy.wrap(replaceBtn).click();
+          cy.get('input[type="file"]')
+            .last()
+            .then(input => {
+              input[0].files = dataTransfer.files;
+              input[0].dispatchEvent(new Event('change', { bubbles: true }));
+            });
         });
-      });
 
       // Verify replacement via useFileManagement.replaceFile
       cy.contains('replacement.csv').should('be.visible');
@@ -441,7 +448,7 @@ describe('Upload System - Refactored Integration Tests', () => {
         expect(row1).to.have.property('lx', 202);
         expect(row1).to.have.property('ly', 104.5);
         expect(row1).to.have.property('dbh', 3.5);
-        expect(row1).to.have.property('hom', 1.30);
+        expect(row1).to.have.property('hom', 1.3);
 
         // Verify multi-stem code
         const row2 = fileRowSet[rowKeys[1]];

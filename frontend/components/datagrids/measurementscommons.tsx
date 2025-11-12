@@ -69,7 +69,7 @@ import { useSession } from 'next-auth/react';
 import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
-import { formatHeader, InputChip, MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { formatHeader, InputChip } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/modals/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
@@ -279,7 +279,145 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     } catch (error: any) {
       ailogger.error('Error refreshing counts:', error);
     }
-  }, [currentSite, currentPlot, currentCensus, gridType]);
+  }, [currentSite, currentPlot, currentCensus, gridType, setSnackbar]);
+
+  const handleAddNewRow = useCallback(async () => {
+    if (locked) {
+      return;
+    }
+    const newRowCount = rowCount + 1;
+    const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
+    const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
+    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
+
+    setIsNewRowAdded(true);
+    setShouldAddRowAfterFetch(isNewPageNeeded);
+    setNewLastPage(calculatedNewLastPage);
+
+    if (isNewPageNeeded) {
+      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
+      addNewRowToGrid();
+    } else {
+      setPaginationModel({ ...paginationModel, page: existingLastPage });
+      addNewRowToGrid();
+    }
+  }, [locked, rowCount, paginationModel, addNewRowToGrid, setIsNewRowAdded, setShouldAddRowAfterFetch, setNewLastPage, setPaginationModel]);
+
+  const fetchPaginatedData = useCallback(
+    (pageToFetch: number) =>
+      debounce(async () => {
+        if (!currentSite || !currentPlot || !currentCensus) {
+          ailogger.warn('Missing necessary context for fetchPaginatedData');
+          return;
+        }
+
+        setLoading(true);
+        let paginatedQuery = '';
+
+        paginatedQuery = createQFFetchQuery(
+          currentSite?.schemaName ?? '',
+          gridType,
+          pageToFetch,
+          paginationModel.pageSize,
+          currentPlot?.plotID,
+          currentCensus?.plotCensusNumber
+        );
+
+        try {
+          const { items, ...rest } = filterModel;
+          const response = await fetch(paginatedQuery, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: filterModel.items.every(item => item.value && item.operator && item.field && item.operator !== '' && item.field !== '')
+              ? JSON.stringify({ filterModel })
+              : JSON.stringify({ filterModel: rest })
+          });
+
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.message || 'Error fetching data');
+
+          setRows(data.output);
+          setRowCount(data.totalCount);
+          // setUsingQuery(data.finishedQuery);
+
+          if (isNewRowAdded && pageToFetch === newLastPage) {
+            await handleAddNewRow();
+          }
+        } catch (error: any) {
+          ailogger.error('Error fetching data:', error);
+          setSnackbar({ children: 'Error fetching data', severity: 'error' });
+        } finally {
+          setLoading(false);
+        }
+      }, 250)(),
+    [
+      filterModel,
+      currentSite,
+      currentPlot,
+      currentCensus,
+      paginationModel,
+      isNewRowAdded,
+      newLastPage,
+      gridType,
+      setRows,
+      setRowCount,
+      setLoading,
+      handleAddNewRow,
+      setSnackbar
+    ]
+  );
+
+  const fetchValidationErrors = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
+      );
+      if (!response.ok) throw new Error('Failed to fetch validation errors');
+      const data = await response.json();
+      const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
+        ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
+            if (error.coreMeasurementID) {
+              const errorDetailsMap = new Map<number, ValidationPair[]>();
+
+              (error.validationErrorIDs || []).forEach((id, index) => {
+                const descriptions = error.descriptions?.[index]?.split(';') || [];
+                const criteria = error.criteria?.[index]?.split(';') || [];
+
+                // Ensure descriptions and criteria are paired correctly
+                const validationPairs = descriptions.map((description, i) => ({
+                  description,
+                  criterion: criteria[i] ?? '' // Default to empty if criteria is missing
+                }));
+
+                if (!errorDetailsMap.has(id)) {
+                  errorDetailsMap.set(id, []);
+                }
+
+                // Append validation pairs to the corresponding ID
+                errorDetailsMap.get(id)!.push(...validationPairs);
+              });
+
+              acc[error.coreMeasurementID] = {
+                coreMeasurementID: error.coreMeasurementID,
+                errors: Array.from(errorDetailsMap.entries()).map(([id, validationPairs]) => ({
+                  id,
+                  validationPairs
+                }))
+              };
+            }
+            return acc;
+          }, {})
+        : {};
+      setValidationErrors(errorMap);
+    } catch (error: any) {
+      ailogger.error('Error fetching validation errors:', error);
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+
+  const runFetchPaginated = useCallback(async () => {
+    await fetchPaginatedData(paginationModel.page);
+    await fetchValidationErrors();
+  }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
 
   useEffect(() => {
     setFilterModel(prevModel => ({
@@ -296,7 +434,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ]
     }));
     setRefresh(true);
-  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, setRefresh]);
 
   useEffect(() => {
     if (refresh) {
@@ -304,11 +442,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         .then(() => setRefresh(false))
         .catch(ailogger.error);
     }
-  }, [refresh, refreshCounts]);
+  }, [refresh, refreshCounts, runFetchPaginated, setRefresh]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
-  }, []);
+  }, [currentSite, currentPlot, currentCensus]);
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
@@ -322,21 +460,27 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
-  const cellHasError = (colField: string, rowId: GridRowId) => {
-    const row = rows.find(row => rowId === row.id);
-    if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
-      return false;
-    }
-    return validationErrors[Number(row.coreMeasurementID)].errors.find(error => error.validationPairs.find(vp => vp.criterion === colField));
-  };
+  const cellHasError = useCallback(
+    (colField: string, rowId: GridRowId) => {
+      const row = rows.find(row => rowId === row.id);
+      if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
+        return false;
+      }
+      return validationErrors[Number(row.coreMeasurementID)].errors.find(error => error.validationPairs.find(vp => vp.criterion === colField));
+    },
+    [rows, validationErrors]
+  );
 
-  const rowHasError = (rowId: GridRowId) => {
-    const row = rows.find(row => rowId === row.id);
-    if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
-      return false; // No errors for this row
-    }
-    return gridColumns.some(column => cellHasError(column.field, rowId));
-  };
+  const rowHasError = useCallback(
+    (rowId: GridRowId) => {
+      const row = rows.find(row => rowId === row.id);
+      if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
+        return false; // No errors for this row
+      }
+      return gridColumns.some(column => cellHasError(column.field, rowId));
+    },
+    [rows, validationErrors, gridColumns, cellHasError]
+  );
 
   const fetchRowsForExport = async (visibility: VisibleFilter[], exportType: 'csv' | 'form') => {
     const tempFilter: ExtendedGridFilterModel = {
@@ -494,21 +638,24 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
-  const openConfirmationDialog = (actionType: 'save' | 'delete', actionId: GridRowId) => {
-    setPendingAction({ actionType, actionId });
-    const row = rows.find(row => String(row.id) === String(actionId));
-    if (row) {
-      if (actionType === 'delete') {
-        setIsDeleteDialogOpen(true);
-      } else {
-        setIsDialogOpen(true);
-        setRowModesModel(oldModel => ({
-          ...oldModel,
-          [actionId]: { mode: GridRowModes.View }
-        }));
+  const openConfirmationDialog = useCallback(
+    (actionType: 'save' | 'delete', actionId: GridRowId) => {
+      setPendingAction({ actionType, actionId });
+      const row = rows.find(row => String(row.id) === String(actionId));
+      if (row) {
+        if (actionType === 'delete') {
+          setIsDeleteDialogOpen(true);
+        } else {
+          setIsDialogOpen(true);
+          setRowModesModel(oldModel => ({
+            ...oldModel,
+            [actionId]: { mode: GridRowModes.View }
+          }));
+        }
       }
-    }
-  };
+    },
+    [rows, setRowModesModel]
+  );
 
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
@@ -633,97 +780,27 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
-  const handleSaveClick = (id: GridRowId) => () => {
-    if (locked) return;
-    openConfirmationDialog('save', id);
-  };
-
-  const handleDeleteClick = (id: GridRowId) => () => {
-    if (locked) return;
-    openConfirmationDialog('delete', id);
-  };
-
-  const handleAddNewRow = async () => {
-    if (locked) {
-      return;
-    }
-    const newRowCount = rowCount + 1;
-    const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
-    const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
-    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
-
-    setIsNewRowAdded(true);
-    setShouldAddRowAfterFetch(isNewPageNeeded);
-    setNewLastPage(calculatedNewLastPage);
-
-    if (isNewPageNeeded) {
-      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
-      addNewRowToGrid();
-    } else {
-      setPaginationModel({ ...paginationModel, page: existingLastPage });
-      addNewRowToGrid();
-    }
-  };
-
-  const fetchPaginatedData = useCallback(
-    debounce(async (pageToFetch: number) => {
-      if (!currentSite || !currentPlot || !currentCensus) {
-        ailogger.warn('Missing necessary context for fetchPaginatedData');
-        return;
-      }
-
-      setLoading(true);
-      let paginatedQuery = '';
-
-      paginatedQuery = createQFFetchQuery(
-        currentSite?.schemaName ?? '',
-        gridType,
-        pageToFetch,
-        paginationModel.pageSize,
-        currentPlot?.plotID,
-        currentCensus?.plotCensusNumber
-      );
-
-      try {
-        const { items, ...rest } = filterModel;
-        const response = await fetch(paginatedQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: filterModel.items.every(item => item.value && item.operator && item.field && item.operator !== '' && item.field !== '')
-            ? JSON.stringify({ filterModel })
-            : JSON.stringify({ filterModel: rest })
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Error fetching data');
-
-        setRows(data.output);
-        setRowCount(data.totalCount);
-        // setUsingQuery(data.finishedQuery);
-
-        if (isNewRowAdded && pageToFetch === newLastPage) {
-          await handleAddNewRow();
-        }
-      } catch (error: any) {
-        ailogger.error('Error fetching data:', error);
-        setSnackbar({ children: 'Error fetching data', severity: 'error' });
-      } finally {
-        setLoading(false);
-      }
-    }, 250),
-    [filterModel, currentSite, currentPlot, currentCensus, paginationModel, isNewRowAdded, newLastPage]
+  const handleSaveClick = useCallback(
+    (id: GridRowId) => () => {
+      if (locked) return;
+      openConfirmationDialog('save', id);
+    },
+    [locked, openConfirmationDialog]
   );
 
-  async function runFetchPaginated() {
-    await fetchPaginatedData(paginationModel.page);
-    await fetchValidationErrors();
-  }
+  const handleDeleteClick = useCallback(
+    (id: GridRowId) => () => {
+      if (locked) return;
+      openConfirmationDialog('delete', id);
+    },
+    [locked, openConfirmationDialog]
+  );
 
   useEffect(() => {
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(ailogger.error);
     }
-  }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel, runFetchPaginated]);
 
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
@@ -741,7 +818,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         setPromiseArguments({ resolve, reject, newRow, oldRow });
         setLoading(false);
       }),
-    [currentSite?.schemaName, setSnackbar, setIsNewRowAdded, setShouldAddRowAfterFetch, paginationModel]
+    [setLoading]
   );
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
@@ -760,59 +837,68 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
-  const handleEditClick = (id: GridRowId) => () => {
-    if (locked) return;
-    const row = rows.find(r => r.id === id);
-    if (row && handleSelectQuadrat) {
-      handleSelectQuadrat(row.quadratID);
-    }
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
-  };
-
-  const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
-    if (locked) return;
-    event?.preventDefault();
-    const row = rows.find(r => r.id === id);
-    if (row?.isNew) {
-      setRows(oldRows => oldRows.filter(row => row.id !== id));
-      setIsNewRowAdded(false);
-      if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
-        const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
-        setPaginationModel({ ...paginationModel, page: newPage });
+  const handleEditClick = useCallback(
+    (id: GridRowId) => () => {
+      if (locked) return;
+      const row = rows.find(r => r.id === id);
+      if (row && handleSelectQuadrat) {
+        handleSelectQuadrat(row.quadratID);
       }
-    } else {
-      setRowModesModel(oldModel => ({
-        ...oldModel,
-        [id]: { mode: GridRowModes.View, ignoreModifications: true }
-      }));
-    }
-    if (handleSelectQuadrat) handleSelectQuadrat(null);
-  };
-
-  const getEnhancedCellAction = (type: string, icon: any, onClick: any) => (
-    <CellItemContainer>
-      <Tooltip
-        disableInteractive
-        title={
-          type === 'Save'
-            ? `Save your changes`
-            : type === 'Cancel'
-              ? `Cancel your changes`
-              : type === 'Edit'
-                ? `Edit this row`
-                : type === 'Delete'
-                  ? 'Delete this row (cannot be undone!)'
-                  : undefined
-        }
-        arrow
-        placement="top"
-      >
-        <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
-      </Tooltip>
-    </CellItemContainer>
+      setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    },
+    [locked, rows, handleSelectQuadrat, rowModesModel, setRowModesModel]
   );
 
-  function getGridActionsColumn(): GridColDef {
+  const handleCancelClick = useCallback(
+    (id: GridRowId, event?: React.MouseEvent) => {
+      if (locked) return;
+      event?.preventDefault();
+      const row = rows.find(r => r.id === id);
+      if (row?.isNew) {
+        setRows(oldRows => oldRows.filter(row => row.id !== id));
+        setIsNewRowAdded(false);
+        if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
+          const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
+          setPaginationModel({ ...paginationModel, page: newPage });
+        }
+      } else {
+        setRowModesModel(oldModel => ({
+          ...oldModel,
+          [id]: { mode: GridRowModes.View, ignoreModifications: true }
+        }));
+      }
+      if (handleSelectQuadrat) handleSelectQuadrat(null);
+    },
+    [locked, rows, rowCount, paginationModel, isNewRowAdded, handleSelectQuadrat, setRows, setIsNewRowAdded, setPaginationModel, setRowModesModel]
+  );
+
+  const getEnhancedCellAction = useCallback(
+    (type: string, icon: any, onClick: any) => (
+      <CellItemContainer>
+        <Tooltip
+          disableInteractive
+          title={
+            type === 'Save'
+              ? `Save your changes`
+              : type === 'Cancel'
+                ? `Cancel your changes`
+                : type === 'Edit'
+                  ? `Edit this row`
+                  : type === 'Delete'
+                    ? 'Delete this row (cannot be undone!)'
+                    : undefined
+          }
+          arrow
+          placement="top"
+        >
+          <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
+        </Tooltip>
+      </CellItemContainer>
+    ),
+    []
+  );
+
+  const getGridActionsColumn = useCallback((): GridColDef => {
     return {
       field: 'actions',
       type: 'actions',
@@ -832,54 +918,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
       }
     };
-  }
-
-  const fetchValidationErrors = useCallback(async () => {
-    try {
-      const response = await fetch(
-        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
-      );
-      if (!response.ok) throw new Error('Failed to fetch validation errors');
-      const data = await response.json();
-      const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
-        ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
-            if (error.coreMeasurementID) {
-              const errorDetailsMap = new Map<number, ValidationPair[]>();
-
-              (error.validationErrorIDs || []).forEach((id, index) => {
-                const descriptions = error.descriptions?.[index]?.split(';') || [];
-                const criteria = error.criteria?.[index]?.split(';') || [];
-
-                // Ensure descriptions and criteria are paired correctly
-                const validationPairs = descriptions.map((description, i) => ({
-                  description,
-                  criterion: criteria[i] ?? '' // Default to empty if criteria is missing
-                }));
-
-                if (!errorDetailsMap.has(id)) {
-                  errorDetailsMap.set(id, []);
-                }
-
-                // Append validation pairs to the corresponding ID
-                errorDetailsMap.get(id)!.push(...validationPairs);
-              });
-
-              acc[error.coreMeasurementID] = {
-                coreMeasurementID: error.coreMeasurementID,
-                errors: Array.from(errorDetailsMap.entries()).map(([id, validationPairs]) => ({
-                  id,
-                  validationPairs
-                }))
-              };
-            }
-            return acc;
-          }, {})
-        : {};
-      setValidationErrors(errorMap);
-    } catch (error: any) {
-      ailogger.error('Error fetching validation errors:', error);
-    }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+  }, [rowModesModel, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]);
 
   const validationStatusColumn: GridColDef = useMemo(
     () => ({
@@ -955,39 +994,45 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         );
       }
     }),
-    [rows, validationErrors, paginationModel, refresh]
+    [validationErrors]
   );
 
-  const measurementDateColumn: GridColDef = {
-    field: 'measurementDate',
-    headerName: 'Date',
-    headerClassName: 'header',
-    headerAlign: 'center',
-    flex: 0.7,
-    sortable: true,
-    editable: true,
-    type: 'date',
-    renderHeader: () => (
-      <Box flexDirection={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-        <Typography level="title-lg">Date</Typography>
-        <Typography level="body-xs">YYYY-MM-DD</Typography>
-      </Box>
-    ),
-    valueFormatter: value => {
-      if (!value || !moment(value).utc().isValid()) {
+  const measurementDateColumn: GridColDef = useMemo(
+    () => ({
+      field: 'measurementDate',
+      headerName: 'Date',
+      headerClassName: 'header',
+      headerAlign: 'center',
+      flex: 0.7,
+      sortable: true,
+      editable: true,
+      type: 'date',
+      renderHeader: () => (
+        <Box flexDirection={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+          <Typography level="title-lg">Date</Typography>
+          <Typography level="body-xs">YYYY-MM-DD</Typography>
+        </Box>
+      ),
+      valueFormatter: value => {
+        if (!value || !moment(value).utc().isValid()) {
+          return '';
+        }
+        return moment(value).utc().format('YYYY-MM-DD');
+      }
+    }),
+    []
+  );
+
+  const getCellErrorMessages = useCallback(
+    (colField: string, coreMeasurementID: number) => {
+      const error = validationErrors[coreMeasurementID].errors;
+      if (!error || !Array.isArray(error)) {
         return '';
       }
-      return moment(value).utc().format('YYYY-MM-DD');
-    }
-  };
-
-  const getCellErrorMessages = (colField: string, coreMeasurementID: number) => {
-    const error = validationErrors[coreMeasurementID].errors;
-    if (!error || !Array.isArray(error)) {
-      return '';
-    }
-    return error.flatMap(errorDetail => errorDetail.validationPairs).find(vp => vp.criterion === colField)?.description || null;
-  };
+      return error.flatMap(errorDetail => errorDetail.validationPairs).find(vp => vp.criterion === colField)?.description || null;
+    },
+    [validationErrors]
+  );
 
   const columns = useMemo(() => {
     const commonColumns = gridColumns.map(column => {
@@ -1109,7 +1154,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns)];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [MeasurementsSummaryViewGridColumns, validationStatusColumn, measurementDateColumn, locked, rows, validationErrors, rowModesModel, refresh]);
+  }, [
+    gridColumns,
+    validationStatusColumn,
+    measurementDateColumn,
+    locked,
+    selectableAttributes,
+    selectableOpts,
+    cellHasError,
+    getCellErrorMessages,
+    rowHasError,
+    getGridActionsColumn,
+    session?.user.userStatus
+  ]);
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);

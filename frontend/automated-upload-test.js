@@ -46,10 +46,7 @@ async function uploadFile(filename, censusID, personnelID) {
     const plotID = 1;
 
     // Setup bulk processor
-    const processorResponse = await axios.get(
-      `${BASE_URL}/api/setupbulkprocessor/${schema}/${plotID}/${censusID}/measurements`,
-      { timeout: 30000 }
-    );
+    const processorResponse = await axios.get(`${BASE_URL}/api/setupbulkprocessor/${schema}/${plotID}/${censusID}/measurements`, { timeout: 30000 });
 
     console.log('✓ Processor setup:', processorResponse.data.message || 'success');
 
@@ -99,10 +96,7 @@ async function uploadFile(filename, censusID, personnelID) {
     console.log('Step 3: Processing batch...');
 
     // Process batch with stored procedure
-    const procedureResponse = await axios.get(
-      `${BASE_URL}/api/setupbulkprocedure/${schema}/${plotID}/${censusID}/measurements/${batchID}`,
-      { timeout: 60000 }
-    );
+    const procedureResponse = await axios.get(`${BASE_URL}/api/setupbulkprocedure/${schema}/${plotID}/${censusID}/measurements/${batchID}`, { timeout: 60000 });
 
     console.log('✓ Batch processed:', procedureResponse.data.message);
 
@@ -116,10 +110,7 @@ async function uploadFile(filename, censusID, personnelID) {
     console.log('Step 4: Collapsing data...');
 
     // Collapse data
-    const collapseResponse = await axios.get(
-      `${BASE_URL}/api/setupbulkcollapser/${schema}/${plotID}/${censusID}`,
-      { timeout: 60000 }
-    );
+    const collapseResponse = await axios.get(`${BASE_URL}/api/setupbulkcollapser/${schema}/${plotID}/${censusID}`, { timeout: 60000 });
 
     console.log('✓ Data collapsed:', collapseResponse.data.message);
 
@@ -131,7 +122,6 @@ async function uploadFile(filename, censusID, personnelID) {
       insertedCount: loadResponse.data.insertedCount,
       failedRows: procedureResponse.data.failedRows || []
     };
-
   } catch (error) {
     console.error('❌ Upload failed:', error.message);
     if (error.response) {
@@ -162,10 +152,7 @@ async function runAutomatedTests() {
     console.log('🔍 GUARANTEE 1: Records save correctly to coremeasurements');
     console.log('='.repeat(60));
 
-    const [[baseline1]] = await connection.execute(
-      'SELECT COUNT(*) as count FROM coremeasurements WHERE CensusID = ?',
-      [censusID]
-    );
+    const [[baseline1]] = await connection.execute('SELECT COUNT(*) as count FROM coremeasurements WHERE CensusID = ?', [censusID]);
     console.log(`Baseline count: ${baseline1.count}`);
 
     const result1 = await uploadFile('test-valid-measurements.csv', censusID, personnelID);
@@ -175,7 +162,8 @@ async function runAutomatedTests() {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Query for the uploaded records
-      const [records] = await connection.execute(`
+      const [records] = await connection.execute(
+        `
         SELECT cm.CoreMeasurementID, s.TreeTag, s.StemTag, sp.SpeciesCode,
                q.QuadratName, cm.MeasuredDBH, cm.MeasuredHOM
         FROM coremeasurements cm
@@ -185,7 +173,9 @@ async function runAutomatedTests() {
         WHERE cm.CensusID = ?
         AND s.TreeTag IN ('TESTVALID001', 'TESTVALID002', 'TESTVALID003')
         ORDER BY s.TreeTag
-      `, [censusID]);
+      `,
+        [censusID]
+      );
 
       console.log(`\n✓ Found ${records.length} uploaded records:`);
       records.forEach(r => {
@@ -210,22 +200,28 @@ async function runAutomatedTests() {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Check valid records
-      const [validRecords] = await connection.execute(`
+      const [validRecords] = await connection.execute(
+        `
         SELECT COUNT(*) as count
         FROM coremeasurements cm
         JOIN stems s ON cm.StemGUID = s.StemGUID
         WHERE cm.CensusID = ?
         AND s.TreeTag LIKE 'TESTINVALID%'
-      `, [censusID]);
+      `,
+        [censusID]
+      );
 
       // Check failed records
-      const [failedRecords] = await connection.execute(`
+      const [failedRecords] = await connection.execute(
+        `
         SELECT Tag, StemTag, FailureReason
         FROM failedmeasurements
         WHERE CensusID = ?
         AND Tag LIKE 'TESTINVALID%'
         ORDER BY Tag
-      `, [censusID]);
+      `,
+        [censusID]
+      );
 
       console.log(`\n✓ Valid records: ${validRecords[0].count}`);
       console.log(`✓ Failed records: ${failedRecords.length}`);
@@ -254,7 +250,8 @@ async function runAutomatedTests() {
     if (result3.success) {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      const [stateRecords] = await connection.execute(`
+      const [stateRecords] = await connection.execute(
+        `
         SELECT s.TreeTag, cm.Description as Codes, cm.IsValidated,
           CASE
             WHEN cm.IsValidated = 1 THEN 'Valid'
@@ -265,7 +262,9 @@ async function runAutomatedTests() {
         WHERE cm.CensusID = ?
         AND s.TreeTag LIKE 'TESTSTATE%'
         ORDER BY s.TreeTag
-      `, [censusID]);
+      `,
+        [censusID]
+      );
 
       console.log(`\n✓ Found ${stateRecords.length} records with states:`);
       stateRecords.forEach(r => {
@@ -282,7 +281,6 @@ async function runAutomatedTests() {
     console.log('\n' + '='.repeat(60));
     console.log('📊 AUTOMATED TESTS COMPLETE');
     console.log('='.repeat(60));
-
   } catch (error) {
     console.error('❌ Test failed:', error);
   } finally {

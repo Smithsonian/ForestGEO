@@ -20,9 +20,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
     cy.visit('/login');
 
     // Wait for login button to be visible before clicking
-    cy.get('[aria-label="Login button"]', { timeout: 10000 })
-      .should('be.visible')
-      .click();
+    cy.get('[aria-label="Login button"]', { timeout: 10000 }).should('be.visible').click();
 
     cy.url().should('include', '/dashboard', { timeout: 10000 });
     cy.wait('@getSession');
@@ -73,29 +71,13 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display icons on metric cards', () => {
       // Verify all metric cards have icons (MUI icons render as SVG)
-      cy.contains('Total Trees')
-        .parent()
-        .parent()
-        .find('svg')
-        .should('exist');
+      cy.contains('Total Trees').parent().parent().find('svg').should('exist');
 
-      cy.contains('Total Stems')
-        .parent()
-        .parent()
-        .find('svg')
-        .should('exist');
+      cy.contains('Total Stems').parent().parent().find('svg').should('exist');
 
-      cy.contains('Active Personnel')
-        .parent()
-        .parent()
-        .find('svg')
-        .should('exist');
+      cy.contains('Active Personnel').parent().parent().find('svg').should('exist');
 
-      cy.contains('New Recruits')
-        .parent()
-        .parent()
-        .find('svg')
-        .should('exist');
+      cy.contains('New Recruits').parent().parent().find('svg').should('exist');
     });
 
     it('should show loading skeletons before data loads', () => {
@@ -181,21 +163,11 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display circular progress indicator', () => {
       // MUI CircularProgress renders as SVG circle
-      cy.contains('Census Progress')
-        .parent()
-        .parent()
-        .find('svg circle')
-        .should('exist')
-        .and('have.length.greaterThan', 0);
+      cy.contains('Census Progress').parent().parent().find('svg circle').should('exist').and('have.length.greaterThan', 0);
     });
 
     it('should show populated quadrats with success color chip', () => {
-      cy.contains('Census Progress')
-        .parent()
-        .parent()
-        .find('[class*="MuiChip"]')
-        .first()
-        .should('be.visible');
+      cy.contains('Census Progress').parent().parent().find('[class*="MuiChip"]').first().should('be.visible');
     });
   });
 
@@ -210,23 +182,13 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.contains('Tachometer View - Click to toggle').should('be.visible');
 
       // Find the clickable visualization area
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .click();
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().click();
 
       // Should switch to pie chart view
       cy.contains('Pie Chart View - Click to toggle', { timeout: 2000 }).should('be.visible');
 
       // Click again to toggle back
-      cy.contains('Pie Chart View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .click();
+      cy.contains('Pie Chart View').parent().parent().find('[role="button"]').first().click();
 
       // Should be back to tachometer
       cy.contains('Tachometer View - Click to toggle', { timeout: 2000 }).should('be.visible');
@@ -234,13 +196,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should maintain interactivity on keyboard navigation', () => {
       // Focus the toggle area
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .focus()
-        .type('{enter}');
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().focus().type('{enter}');
 
       // Should toggle view
       cy.contains('Pie Chart View - Click to toggle', { timeout: 2000 }).should('be.visible');
@@ -265,10 +221,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should color-code statistics chips appropriately', () => {
       // Verify chips exist with different color variants
-      cy.contains('Stem Type Breakdown')
-        .parent()
-        .find('[class*="MuiChip"]')
-        .should('have.length.greaterThan', 0);
+      cy.contains('Stem Type Breakdown').parent().find('[class*="MuiChip"]').should('have.length.greaterThan', 0);
     });
   });
 
@@ -301,13 +254,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
     });
 
     it('should display site access chips with check icons', () => {
-      cy.contains('Site Access')
-        .parent()
-        .find('[class*="MuiChip"]')
-        .should('have.length.greaterThan', 0)
-        .first()
-        .find('svg')
-        .should('exist'); // CheckIcon
+      cy.contains('Site Access').parent().find('[class*="MuiChip"]').should('have.length.greaterThan', 0).first().find('svg').should('exist'); // CheckIcon
     });
 
     it('should display report incorrect info button', () => {
@@ -491,12 +438,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
         cy.contains('Census Progress').should('be.visible');
 
         // Census toggle should work on all sizes
-        cy.contains('Tachometer View')
-          .parent()
-          .parent()
-          .find('[role="button"]')
-          .first()
-          .click();
+        cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().click();
 
         cy.contains('Pie Chart View', { timeout: 2000 }).should('be.visible');
       });
@@ -514,12 +456,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should have smooth transitions on interactive elements', () => {
       // Click visualization toggle
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .click();
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().click();
 
       // Transition should be smooth (verified by no jarring layout shift)
       cy.contains('Pie Chart View', { timeout: 2000 }).should('be.visible');
@@ -527,11 +464,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should display gradient backgrounds on metric cards', () => {
       // Verify metric cards have styled backgrounds (gradient)
-      cy.contains('Total Trees')
-        .parent()
-        .parent()
-        .should('have.css', 'background')
-        .and('not.equal', 'rgba(0, 0, 0, 0)'); // Not transparent
+      cy.contains('Total Trees').parent().parent().should('have.css', 'background').and('not.equal', 'rgba(0, 0, 0, 0)'); // Not transparent
     });
 
     it('should animate progress ring on load', () => {
@@ -543,11 +476,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.contains('Census Progress', { timeout: 5000 }).should('be.visible');
 
       // Circular progress should be rendered
-      cy.contains('Census Progress')
-        .parent()
-        .parent()
-        .find('svg circle')
-        .should('exist');
+      cy.contains('Census Progress').parent().parent().find('svg circle').should('exist');
     });
   });
 
@@ -561,13 +490,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.get('body').tab();
 
       // Census toggle should be focusable
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .focus()
-        .should('be.focused');
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().focus().should('be.focused');
     });
 
     it('should have proper heading hierarchy', () => {
@@ -607,12 +530,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
       cy.contains('Census Progress').should('be.visible');
 
       // 6. User toggles census visualization
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .click();
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().click();
       cy.contains('Pie Chart View').should('be.visible');
 
       // 7. User views recent activity
@@ -638,12 +556,7 @@ describe('Dashboard Visual Enhancements E2E', () => {
 
     it('should persist user interactions across page refreshes', () => {
       // Toggle to pie chart
-      cy.contains('Tachometer View')
-        .parent()
-        .parent()
-        .find('[role="button"]')
-        .first()
-        .click();
+      cy.contains('Tachometer View').parent().parent().find('[role="button"]').first().click();
       cy.contains('Pie Chart View').should('be.visible');
 
       // Refresh page

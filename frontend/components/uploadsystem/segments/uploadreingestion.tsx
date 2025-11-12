@@ -363,7 +363,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
     return () => {
       isMounted = false;
     };
-  }, [schema, currentPlot, currentCensus]);
+  }, [schema, currentPlot, currentCensus, queue, setReviewState]);
 
   useEffect(() => {
     if (processed) {

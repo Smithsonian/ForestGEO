@@ -56,7 +56,7 @@ describe('Icon Components - Functional Tests', () => {
         expect(svg).toHaveAttribute('aria-hidden', 'true');
       });
 
-      it.each(icons)('$name SHOULD have <title> element for tooltip accessibility', ({ component: Icon, purpose }) => {
+      it.each(icons)('$name SHOULD have <title> element for tooltip accessibility', ({ component: Icon, purpose: _purpose }) => {
         const { container } = render(<Icon />);
         const svg = container.querySelector('svg');
         const title = svg?.querySelector('title');

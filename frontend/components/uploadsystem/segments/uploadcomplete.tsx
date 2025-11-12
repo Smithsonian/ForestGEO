@@ -3,7 +3,7 @@
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
 import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -31,7 +31,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
 
-  const loadCensusData = async () => {
+  const loadCensusData = useCallback(async () => {
     if (!currentPlot || !censusDispatch) return;
 
     setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
@@ -50,9 +50,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     if (existingCensus) await censusDispatch({ census: existingCensus });
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
-  };
+  }, [currentPlot, censusDispatch, currentCensus?.plotCensusNumber, currentCensus?.dateRanges, currentSite?.schemaName, censusListDispatch]);
 
-  const loadPlotsData = async () => {
+  const loadPlotsData = useCallback(async () => {
     if (!currentSite) return;
 
     setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
@@ -66,9 +66,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
     setProgress(prev => ({ ...prev, plots: 100 }));
     setProgressText(prev => ({ ...prev, plots: 'Plot list information loaded.' }));
-  };
+  }, [currentSite, plotListDispatch]);
 
-  const loadQuadratsData = async () => {
+  const loadQuadratsData = useCallback(async () => {
     if (!currentPlot || !currentCensus) return;
 
     setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
@@ -84,7 +84,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
     setProgress(prev => ({ ...prev, quadrats: 100 }));
     setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
-  };
+  }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
   useEffect(() => {
     if (hasRunRef.current) return;
@@ -113,7 +113,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }
     };
     runAsyncTasks().catch(ailogger.error);
-  }, []);
+  }, [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
 
   return (
     <Box

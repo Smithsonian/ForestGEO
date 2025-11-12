@@ -51,7 +51,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       (currentFileHeaders.length > 0 && !currentFileHeaders.some(header => header === ''))
     );
     setRequireReupload(needsReupload);
-  }, [currentFileHeaders, acceptedFiles]);
+  }, [currentFileHeaders, acceptedFiles, dataViewActive]);
 
   const handleReUploadFileChange = async (newFiles: FileWithPath[]) => {
     setReuploadInProgress(true);

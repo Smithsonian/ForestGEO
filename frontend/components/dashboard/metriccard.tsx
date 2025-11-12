@@ -41,10 +41,20 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
 
   const formattedValue = typeof value === 'number' ? value.toLocaleString() : value;
 
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (onClick && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      onClick();
+    }
+  };
+
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <Card
       variant="solid"
+      component={onClick ? 'button' : 'div'}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
       sx={{
         background: gradients[gradient],
         color: 'white',
@@ -119,6 +129,7 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
         {/* Icon */}
         <Avatar
           className="metric-icon"
+          alt={title}
           sx={{
             bgcolor: 'rgba(255,255,255,0.2)',
             backdropFilter: 'blur(10px)',

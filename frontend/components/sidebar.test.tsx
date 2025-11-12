@@ -314,7 +314,7 @@ describe('Sidebar - Functional Tests', () => {
 
   describe('User Interaction', () => {
     it('MUST allow interaction with selection dropdowns', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });
@@ -323,7 +323,7 @@ describe('Sidebar - Functional Tests', () => {
     });
 
     it('MUST support keyboard navigation', async () => {
-      const user = userEvent.setup();
+      const _user = userEvent.setup();
       render(<Sidebar siteListLoaded={false} coreDataLoaded={false} setCensusListLoaded={vi.fn()} setManualReset={vi.fn()} />);
 
       const siteSelect = screen.getByRole('combobox', { name: /select a site/i });

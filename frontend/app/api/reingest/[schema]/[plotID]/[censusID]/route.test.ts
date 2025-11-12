@@ -1,7 +1,6 @@
 // app/api/reingest/[schema]/[plotID]/[censusID]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
-import ailogger from '@/ailogger';
 import ConnectionManager from '@/config/connectionmanager';
 
 // Mock ConnectionManager

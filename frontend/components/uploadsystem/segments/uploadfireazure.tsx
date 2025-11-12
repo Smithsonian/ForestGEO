@@ -15,8 +15,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   user,
   setUploadError,
   setErrorComponent,
-  setReviewState,
-  allRowToCMID
+  setReviewState
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -41,8 +40,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           // const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
           // formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
+        const censusID = currentCensus?.dateRanges?.[0]?.censusID;
         const response = await fetch(
-          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
+          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${censusID ? censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
           {
             method: 'POST',
             body: formData
@@ -56,7 +56,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         setReviewState(ReviewStates.ERRORS);
       }
     },
-    [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, allRowToCMID]
+    [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user]
   );
 
   useEffect(() => {
@@ -92,7 +92,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           setReviewState(ReviewStates.COMPLETE);
         });
     }
-  }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved]);
+  }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved, setReviewState]);
 
   return (
     <>

@@ -569,7 +569,7 @@ describe('LoginLogout - Functional Tests', () => {
         status: 'authenticated'
       });
 
-      const { container } = render(<LoginLogout />);
+      const { container: _container } = render(<LoginLogout />);
 
       const emailElement = screen.getByText('verylongemail@verylongdomainname.example.com');
       const style = window.getComputedStyle(emailElement);

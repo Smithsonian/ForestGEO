@@ -11,10 +11,7 @@ import {
   CardContent,
   Chip,
   Divider,
-  Skeleton,
   Stack,
-  Step,
-  Stepper,
   Tooltip,
   Typography
 } from '@mui/joy';
@@ -134,7 +131,7 @@ export default function DashboardPage() {
     }
   }, [currentSite, currentPlot, currentCensus]);
 
-  async function loadChangelogHistory() {
+  const loadChangelogHistory = useCallback(async () => {
     try {
       setIsLoading(true);
       if (!currentSite || !currentPlot || !currentCensus) {
@@ -164,7 +161,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [currentSite, currentPlot, currentCensus]);
 
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
@@ -194,7 +191,7 @@ export default function DashboardPage() {
       // Load changelog separately (not part of aggregated API)
       loadChangelogHistory().catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics]);
+  }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics, loadChangelogHistory]);
 
   const hasData = progressTacho.PopulatedQuadrats > 0 || countStems > 0;
 
@@ -660,10 +657,11 @@ export default function DashboardPage() {
                       .map((log, index) => (
                         <AccordionGroup key={index}>
                           <Accordion>
-                            <AccordionSummary>
+                            <AccordionSummary aria-label={`Change ${log.changeID}: ${log.operation || 'Update'} on ${log.tableName || 'Data'}`}>
                               <Stack direction="row" spacing={2} alignItems="center" sx={{ width: '100%' }}>
                                 <Avatar
                                   size="sm"
+                                  alt={`Change ${log.changeID}`}
                                   sx={{
                                     bgcolor: 'primary.softBg',
                                     color: 'primary.solidBg'

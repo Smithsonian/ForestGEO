@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within as _within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UploadParent from './uploadparent';
 import { FormType } from '@/config/macros/formdetails';
@@ -52,7 +52,7 @@ vi.mock('@/components/shared/ContextValidationGuard', () => ({
 
 // Mock upload segment components
 vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
-  default: ({ uploadForm, setUploadForm, setReviewState, personnelRecording, setPersonnelRecording }: any) => (
+  default: ({ uploadForm, setUploadForm, setReviewState: _setReviewState, personnelRecording, setPersonnelRecording }: any) => (
     <div data-testid="upload-start">
       <button
         onClick={() => {
@@ -69,7 +69,7 @@ vi.mock('@/components/uploadsystem/segments/uploadstart', () => ({
 }));
 
 vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
-  default: ({ acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile, handleInitialSubmit }: any) => (
+  default: ({ acceptedFiles, handleAddFile, handleRemoveFile, handleReplaceFile: _handleReplaceFile, handleInitialSubmit }: any) => (
     <div data-testid="upload-parse-files">
       <div data-testid="file-count">{acceptedFiles.length}</div>
       {acceptedFiles.map((file: any, index: number) => (
@@ -91,8 +91,8 @@ vi.mock('@/components/uploadsystem/segments/uploadparsefiles', () => ({
   )
 }));
 
-vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => ({
-  default: ({ acceptedFiles, personnelRecording, setReviewState }: any) => {
+vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
+  const MockUploadFireSQL = ({ acceptedFiles, personnelRecording, setReviewState }: any) => {
     React.useEffect(() => {
       // Simulate successful upload
       setTimeout(() => {
@@ -106,8 +106,9 @@ vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => ({
         <div>Personnel: {personnelRecording}</div>
       </div>
     );
-  }
-}));
+  };
+  return { default: MockUploadFireSQL };
+});
 
 vi.mock('@/components/uploadsystem/segments/uploaderror', () => ({
   default: ({ error, component, resetError }: any) => (
@@ -278,8 +279,8 @@ describe('UploadParent - Integration Tests', () => {
   describe('Hook Integration - useErrorHandling', () => {
     it('should handle errors via useErrorHandling.setError', async () => {
       // Create a version that triggers error
-      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => ({
-        default: ({ setUploadError, setErrorComponent }: any) => {
+      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
+        const MockUploadFireSQL = ({ setUploadError, setErrorComponent }: any) => {
           React.useEffect(() => {
             // Simulate error during upload
             setUploadError(new Error('Upload failed'));
@@ -287,8 +288,9 @@ describe('UploadParent - Integration Tests', () => {
           }, [setUploadError, setErrorComponent]);
 
           return <div data-testid="upload-fire-sql">Processing...</div>;
-        }
-      }));
+        };
+        return { default: MockUploadFireSQL };
+      });
 
       const user = userEvent.setup();
 
@@ -312,15 +314,16 @@ describe('UploadParent - Integration Tests', () => {
       const user = userEvent.setup();
 
       // Mock error state
-      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => ({
-        default: ({ setUploadError, setReviewState }: any) => {
+      vi.mock('@/components/uploadsystem/segments/uploadfiresql', () => {
+        const MockUploadFireSQL = ({ setUploadError, setReviewState: _setReviewState }: any) => {
           React.useEffect(() => {
             setUploadError(new Error('Test error'));
           }, [setUploadError]);
 
           return <div data-testid="upload-fire-sql">Processing...</div>;
-        }
-      }));
+        };
+        return { default: MockUploadFireSQL };
+      });
 
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 

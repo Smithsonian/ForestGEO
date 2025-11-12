@@ -108,11 +108,14 @@ async function cleanupTestData(connection) {
 
 // Get baseline counts
 async function getBaselineCounts(connection) {
-  const [[counts]] = await connection.execute(`
+  const [[counts]] = await connection.execute(
+    `
     SELECT
       (SELECT COUNT(*) FROM coremeasurements WHERE CensusID = ?) as measurement_count,
       (SELECT COUNT(*) FROM failedmeasurements WHERE CensusID = ?) as failed_count
-  `, [TEST_CENSUS_ID, TEST_CENSUS_ID]);
+  `,
+    [TEST_CENSUS_ID, TEST_CENSUS_ID]
+  );
 
   return counts;
 }
@@ -168,10 +171,13 @@ async function testGuarantee1(connection) {
     });
 
     // Verify records inserted
-    const [[insertedRecords]] = await connection.execute(`
+    const [[insertedRecords]] = await connection.execute(
+      `
       SELECT COUNT(*) as count FROM coremeasurements
       WHERE TreeTag LIKE 'TESTVALID%' AND CensusID = ?
-    `, [TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID]
+    );
 
     console.log(`\n✓ Records inserted: ${insertedRecords.count}`);
 
@@ -179,12 +185,15 @@ async function testGuarantee1(connection) {
       console.log('✅ GUARANTEE 1 PASSED: All 3 records inserted correctly');
 
       // Verify data integrity
-      const [records] = await connection.execute(`
+      const [records] = await connection.execute(
+        `
         SELECT TreeTag, StemTag, SpeciesCode, QuadratName, MeasuredDBH, MeasuredHOM
         FROM coremeasurements
         WHERE TreeTag LIKE 'TESTVALID%' AND CensusID = ?
         ORDER BY TreeTag
-      `, [TEST_CENSUS_ID]);
+      `,
+        [TEST_CENSUS_ID]
+      );
 
       console.log('\n📋 Inserted Records:');
       records.forEach(r => {
@@ -213,7 +222,6 @@ async function testGuarantee1(connection) {
       console.log(`❌ GUARANTEE 1 FAILED: Expected 3 records, got ${insertedRecords.count}`);
       results.guarantee1.details = `Expected 3 records, got ${insertedRecords.count}`;
     }
-
   } catch (error) {
     console.error('❌ GUARANTEE 1 FAILED:', error.message);
     results.guarantee1.details = error.message;
@@ -238,16 +246,22 @@ async function testGuarantee2(connection) {
     });
 
     // Check valid records inserted
-    const [[validRecords]] = await connection.execute(`
+    const [[validRecords]] = await connection.execute(
+      `
       SELECT COUNT(*) as count FROM coremeasurements
       WHERE TreeTag LIKE 'TESTINVALID%' AND CensusID = ?
-    `, [TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID]
+    );
 
     // Check failed records
-    const [[failedRecords]] = await connection.execute(`
+    const [[failedRecords]] = await connection.execute(
+      `
       SELECT COUNT(*) as count FROM failedmeasurements
       WHERE Tag LIKE 'TESTINVALID%' AND CensusID = ?
-    `, [TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID]
+    );
 
     console.log(`\n📊 Results:`);
     console.log(`   Valid records in coremeasurements: ${validRecords.count}`);
@@ -257,12 +271,15 @@ async function testGuarantee2(connection) {
       console.log('✅ GUARANTEE 2 PASSED: 1 valid inserted, 3 failed correctly categorized');
 
       // Check failure reasons
-      const [failures] = await connection.execute(`
+      const [failures] = await connection.execute(
+        `
         SELECT Tag, StemTag, FailureReason
         FROM failedmeasurements
         WHERE Tag LIKE 'TESTINVALID%' AND CensusID = ?
         ORDER BY Tag
-      `, [TEST_CENSUS_ID]);
+      `,
+        [TEST_CENSUS_ID]
+      );
 
       console.log('\n📋 Failed Records:');
       failures.forEach(f => {
@@ -275,7 +292,6 @@ async function testGuarantee2(connection) {
       console.log(`❌ GUARANTEE 2 FAILED: Expected 1 valid + 3 failed, got ${validRecords.count} valid + ${failedRecords.count} failed`);
       results.guarantee2.details = `Expected 1 valid + 3 failed, got ${validRecords.count} valid + ${failedRecords.count} failed`;
     }
-
   } catch (error) {
     console.error('❌ GUARANTEE 2 FAILED:', error.message);
     results.guarantee2.details = error.message;
@@ -299,7 +315,8 @@ async function testGuarantee3(connection) {
     });
 
     // Check validation states
-    const [records] = await connection.execute(`
+    const [records] = await connection.execute(
+      `
       SELECT TreeTag, Codes, IsValidated,
         CASE
           WHEN IsValidated = 1 THEN 'Valid'
@@ -309,7 +326,9 @@ async function testGuarantee3(connection) {
       FROM coremeasurements
       WHERE TreeTag LIKE 'TESTSTATE%' AND CensusID = ?
       ORDER BY TreeTag
-    `, [TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID]
+    );
 
     console.log('\n📋 Tree-Stem States:');
     records.forEach(r => {
@@ -318,10 +337,10 @@ async function testGuarantee3(connection) {
 
     // Verify expected states
     const expectations = [
-      { tag: 'TESTSTATE001', code: null, expectedState: 'Valid' },      // No code -> Valid
-      { tag: 'TESTSTATE002', code: 'M', expectedState: 'Pending' },     // Multi-stem -> Pending
-      { tag: 'TESTSTATE003', code: 'D', expectedState: 'Pending' },     // Dead -> Pending
-      { tag: 'TESTSTATE004', code: 'A', expectedState: 'Pending' }      // Needs checking -> Pending
+      { tag: 'TESTSTATE001', code: null, expectedState: 'Valid' }, // No code -> Valid
+      { tag: 'TESTSTATE002', code: 'M', expectedState: 'Pending' }, // Multi-stem -> Pending
+      { tag: 'TESTSTATE003', code: 'D', expectedState: 'Pending' }, // Dead -> Pending
+      { tag: 'TESTSTATE004', code: 'A', expectedState: 'Pending' } // Needs checking -> Pending
     ];
 
     let allCorrect = true;
@@ -343,7 +362,6 @@ async function testGuarantee3(connection) {
       console.log('❌ GUARANTEE 3 FAILED: Some states incorrectly categorized');
       results.guarantee3.details = 'State categorization errors detected';
     }
-
   } catch (error) {
     console.error('❌ GUARANTEE 3 FAILED:', error.message);
     results.guarantee3.details = error.message;
@@ -388,12 +406,15 @@ async function testStoredProcedure(connection) {
     console.log('\nChecking stored procedure integrity...');
 
     // Check temporarymeasurements vs coremeasurements counts
-    const [[counts]] = await connection.execute(`
+    const [[counts]] = await connection.execute(
+      `
       SELECT
         (SELECT COUNT(*) FROM temporarymeasurements WHERE CensusID = ?) as temp_count,
         (SELECT COUNT(*) FROM coremeasurements WHERE CensusID = ?) as core_count,
         (SELECT COUNT(*) FROM failedmeasurements WHERE CensusID = ?) as failed_count
-    `, [TEST_CENSUS_ID, TEST_CENSUS_ID, TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID, TEST_CENSUS_ID, TEST_CENSUS_ID]
+    );
 
     console.log(`\n📊 Counts:`);
     console.log(`   Temporary measurements: ${counts.temp_count}`);
@@ -401,12 +422,15 @@ async function testStoredProcedure(connection) {
     console.log(`   Failed measurements: ${counts.failed_count}`);
 
     // Check for data loss reports
-    const [lossReports] = await connection.execute(`
+    const [lossReports] = await connection.execute(
+      `
       SELECT * FROM uploaddatalossreport
       WHERE CensusID = ?
       ORDER BY createdAt DESC
       LIMIT 1
-    `, [TEST_CENSUS_ID]);
+    `,
+      [TEST_CENSUS_ID]
+    );
 
     if (lossReports.length > 0) {
       console.log('\n⚠️  Data loss reports found:');
@@ -419,7 +443,6 @@ async function testStoredProcedure(connection) {
       results.storedProcedure.passed = true;
       results.storedProcedure.details = 'Stored procedure integrity verified';
     }
-
   } catch (error) {
     console.error('❌ STORED PROCEDURE TEST FAILED:', error.message);
     results.storedProcedure.details = error.message;
@@ -494,7 +517,6 @@ async function runIntegrationTests() {
     } else {
       console.log('⚠️  Test data left in database for review');
     }
-
   } catch (error) {
     console.error('\n❌ Test suite failed:', error);
   } finally {

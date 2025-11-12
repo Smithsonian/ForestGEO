@@ -91,7 +91,20 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 
-  const debouncedRecheckValidityIfNeeded = useCallback(debounce(recheckValidityIfNeeded, 300), [recheckValidityIfNeeded]);
+  // Using useMemo instead of useCallback for debounced function to avoid stale closure
+  const debouncedRecheckValidityIfNeeded = React.useMemo(() => debounce(recheckValidityIfNeeded, 300), [recheckValidityIfNeeded]);
+
+  const triggerRefresh = useCallback(
+    (types?: (keyof UnifiedValidityFlags)[]) => {
+      if (types) {
+        types.forEach(type => setValidity(type, false));
+      } else {
+        Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
+      }
+      setRefreshNeeded(true); // Trigger a refresh
+    },
+    [setValidity, validity]
+  );
 
   useEffect(() => {
     if (refreshNeeded) {
@@ -103,19 +116,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     if (currentSite && currentPlot && currentCensus) {
       triggerRefresh(); // Trigger initial refresh when user logs in
     }
-  }, [currentSite, currentPlot, currentCensus]);
-
-  const triggerRefresh = useCallback(
-    (types?: (keyof UnifiedValidityFlags)[]) => {
-      if (types) {
-        types.forEach(type => setValidity(type, false));
-      } else {
-        Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
-      }
-      setRefreshNeeded(true); // Trigger a refresh
-    },
-    [setValidity]
-  );
+  }, [currentSite, currentPlot, currentCensus, triggerRefresh]);
 
   return <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>{children}</DataValidityContext.Provider>;
 };

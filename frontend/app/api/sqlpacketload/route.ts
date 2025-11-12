@@ -14,7 +14,7 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
-import { isValidSchema, formatWithSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime

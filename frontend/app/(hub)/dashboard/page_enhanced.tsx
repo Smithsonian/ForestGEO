@@ -11,21 +11,7 @@
 
 'use client';
 
-import {
-  Box,
-  Typography,
-  Stack,
-  Card,
-  CardContent,
-  Alert,
-  Divider,
-  Chip,
-  Avatar,
-  Accordion,
-  AccordionDetails,
-  AccordionGroup,
-  AccordionSummary
-} from '@mui/joy';
+import { Box, Typography, Stack, Card, CardContent, Alert, Chip, Avatar } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useCallback, useEffect, useState } from 'react';
@@ -34,7 +20,7 @@ import moment from 'moment';
 import ailogger from '@/ailogger';
 
 // Enhanced Components
-import MetricCard, { MetricCardSkeleton } from '@/components/dashboard/metriccard';
+import MetricCard from '@/components/dashboard/metriccard';
 import ProgressCard, { ProgressCardSkeleton } from '@/components/dashboard/progresscard';
 import { designTokens } from '@/config/design-tokens';
 
@@ -44,8 +30,6 @@ import ParkIcon from '@mui/icons-material/Park';
 import PeopleIcon from '@mui/icons-material/People';
 import CategoryIcon from '@mui/icons-material/Category';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
-import WarningIcon from '@mui/icons-material/Warning';
-import CheckIcon from '@mui/icons-material/Check';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -127,7 +111,7 @@ export default function EnhancedDashboardPage() {
     }
   }, [currentSite, currentPlot, currentCensus]);
 
-  async function loadChangelogHistory() {
+  const loadChangelogHistory = useCallback(async () => {
     try {
       if (!currentSite || !currentPlot || !currentCensus) {
         setChangelogHistory(Array(5).fill({}));
@@ -147,7 +131,7 @@ export default function EnhancedDashboardPage() {
       ailogger.error('Failed to load changelog history', error);
       setChangelogHistory(Array(5).fill({}));
     }
-  }
+  }, [currentSite, currentPlot, currentCensus]);
 
   // Reset data when contexts are cleared
   useEffect(() => {
@@ -175,7 +159,7 @@ export default function EnhancedDashboardPage() {
       loadAllDashboardMetrics().catch(ailogger.error);
       loadChangelogHistory().catch(ailogger.error);
     }
-  }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics]);
+  }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics, loadChangelogHistory]);
 
   const hasData = progressTacho.PopulatedQuadrats > 0 || countStems > 0;
 
@@ -340,7 +324,7 @@ export default function EnhancedDashboardPage() {
                       }}
                     >
                       <Stack direction="row" spacing={2} alignItems="center">
-                        <Avatar size="sm" sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg' }}>
+                        <Avatar size="sm" alt={log.changedBy || 'Unknown User'} sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg' }}>
                           {log.changedBy?.[0]?.toUpperCase() || '?'}
                         </Avatar>
                         <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -387,6 +371,7 @@ export default function EnhancedDashboardPage() {
           }}
         >
           <Avatar
+            alt="No census data available"
             sx={{
               width: 80,
               height: 80,

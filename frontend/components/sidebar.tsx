@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -182,21 +182,24 @@ export default function Sidebar(props: SidebarProps) {
     setAnchorPlotEdit(event.currentTarget);
   };
 
-  const handleClose = (event?: MouseEvent) => {
-    const target = event?.target as HTMLElement;
-    const selectElement = sidebarRef.current?.querySelector('.plot-selection');
-    const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
-    if (menuElement?.contains(target)) {
-      return;
-    }
-    if (selectElement?.contains(target)) {
-      if (anchorPlotEdit) {
-        setAnchorPlotEdit(null);
+  const handleClose = useCallback(
+    (event?: MouseEvent) => {
+      const target = event?.target as HTMLElement;
+      const selectElement = sidebarRef.current?.querySelector('.plot-selection');
+      const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
+      if (menuElement?.contains(target)) {
+        return;
       }
-      return;
-    }
-    setAnchorPlotEdit(null);
-  };
+      if (selectElement?.contains(target)) {
+        if (anchorPlotEdit) {
+          setAnchorPlotEdit(null);
+        }
+        return;
+      }
+      setAnchorPlotEdit(null);
+    },
+    [anchorPlotEdit]
+  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -207,7 +210,7 @@ export default function Sidebar(props: SidebarProps) {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [anchorPlotEdit]);
+  }, [handleClose]);
 
   const handleOptionClick = () => {
     setOpenPlotCardModal(true);

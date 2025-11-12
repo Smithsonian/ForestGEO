@@ -190,35 +190,35 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false, 'Loading Sites...');
     }
-  }, [session, siteListLoaded, siteListDispatch, setLoading]);
+  }, [session, siteListLoaded, siteListDispatch, setLoading, currentSite, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
     if (session && !siteListLoaded) {
       executeFetchSiteList();
     }
-  }, [session, siteListLoaded]); // Removed function dependency to prevent cascade
+  }, [session, siteListLoaded, executeFetchSiteList]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
       executeLoadPlotData();
     }
-  }, [currentSite, plotListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, plotListLoaded, executeLoadPlotData]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
       executeLoadCensusData();
     }
-  }, [currentSite, currentPlot, censusListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, censusListLoaded, executeLoadCensusData]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
       executeLoadQuadratData();
     }
-  }, [currentSite, currentPlot, currentCensus, quadratListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, executeLoadQuadratData]);
 
   // Handle manual reset logic
   useEffect(() => {
@@ -254,7 +254,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           setManualReset(false);
         });
     }
-  }, [manualReset]);
+  }, [manualReset, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch, setLoading]);
 
   // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {

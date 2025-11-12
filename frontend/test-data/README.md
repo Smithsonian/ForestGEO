@@ -10,25 +10,27 @@
 
 ## Quick Reference
 
-| File | Records | Focus Area | Priority |
-|------|---------|------------|----------|
-| `test-set-1-null-fields.csv` | 5 | NULL required fields | ✅ TESTED |
-| `test-set-6-date-edge-cases.csv` | 9 | Date boundaries & validation | HIGH |
-| `test-set-7-multi-stem-temporal.csv` | 12 | Multi-stem trees & temporal measurements | CRITICAL |
-| `test-set-8-string-safety.csv` | 10 | Special characters & Unicode | HIGH |
-| `test-set-9-numeric-boundaries.csv` | 11 | Numeric edge cases | MEDIUM |
-| `test-set-10-comprehensive-stress.csv` | 20 | Mixed scenarios | HIGH |
+| File                                   | Records | Focus Area                               | Priority  |
+| -------------------------------------- | ------- | ---------------------------------------- | --------- |
+| `test-set-1-null-fields.csv`           | 5       | NULL required fields                     | ✅ TESTED |
+| `test-set-6-date-edge-cases.csv`       | 9       | Date boundaries & validation             | HIGH      |
+| `test-set-7-multi-stem-temporal.csv`   | 12      | Multi-stem trees & temporal measurements | CRITICAL  |
+| `test-set-8-string-safety.csv`         | 10      | Special characters & Unicode             | HIGH      |
+| `test-set-9-numeric-boundaries.csv`    | 11      | Numeric edge cases                       | MEDIUM    |
+| `test-set-10-comprehensive-stress.csv` | 20      | Mixed scenarios                          | HIGH      |
 
 ---
 
 ## Test Set Descriptions
 
 ### Test Set 1: NULL Field Validation ✅ TESTED
+
 **File:** `test-set-1-null-fields.csv`
 **Records:** 5
 **Status:** ✅ Fully tested and passing
 
 **Scenarios:**
+
 - NULL StemTag
 - NULL SpeciesCode
 - NULL QuadratName
@@ -36,11 +38,13 @@
 - Valid baseline
 
 **Expected Results:**
+
 - Valid: 1
 - Failed: 4
 - Data Loss: 0
 
 **Validation Points:**
+
 - ✅ NULL required fields caught
 - ✅ Specific error messages provided
 - ✅ No data loss
@@ -48,11 +52,13 @@
 ---
 
 ### Test Set 6: Date Edge Cases
+
 **File:** `test-set-6-date-edge-cases.csv`
 **Records:** 9
 **Status:** ⏳ Ready for testing
 
 **Scenarios:**
+
 - NULL date (should fail)
 - `1900-01-01` placeholder date (converts to NULL)
 - Future dates (2099, 2199)
@@ -62,11 +68,13 @@
 - Normal valid date
 
 **Expected Results:**
+
 - Valid: 8
 - Failed: 1 (NULL date)
 - Data Loss: 0
 
 **Validation Points:**
+
 - [ ] NULL date rejected with error message
 - [ ] `1900-01-01` converts to NULL (intentional design)
 - [ ] Future dates accepted (or rejected per business rules)
@@ -74,6 +82,7 @@
 - [ ] Year boundaries handled correctly
 
 **Business Rules to Clarify:**
+
 - Should future dates be rejected?
 - Should dates before 1900 be rejected?
 - Is `1900-01-01` → NULL conversion acceptable?
@@ -81,21 +90,25 @@
 ---
 
 ### Test Set 7: Multi-Stem & Temporal Measurements ✅ PARTIALLY TESTED
+
 **File:** `test-set-7-multi-stem-temporal.csv`
 **Records:** 12
 **Status:** ✅ Critical scenarios tested
 
 **Scenarios:**
+
 - Multi-stem tree (4 stems, same TreeTag)
 - Temporal measurements (4 months, same tree/stem)
 - Multi-stem temporal (2 stems over 2 months)
 
 **Expected Results:**
+
 - Valid: 12 (ALL should be valid)
 - Failed: 0
 - Data Loss: 0
 
 **Validation Points:**
+
 - ✅ Multi-stem trees NOT treated as duplicates
 - ✅ Temporal measurements preserved
 - [ ] Multi-stem temporal combinations work
@@ -105,11 +118,13 @@
 ---
 
 ### Test Set 8: String Safety & Special Characters
+
 **File:** `test-set-8-string-safety.csv`
 **Records:** 10
 **Status:** ⏳ Ready for testing
 
 **Scenarios:**
+
 - Apostrophes in tags (`O'Malley`)
 - Double quotes in comments
 - Unicode (Chinese, Russian characters)
@@ -121,11 +136,13 @@
 - Normal ASCII baseline
 
 **Expected Results:**
+
 - Valid: 6-7 (depends on Unicode support)
 - Failed: 2-3 (empty/whitespace strings)
 - Data Loss: 0
 
 **Validation Points:**
+
 - [ ] SQL injection safety (apostrophes handled)
 - [ ] Unicode characters supported
 - [ ] Empty/whitespace strings rejected
@@ -137,11 +154,13 @@
 ---
 
 ### Test Set 9: Numeric Boundaries
+
 **File:** `test-set-9-numeric-boundaries.csv`
 **Records:** 11
 **Status:** ⏳ Ready for testing
 
 **Scenarios:**
+
 - Both DBH and HOM NULL (with/without codes)
 - Both DBH and HOM zero (with/without codes)
 - Extreme values near decimal(12,6) limits
@@ -151,11 +170,13 @@
 - Maximum precision (6 decimal places)
 
 **Expected Results:**
+
 - Valid: 8-9 (depends on business rules for NULL DBH/HOM)
 - Failed: 1-2 (both zero without codes)
 - Data Loss: 0
 
 **Validation Points:**
+
 - [ ] Both DBH and HOM NULL handling (business rule dependent)
 - [ ] Both zero without codes rejected
 - [ ] Both zero WITH codes accepted
@@ -164,17 +185,20 @@
 - [ ] Zero coordinates acceptable
 
 **Business Rules to Clarify:**
+
 - Is NULL DBH and NULL HOM without codes acceptable?
 - Are zero coordinates (0,0) valid?
 
 ---
 
 ### Test Set 10: Comprehensive Stress Test
+
 **File:** `test-set-10-comprehensive-stress.csv`
 **Records:** 20
 **Status:** ⏳ Ready for testing
 
 **Scenarios:** Mixed batch with ALL failure types:
+
 - Valid records (various)
 - NULL field violations
 - Duplicates (3 exact copies)
@@ -187,11 +211,13 @@
 - Special characters
 
 **Expected Results:**
+
 - Valid: 12-13
 - Failed: 7-8
 - Data Loss: 0
 
 **Validation Points:**
+
 - [ ] All failure types correctly categorized
 - [ ] No interference between validation rules
 - [ ] Audit trail complete (uploadintegrityalerts)
@@ -258,15 +284,15 @@ done
 
 ## Expected Test Results Summary
 
-| Test Set | Input | Expected Valid | Expected Failed | Expected Loss |
-|----------|-------|----------------|-----------------|---------------|
-| Set 1: NULL fields | 5 | 1 | 4 | 0 |
-| Set 6: Dates | 9 | 8 | 1 | 0 |
-| Set 7: Multi/Temporal | 12 | 12 | 0 | 0 |
-| Set 8: Strings | 10 | 6-7 | 3-4 | 0 |
-| Set 9: Numeric | 11 | 8-9 | 2-3 | 0 |
-| Set 10: Stress | 20 | 12-13 | 7-8 | 0 |
-| **TOTAL** | **67** | **47-50** | **17-20** | **0** |
+| Test Set              | Input  | Expected Valid | Expected Failed | Expected Loss |
+| --------------------- | ------ | -------------- | --------------- | ------------- |
+| Set 1: NULL fields    | 5      | 1              | 4               | 0             |
+| Set 6: Dates          | 9      | 8              | 1               | 0             |
+| Set 7: Multi/Temporal | 12     | 12             | 0               | 0             |
+| Set 8: Strings        | 10     | 6-7            | 3-4             | 0             |
+| Set 9: Numeric        | 11     | 8-9            | 2-3             | 0             |
+| Set 10: Stress        | 20     | 12-13          | 7-8             | 0             |
+| **TOTAL**             | **67** | **47-50**      | **17-20**       | **0**         |
 
 **Critical Success Criteria:** Data Loss = 0 for ALL test sets
 
@@ -307,18 +333,21 @@ After running each test set:
 ## Troubleshooting
 
 ### Data Loss Detected
+
 1. Check temporarymeasurements for orphaned records
 2. Check procedure logs in uploadintegrityalerts
 3. Verify hash collisions in failedmeasurements
 4. Review procedure error handler output
 
 ### Unexpected Failures
+
 1. Verify reference data (species, quadrats) is active
 2. Check collation settings (should be utf8mb4_0900_ai_ci)
 3. Review validation logic in procedure
 4. Check for schema changes
 
 ### Performance Issues
+
 1. Verify indexes on temporarymeasurements
 2. Check batch size (keep under 1000 records)
 3. Review temporary table creation time
@@ -329,17 +358,20 @@ After running each test set:
 ## Additional Test Scenarios (Not Yet Implemented)
 
 ### High Priority
+
 - Cross-census linking (requires census 1 data setup)
 - Very large batches (1000+ records)
 - Inactive quadrat validation
 - Case sensitivity verification
 
 ### Medium Priority
+
 - Code formatting edge cases (multiple semicolons, spaces)
 - Extreme precision numeric values
 - Concurrent batch processing
 
 ### Low Priority
+
 - Non-standard date formats (would fail at MySQL level)
 - Invalid characters in quadrat names
 - Performance benchmarking

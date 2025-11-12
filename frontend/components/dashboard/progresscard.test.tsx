@@ -119,7 +119,7 @@ describe('ProgressCard Component', () => {
 
   describe('Color Coding', () => {
     it('should render for >= 90% completion', () => {
-      const { container } = render(<ProgressCard totalQuadrats={100} populatedQuadrats={90} populatedPercent={90} unpopulatedQuadrats={[]} />);
+      const { container: _container } = render(<ProgressCard totalQuadrats={100} populatedQuadrats={90} populatedPercent={90} unpopulatedQuadrats={[]} />);
 
       const percentText = screen.getByText('90%');
       expect(percentText).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe('ProgressCard Component', () => {
     });
 
     it('should render for < 90% completion', () => {
-      const { container } = render(<ProgressCard totalQuadrats={100} populatedQuadrats={89} populatedPercent={89} unpopulatedQuadrats={[]} />);
+      const { container: _container } = render(<ProgressCard totalQuadrats={100} populatedQuadrats={89} populatedPercent={89} unpopulatedQuadrats={[]} />);
 
       const percentText = screen.getByText('89%');
       expect(percentText).toBeInTheDocument();
@@ -163,14 +163,14 @@ describe('ProgressCard Component', () => {
     });
 
     it('should have pointer cursor on pending chip when onClick provided', () => {
-      const { container } = render(<ProgressCard {...defaultProps} onViewUnpopulated={() => {}} />);
+      const { container: _container } = render(<ProgressCard {...defaultProps} onViewUnpopulated={() => {}} />);
 
       const pendingChip = screen.getByText('3 Pending').closest('.MuiChip-root');
       expect(pendingChip).toHaveStyle({ cursor: 'pointer' });
     });
 
     it('should have default cursor on pending chip when onClick not provided', () => {
-      const { container } = render(<ProgressCard {...defaultProps} />);
+      const { container: _container } = render(<ProgressCard {...defaultProps} />);
 
       const pendingChip = screen.getByText('3 Pending').closest('.MuiChip-root');
       expect(pendingChip).toHaveStyle({ cursor: 'default' });

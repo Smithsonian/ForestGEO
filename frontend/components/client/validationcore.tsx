@@ -49,7 +49,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           ailogger.error('Error fetching validation list:', err);
         }
       });
-  }, [currentSite?.schemaName]);
+  }, [currentSite?.schemaName, onValidationComplete]);
 
   const performValidations = useCallback(async () => {
     try {

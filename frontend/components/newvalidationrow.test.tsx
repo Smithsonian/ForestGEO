@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within as _within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NewValidationRow from './newvalidationrow';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';

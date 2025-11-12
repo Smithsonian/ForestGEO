@@ -11,7 +11,7 @@
  * Centralizes upload state management to reduce component complexity
  */
 
-import React, { useState, useCallback, useReducer, Dispatch } from 'react';
+import React, { useCallback, useReducer, Dispatch } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FormType } from '@/config/macros/formdetails';
 
