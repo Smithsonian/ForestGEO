@@ -98,6 +98,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         } else {
           if (siteListDispatch) await siteListDispatch({ siteList: sites });
         }
+        setSiteListLoaded(true);
       }
     },
     {
