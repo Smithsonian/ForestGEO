@@ -59,7 +59,6 @@ export default function ProgressCard({
         }
       }}
     >
-      {/* Header */}
       <Box>
         <Typography level="h4" sx={{ mb: 0.5, fontWeight: 600 }}>
           Census Progress
@@ -69,7 +68,6 @@ export default function ProgressCard({
         </Typography>
       </Box>
 
-      {/* Progress Ring */}
       <Box
         sx={{
           display: 'flex',
@@ -80,7 +78,6 @@ export default function ProgressCard({
         }}
       >
         <Box sx={{ position: 'relative', display: 'inline-flex' }}>
-          {/* Background circle */}
           <CircularProgress
             determinate
             value={100}
@@ -94,7 +91,6 @@ export default function ProgressCard({
             }}
           />
 
-          {/* Progress circle */}
           <CircularProgress
             determinate
             value={percentValue}
@@ -116,7 +112,6 @@ export default function ProgressCard({
             }}
           />
 
-          {/* Center content */}
           <Box
             sx={{
               position: 'absolute',
@@ -148,7 +143,6 @@ export default function ProgressCard({
         </Box>
       </Box>
 
-      {/* Stats */}
       <Stack direction="row" spacing={2} sx={{ justifyContent: 'center' }}>
         <Tooltip title="Quadrats with measurements" arrow>
           <Chip
@@ -199,7 +193,6 @@ export default function ProgressCard({
         )}
       </Stack>
 
-      {/* Unpopulated list (if present and small) */}
       {unpopulatedCount > 0 && unpopulatedCount <= 10 && (
         <Box sx={{ mt: 1 }}>
           <Typography level="body-xs" color="neutral" sx={{ mb: 1 }}>
@@ -235,18 +228,15 @@ export function ProgressCardSkeleton() {
         p: 3
       }}
     >
-      {/* Header */}
       <Box>
         <Skeleton variant="text" width="60%" height={28} sx={{ mb: 1 }} />
         <Skeleton variant="text" width="80%" height={20} />
       </Box>
 
-      {/* Progress Ring */}
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
         <Skeleton variant="circular" width={180} height={180} />
       </Box>
 
-      {/* Stats */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
         <Skeleton variant="rectangular" width={120} height={36} sx={{ borderRadius: 'sm' }} />
         <Skeleton variant="rectangular" width={100} height={36} sx={{ borderRadius: 'sm' }} />

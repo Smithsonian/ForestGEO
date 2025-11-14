@@ -97,7 +97,6 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
         }
       }}
     >
-      {/* Header with title and icon */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
         <Box>
           <Typography
@@ -126,7 +125,6 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
           </Typography>
         </Box>
 
-        {/* Icon */}
         <Avatar
           className="metric-icon"
           alt={title}
@@ -143,7 +141,6 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
         </Avatar>
       </Box>
 
-      {/* Trend indicator */}
       {trend && (
         <Box
           sx={{
@@ -194,7 +191,6 @@ export function MetricCardSkeleton() {
         }
       }}
     >
-      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box sx={{ flex: 1 }}>
           <Skeleton variant="text" width="60%" height={20} sx={{ mb: 2 }} />
@@ -203,7 +199,6 @@ export function MetricCardSkeleton() {
         <Skeleton variant="circular" width={56} height={56} />
       </Box>
 
-      {/* Trend */}
       <Skeleton variant="text" width="40%" height={20} />
     </Card>
   );

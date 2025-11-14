@@ -81,7 +81,6 @@ export default function EmptyState({ icon, title, description, primaryAction, se
         ...sx
       }}
     >
-      {/* Icon */}
       <Avatar
         alt={title}
         sx={{
@@ -97,12 +96,10 @@ export default function EmptyState({ icon, title, description, primaryAction, se
         {icon}
       </Avatar>
 
-      {/* Title */}
       <Typography level="h3" sx={{ mb: 2, fontWeight: 600 }}>
         {title}
       </Typography>
 
-      {/* Description */}
       <Typography
         level="body-md"
         color="neutral"
@@ -116,7 +113,6 @@ export default function EmptyState({ icon, title, description, primaryAction, se
         {description}
       </Typography>
 
-      {/* Actions */}
       {(primaryAction || secondaryAction) && (
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
           {primaryAction && (

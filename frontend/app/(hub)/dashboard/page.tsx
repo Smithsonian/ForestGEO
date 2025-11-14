@@ -226,14 +226,12 @@ export default function DashboardPage() {
         gap: 3
       }}
     >
-      {/* Error Alert */}
       {error && (
         <Alert color="danger" variant="soft" sx={{ animation: 'slideDown 0.3s ease' }}>
           {error}
         </Alert>
       )}
 
-      {/* Welcome Header */}
       <Box>
         <Typography level="h2" sx={{ fontWeight: 700, mb: 0.5 }}>
           Welcome back, {userName}! 👋
@@ -243,7 +241,6 @@ export default function DashboardPage() {
         </Typography>
       </Box>
 
-      {/* Empty State: No Site/Plot/Census Selected */}
       {!currentSite || !currentPlot || !currentCensus ? (
         <EmptyState
           icon={<AssessmentIcon />}
@@ -268,7 +265,6 @@ export default function DashboardPage() {
         />
       ) : (
         <>
-          {/* Main Metrics Grid - Modern Gradient Cards */}
           <Box
             sx={{
               display: 'grid',
@@ -281,7 +277,6 @@ export default function DashboardPage() {
               gap: 3
             }}
           >
-            {/* Trees Count */}
             <MetricCard
               title="Total Trees"
               value={countTrees}
@@ -294,7 +289,6 @@ export default function DashboardPage() {
               }}
             />
 
-            {/* Stems Count */}
             <MetricCard
               title="Total Stems"
               value={countStems}
@@ -307,7 +301,6 @@ export default function DashboardPage() {
               }}
             />
 
-            {/* Active Personnel */}
             <MetricCard
               title="Active Personnel"
               value={activeUsers}
@@ -320,7 +313,6 @@ export default function DashboardPage() {
               }}
             />
 
-            {/* New Recruits */}
             <MetricCard
               title="New Recruits"
               value={stemTypes.CountNewRecruits}
@@ -334,7 +326,6 @@ export default function DashboardPage() {
             />
           </Box>
 
-          {/* Progress and Detailed Statistics Section */}
           <Box
             sx={{
               display: 'grid',
@@ -345,7 +336,6 @@ export default function DashboardPage() {
               gap: 3
             }}
           >
-            {/* Modern Progress Card */}
             <ProgressCard
               totalQuadrats={progressTacho.TotalQuadrats}
               populatedQuadrats={progressTacho.PopulatedQuadrats}

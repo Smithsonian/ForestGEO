@@ -140,7 +140,6 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
           ))}
       </Select>
 
-      {/* Context menu for plot options */}
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={handleMenuClose} placement="right-start" data-testid="plot-options-menu">
         <MenuItem onClick={handleEditPlot} data-testid="edit-plot-option">
           Edit Plot

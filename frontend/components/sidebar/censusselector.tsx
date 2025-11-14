@@ -172,7 +172,6 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
       data-testid="census-select-component"
       aria-label="Select a Census. Required field for accessing measurement tools"
     >
-      {/* Add New Census Option */}
       <ListItem>
         <Box
           sx={{
@@ -208,7 +207,6 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
       </ListItem>
       <Divider orientation="horizontal" sx={{ my: 1 }} />
 
-      {/* Census List */}
       {Array.isArray(censusList) &&
         censusList
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))

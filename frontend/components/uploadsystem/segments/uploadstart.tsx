@@ -138,14 +138,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             </Button>
           </Tooltip>
         )}
-        {/* Form Type Selection */}
+
         {uploadForm !== undefined && uploadForm !== 'measurements' && !finish && (
           <>
             <Typography sx={{ mb: 2 }}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
           </>
         )}
-        {/* Personnel Recording Selection */}
+
         {uploadForm === 'measurements' && personnelRecording === '' && (
           <>
             <Typography sx={{ mb: 2 }}>Who recorded this data?</Typography>

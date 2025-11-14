@@ -791,6 +791,7 @@ export default function Sidebar(props: SidebarProps) {
       <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           ref={sidebarRef}
+          id="side-navigation"
           className="Sidebar"
           sx={{
             position: 'sticky',
