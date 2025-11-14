@@ -264,10 +264,27 @@ class TransactionAwarePQueue extends PQueue {
 
   /**
    * Wait for task dependencies to complete
+   * CRITICAL FIX: Added timeout protection to prevent infinite loops
    */
   private async waitForDependencies(dependencies: string[]): Promise<void> {
+    const maxWaitTime = this.lockTimeout; // 1 minute timeout
+    const startTime = Date.now();
+
     for (const dependency of dependencies) {
+      // Reset timer for each dependency
+      const depStartTime = Date.now();
+
       while (this.taskDependencies.has(dependency)) {
+        // Check global timeout
+        if (Date.now() - startTime > maxWaitTime) {
+          throw new Error(`Dependency wait timeout: waited ${maxWaitTime}ms for all dependencies`);
+        }
+
+        // Check per-dependency timeout
+        if (Date.now() - depStartTime > maxWaitTime) {
+          throw new Error(`Dependency wait timeout: dependency '${dependency}' not resolved within ${maxWaitTime}ms`);
+        }
+
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }

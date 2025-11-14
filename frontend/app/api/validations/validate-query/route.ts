@@ -169,6 +169,8 @@ function extractColumnReferences(query: string): string[] {
   while ((match = selectPattern.exec(query)) !== null) {
     const selectClause = match[1];
     if (!selectClause.includes('*')) {
+      // CRITICAL FIX: Reset regex lastIndex before reuse to prevent skipping matches
+      columnPattern.lastIndex = 0;
       let columnMatch;
       while ((columnMatch = columnPattern.exec(selectClause)) !== null) {
         const col = columnMatch[1].replace(/`/g, '');
@@ -182,6 +184,8 @@ function extractColumnReferences(query: string): string[] {
   // Extract from WHERE clause
   while ((match = wherePattern.exec(query)) !== null) {
     const whereClause = match[1];
+    // CRITICAL FIX: Reset regex lastIndex before reuse to prevent skipping matches
+    columnPattern.lastIndex = 0;
     let columnMatch;
     while ((columnMatch = columnPattern.exec(whereClause)) !== null) {
       const col = columnMatch[1].replace(/`/g, '');
