@@ -7,6 +7,7 @@ export class PoolMonitor {
   public pool: Pool;
   private readonly config: PoolOptions;
   private inactivityTimer: NodeJS.Timeout | null = null;
+  private healthMonitorIntervalId: NodeJS.Timeout | null = null;
   private poolClosed = false;
   private reinitializing = false;
 
@@ -57,6 +58,19 @@ export class PoolMonitor {
         ailogger.info(chalk.yellow('Pool already closed.'));
         return;
       }
+
+      // Clear health monitor interval to prevent memory leak
+      if (this.healthMonitorIntervalId) {
+        clearInterval(this.healthMonitorIntervalId);
+        this.healthMonitorIntervalId = null;
+      }
+
+      // Clear inactivity timer
+      if (this.inactivityTimer) {
+        clearTimeout(this.inactivityTimer);
+        this.inactivityTimer = null;
+      }
+
       ailogger.info(chalk.yellow('Ending pool connections...'));
       await this.pool.end();
       this.poolClosed = true;
@@ -156,7 +170,13 @@ export class PoolMonitor {
   }
 
   private monitorPoolHealth(): void {
-    setInterval(async () => {
+    // Clear any existing health monitor interval before creating a new one
+    if (this.healthMonitorIntervalId) {
+      clearInterval(this.healthMonitorIntervalId);
+    }
+
+    // Store interval ID for cleanup
+    this.healthMonitorIntervalId = setInterval(async () => {
       try {
         const { sleeping } = await this.logAndReturnConnections();
         if (sleeping.length > 0) {
