@@ -52,11 +52,18 @@ export async function uploadValidFileAsBuffer(
     let newFileName = fileName;
     let match;
     let index = 0;
+    const MAX_ITERATIONS = 1000; // CRITICAL FIX: Prevent infinite loop
+    let iterations = 0;
 
     // Regex to find if the filename has a suffix pattern like _1, _2, etc.
     const regex = /^(.+)(_)(\d+)(\..+)$/;
 
     do {
+      iterations++;
+      if (iterations > MAX_ITERATIONS) {
+        throw new Error(`Failed to generate unique filename after ${MAX_ITERATIONS} attempts`);
+      }
+
       const fileExists = await containerClient.getBlockBlobClient(newFileName).exists();
       if (!fileExists) break;
 

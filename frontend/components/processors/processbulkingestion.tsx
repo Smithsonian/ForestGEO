@@ -5,6 +5,7 @@ import { CMAttributesResult, CoreMeasurementsResult, FailedMeasurementsResult } 
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 export interface TemporaryMeasurement {
   id: number;
@@ -72,8 +73,8 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     }
 
     // Clean up measurements - set 0 values to null
-    await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`);
-    await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`);
+    await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`));
+    await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`));
   } catch (error: any) {
     throw createError(`Bulk ingestion collapser failed: ${error.message}`, error);
   }

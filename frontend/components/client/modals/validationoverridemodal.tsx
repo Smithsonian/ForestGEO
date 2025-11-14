@@ -52,6 +52,9 @@ export default function ValidationOverrideModal(props: VOMProps) {
     if (resultPacket.affectedRows === 0) throw new Error('validation override failed');
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
+  // CRITICAL FIX: Store interval ref for cleanup to prevent memory leak
+  const progressIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (startOverride) {
       setOverrideProgress(0);
@@ -63,6 +66,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
             setOverrideProgress(progress);
             if (progress >= 100) {
               clearInterval(interval);
+              progressIntervalRef.current = null;
               setTimeout(() => {
                 setStartOverride(false);
                 handleValidationOverrideModalClose(true).then(() => {});
@@ -70,12 +74,23 @@ export default function ValidationOverrideModal(props: VOMProps) {
             }
             progress += 20;
           }, 200); // Increment progress every 200ms
+
+          // Store interval ref for cleanup
+          progressIntervalRef.current = interval;
         })
         .catch((error: any) => {
           ailogger.error('Override operation failed:', error);
           setStartOverride(false);
         });
     }
+
+    // Cleanup interval on unmount
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
   }, [startOverride, handleValidationOverrideModalClose, triggerOverride]);
 
   useEffect(() => {

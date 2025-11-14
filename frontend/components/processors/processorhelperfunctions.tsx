@@ -287,8 +287,9 @@ export async function runValidation(
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
   let delay = 100;
+  const MAX_ATTEMPTS = 10; // CRITICAL FIX: Prevent infinite retry loop
 
-  while (true) {
+  while (attempt < MAX_ATTEMPTS) {
     let transactionID: string = '';
 
     try {
@@ -322,6 +323,16 @@ export async function runValidation(
       return true;
     } catch (e: any) {
       if (isDeadlockError(e)) {
+        if (attempt >= MAX_ATTEMPTS) {
+          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          try {
+            await connectionManager.rollbackTransaction(transactionID);
+          } catch (rollbackError: any) {
+            ailogger.error('Rollback error:', rollbackError);
+          }
+          return false;
+        }
+
         ailogger.info(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
@@ -330,7 +341,7 @@ export async function runValidation(
         }
         // Wait for an exponentially increasing delay before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // exponential backoff
+        delay = Math.min(delay * 2, 5000); // Exponential backoff capped at 5 seconds
       } else {
         try {
           await connectionManager.rollbackTransaction(transactionID);
@@ -341,6 +352,10 @@ export async function runValidation(
       }
     }
   }
+
+  // If we exit the loop without success, max retries exceeded
+  ailogger.error(`Validation failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
+  return false;
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
