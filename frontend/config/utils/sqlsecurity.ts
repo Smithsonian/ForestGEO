@@ -3,9 +3,8 @@
  *
  * Provides shared validation and sanitization functions to prevent SQL injection attacks.
  * All schema names MUST be validated against the whitelist before use in SQL queries.
+ * IMPORTANT: This module must NOT import mysql2 to remain compatible with client-side code.
  */
-
-import { format } from 'mysql2/promise';
 
 // Whitelist of allowed schemas - MUST match production database schemas
 export const ALLOWED_SCHEMAS = [
@@ -44,9 +43,19 @@ export function validateSchemaOrThrow(schema: string | null | undefined): assert
 }
 
 /**
+ * Manually escapes a MySQL identifier (schema, table, column name)
+ * Wraps identifier in backticks and escapes any backticks within
+ * @param identifier - The identifier to escape
+ * @returns Escaped identifier wrapped in backticks
+ */
+function escapeIdentifier(identifier: string): string {
+  return '`' + identifier.replace(/`/g, '``') + '`';
+}
+
+/**
  * Safely formats SQL query with schema identifier(s)
- * Uses mysql2 format() to escape identifiers and prevent SQL injection
- * Handles multiple ?? placeholders by passing schema multiple times
+ * Replaces ?? placeholders with escaped schema identifiers
+ * Handles multiple ?? placeholders by replacing each with the schema
  *
  * @example
  * const sql = formatWithSchema(schema, 'SELECT * FROM ??.users WHERE id = ?');
@@ -61,11 +70,9 @@ export function validateSchemaOrThrow(schema: string | null | undefined): assert
  * @returns Formatted SQL string with escaped schema identifier(s)
  */
 export function formatWithSchema(schema: AllowedSchema, query: string): string {
-  // Count how many ?? placeholders exist in the query
-  const placeholderCount = (query.match(/\?\?/g) || []).length;
-  // Pass schema once for each ?? placeholder
-  const params = Array(placeholderCount).fill(schema);
-  return format(query, params);
+  const escapedSchema = escapeIdentifier(schema);
+  // Replace all ?? with escaped schema identifier
+  return query.replace(/\?\?/g, escapedSchema);
 }
 
 /**
@@ -84,8 +91,8 @@ export function safeFormatQuery(schema: string | null | undefined, query: string
 
 /**
  * Safely escapes an identifier (table name, column name, etc.)
- * Uses mysql2 format() with ?? placeholder to prevent SQL injection
- * Validates that identifier contains only alphanumeric characters and underscores
+ * Validates that identifier contains only alphanumeric characters, underscores, and dots
+ * Then wraps in backticks with proper escaping
  *
  * @param identifier - The identifier to escape (table/column name)
  * @returns Escaped identifier wrapped in backticks
@@ -93,7 +100,8 @@ export function safeFormatQuery(schema: string | null | undefined, query: string
  *
  * @example
  * safeEscapeId('user_name') // Returns: `user_name`
- * safeEscapeId('user.name') // Throws error (invalid character)
+ * safeEscapeId('table.column') // Returns: `table`.`column`
+ * safeEscapeId('user-name') // Throws error (invalid character)
  */
 export function safeEscapeId(identifier: string): string {
   // Validate identifier contains only safe characters
@@ -102,6 +110,14 @@ export function safeEscapeId(identifier: string): string {
     throw new Error(`Invalid identifier: ${identifier}. Only alphanumeric characters, underscores, and dots are allowed.`);
   }
 
-  // Use mysql2's format to safely escape the identifier
-  return format('??', [identifier]);
+  // Handle qualified identifiers (e.g., "table.column")
+  if (identifier.includes('.')) {
+    return identifier
+      .split('.')
+      .map(part => escapeIdentifier(part))
+      .join('.');
+  }
+
+  // Single identifier
+  return escapeIdentifier(identifier);
 }

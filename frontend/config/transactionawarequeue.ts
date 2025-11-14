@@ -92,7 +92,7 @@ class TransactionAwarePQueue extends PQueue {
           for (const lockId of acquiredLocks) {
             try {
               await this.releaseResourceLock(lockId);
-            } catch (error) {
+            } catch (error: any) {
               ailogger.error(`Failed to release lock ${lockId}:`, error);
               // Continue releasing other locks even if this one fails
             }
@@ -310,7 +310,7 @@ class TransactionAwarePQueue extends PQueue {
       this.taskDependencies.clear();
 
       ailogger.info('TransactionAwarePQueue shutdown complete');
-    } catch (error) {
+    } catch (error: any) {
       ailogger.error('Error during TransactionAwarePQueue shutdown:', error);
       throw error;
     }

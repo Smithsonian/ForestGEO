@@ -28,7 +28,7 @@ async function getSqlConnection(tries: number): Promise<PoolConnection> {
     if (connectionAcquired && connection) {
       try {
         connection.release();
-      } catch (releaseError) {
+      } catch (releaseError: any) {
         ailogger.error('Error releasing failed connection:', releaseError);
       }
       connectionAcquired = false;
