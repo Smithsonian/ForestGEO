@@ -35,17 +35,34 @@ export class PoolMonitor {
   }
 
   public async getConnection(): Promise<PoolConnection> {
+    let connection: PoolConnection | null = null;
+    let connectionAcquired = false;
+
     try {
       if (this.poolClosed) {
         await this.reinitializePool();
       }
 
-      const connection = await this.pool.getConnection();
+      connection = await this.pool.getConnection();
+      connectionAcquired = true;
+
       connection.on('query', () => this.resetInactivityTimer());
       connection.on('release', () => this.resetInactivityTimer());
+
+      connectionAcquired = false; // Successfully returning, caller now responsible
       return connection;
     } catch (error: any) {
       ailogger.error(chalk.red('Error acquiring connection:', error));
+
+      // Release connection if we acquired it but failed to configure it
+      if (connectionAcquired && connection) {
+        try {
+          connection.release();
+        } catch (releaseError) {
+          ailogger.error(chalk.red('Error releasing failed connection:', releaseError));
+        }
+      }
+
       ailogger.warn(chalk.yellow('Reinitializing pool due to connection error.'));
       await this.reinitializePool();
       throw error;

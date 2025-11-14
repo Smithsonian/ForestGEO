@@ -9,16 +9,30 @@ import ailogger from '@/ailogger';
 
 async function getSqlConnection(tries: number): Promise<PoolConnection> {
   let connection: PoolConnection | null = null;
+  let connectionAcquired = false;
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
     // Acquire the connection and ping to validate it
     connection = await getPoolMonitorInstance().getConnection();
+    connectionAcquired = true;
     await connection.ping(); // Use ping to check the connection
-    return connection; // Resolve the connection when successful
+    const conn = connection;
+    connectionAcquired = false; // Successfully returning, caller now responsible
+    return conn; // Resolve the connection when successful
   } catch (err: any) {
     ailogger.error(`Connection attempt ${tries + 1} failed:`, err);
-    connection?.release();
+
+    // Release connection if we acquired it but failed
+    if (connectionAcquired && connection) {
+      try {
+        connection.release();
+      } catch (releaseError) {
+        ailogger.error('Error releasing failed connection:', releaseError);
+      }
+      connectionAcquired = false;
+    }
+
     if (tries === 5) {
       ailogger.error('!!! Cannot connect !!! Error:', err);
       throw err;
