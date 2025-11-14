@@ -8,7 +8,16 @@
 import { format } from 'mysql2/promise';
 
 // Whitelist of allowed schemas - MUST match production database schemas
-export const ALLOWED_SCHEMAS = ['forestgeo', 'forestgeo_testing', 'forestgeo_testing_alternate', 'catalog'] as const;
+export const ALLOWED_SCHEMAS = [
+  'forestgeo',
+  'forestgeo_testing',
+  'forestgeo_testing_alternate',
+  'forestgeo_panama',
+  'forestgeo_harvard',
+  'forestgeo_mpala',
+  'forestgeo_serc',
+  'catalog'
+] as const;
 
 export type AllowedSchema = (typeof ALLOWED_SCHEMAS)[number];
 
@@ -71,4 +80,28 @@ export function formatWithSchema(schema: AllowedSchema, query: string): string {
 export function safeFormatQuery(schema: string | null | undefined, query: string): string {
   validateSchemaOrThrow(schema);
   return formatWithSchema(schema, query);
+}
+
+/**
+ * Safely escapes an identifier (table name, column name, etc.)
+ * Uses mysql2 format() with ?? placeholder to prevent SQL injection
+ * Validates that identifier contains only alphanumeric characters and underscores
+ *
+ * @param identifier - The identifier to escape (table/column name)
+ * @returns Escaped identifier wrapped in backticks
+ * @throws Error if identifier contains invalid characters
+ *
+ * @example
+ * safeEscapeId('user_name') // Returns: `user_name`
+ * safeEscapeId('user.name') // Throws error (invalid character)
+ */
+export function safeEscapeId(identifier: string): string {
+  // Validate identifier contains only safe characters
+  // Allow alphanumeric, underscore, and dot (for qualified names like table.column)
+  if (!/^[a-zA-Z0-9_.]+$/.test(identifier)) {
+    throw new Error(`Invalid identifier: ${identifier}. Only alphanumeric characters, underscores, and dots are allowed.`);
+  }
+
+  // Use mysql2's format to safely escape the identifier
+  return format('??', [identifier]);
 }

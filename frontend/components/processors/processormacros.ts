@@ -6,6 +6,7 @@ import { capitalizeAndTransformField } from '@/config/utils';
 import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 import ailogger from '@/ailogger';
+import { safeEscapeId } from '@/config/utils/sqlsecurity';
 
 async function getSqlConnection(tries: number): Promise<PoolConnection> {
   let connection: PoolConnection | null = null;
@@ -126,44 +127,47 @@ function escapeSql(value: string): string {
 }
 
 function buildCondition({ operator, column, value }: { operator: Operator; column: string; value?: number | string | string[] }): string {
+  // SQL injection protection: validate and escape column name
+  const safeColumn = safeEscapeId(column);
+
   switch (operator) {
     case 'contains':
       // Use the value as provided since it already includes the % signs
-      return `${column} LIKE '%${escapeSql(value as string)}%'`;
+      return `${safeColumn} LIKE '%${escapeSql(value as string)}%'`;
     case 'doesNotContain':
-      return `${column} NOT LIKE '%${escapeSql(value as string)}%'`;
+      return `${safeColumn} NOT LIKE '%${escapeSql(value as string)}%'`;
     case 'equals':
     case 'is':
     case '=':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'doesNotEqual':
     case 'isNot':
     case '!=':
-      return `${column} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'startsWith':
-      return `${column} LIKE '%${escapeSql(value as string)}'`;
+      return `${safeColumn} LIKE '%${escapeSql(value as string)}'`;
     case 'endsWith':
-      return `${column} LIKE '${escapeSql(value as string)}%'`;
+      return `${safeColumn} LIKE '${escapeSql(value as string)}%'`;
     case 'isAfter':
     case '>':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isOnOrAfter':
     case '>=':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isBefore':
     case '<':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isOnOrBefore':
     case '<=':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isEmpty':
-      return `(${column} = '' OR ${column} IS NULL)`;
+      return `(${safeColumn} = '' OR ${safeColumn} IS NULL)`;
     case 'isNotEmpty':
-      return `(${column} <> '' AND ${column} IS NOT NULL)`;
+      return `(${safeColumn} <> '' AND ${safeColumn} IS NOT NULL)`;
     case 'isAnyOf':
       if (Array.isArray(value)) {
         const values = value.map(val => `'${escapeSql(val)}'`).join(', ');
-        return `${column} IN (${values})`;
+        return `${safeColumn} IN (${values})`;
       }
       throw new Error('For "is any of", value must be an array.');
     default:
@@ -196,7 +200,9 @@ export const buildSearchStub = (columns: string[], quickFilter: string[], alias?
 
   return columns
     .map(column => {
-      const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
+      // SQL injection protection: escape column name with alias if present
+      const columnPart = safeEscapeId(column);
+      const aliasedColumn = alias ? `${safeEscapeId(alias)}.${columnPart}` : columnPart;
 
       // For identifier columns, prioritize exact match, then fall back to contains
       if (identifierColumns.includes(column)) {
