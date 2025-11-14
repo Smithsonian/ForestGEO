@@ -42,6 +42,7 @@ class ConnectionManager {
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
   private applicationLocks = new Map<string, { transactionId: string; acquiredAt: number }>();
   private readonly LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for application locks
+  private transactionSlotQueue: Array<() => void> = []; // Queue for waiting transactions
 
   // Private constructor
   private constructor() {
@@ -151,6 +152,9 @@ class ConnectionManager {
       this.cleanupApplicationLocks(transactionId);
       connection.release();
       this.transactionConnections.delete(transactionId);
+
+      // Release a waiting transaction slot (race condition fix)
+      this.releaseTransactionSlot();
     }
   }
 
@@ -174,6 +178,9 @@ class ConnectionManager {
       this.cleanupApplicationLocks(transactionId);
       connection.release();
       this.transactionConnections.delete(transactionId);
+
+      // Release a waiting transaction slot (race condition fix)
+      this.releaseTransactionSlot();
     }
   }
 
@@ -185,21 +192,28 @@ class ConnectionManager {
   public async withTransaction<T>(fn: (transactionId: string) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
-    // Check if we're at the concurrent transaction limit
+    // Race condition fix: use promise-based queue instead of polling
     if (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS) {
       ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
 
-      // Wait for a transaction to complete with timeout
-      const waitStart = Date.now();
-      const maxWait = 60000; // 1 minute max wait
+      // Wait for a slot to become available using a promise queue
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          // Remove from queue if still waiting
+          const index = this.transactionSlotQueue.indexOf(resolve);
+          if (index !== -1) {
+            this.transactionSlotQueue.splice(index, 1);
+          }
+          reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
+        }, 60000); // 1 minute max wait
 
-      while (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS && Date.now() - waitStart < maxWait) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Check every second
-      }
-
-      if (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS) {
-        throw new Error('Transaction slot wait timeout - too many concurrent transactions');
-      }
+        // Add to queue with cleanup
+        const wrappedResolve = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        this.transactionSlotQueue.push(wrappedResolve);
+      });
 
       ailogger.info('Transaction slot available, proceeding...');
     }
@@ -373,6 +387,17 @@ class ConnectionManager {
     if (meta) {
       for (const lockName of meta.resourceLocks) {
         this.releaseApplicationLock(lockName, transactionId);
+      }
+    }
+  }
+
+  // Release a transaction slot from the queue (race condition fix)
+  private releaseTransactionSlot(): void {
+    if (this.transactionSlotQueue.length > 0) {
+      const nextResolver = this.transactionSlotQueue.shift();
+      if (nextResolver) {
+        nextResolver();
+        ailogger.info('Released transaction slot to waiting transaction');
       }
     }
   }

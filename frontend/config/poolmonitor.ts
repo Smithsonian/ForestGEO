@@ -9,7 +9,8 @@ export class PoolMonitor {
   private inactivityTimer: NodeJS.Timeout | null = null;
   private healthMonitorIntervalId: NodeJS.Timeout | null = null;
   private poolClosed = false;
-  private reinitializing = false;
+  private reinitializePromise: Promise<void> | null = null;
+  private closePromise: Promise<void> | null = null;
 
   constructor(config: PoolOptions) {
     this.config = config;
@@ -70,12 +71,30 @@ export class PoolMonitor {
   }
 
   public async closeAllConnections(): Promise<void> {
-    try {
-      if (this.poolClosed) {
-        ailogger.info(chalk.yellow('Pool already closed.'));
-        return;
-      }
+    // Race condition fix: if close is already in progress, wait for it
+    if (this.closePromise) {
+      await this.closePromise;
+      return;
+    }
 
+    // Atomic check-and-set for poolClosed flag
+    if (this.poolClosed) {
+      ailogger.info(chalk.yellow('Pool already closed.'));
+      return;
+    }
+
+    // Store the close promise so concurrent calls wait
+    this.closePromise = this._doCloseAllConnections();
+
+    try {
+      await this.closePromise;
+    } finally {
+      this.closePromise = null;
+    }
+  }
+
+  private async _doCloseAllConnections(): Promise<void> {
+    try {
       // Clear health monitor interval to prevent memory leak
       if (this.healthMonitorIntervalId) {
         clearInterval(this.healthMonitorIntervalId);
@@ -107,9 +126,23 @@ export class PoolMonitor {
   }
 
   private async reinitializePool(): Promise<void> {
-    if (this.reinitializing) return; // Prevent concurrent reinitialization
-    this.reinitializing = true;
+    // Race condition fix: if reinitialize is already in progress, wait for it
+    if (this.reinitializePromise) {
+      await this.reinitializePromise;
+      return;
+    }
 
+    // Store the reinitialize promise so concurrent calls wait
+    this.reinitializePromise = this._doReinitializePool();
+
+    try {
+      await this.reinitializePromise;
+    } finally {
+      this.reinitializePromise = null;
+    }
+  }
+
+  private async _doReinitializePool(): Promise<void> {
     try {
       ailogger.info(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
@@ -122,8 +155,6 @@ export class PoolMonitor {
       ailogger.info(chalk.cyan('Connection pool reinitialized.'));
     } catch (error: any) {
       ailogger.error(chalk.red('Error during reinitialization:', error));
-    } finally {
-      this.reinitializing = false;
     }
   }
 
