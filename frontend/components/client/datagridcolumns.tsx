@@ -763,13 +763,6 @@ export const RolesGridColumns: GridColDef[] = standardizeGridColumns([
     editable: false,
     filterable: false
   },
-  {
-    field: 'roleID',
-    headerName: '#',
-    flex: 0.2,
-    editable: false,
-    filterable: false
-  },
   { field: 'roleName', headerName: 'Role', flex: 1, editable: true },
   {
     field: 'roleDescription',

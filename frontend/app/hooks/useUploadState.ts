@@ -187,9 +187,9 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
   // Derived state
   const isComplete = state.reviewState === ReviewStates.COMPLETE;
 
-  const needsPersonnel = state.uploadForm === 'measurements' && !state.personnelRecording;
+  const needsPersonnel = false; // Personnel is now optional for all upload types
 
-  const canProceed = state.uploadForm !== undefined && (state.uploadForm !== 'measurements' || state.personnelRecording !== '');
+  const canProceed = state.uploadForm !== undefined; // Personnel no longer required for measurements
 
   return {
     // State

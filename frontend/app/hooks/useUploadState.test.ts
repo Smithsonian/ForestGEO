@@ -350,14 +350,14 @@ describe('useUploadState', () => {
       expect(result.current.needsPersonnel).toBe(false);
     });
 
-    it('should be true for measurements without personnel', () => {
+    it('should be false for measurements without personnel (personnel now optional)', () => {
       const { result } = renderHook(() => useUploadState());
 
       act(() => {
         result.current.setUploadForm(FormType.measurements);
       });
 
-      expect(result.current.needsPersonnel).toBe(true);
+      expect(result.current.needsPersonnel).toBe(false);
     });
 
     it('should be false for measurements with personnel', () => {
@@ -389,14 +389,14 @@ describe('useUploadState', () => {
       expect(result.current.canProceed).toBe(true);
     });
 
-    it('should be false for measurements without personnel', () => {
+    it('should be true for measurements without personnel (personnel now optional)', () => {
       const { result } = renderHook(() => useUploadState());
 
       act(() => {
         result.current.setUploadForm(FormType.measurements);
       });
 
-      expect(result.current.canProceed).toBe(false);
+      expect(result.current.canProceed).toBe(true);
     });
 
     it('should be true for measurements with personnel', () => {
@@ -440,9 +440,9 @@ describe('useUploadState', () => {
         result.current.setUploadForm(FormType.measurements);
       });
 
-      expect(result.current.canProceed).toBe(false);
+      expect(result.current.canProceed).toBe(true); // Personnel now optional, can proceed immediately
 
-      // Set personnel
+      // Set personnel (optional)
       act(() => {
         result.current.setPersonnelRecording('Field Worker');
       });

@@ -184,10 +184,6 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     ]
   );
 
-  useEffect(() => {
-    if (rowCount < paginationModel.pageSize) setHidingEmpty(false);
-  }, [rowCount, paginationModel.pageSize]);
-
   const handleRefresh = useCallback(async () => {
     await fetchPaginatedData(paginationModel.page);
   }, [paginationModel.page, fetchPaginatedData]);

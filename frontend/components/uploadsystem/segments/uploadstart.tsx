@@ -90,7 +90,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     setIsQuadratConfirmed(true);
   };
 
-  const allSelectionsMade = uploadForm !== undefined && (uploadForm !== 'measurements' || (personnelRecording !== '' && isQuadratConfirmed));
+  const allSelectionsMade = uploadForm !== undefined; // Personnel and quadrat selection now optional for measurements
 
   const showBackButton = personnelRecording !== '' || isQuadratConfirmed;
 

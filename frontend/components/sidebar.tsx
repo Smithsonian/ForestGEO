@@ -225,7 +225,7 @@ export default function Sidebar(props: SidebarProps) {
         const scrollWidth = sidebarRef.current.scrollWidth;
         const calculatedWidth = Math.max(scrollWidth, 340); // Minimum width
 
-        setSidebarWidth(Math.min(calculatedWidth + 10, 500));
+        setSidebarWidth(Math.min(calculatedWidth + 10, 380)); // Reduced max width from 500 to 380
       }
     };
 

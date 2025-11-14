@@ -259,17 +259,10 @@ export default function DashboardPage() {
           description="You haven't uploaded any measurements for this census yet. Start by uploading your field data or creating measurement entries."
           primaryAction={{
             label: 'Upload Data',
-            onClick: () => router.push('/measurementshub'),
+            onClick: () => router.push('/measurementshub/uploadedfiles'),
             startDecorator: <AddIcon />,
             variant: 'solid',
             color: 'primary'
-          }}
-          secondaryAction={{
-            label: 'View Guide',
-            onClick: () => window.open('https://docs.forestgeo.si.edu', '_blank'),
-            startDecorator: <HelpIcon />,
-            variant: 'outlined',
-            color: 'neutral'
           }}
           iconColor="warning"
         />

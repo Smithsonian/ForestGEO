@@ -91,7 +91,7 @@ describe('Upload System - Refactored Integration Tests', () => {
       cy.get('[data-cy="form-type-select"]').click();
       cy.contains('measurements').click();
 
-      // Set personnel (required for measurements)
+      // Set personnel (optional for measurements)
       cy.get('[data-cy="personnel-select"]').should('be.visible');
       cy.get('[data-cy="personnel-select"]').click();
       cy.contains('Test User').click();
@@ -259,23 +259,23 @@ describe('Upload System - Refactored Integration Tests', () => {
       cy.wait('@processBatch');
     });
 
-    it('should manage personnel recording state for measurements', () => {
+    it('should allow optional personnel recording for measurements', () => {
       cy.visit('/dashboard');
       cy.contains('Upload Data').click();
 
       cy.get('[data-cy="form-type-select"]').click();
       cy.contains('measurements').click();
 
-      // useUploadState.needsPersonnel should be true
+      // useUploadState.needsPersonnel is now false - personnel is optional
       cy.get('[data-cy="personnel-select"]').should('be.visible');
-      cy.contains('Continue Upload').should('be.disabled'); // canProceed = false
+      // Continue Upload button may be enabled even without personnel (personnel is optional)
+      // Button state depends on other factors like file presence
 
-      // Set personnel via useUploadState.setPersonnelRecording
+      // Set personnel via useUploadState.setPersonnelRecording (optional)
       cy.get('[data-cy="personnel-select"]').click();
       cy.contains('Test User').click();
 
-      // Now canProceed should be true
-      // (Will still be disabled until file is added, but personnel requirement is met)
+      // Personnel is set but still optional
       cy.get('[data-cy="personnel-select"]').should('contain', 'Test User');
     });
 
