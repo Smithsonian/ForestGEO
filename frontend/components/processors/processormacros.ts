@@ -145,21 +145,21 @@ function buildCondition({ operator, column, value }: { operator: Operator; colum
     case '!=':
       return `${safeColumn} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'startsWith':
-      return `${safeColumn} LIKE '%${escapeSql(value as string)}'`;
-    case 'endsWith':
       return `${safeColumn} LIKE '${escapeSql(value as string)}%'`;
+    case 'endsWith':
+      return `${safeColumn} LIKE '%${escapeSql(value as string)}'`;
     case 'isAfter':
     case '>':
-      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} > ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isOnOrAfter':
     case '>=':
-      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} >= ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isBefore':
     case '<':
-      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} < ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isOnOrBefore':
     case '<=':
-      return `${safeColumn} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${safeColumn} <= ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'isEmpty':
       return `(${safeColumn} = '' OR ${safeColumn} IS NULL)`;
     case 'isNotEmpty':

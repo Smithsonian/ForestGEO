@@ -153,11 +153,11 @@ export async function processBulkIngestionProcessor(
       }
 
       // CORRECTED validation logic from stored procedure:
-      // Valid = false ONLY if ((DBH=0 OR HOM=0) AND no codes)
+      // Valid = false ONLY if (both DBH AND HOM are 0) AND no codes
       const dbh = measurement.DBH || 0;
       const hom = measurement.HOM || 0;
       const codes = measurement.Codes?.trim() || '';
-      const isValid = !((dbh === 0 || hom === 0) && codes === '');
+      const isValid = !(dbh === 0 && hom === 0 && codes === '');
 
       const filteredMeasurement: FilteredMeasurement = {
         ...measurement,
@@ -269,12 +269,12 @@ export async function processBulkIngestion(props: Readonly<SpecialBulkProcessing
 
 async function validateQuadrat(connectionManager: ConnectionManager, schema: string, quadratName: string): Promise<boolean> {
   const result = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.quadrats WHERE QuadratName = ?`, [quadratName]);
-  return result[0].count > 0;
+  return result?.[0]?.count > 0;
 }
 
 async function validateSpecies(connectionManager: ConnectionManager, schema: string, speciesCode: string): Promise<boolean> {
   const result = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.species WHERE SpeciesCode = ?`, [speciesCode]);
-  return result[0].count > 0;
+  return result?.[0]?.count > 0;
 }
 
 async function validateAttributeCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<number> {

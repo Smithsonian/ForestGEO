@@ -22,11 +22,11 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
     }
 
     let genusID: number | undefined;
-    if (rowData.genus) {
+    if (rowData.genus && familyID) {
       genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID')).id;
     }
 
-    if (rowData.spcode) {
+    if (rowData.spcode && genusID) {
       const speciesData = {
         SpeciesCode: rowData.spcode,
         SpeciesName: rowData.species,

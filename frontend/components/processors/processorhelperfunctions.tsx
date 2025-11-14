@@ -22,7 +22,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     } else {
       const columns = Object.keys(mapping.columnMappings);
       if (columns.includes('plotID')) rowData['plotID'] = subProps.plot?.plotID?.toString() ?? null;
-      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges[0]?.censusID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges?.[0]?.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => {
