@@ -111,14 +111,11 @@ export function useErrorHandling(): UseErrorHandlingReturn {
 
   /**
    * Set which component the error originated from
+   * Stable function that doesn't depend on errorComponent state
    */
-  const setErrorComponent = useCallback(
-    (value: React.SetStateAction<string>) => {
-      const component = typeof value === 'function' ? value(errorComponent) : value;
-      setErrorComponentState(component);
-    },
-    [errorComponent]
-  );
+  const setErrorComponent = useCallback((value: React.SetStateAction<string>) => {
+    setErrorComponentState(value);
+  }, []);
 
   /**
    * Get formatted error message

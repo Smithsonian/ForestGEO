@@ -25,7 +25,7 @@ import CategoryIcon from '@mui/icons-material/Category';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
@@ -87,6 +87,10 @@ export default function DashboardPage() {
     CountNewRecruits: 0
   });
   const [toggleSwitch, setToggleSwitch] = useState(true);
+
+  // Track loading state and last loaded key to prevent duplicate requests
+  const loadingRef = useRef<boolean>(false);
+  const lastLoadedKeyRef = useRef<string>('');
 
   /**
    * Aggregated Dashboard Metrics Loader
@@ -181,15 +185,29 @@ export default function DashboardPage() {
         CountNewRecruits: 0
       });
       setChangelogHistory(Array(5));
+      lastLoadedKeyRef.current = ''; // Reset tracking key when contexts are cleared
     }
   }, [currentSite, currentPlot, currentCensus]);
 
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus) {
+      // Create unique key to prevent duplicate loads
+      const loadKey = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.dateRanges[0].censusID}`;
+
+      // Skip if already loading or if same key as last load
+      if (loadingRef.current || lastLoadedKeyRef.current === loadKey) {
+        return;
+      }
+
+      loadingRef.current = true;
+      lastLoadedKeyRef.current = loadKey;
+
       // Load all dashboard metrics with single aggregated API call (3-4x faster)
-      loadAllDashboardMetrics().catch(ailogger.error);
-      // Load changelog separately (not part of aggregated API)
-      loadChangelogHistory().catch(ailogger.error);
+      Promise.all([loadAllDashboardMetrics(), loadChangelogHistory()])
+        .catch(ailogger.error)
+        .finally(() => {
+          loadingRef.current = false;
+        });
     }
   }, [currentSite, currentPlot, currentCensus, loadAllDashboardMetrics, loadChangelogHistory]);
 

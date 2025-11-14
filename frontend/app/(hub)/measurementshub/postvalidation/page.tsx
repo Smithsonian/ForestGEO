@@ -94,8 +94,13 @@ export default function PostValidationPage() {
   useEffect(() => {
     setLoading(true);
     loadPostValidations()
-      .catch(ailogger.error)
-      .then(() => setLoading(false));
+      .catch(error => {
+        ailogger.error(error);
+        // Still set loading to false on error
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [setLoading, loadPostValidations]);
 
   useEffect(() => {

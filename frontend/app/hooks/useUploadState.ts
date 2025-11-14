@@ -143,53 +143,37 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
   });
 
   // Convenience setters - support both values and updater functions
-  const setUploadForm = useCallback(
-    (value: React.SetStateAction<FormType | undefined>) => {
-      const form = typeof value === 'function' ? value(state.uploadForm) : value;
-      dispatch({ type: 'SET_UPLOAD_FORM', payload: form });
-    },
-    [state.uploadForm]
-  );
+  // Note: useCallback removed as these depend on frequently-changing state
+  // Recreating these simple functions is more efficient than memoization overhead
+  const setUploadForm = (value: React.SetStateAction<FormType | undefined>) => {
+    const form = typeof value === 'function' ? value(state.uploadForm) : value;
+    dispatch({ type: 'SET_UPLOAD_FORM', payload: form });
+  };
 
-  const setReviewState = useCallback(
-    (value: React.SetStateAction<ReviewStates>) => {
-      const reviewState = typeof value === 'function' ? value(state.reviewState) : value;
-      dispatch({ type: 'SET_REVIEW_STATE', payload: reviewState });
-    },
-    [state.reviewState]
-  );
+  const setReviewState = (value: React.SetStateAction<ReviewStates>) => {
+    const reviewState = typeof value === 'function' ? value(state.reviewState) : value;
+    dispatch({ type: 'SET_REVIEW_STATE', payload: reviewState });
+  };
 
-  const setPersonnelRecording = useCallback(
-    (value: React.SetStateAction<string>) => {
-      const personnel = typeof value === 'function' ? value(state.personnelRecording) : value;
-      dispatch({ type: 'SET_PERSONNEL', payload: personnel });
-    },
-    [state.personnelRecording]
-  );
+  const setPersonnelRecording = (value: React.SetStateAction<string>) => {
+    const personnel = typeof value === 'function' ? value(state.personnelRecording) : value;
+    dispatch({ type: 'SET_PERSONNEL', payload: personnel });
+  };
 
-  const setIsDataUnsaved = useCallback(
-    (value: React.SetStateAction<boolean>) => {
-      const unsaved = typeof value === 'function' ? value(state.isDataUnsaved) : value;
-      dispatch({ type: 'SET_DATA_UNSAVED', payload: unsaved });
-    },
-    [state.isDataUnsaved]
-  );
+  const setIsDataUnsaved = (value: React.SetStateAction<boolean>) => {
+    const unsaved = typeof value === 'function' ? value(state.isDataUnsaved) : value;
+    dispatch({ type: 'SET_DATA_UNSAVED', payload: unsaved });
+  };
 
-  const setUploadCompleteMessage = useCallback(
-    (value: React.SetStateAction<string>) => {
-      const message = typeof value === 'function' ? value(state.uploadCompleteMessage) : value;
-      dispatch({ type: 'SET_COMPLETE_MESSAGE', payload: message });
-    },
-    [state.uploadCompleteMessage]
-  );
+  const setUploadCompleteMessage = (value: React.SetStateAction<string>) => {
+    const message = typeof value === 'function' ? value(state.uploadCompleteMessage) : value;
+    dispatch({ type: 'SET_COMPLETE_MESSAGE', payload: message });
+  };
 
-  const setDataViewActive = useCallback(
-    (value: React.SetStateAction<number>) => {
-      const page = typeof value === 'function' ? value(state.dataViewActive) : value;
-      dispatch({ type: 'SET_DATA_VIEW_ACTIVE', payload: page });
-    },
-    [state.dataViewActive]
-  );
+  const setDataViewActive = (value: React.SetStateAction<number>) => {
+    const page = typeof value === 'function' ? value(state.dataViewActive) : value;
+    dispatch({ type: 'SET_DATA_VIEW_ACTIVE', payload: page });
+  };
 
   // Complex actions
   const resetToStart = useCallback(() => {

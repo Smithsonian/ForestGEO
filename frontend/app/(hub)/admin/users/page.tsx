@@ -1,7 +1,7 @@
 'use client';
 
 import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import ailogger from '@/ailogger';
 
@@ -9,7 +9,7 @@ type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[
 
 export default function UserSettingsPage() {
   const [users, setUsers] = useState<UserWithSite[]>([]);
-  const baseUsers = useRef(users);
+  const [baseUsers, setBaseUsers] = useState<UserWithSite[]>([]);
   const [_sites, setSites] = useState<AdminSiteRDS[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export default function UserSettingsPage() {
           const ids =
             u.userSites
               ?.split(';')
-              .map(s => parseInt(s))
+              .map(s => parseInt(s, 10))
               .filter(n => !isNaN(n)) ?? [];
           return {
             userID: u.userID,
@@ -55,7 +55,7 @@ export default function UserSettingsPage() {
         });
 
         setUsers(mappedUsers);
-        baseUsers.current = mappedUsers;
+        setBaseUsers(mappedUsers);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please try again.';
         setError(errorMessage);
@@ -105,7 +105,7 @@ export default function UserSettingsPage() {
     [safeJoin]
   );
 
-  const baseUsersMap = useMemo(() => new Map(baseUsers.current.map(u => [u.userID, u])), []);
+  const baseUsersMap = useMemo(() => new Map(baseUsers.map(u => [u.userID, u])), [baseUsers]);
 
   const foundChanges = useMemo(() => {
     return users.some(u => isUserChanged(u, baseUsersMap.get(u.userID)));
@@ -134,7 +134,7 @@ export default function UserSettingsPage() {
       {!loading && !error && (
         <>
           <Stack direction={'row'} gap={1}>
-            <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers.current)}>
+            <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers)}>
               Discard Changes
             </Button>
             <Button
@@ -142,7 +142,7 @@ export default function UserSettingsPage() {
               onClick={async () => {
                 try {
                   setSaveError(null);
-                  const baseMap = new Map(baseUsers.current.map(u => [u.userID, u]));
+                  const baseMap = new Map(baseUsers.map(u => [u.userID, u]));
                   const updates = await Promise.all(
                     users.map(async user => {
                       const oldUser = baseMap.get(user.userID);
@@ -160,7 +160,7 @@ export default function UserSettingsPage() {
                       return oldUser;
                     })
                   );
-                  baseUsers.current = updates.filter((u): u is UserWithSite => !!u);
+                  setBaseUsers(updates.filter((u): u is UserWithSite => !!u));
                 } catch (err) {
                   const errorMessage = err instanceof Error ? err.message : 'Failed to save changes. Please try again.';
                   setSaveError(errorMessage);

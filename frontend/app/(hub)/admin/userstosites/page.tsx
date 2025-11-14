@@ -19,24 +19,37 @@ export default function UsersToSitesPage() {
   const [sites, setSites] = useState<AdminSiteRDS[]>([]);
   const [selectedUser, setSelectedUser] = useState<number>(0);
   const baseUserSites = useRef(userSites);
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
 
   useEffect(() => {
-    async function fetchUserSites() {
-      const usResponse = await (await fetch(`/api/administrative/fetch/usersiterelations`)).json();
-      const userResponse = await (await fetch(`/api/administrative/fetch/users`)).json();
-      const siteResponse = await (await fetch(`/api/administrative/fetch/sites`)).json();
+    // Only fetch once on mount
+    if (isInitialLoadComplete) return;
 
-      setSelectedUser(
-        usResponse.reduce((minSoFar: UserSiteRelation, candidate: UserSiteRelation) => (candidate.userID < minSoFar.userID ? candidate : minSoFar))
-      );
-      setUserSites(usResponse);
-      baseUserSites.current = usResponse;
-      setUsers(userResponse);
-      setSites(siteResponse);
+    async function fetchUserSites() {
+      try {
+        const usResponse = await (await fetch(`/api/administrative/fetch/usersiterelations`)).json();
+        const userResponse = await (await fetch(`/api/administrative/fetch/users`)).json();
+        const siteResponse = await (await fetch(`/api/administrative/fetch/sites`)).json();
+
+        // Fix: Extract userID from the reduce result
+        const firstUserRelation = usResponse.reduce(
+          (minSoFar: UserSiteRelation, candidate: UserSiteRelation) => (candidate.userID < minSoFar.userID ? candidate : minSoFar),
+          usResponse[0]
+        );
+        setSelectedUser(firstUserRelation?.userID ?? 0);
+
+        setUserSites(usResponse);
+        baseUserSites.current = usResponse;
+        setUsers(userResponse);
+        setSites(siteResponse);
+        setIsInitialLoadComplete(true);
+      } catch (error) {
+        ailogger.error('Failed to fetch user sites data:', error instanceof Error ? error : new Error(String(error)));
+      }
     }
 
-    fetchUserSites().catch(ailogger.error);
-  }, []);
+    fetchUserSites();
+  }, [isInitialLoadComplete]);
 
   const siteIdsByUser = useMemo(
     () =>
