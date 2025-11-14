@@ -68,7 +68,7 @@ export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingPr
   nullif(i.IDLevel, ''),
   nullif(i.SpeciesAuthority, ''),
   nullif(i.SubspeciesAuthority, ''),
-  nullif(g.GenusID, '')
+  g.GenusID
   FROM ??.stagingspecies i
   JOIN ??.genus g ON i.Genus = g.Genus
   ON DUPLICATE KEY UPDATE

@@ -97,7 +97,10 @@ export async function processBulkIngestionProcessor(
       return;
     }
 
-    const currentCensusID = temporaryMeasurements[0].CensusID;
+    const currentCensusID = temporaryMeasurements[0]?.CensusID;
+    if (!currentCensusID) {
+      throw new Error('CensusID missing from first measurement');
+    }
 
     // Step 1: Initial duplicate filter - remove exact duplicates
     const uniqueMeasurements = temporaryMeasurements.filter(
@@ -280,15 +283,14 @@ async function validateSpecies(connectionManager: ConnectionManager, schema: str
 async function validateAttributeCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<number> {
   if (codes.length === 0) return 0;
 
-  const _placeholders = codes.map(() => '?').join(',');
   const result = await connectionManager.executeQuery(
-    `SELECT COUNT(*) as invalid FROM (${codes.map(() => 'SELECT ? as code').join(' UNION ')}) temp 
+    `SELECT COUNT(*) as invalid FROM (${codes.map(() => 'SELECT ? as code').join(' UNION ')}) temp
      LEFT JOIN ${schema}.attributes a ON a.Code = temp.code
      WHERE a.Code IS NULL`,
     codes
   );
 
-  return result[0].invalid || 0;
+  return result?.[0]?.invalid || 0;
 }
 
 async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: FailedMeasurementsResult[]): Promise<void> {
@@ -419,8 +421,8 @@ async function processStemInsertions(
     CensusID: currentCensusID,
     StemCrossID: -1,
     StemTag: ts.StemTag || '',
-    LocalX: ts.LocalX || -1,
-    LocalY: ts.LocalY || -1,
+    LocalX: ts.LocalX ?? -1,
+    LocalY: ts.LocalY ?? -1,
     Moved: false,
     StemDescription: '',
     IsActive: true // ADDED: Missing IsActive field
@@ -499,6 +501,9 @@ async function processCoreMeasurementInsertions(
 
 async function processCMAttributeInsertions(connectionManager: ConnectionManager, schema: string, treeStates: TreeStemState[]): Promise<void> {
   // Get core measurement IDs
+  // Check if treeStates is not empty before accessing
+  if (treeStates.length === 0) return;
+
   const cmQuery = `
     SELECT cm.CoreMeasurementID, s.StemTag, t.TreeTag, q.QuadratName, cm.MeasurementDate, cm.MeasuredDBH, cm.MeasuredHOM
     FROM ${schema}.coremeasurements cm
