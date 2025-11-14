@@ -248,18 +248,20 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
 
   return (
     <>
-      <Toolbar color="primary" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Toolbar color="primary" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center', overflow: 'auto' }}>
         <Box
           sx={{
             display: 'flex',
             flex: 1,
             maxWidth: '100%',
             justifyContent: 'space-evenly',
-            alignItems: 'center'
+            alignItems: 'center',
+            overflowX: 'auto',
+            gap: 1
           }}
         >
-          <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
-            <Box display={'flex'} alignItems={'center'} sx={{ flex: 0.75, display: 'flex', justifyContent: 'space-evenly' }}>
+          <Box sx={{ display: 'flex', flex: 1, width: '100%', minWidth: 'fit-content' }}>
+            <Box display={'flex'} alignItems={'center'} sx={{ flex: 0.75, display: 'flex', justifyContent: 'space-evenly', minWidth: 'fit-content' }}>
               <ColumnsPanelTrigger
                 style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
                 render={<ToolbarButton>Columns</ToolbarButton>}
@@ -301,7 +303,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             </Box>
             <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
             <Button
-              style={{ display: 'flex', flex: 0.15, maxWidth: '15%', marginRight: '0.75%' }}
+              style={{ display: 'flex', flex: 0.15, maxWidth: '15%', marginRight: '0.75%', minWidth: 'fit-content' }}
               color={'primary'}
               startDecorator={<RefreshIcon />}
               onClick={async () => await handleRefresh()}
@@ -310,7 +312,12 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               Refresh
             </Button>
             {gridType === 'measurements' && (
-              <Stack direction={'row'} gap={1} spacing={1} sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center' }}>
+              <Stack
+                direction={'row'}
+                gap={1}
+                spacing={1}
+                sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center', minWidth: 'fit-content' }}
+              >
                 <Tooltip title={`Invalid: (${errorControls.count})`}>
                   <Badge badgeContent={errorControls.count} size={'sm'}>
                     <IconButton
@@ -427,7 +434,8 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 flex: 0.5,
                 alignItems: 'center',
                 justifyContent: 'flex-end',
-                gap: 1.5
+                gap: 1.5,
+                minWidth: 'fit-content'
               }}
             >
               {hasAnyExport && (

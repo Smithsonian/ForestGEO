@@ -101,17 +101,17 @@ const codeMetrics = {
     'Error response': '2-3 lines',
     'Finally block': '1 line',
     'Close connection': '1 line',
-    'Total': '~10-13 lines'
+    Total: '~10-13 lines'
   },
   'After (per route)': {
     'Return statement': '1 line',
     'Handler function': '2-4 lines',
-    'Total': '~3-5 lines'
+    Total: '~3-5 lines'
   },
-  'Savings': {
+  Savings: {
     'Per route': '7-8 lines (65-70%)',
     '32 routes': '~224-256 lines total',
-    'Plus': 'Eliminated 32 error handlers'
+    Plus: 'Eliminated 32 error handlers'
   }
 };
 
@@ -167,31 +167,19 @@ console.log('='.repeat(60));
 const migrationSteps = [
   {
     phase: 'Phase 1: Simple Routes (Week 1)',
-    routes: [
-      '/api/structure/[schema]',
-      '/api/clearallcookies',
-      '/api/clearcensus'
-    ],
+    routes: ['/api/structure/[schema]', '/api/clearallcookies', '/api/clearcensus'],
     risk: 'Low',
     benefit: 'Quick wins, build confidence'
   },
   {
     phase: 'Phase 2: Medium Routes (Week 2)',
-    routes: [
-      '/api/fetchall',
-      '/api/fixeddata/[dataType]',
-      '/api/formdownload/[dataType]'
-    ],
+    routes: ['/api/fetchall', '/api/fixeddata/[dataType]', '/api/formdownload/[dataType]'],
     risk: 'Medium',
     benefit: 'Significant code reduction'
   },
   {
     phase: 'Phase 3: Complex Routes (Week 3)',
-    routes: [
-      '/api/batchedupload',
-      '/api/reingest',
-      '/api/postvalidation'
-    ],
+    routes: ['/api/batchedupload', '/api/reingest', '/api/postvalidation'],
     risk: 'Higher',
     benefit: 'Maximum impact, transaction safety'
   }
