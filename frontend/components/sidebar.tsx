@@ -218,45 +218,38 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   useEffect(() => {
+    let debounceTimer: NodeJS.Timeout | null = null;
+
     const updateSidebarWidth = () => {
       if (sidebarRef.current) {
-        const sidebarElements = sidebarRef.current.querySelectorAll('*');
-        let maxWidth = 340; // Minimum width
+        const scrollWidth = sidebarRef.current.scrollWidth;
+        const calculatedWidth = Math.max(scrollWidth, 340); // Minimum width
 
-        sidebarElements.forEach(element => {
-          if (sidebarRef.current) {
-            const elementRect = element.getBoundingClientRect();
-            const sidebarRect = sidebarRef.current.getBoundingClientRect();
-            const elementWidth = elementRect.right - sidebarRect.left;
-
-            if (elementWidth > maxWidth) {
-              maxWidth = elementWidth;
-            }
-          }
-        });
-
-        setSidebarWidth(Math.min(maxWidth + 10, 500));
+        setSidebarWidth(Math.min(calculatedWidth + 10, 500));
       }
     };
 
-    const resizeObserver = new ResizeObserver(() => {
-      updateSidebarWidth();
-    });
+    // Debounce resize updates to prevent excessive recalculations
+    const debouncedUpdate = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateSidebarWidth, 300);
+    };
 
+    const resizeObserver = new ResizeObserver(debouncedUpdate);
+
+    // Only observe the container, not all children
     if (sidebarRef.current) {
-      const sidebarElements = sidebarRef.current.querySelectorAll('*');
-      sidebarElements.forEach(element => {
-        resizeObserver.observe(element);
-      });
+      resizeObserver.observe(sidebarRef.current);
     }
 
     // Initial calculation
     updateSidebarWidth();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       resizeObserver.disconnect();
     };
-  }, [currentSite, currentPlot, currentCensus]);
+  }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (siteDispatch) {

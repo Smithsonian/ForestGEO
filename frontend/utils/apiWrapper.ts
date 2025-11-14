@@ -1,5 +1,7 @@
 'use client';
 
+import { useLoading } from '@/app/contexts/loadingprovider';
+
 interface ApiWrapperOptions {
   loadingMessage?: string;
   category?: 'api' | 'upload' | 'processing' | 'general';
@@ -287,21 +289,11 @@ export class ApiWrapper {
  * Call this in your root component or high-level components
  */
 export function useApiWrapper() {
-  if (typeof window !== 'undefined') {
-    try {
-      // Dynamic import to avoid issues during SSR
-      const { useLoading } = require('@/app/contexts/loadingprovider');
-      const loadingContext = useLoading();
+  // Use static import - tree-shakeable and optimizable by bundler
+  const loadingContext = useLoading();
 
-      // Initialize the wrapper
-      ApiWrapper.initialize(loadingContext);
-
-      return ApiWrapper;
-    } catch (error) {
-      console.warn('Failed to initialize API wrapper:', error);
-      return ApiWrapper;
-    }
-  }
+  // Initialize the wrapper
+  ApiWrapper.initialize(loadingContext);
 
   return ApiWrapper;
 }

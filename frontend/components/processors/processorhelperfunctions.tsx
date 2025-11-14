@@ -361,6 +361,11 @@ export async function runValidation(
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
+
+  // Use parameterized query to prevent SQL injection
+  const censusID = params.p_CensusID ?? null;
+  const plotID = params.p_PlotID ?? null;
+
   const updateQuery = `
   UPDATE ${schema}.coremeasurements cm
   JOIN ${schema}.census c ON cm.CensusID = c.CensusID
@@ -373,15 +378,15 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     ELSE FALSE
   END
   WHERE cm.IsValidated IS NULL
-    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+    AND (? IS NULL OR c.CensusID = ?)
+    AND (? IS NULL OR c.PlotID = ?);
     `;
 
   try {
     // Begin transaction
     transactionID = await connectionManager.beginTransaction();
 
-    await connectionManager.executeQuery(updateQuery);
+    await connectionManager.executeQuery(updateQuery, [censusID, censusID, plotID, plotID]);
 
     await connectionManager.commitTransaction(transactionID ?? '');
   } catch (error: any) {
