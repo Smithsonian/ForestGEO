@@ -279,7 +279,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     } catch (error: any) {
       ailogger.error('Error refreshing counts:', error);
     }
-  }, [currentSite, currentPlot, currentCensus, gridType, setSnackbar]);
+  }, [currentSite, currentPlot, currentCensus, gridType]);
 
   const handleAddNewRow = useCallback(async () => {
     if (locked) {
@@ -301,7 +301,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setPaginationModel({ ...paginationModel, page: existingLastPage });
       addNewRowToGrid();
     }
-  }, [locked, rowCount, paginationModel, addNewRowToGrid, setIsNewRowAdded, setShouldAddRowAfterFetch, setNewLastPage, setPaginationModel]);
+  }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
   const fetchPaginatedData = useCallback(
     (pageToFetch: number) =>
@@ -350,21 +350,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           setLoading(false);
         }
       }, 250)(),
-    [
-      filterModel,
-      currentSite,
-      currentPlot,
-      currentCensus,
-      paginationModel,
-      isNewRowAdded,
-      newLastPage,
-      gridType,
-      setRows,
-      setRowCount,
-      setLoading,
-      handleAddNewRow,
-      setSnackbar
-    ]
+    [filterModel, currentSite, currentPlot, currentCensus, paginationModel, isNewRowAdded, newLastPage, gridType, handleAddNewRow]
   );
 
   const fetchValidationErrors = useCallback(async () => {
@@ -434,7 +420,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ]
     }));
     setRefresh(true);
-  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, setRefresh]);
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
 
   useEffect(() => {
     if (refresh) {
@@ -442,7 +428,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         .then(() => setRefresh(false))
         .catch(ailogger.error);
     }
-  }, [refresh, refreshCounts, runFetchPaginated, setRefresh]);
+  }, [refresh, refreshCounts, runFetchPaginated]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -654,7 +640,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       }
     },
-    [rows, setRowModesModel]
+    [rows]
   );
 
   const handleConfirmAction = async () => {
@@ -818,7 +804,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         setPromiseArguments({ resolve, reject, newRow, oldRow });
         setLoading(false);
       }),
-    [setLoading]
+    []
   );
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
