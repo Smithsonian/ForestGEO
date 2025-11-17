@@ -4,18 +4,25 @@ Welcome to the ForestGEO Data Processing Application!
 
 ## About
 
-The goal of this application is to allow you to record and analyze past and current census data for established global
-sites worldwide. By either directly entering data or uploading CSV/TSV files (conforming to defined constraints), you
-can save historical data and run validations or analysis on it as you complete a census.
+The goal of this application is to allow you to record and analyze past and current census data for established ForestGEO
+sites worldwide. By either directly entering data or uploading CSV/TSV files (detailed requirements below), you
+can save historical data and run validations or analysis on it as you complete a census. 
+
+**In order to get started you will need:**
+
+1. A personal Microsoft account - the credentials for this account will be used to login to the app
+2. Contact XX with the name of your site and the username of your Microsoft account to be added to the app
+3. CSV files of [fixed data] (./Adding-Historical-Data.md#fixed-data) (quadrats, species, stem codes)
+4. CSV files of [stem measurements] (./Adding-Historical-Data.md#the-measurements-form)
 
 ### Summary of Operations
 
-The app is intended to be used as follows:
+The the workflow of the app is as follows:
 
-1. You must be **assigned** as site by an administrator
+1. You must be **assigned** a site by an administrator
 2. You must **edit** or **request upload** of plots within that site.
-3. Create a census through the dropdown
-4. Populate your fixed data:
+3. Create an empty census through the dropdown
+4. Populate your [fixed data](./Adding-Historical-Data.md#fixed-data):
    - Stem Codes
    - Personnel
    - Quadrats
@@ -28,23 +35,10 @@ The app is intended to be used as follows:
 9. Use this to perform **analyses** on your data to derive conclusions on your census
 10. If you have permissions, use the **Validations** page to enable, disable, or edit validations
 
-## Logging In
-
-Before you can log in, you must complete the following (if you haven't already):
-
-- You must create a **personal** Microsoft (non-SI) account (if you don't have one already)
-- An administrator must invite you to the Smithsonian Research Computing tenant.
-- From here, your account will be added to the ForestGEO app server
-- An administrator must assign at least one site to you
-
-Once these steps are finished, you should be able to login to the application and successfully use the site.
-
-> Currently, this is a stopgap measure. We are working on a solution to allow for ForestGEO users to log in with their
-> SI credentials.
 
 ### Logging Into the Website
 
-In order to log into the website proper, please navigate to the **production** website instance, available
+In order to log into the website proper, please navigate to the **production** website available
 at [](https://forestgeo-livesite.azurewebsites.net).
 
 Click on the icon: ![login icon view](mui-login-icon.svg) to log in!
@@ -115,21 +109,7 @@ Customize button. This will open a grid display allowing you to select/deselect 
 Creating a new census will also trigger a selection reset. Please re-select your prior selections, and you should be
 able to see your new census displayed.
 
-#### Understand the Data Types
 
-There are **four** core data types that are required before you can record measurements for a census.
-
-> **Fixed Data is not census-dependent!**
-> {style='warning'}
-
-They are:
-
-- **Stem Codes**: A list of shorthand codes designating attributes that can assigned to a tree/stem object.
-- **Personnel**: A list of personnel working on the census. Additionally, you can add/designate roles to each user to
-  better denote how personnel are distributed job-wise across the census.
-- **Quadrats**: A breakdown of the plot into smaller area segments.
-- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow rapid
-  assignment when actively recording statistics in the field.
 
 #### Deleting a Census?
 
