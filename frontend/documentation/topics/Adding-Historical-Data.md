@@ -2,17 +2,24 @@
 
 The first thing you'll have to do when logging into the app for the first time is to add historical data.
 
+## Required Data and Formatting of Files for Upload
+
+There are **four** core data types that are required before you can upload measurements for a census. The app is designed to accept file uploads (called `forms`) in either CSV or TSV format.
+
+> **Fixed Data is not census-dependent!** 
+
+They are:
+
+- **Stem Codes**: A list of shorthand codes designating attributes that can assigned to a tree/stem object.
+- **Personnel**: A list of personnel working on the census. Additionally, you can add/designate roles to each user to
+  better denote how personnel are distributed job-wise across the census.
+- **Quadrats**: A breakdown of the plot into smaller area segments.
+- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow rapid
+  assignment when actively recording statistics in the field.
+
 ## Understanding the Forms
 
-The app is designed to accept file uploads (called `forms`) in either CSV or TSV format.
-
-A "complete" census comprises the following data types (forms):
-
-- attributes
-- personnel
-- quadrats
-- species
-- measurements - **this will be locked until at least one of each of the other data types has been added!**
+A "complete" census comprises the fixed data as well as the census measurements. **You will be unable to add census measurements until the fixed data are added.**
 
 Each form accepts a set of headers. Some headers are required, and some are optional. Please ensure you have (at
 minimum) the required headers when uploading a file. **Headers in bold are required!**
@@ -27,8 +34,11 @@ minimum) the required headers when uploading a file. **Headers in bold are requi
 
 > Files that do not contain the required headers will be rejected!
 > {style="warning"}
+>
 
-### The `attributes` Form
+## Fixed Data
+
+### The `attributes` (stem codes) Form
 
 The `attributes` form accepts the following headers:
 
