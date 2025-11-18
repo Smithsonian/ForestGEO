@@ -11,11 +11,13 @@ import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefile
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
+import UploadValidationErrors from '@/components/uploadsystem/segments/uploadvalidationerrors';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
 import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
+import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/useFileManagement';
 import { useUploadState } from '@/app/hooks/useUploadState';
@@ -53,6 +55,7 @@ export default function UploadParent(props: UploadParentProps) {
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
+  const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
 
   // Context and session
   const _currentPlot = usePlotContext();
@@ -201,6 +204,16 @@ export default function UploadParent(props: UploadParentProps) {
         );
       case ReviewStates.VALIDATE:
         return <UploadValidation setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
+      case ReviewStates.VALIDATE_ERRORS_FOUND:
+        return (
+          <UploadValidationErrors
+            setReviewState={uploadState.setReviewState}
+            onViewFailedMeasurements={() => {
+              ailogger.info('Opening Failed Measurements Modal from validation errors screen');
+              setShowFailedMeasurementsModal(true);
+            }}
+          />
+        );
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPLOAD_AZURE:
@@ -243,21 +256,43 @@ export default function UploadParent(props: UploadParentProps) {
       requireCensus={true}
       customMessage="Upload functionality requires site, plot, and census selections to be active."
     >
-      <Box
-        sx={{
-          display: 'flex',
-          width: '100%',
-          flexDirection: 'column',
-          marginBottom: 2
-        }}
-      >
-        <Typography level={'title-lg'} color={'primary'}>
-          Drag and drop files into the box to upload them to storage
-        </Typography>
-        <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
-          <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
+      <>
+        <FailedMeasurementsModal
+          open={showFailedMeasurementsModal}
+          setReingested={reingested => {
+            if (reingested) {
+              ailogger.info('Failed measurements were reingested successfully');
+              // Close modal and return to start for reingestion processing
+              setShowFailedMeasurementsModal(false);
+            }
+          }}
+          handleCloseModal={async () => {
+            ailogger.info('Closing failed measurements modal');
+            setShowFailedMeasurementsModal(false);
+          }}
+          onTriggerReingestion={() => {
+            ailogger.info('Triggering reingestion from failed measurements modal');
+            setShowFailedMeasurementsModal(false);
+            // Note: Reingestion will be handled by the modal's own logic
+            // which moves data to temporarymeasurements and triggers reprocessing
+          }}
+        />
+        <Box
+          sx={{
+            display: 'flex',
+            width: '100%',
+            flexDirection: 'column',
+            marginBottom: 2
+          }}
+        >
+          <Typography level={'title-lg'} color={'primary'}>
+            Drag and drop files into the box to upload them to storage
+          </Typography>
+          <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
+            <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
+          </Box>
         </Box>
-      </Box>
+      </>
     </ContextValidationGuard>
   );
 }

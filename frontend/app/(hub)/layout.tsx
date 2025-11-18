@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
@@ -25,9 +24,9 @@ import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeepin
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
-
-const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
-const Header = dynamic(() => import('@/components/header'), { ssr: false });
+// Eager load for maximum speed (bundle size not a concern)
+import Sidebar from '@/components/sidebar';
+import Header from '@/components/header';
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
@@ -255,7 +254,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           setManualReset(false);
         });
     }
-  }, [manualReset, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch, setLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualReset, currentSite, currentPlot, currentCensus]);
 
   // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {

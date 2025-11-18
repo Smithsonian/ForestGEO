@@ -46,14 +46,14 @@ export async function GET(
             SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
             FROM ${schema}.personnel
             WHERE CONCAT(FirstName, ' ', LastName) LIKE ?
-            ORDER BY FirstName, LastName
+            ORDER BY DisplayName
             LIMIT 100`;
           queryParams.push(`%${searchFor}%`);
         } else {
           query = `
             SELECT DISTINCT CONCAT(FirstName, ' ', LastName) AS DisplayName
             FROM ${schema}.personnel
-            ORDER BY FirstName, LastName
+            ORDER BY DisplayName
             LIMIT 100`;
         }
         break;

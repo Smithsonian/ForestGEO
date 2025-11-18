@@ -9,6 +9,7 @@ import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownR
 export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
   const { progressTracker, reviewState, setProgressTracker } = props;
 
+  // Sync progress tracker with review state changes
   useEffect(() => {
     switch (reviewState) {
       case ReviewStates.START:

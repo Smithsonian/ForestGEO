@@ -27,7 +27,7 @@ export interface IsolatedDataGridCommonProps {
 }
 
 export default function IsolatedMultilineDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, initialRow, setChangesSubmitted } = props;
+  const { gridColumns, gridType, refresh: _refresh, setRefresh: _setRefresh, initialRow, setChangesSubmitted } = props;
   const apiRef = useGridApiRef();
 
   const [rows, setRows] = useState<GridRowsProp>([]);
@@ -172,11 +172,8 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     });
   }, [initialRow]);
 
-  useEffect(() => {
-    if (refresh) {
-      setRefresh(false);
-    }
-  }, [refresh, setRefresh]);
+  // Removed problematic refresh effect that caused infinite rerender
+  // The refresh pattern should be handled by parent component if needed
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

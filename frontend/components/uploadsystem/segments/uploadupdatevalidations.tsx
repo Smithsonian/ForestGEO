@@ -34,7 +34,8 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
 
       return () => clearInterval(ellipsisTimer);
     } else setReviewState(ReviewStates.UPLOAD_AZURE);
-  }, [isUpdateValidationComplete, setReviewState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUpdateValidationComplete]);
 
   return (
     <Box sx={{ display: 'flex', flex: 1, width: '100%', p: 2 }}>

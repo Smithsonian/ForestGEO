@@ -59,6 +59,16 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });
         break;
+      case 'failedmeasurements':
+        const fmQuery = `SELECT 1 FROM ${schema}.failedmeasurements fm
+        JOIN ${schema}.census c ON c.CensusID = fm.CensusID
+        WHERE fm.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} AND c.IsActive IS TRUE LIMIT 1`;
+        const fmResults = await connection.executeQuery(fmQuery);
+        if (fmResults.length === 0)
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        break;
       default:
         return new NextResponse(null, {
           status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE

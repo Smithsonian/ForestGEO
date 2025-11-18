@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
-import { v4 } from 'uuid';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { generateShortBatchID } from '@/config/utils';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -73,12 +73,12 @@ async function moveFailedToTemporary(
   const totalRows = countResult[0]?.total || 0;
 
   if (totalRows === 0) {
-    return { totalRows: 0, fileID: 'reingestion.csv', batchID: v4() };
+    return { totalRows: 0, fileID: 'reingestion.csv', batchID: generateShortBatchID() };
   }
 
   // Generate batch identifiers
   const fileID = 'reingestion.csv';
-  const batchID = v4();
+  const batchID = generateShortBatchID();
 
   const shiftQuery = safeFormatQuery(
     schema,

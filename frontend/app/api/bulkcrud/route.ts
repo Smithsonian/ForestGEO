@@ -6,9 +6,9 @@ import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { v4 } from 'uuid';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { generateShortBatchID } from '@/config/utils';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   try {
     transactionID = await connectionManager.beginTransaction();
     if (['measurementssummary', 'measurementssummaryview'].includes(dataType)) {
-      const batchID = v4();
+      const batchID = generateShortBatchID();
       const values = Object.values(rows).map(row => [
         'sample_bulk_insert.csv',
         batchID,

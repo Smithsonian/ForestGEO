@@ -11,7 +11,7 @@ import { Card, Box, Typography, Avatar, Skeleton } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
-import { ReactNode } from 'react';
+import React, { ReactNode } from 'react';
 
 export interface MetricCardProps {
   title: string;
@@ -34,7 +34,7 @@ const gradients = {
   neutral: 'linear-gradient(135deg, #57534e 0%, #44403c 100%)'
 };
 
-export default function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading = false, onClick }: MetricCardProps) {
+function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading = false, onClick }: MetricCardProps) {
   if (isLoading) {
     return <MetricCardSkeleton />;
   }
@@ -67,6 +67,7 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
         cursor: onClick ? 'pointer' : 'default',
         transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         border: 'none',
+        p: 2,
 
         // Hover effect
         '&:hover': {
@@ -102,11 +103,12 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
           <Typography
             level="body-sm"
             sx={{
-              opacity: 0.9,
+              color: 'rgba(255, 255, 255, 0.95)',
               fontWeight: 500,
               letterSpacing: '0.5px',
               textTransform: 'uppercase',
-              fontSize: '0.75rem'
+              fontSize: '0.75rem',
+              textShadow: '0 2px 4px rgba(0,0,0,0.3)'
             }}
           >
             {title}
@@ -149,17 +151,24 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
             alignItems: 'center',
             mt: 2,
             position: 'relative',
-            zIndex: 1
+            zIndex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.15)',
+            backdropFilter: 'blur(4px)',
+            borderRadius: 'sm',
+            px: 1.5,
+            py: 0.75,
+            width: 'fit-content'
           }}
         >
-          {trend.direction === 'up' && <TrendingUpIcon sx={{ fontSize: 18, opacity: 0.9 }} />}
-          {trend.direction === 'down' && <TrendingDownIcon sx={{ fontSize: 18, opacity: 0.9 }} />}
+          {trend.direction === 'up' && <TrendingUpIcon sx={{ fontSize: 18, color: 'rgba(255, 255, 255, 0.9)' }} />}
+          {trend.direction === 'down' && <TrendingDownIcon sx={{ fontSize: 18, color: 'rgba(255, 255, 255, 0.9)' }} />}
           <Typography
             level="body-sm"
             sx={{
-              opacity: 0.9,
+              color: 'rgba(255, 255, 255, 0.95)',
               fontWeight: 500,
-              fontSize: '0.875rem'
+              fontSize: '0.8125rem',
+              textShadow: '0 1px 2px rgba(0,0,0,0.2)'
             }}
           >
             {trend.value}
@@ -169,6 +178,19 @@ export default function MetricCard({ title, value, icon, gradient = 'primary', t
     </Card>
   );
 }
+
+// Memoize MetricCard to prevent unnecessary re-renders
+export default React.memo(MetricCard, (prevProps, nextProps) => {
+  // Custom comparison function for optimal performance
+  return (
+    prevProps.value === nextProps.value &&
+    prevProps.title === nextProps.title &&
+    prevProps.gradient === nextProps.gradient &&
+    prevProps.isLoading === nextProps.isLoading &&
+    JSON.stringify(prevProps.trend) === JSON.stringify(nextProps.trend) &&
+    prevProps.onClick === nextProps.onClick
+  );
+});
 
 /**
  * Skeleton loader for metric cards

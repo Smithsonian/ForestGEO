@@ -279,6 +279,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     } catch (error: any) {
       ailogger.error('Error refreshing counts:', error);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite, currentPlot, currentCensus, gridType]);
 
   const handleAddNewRow = useCallback(async () => {
@@ -301,6 +302,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setPaginationModel({ ...paginationModel, page: existingLastPage });
       addNewRowToGrid();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
   const fetchPaginatedData = useCallback(
@@ -341,7 +343,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           // setUsingQuery(data.finishedQuery);
 
           if (isNewRowAdded && pageToFetch === newLastPage) {
-            await handleAddNewRow();
+            addNewRowToGrid();
           }
         } catch (error: any) {
           ailogger.error('Error fetching data:', error);
@@ -350,7 +352,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           setLoading(false);
         }
       }, 250)(),
-    [filterModel, currentSite, currentPlot, currentCensus, paginationModel, isNewRowAdded, newLastPage, gridType, handleAddNewRow]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      filterModel,
+      currentSite,
+      currentPlot,
+      currentCensus,
+      paginationModel.page,
+      paginationModel.pageSize,
+      isNewRowAdded,
+      newLastPage,
+      gridType,
+      addNewRowToGrid
+    ]
   );
 
   const fetchValidationErrors = useCallback(async () => {
@@ -420,15 +434,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ]
     }));
     setRefresh(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
 
+  // Handle refresh signal - use ref to track previous state to avoid infinite rerender
+  const previousRefresh = useRef(refresh);
   useEffect(() => {
-    if (refresh) {
+    // Only refresh when transitioning from false to true
+    if (refresh && !previousRefresh.current) {
       Promise.all([runFetchPaginated(), refreshCounts()])
         .then(() => setRefresh(false))
         .catch(ailogger.error);
     }
-  }, [refresh, refreshCounts, runFetchPaginated]);
+    previousRefresh.current = refresh;
+  }, [refresh, runFetchPaginated, refreshCounts, setRefresh]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -640,6 +659,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows]
   );
 
@@ -786,11 +806,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(ailogger.error);
     }
-  }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel, runFetchPaginated]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel, filterModel]);
 
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
-  }, [refreshCounts, rows, paginationModel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPlot, currentCensus, currentSite]);
 
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
@@ -804,6 +826,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         setPromiseArguments({ resolve, reject, newRow, oldRow });
         setLoading(false);
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 

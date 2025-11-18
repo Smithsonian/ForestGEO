@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Plot, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import { v4 } from 'uuid';
 import moment from 'moment/moment';
-import { buildBulkUpsertQuery } from '@/config/utils';
+import { buildBulkUpsertQuery, generateShortBatchID } from '@/config/utils';
 import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 import { getCookie } from '@/app/actions/cookiemanager';
@@ -75,7 +74,7 @@ export async function POST(request: NextRequest) {
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
-    const batchID = v4();
+    const batchID = generateShortBatchID();
     const placeholders = Object.values(fileRowSet ?? [])
       .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .join(', ');
@@ -134,7 +133,8 @@ export async function POST(request: NextRequest) {
             await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie]);
           } else {
             // Subsequent batch - update the existing entry with accumulated count
-            const metadata = JSON.parse(existingEntry[0].NewRowState);
+            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
+            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
             metadata.rowCount = (metadata.rowCount || 0) + (countResult[0]?.count || 0);
             metadata.batchCount = (metadata.batchCount || 1) + 1;
             const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
           }
         } catch (logError: any) {
           // Log but don't fail the upload if changelog tracking fails
-          ailogger.error(`Failed to log file upload to changelog: ${logError.message}`);
+          ailogger.error('Failed to log file upload to changelog', logError);
         }
 
         return new NextResponse(
@@ -280,7 +280,8 @@ export async function POST(request: NextRequest) {
           await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
         } else {
           // Subsequent batch - update the existing entry with accumulated count
-          const metadata = JSON.parse(existingEntry[0].NewRowState);
+          // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
+          const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
           metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
           metadata.batchCount = (metadata.batchCount || 1) + 1;
           const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
@@ -288,7 +289,7 @@ export async function POST(request: NextRequest) {
         }
       } catch (logError: any) {
         // Log but don't fail the upload if changelog tracking fails
-        ailogger.error(`Failed to log file upload to changelog: ${logError.message}`);
+        ailogger.error('Failed to log file upload to changelog', logError);
       }
     } catch (error: any) {
       await connectionManager.rollbackTransaction(transactionID ?? '');

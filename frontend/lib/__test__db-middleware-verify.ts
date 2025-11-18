@@ -90,7 +90,7 @@ console.log('\n' + '='.repeat(60));
 console.log('CODE REDUCTION ANALYSIS');
 console.log('='.repeat(60));
 
-const codeMetrics = {
+const _codeMetrics = {
   'Before (per route)': {
     'Connection setup': '1 line',
     'Try block': '1 line',

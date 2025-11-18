@@ -1,5 +1,5 @@
 'use client';
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { tableHeaderSettings } from '@/config/macros';
 import { fileColumns, UploadedFileData } from '@/config/macros/formdetails';
 import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -166,10 +166,16 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     }
   }, [currentPlot, currentCensus]);
 
+  // Handle refresh file list - use ref to track previous state to avoid infinite rerender
+  const previousRefreshFileList = useRef(refreshFileList);
   useEffect(() => {
-    if (refreshFileList && currentPlot && currentCensus) {
-      getListOfFiles().then(() => setRefreshFileList(false)); // Reset the refresh trigger after loading
+    // Only refresh when transitioning from false to true
+    if (refreshFileList && !previousRefreshFileList.current && currentPlot && currentCensus) {
+      getListOfFiles()
+        .then(() => setRefreshFileList(false))
+        .catch(ailogger.error);
     }
+    previousRefreshFileList.current = refreshFileList;
   }, [refreshFileList, currentPlot, currentCensus, getListOfFiles, setRefreshFileList]);
 
   const refreshFiles = useCallback(() => {

@@ -13,13 +13,14 @@ export default function LoginPage() {
   const { data: _session, status } = useSession();
   const [index, setIndex] = useState(0);
 
+  // Carousel auto-advance using interval to avoid circular dependency
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const interval = setInterval(() => {
       setIndex(prevIndex => (prevIndex + 1) % slides.length);
     }, 5000);
 
-    return () => clearTimeout(timer); // Cleanup on unmount
-  }, [index]);
+    return () => clearInterval(interval);
+  }, []); // Empty deps - interval runs independently
 
   if (status === 'unauthenticated') {
     return (
@@ -42,4 +43,19 @@ export default function LoginPage() {
   } else if (status === 'authenticated') {
     redirect('/dashboard');
   }
+
+  // Handle loading state
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        width: '100%'
+      }}
+    >
+      <Box sx={{ textAlign: 'center' }}>Loading...</Box>
+    </Box>
+  );
 }

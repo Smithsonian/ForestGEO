@@ -29,8 +29,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
-import ProgressTachometer from '@/components/metrics/progresstachometer';
 import ailogger from '@/ailogger';
+// Eager load for maximum speed (bundle size not a concern)
+import ProgressTachometer from '@/components/metrics/progresstachometer';
 import ProgressPieChart from '@/components/metrics/progresspiechart';
 
 // Enhanced Visual Components
@@ -39,7 +40,6 @@ import ProgressCard from '@/components/dashboard/progresscard';
 import EmptyState from '@/components/emptystate';
 import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
-import HelpIcon from '@mui/icons-material/Help';
 import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useRouter } from 'next/navigation';
@@ -166,6 +166,28 @@ export default function DashboardPage() {
       setIsLoading(false);
     }
   }, [currentSite, currentPlot, currentCensus]);
+
+  // Memoized event handlers to prevent unnecessary re-renders
+  const handleChartToggle = useCallback(() => {
+    setToggleSwitch(prev => !prev);
+  }, []);
+
+  const handleChartToggleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setToggleSwitch(prev => !prev);
+    }
+  }, []);
+
+  const handleFeedbackKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        triggerPulse();
+      }
+    },
+    [triggerPulse]
+  );
 
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
@@ -384,13 +406,8 @@ export default function DashboardPage() {
                         transform: 'scale(1.02)'
                       }
                     }}
-                    onClick={() => setToggleSwitch(!toggleSwitch)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setToggleSwitch(!toggleSwitch);
-                      }
-                    }}
+                    onClick={handleChartToggle}
+                    onKeyDown={handleChartToggleKeyDown}
                   >
                     {toggleSwitch ? (
                       <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
@@ -503,12 +520,7 @@ export default function DashboardPage() {
                     size="lg"
                     startDecorator={<HelpOutlineOutlinedIcon fontSize="medium" />}
                     onClick={triggerPulse}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        triggerPulse();
-                      }
-                    }}
+                    onKeyDown={handleFeedbackKeyDown}
                     sx={{
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',

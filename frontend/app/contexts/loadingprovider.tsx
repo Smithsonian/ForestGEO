@@ -35,6 +35,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const operationTimeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // Use ref to avoid activeOperations in setLoading dependencies (prevents cascade rerenders)
+  const activeOperationsRef = useRef<LoadingOperation[]>([]);
   useAppInsightsUserSync();
 
   // Generate unique operation ID
@@ -127,7 +129,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
           }
         } else {
           // Fallback: end the most recent operation if no identifier provided
-          const lastOperation = activeOperations[activeOperations.length - 1];
+          // Use ref instead of state to avoid dependency on activeOperations
+          const lastOperation = activeOperationsRef.current[activeOperationsRef.current.length - 1];
           if (lastOperation) {
             endOperation(lastOperation.id);
             // Clean up from legacy tracking
@@ -141,8 +144,13 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
         }
       }
     },
-    [startOperation, endOperation, isOperationActive, activeOperations]
+    [startOperation, endOperation, isOperationActive]
   );
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeOperationsRef.current = activeOperations;
+  }, [activeOperations]);
 
   // Update loading state based on active operations
   useEffect(() => {

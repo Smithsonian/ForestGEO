@@ -28,7 +28,7 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
-import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
@@ -194,14 +194,16 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     }
   }, [currentPlot, currentCensus, paginationModel.page, filterModel, fetchPaginatedData, isNewRowAdded]);
 
+  // Handle refresh signal from parent - use ref to track previous state
+  const previousRefresh = useRef(refresh);
   useEffect(() => {
-    if (refresh && currentSite) {
-      handleRefresh().then(() => {
-        if (refresh) {
-          setRefresh(false);
-        }
-      });
+    // Only refresh when transitioning from false to true
+    if (refresh && !previousRefresh.current && currentSite) {
+      handleRefresh()
+        .then(() => setRefresh(false))
+        .catch(ailogger.error);
     }
+    previousRefresh.current = refresh;
   }, [refresh, currentSite, handleRefresh, setRefresh]);
 
   useEffect(() => {
@@ -264,7 +266,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     } finally {
       setLoading(false);
     }
-  }, [filterModel, currentPlot, currentCensus, currentSite, gridType, paginationModel.page, paginationModel.pageSize, setLoading]);
+  }, [filterModel, currentPlot, currentCensus, currentSite, gridType, paginationModel.page, paginationModel.pageSize]);
 
   const exportAllCSV = useCallback(async () => {
     setLoading(true);
@@ -919,15 +921,26 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     [locked, rows]
   );
 
-  function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => {
-      return {
-        ...prevFilterModel,
-        items: [...(incomingValues.items || [])],
-        quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      };
-    });
-  }
+  // Debounced filter change to prevent excessive re-renders and API calls
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => {
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Set new timer to update filter after 500ms of inactivity
+    debounceTimerRef.current = setTimeout(() => {
+      setFilterModel(prevFilterModel => {
+        return {
+          ...prevFilterModel,
+          items: [...(incomingValues.items || [])],
+          quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+        };
+      });
+    }, 500);
+  }, []);
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: any, onClick: any) => (

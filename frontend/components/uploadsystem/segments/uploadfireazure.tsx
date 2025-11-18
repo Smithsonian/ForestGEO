@@ -92,7 +92,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           setReviewState(ReviewStates.COMPLETE);
         });
     }
-  }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved, setReviewState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceptedFiles, uploadToStorage, uploadForm]);
 
   return (
     <>

@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
@@ -62,8 +62,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 1024 * 8;
+  const chunkSize = 1024 * 32; // Increased from 8KB to 32KB to reduce AJAX call count (4x reduction)
   const connectionLimit = 8; // Reduced concurrency for production stability
+  const uploadStartedRef = useRef<boolean>(false);
+  const batchProcessingStartedRef = useRef<boolean>(false);
 
   // Enhanced client-side queue with proper transaction tracking
   const createTransactionAwareQueue = (concurrency: number) => {
@@ -72,6 +74,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     let isEmpty = true;
     let emptyResolvers: (() => void)[] = [];
 
+    // Use iterative approach instead of recursion to prevent stack overflow on large queues
     const processNext = async () => {
       if (pending.length === 0) {
         if (running === 0) {
@@ -92,7 +95,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.error('Task failed:', error instanceof Error ? error : new Error(String(error)));
       } finally {
         running--;
-        processNext();
+        // Use setImmediate/setTimeout to break recursion chain and prevent stack overflow
+        if (pending.length > 0 && running < concurrency) {
+          setTimeout(() => processNext(), 0);
+        } else if (running === 0 && pending.length === 0) {
+          isEmpty = true;
+          emptyResolvers.forEach(resolve => resolve());
+          emptyResolvers = [];
+        }
       }
     };
 
@@ -120,7 +130,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     };
   };
 
-  const queue = createTransactionAwareQueue(connectionLimit);
+  const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
 
   // Simplified approach: track operations with completion callbacks
   const activeOperations = useRef(new Set<string>());
@@ -150,6 +160,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     `row-${Object.values(row)
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
+
+  // Helper function to detect Application Insights monitoring errors
+  const isApplicationInsightsError = useCallback((error: any): boolean => {
+    const errorString = error?.message || error?.toString() || '';
+    return (
+      errorString.includes('Maximum ajax per page view limit') ||
+      errorString.includes('AI (Internal)') ||
+      errorString.includes('Failed to calculate the duration of the fetch call') ||
+      errorString.includes('maxAjaxCallsPerView') ||
+      errorString.includes('ajax monitoring is paused')
+    );
+  }, []);
 
   const fetchWithTimeout = useCallback(async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();
@@ -224,9 +246,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
 
-  // Usage:
+  // Usage: Count total chunks using the SAME delimiter that will be used for actual parsing
   const countTotalChunks = useCallback(
-    (file: File): Promise<number> => {
+    (file: File, delimiter: string): Promise<number> => {
       return new Promise((resolve, reject) => {
         let chunkCount = 0;
 
@@ -235,6 +257,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           header: true,
           skipEmptyLines: true,
           chunkSize: chunkSize,
+          delimiter: delimiter, // CRITICAL: Use same delimiter as actual parsing
           chunk: () => (chunkCount += 1),
           complete: () => resolve(chunkCount),
           error: err => reject(err)
@@ -301,108 +324,114 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string, retryCount = 0) => {
+    async (fileData: FileCollectionRowSet, fileName: string, _retryCount = 0) => {
       const maxRetries = 3;
       const baseDelay = 1000; // 1 second base delay
       const operationId = `${fileName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-      // Track this operation
+      // Track this operation (once for all retries)
       activeOperations.current.add(operationId);
       ailogger.info(`Starting upload operation ${operationId} for ${fileName} (${activeOperations.current.size} active operations)`);
 
-      try {
-        const response = await fetchWithTimeout(
-          `/api/sqlpacketload`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              schema,
-              formType: uploadForm,
-              fileName,
-              plot: currentPlot,
-              census: currentCensus,
-              user: userID,
-              fileRowSet: fileData[fileName]
-            })
-          },
-          300000
-        ); // 5 minute timeout for large batches
-
-        if (!response.ok) {
-          // Enhanced error handling for different HTTP status codes
-          if (response.status >= 500) {
-            throw new Error(`Server error (${response.status}): The server is experiencing issues. This may be temporary.`);
-          } else if (response.status === 429) {
-            throw new Error(`Rate limit exceeded (${response.status}): Too many requests. Please wait before retrying.`);
-          } else if (response.status >= 400) {
-            const errorText = await response.text().catch(() => 'Unknown client error');
-            throw new Error(`Client error (${response.status}): ${errorText}`);
-          } else {
-            throw new Error(`API returned status ${response.status}`);
-          }
-        }
-
+      // Use iterative retry loop instead of recursion to prevent stack overflow
+      for (let retryCount = 0; retryCount <= maxRetries; retryCount++) {
         try {
-          const data = await response.json();
-          // Failing rows are now handled via enhanced error reporting in error rows
-          if (data.failingRows) {
-            ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
+          const response = await fetchWithTimeout(
+            `/api/sqlpacketload`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                schema,
+                formType: uploadForm,
+                fileName,
+                plot: currentPlot,
+                census: currentCensus,
+                user: userID,
+                fileRowSet: fileData[fileName]
+              })
+            },
+            300000
+          ); // 5 minute timeout for large batches
+
+          if (!response.ok) {
+            // Enhanced error handling for different HTTP status codes
+            if (response.status >= 500) {
+              throw new Error(`Server error (${response.status}): The server is experiencing issues. This may be temporary.`);
+            } else if (response.status === 429) {
+              throw new Error(`Rate limit exceeded (${response.status}): Too many requests. Please wait before retrying.`);
+            } else if (response.status >= 400) {
+              const errorText = await response.text().catch(() => 'Unknown client error');
+              throw new Error(`Client error (${response.status}): ${errorText}`);
+            } else {
+              throw new Error(`API returned status ${response.status}`);
+            }
           }
 
-          // Check if the server indicates transaction completion
-          if (data.transactionCompleted) {
-            ailogger.info(`Server confirmed transaction completion for ${fileName} (batchID: ${data.batchID || 'N/A'})`);
+          try {
+            const data = await response.json();
+            // Failing rows are now handled via enhanced error reporting in error rows
+            if (data.failingRows) {
+              ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
+            }
+
+            // Check if the server indicates transaction completion
+            if (data.transactionCompleted) {
+              ailogger.info(`Server confirmed transaction completion for ${fileName} (batchID: ${data.batchID || 'N/A'})`);
+            }
+
+            // Mark operation as complete
+            activeOperations.current.delete(operationId);
+            ailogger.info(`Completed upload operation ${operationId} for ${fileName} (${activeOperations.current.size} remaining operations)`);
+
+            // Notify waiting processes if all operations are complete
+            if (activeOperations.current.size === 0) {
+              operationCompletionCallbacks.current.forEach(callback => callback());
+              operationCompletionCallbacks.current = [];
+            }
+
+            return data;
+          } catch (e: any) {
+            ailogger.error('Error parsing response data:', e);
+            throw new Error(`Failed to parse server response: ${e.message}`);
           }
+        } catch (error: any) {
+          ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, error);
 
-          // Mark operation as complete
-          activeOperations.current.delete(operationId);
-          ailogger.info(`Completed upload operation ${operationId} for ${fileName} (${activeOperations.current.size} remaining operations)`);
+          // Determine if we should retry based on error type
+          const shouldRetry =
+            retryCount < maxRetries &&
+            (error.message?.includes('Server error (5') ||
+              error.message?.includes('Rate limit exceeded') ||
+              error.message?.includes('timeout') ||
+              error.message?.includes('ECONNRESET') ||
+              error.message?.includes('PROTOCOL_CONNECTION_LOST'));
 
-          // Notify waiting processes if all operations are complete
-          if (activeOperations.current.size === 0) {
-            operationCompletionCallbacks.current.forEach(callback => callback());
-            operationCompletionCallbacks.current = [];
+          if (shouldRetry) {
+            const delay = baseDelay * Math.pow(2, retryCount) + Math.random() * 1000; // Exponential backoff with jitter
+            ailogger.info(`Retrying upload for ${fileName} in ${delay.toFixed(0)}ms... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            // Continue to next iteration of retry loop
+          } else {
+            ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, error);
+
+            // Mark operation as complete even on failure to prevent hanging
+            activeOperations.current.delete(operationId);
+            ailogger.info(`Failed upload operation ${operationId} marked complete (${activeOperations.current.size} remaining operations)`);
+
+            // Notify waiting processes if all operations are complete
+            if (activeOperations.current.size === 0) {
+              operationCompletionCallbacks.current.forEach(callback => callback());
+              operationCompletionCallbacks.current = [];
+            }
+
+            throw error;
           }
-
-          return data;
-        } catch (e: any) {
-          ailogger.error('Error parsing response data:', e);
-          throw new Error(`Failed to parse server response: ${e.message}`);
-        }
-      } catch (error: any) {
-        ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, error);
-
-        // Determine if we should retry based on error type
-        const shouldRetry =
-          retryCount < maxRetries &&
-          (error.message?.includes('Server error (5') ||
-            error.message?.includes('Rate limit exceeded') ||
-            error.message?.includes('timeout') ||
-            error.message?.includes('ECONNRESET') ||
-            error.message?.includes('PROTOCOL_CONNECTION_LOST'));
-
-        if (shouldRetry) {
-          const delay = baseDelay * Math.pow(2, retryCount) + Math.random() * 1000; // Exponential backoff with jitter
-          ailogger.info(`Retrying upload for ${fileName} in ${delay.toFixed(0)}ms... (attempt ${retryCount + 2}/${maxRetries + 1})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return uploadToSql(fileData, fileName, retryCount + 1);
-        } else {
-          ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, error);
-
-          // Mark operation as complete even on failure to prevent hanging
-          activeOperations.current.delete(operationId);
-          ailogger.info(`Failed upload operation ${operationId} marked complete (${activeOperations.current.size} remaining operations)`);
-
-          // Notify waiting processes if all operations are complete
-          if (activeOperations.current.size === 0) {
-            operationCompletionCallbacks.current.forEach(callback => callback());
-            operationCompletionCallbacks.current = [];
-          }
-
-          throw error;
         }
       }
+
+      // If we reach here, all retries failed but error wasn't thrown (shouldn't happen)
+      throw new Error(`Upload failed for ${fileName} after ${maxRetries + 1} attempts`);
     },
     [uploadForm, currentPlot, currentCensus, userID, schema, fetchWithTimeout]
   );
@@ -678,8 +707,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               if (queue.size >= connectionLimit * 2) {
                 ailogger.info(`Queue size ${queue.size} exceeded threshold (${connectionLimit * 2}). Pausing parser.`);
                 parser.pause();
-                // Wait until the queue has room before resuming
+                // Wait until the queue has room before resuming (with timeout protection)
+                const maxWaitTime = 60000; // 60 seconds timeout
+                const startTime = Date.now();
                 while (queue.size >= connectionLimit) {
+                  if (Date.now() - startTime > maxWaitTime) {
+                    ailogger.error(`Queue wait timeout: queue size ${queue.size} did not drop below ${connectionLimit} within ${maxWaitTime}ms`);
+                    throw new Error(`Queue processing stalled - timeout after ${maxWaitTime}ms`);
+                  }
                   await new Promise(resolve => setTimeout(resolve, 100));
                 }
                 parser.resume();
@@ -779,21 +814,44 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     async function runUploads() {
       try {
+        // Validate required data before proceeding
+        if (!currentPlot || !currentCensus || !schema || !session?.user?.name) {
+          const contextStatus = `currentPlot: ${!!currentPlot}, currentCensus: ${!!currentCensus}, schema: ${!!schema}, session: ${!!session?.user?.name}`;
+          ailogger.error(`Missing required context for upload: ${contextStatus}`);
+          setUploadError(new Error('Missing required context. Please ensure a plot and census are selected.'));
+          setReviewState(ReviewStates.ERRORS);
+          return;
+        }
+
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
         setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
 
-        const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
-        setUserID(await userIDResponse.json());
+        // Try to fetch user ID, but don't fail if it's not available
+        try {
+          const nameParts = session.user.name.split(' ');
+          const firstName = nameParts[0] || '';
+          const lastName = nameParts.slice(1).join(' ') || nameParts[0] || '';
 
-        // Count chunks for each file.
-        for (const file of acceptedFiles) {
-          const count = await countTotalChunks(file as File);
-          setTotalChunks(prev => prev + count);
+          const userIDResponse = await fetch(`/api/catalog/${encodeURIComponent(firstName)}/${encodeURIComponent(lastName)}`, { method: 'GET' });
+          if (userIDResponse.ok) {
+            setUserID(await userIDResponse.json());
+            ailogger.info(`User ID fetched successfully for ${firstName} ${lastName}`);
+          } else {
+            ailogger.warn(`Could not fetch user ID for ${firstName} ${lastName} (status: ${userIDResponse.status}). Continuing without user ID.`);
+            setUserID(null);
+          }
+        } catch (userIdError: any) {
+          ailogger.warn(`Error fetching user ID: ${userIdError.message}. Continuing without user ID.`);
+          setUserID(null);
         }
 
+        // CRITICAL FIX: Detect delimiters FIRST, then count chunks and parse
+        // This ensures chunk count matches actual parsing
+        const fileDelimiters: Map<string, string> = new Map();
+
+        // Step 1: Detect delimiters for all files
         for (const file of acceptedFiles) {
-          // Use user-selected delimiter if available, otherwise use enhanced detection
           let delimiter: string;
 
           if (selectedDelimiters[file.name]) {
@@ -822,6 +880,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
           }
 
+          fileDelimiters.set(file.name, delimiter);
+        }
+
+        // Step 2: Count chunks using the SAME delimiters that will be used for parsing
+        for (const file of acceptedFiles) {
+          const delimiter = fileDelimiters.get(file.name)!;
+          const count = await countTotalChunks(file as File, delimiter);
+          ailogger.info(`File ${file.name}: Counted ${count} chunks with delimiter "${delimiter}"`);
+          setTotalChunks(prev => prev + count);
+        }
+
+        // Step 3: Parse files using the detected delimiters
+        for (const file of acceptedFiles) {
+          const delimiter = fileDelimiters.get(file.name)!;
           await parseFileInChunks(file as File, delimiter);
           setCompletedOperations(prev => prev + 1);
         }
@@ -892,7 +964,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         if (isMounted) {
+          ailogger.info('Setting uploaded to true - processing should begin');
           setUploaded(true);
+        } else {
+          ailogger.warn('Component unmounted before upload could complete');
         }
       } catch (error: any) {
         ailogger.error('Upload error:', error);
@@ -900,32 +975,50 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
     }
 
-    runUploads().catch(error => {
-      setUploadError(error);
-      setReviewState(ReviewStates.ERRORS);
-    });
+    // Only run uploads once using ref
+    if (!uploadStartedRef.current && !uploaded && !processed) {
+      uploadStartedRef.current = true;
+      runUploads().catch(error => {
+        // Filter out Application Insights monitoring errors
+        if (isApplicationInsightsError(error)) {
+          ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
+          ailogger.info('Upload process continuing despite monitoring system limitation');
+          // Don't set error state or change review state for monitoring errors
+          return;
+        }
+
+        ailogger.error('runUploads failed:', error);
+        setUploadError(error);
+        setReviewState(ReviewStates.ERRORS);
+      });
+    }
     return () => {
-      isMounted = false;
+      // Only set isMounted to false if upload hasn't started yet
+      // This prevents the cleanup from interrupting an in-progress upload
+      if (!uploadStartedRef.current) {
+        isMounted = false;
+      }
     };
-  }, [
-    acceptedFiles,
-    uploadForm,
-    currentPlot,
-    currentCensus,
-    schema,
-    session?.user.name,
-    selectedDelimiters,
-    countTotalChunks,
-    parseFileInChunks,
-    queue,
-    setReviewState,
-    setUploadError,
-    waitForAllOperationsToComplete
-  ]);
+    // Empty dependency array - upload runs once on mount via uploadStartedRef guard
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
+    ailogger.info('Processing useEffect triggered', {
+      uploadForm,
+      uploaded,
+      processed,
+      completedChunks,
+      totalChunks,
+      batchProcessingStarted: batchProcessingStartedRef.current,
+      willProcess: uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks && !batchProcessingStartedRef.current
+    });
+
+    // Guard to prevent batch processing from running multiple times
+    if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks && !batchProcessingStartedRef.current) {
+      batchProcessingStartedRef.current = true;
       queue.clear();
+      ailogger.info('Starting batch processing phase (guarded by ref)');
 
       async function runProcessBatches() {
         setProcessedChunks(0);
@@ -939,6 +1032,51 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
         const output: { fileID: string; batchID: string }[] = await response.json();
         ailogger.info(`Received ${output.length} batches to process:`, output);
+
+        // If there are no batches to process, skip batch processing entirely
+        if (output.length === 0) {
+          ailogger.info('No batches to process - all data was processed directly or moved to failedmeasurements');
+          setTotalBatches(0);
+          setProcessedChunks(0);
+          setCompletedOperations(prev => prev + 1);
+
+          // Skip to collapser
+          try {
+            setIsVerifying(true);
+            setTotalVerificationSteps(2); // Collapser + Final sync
+            setVerificationStep(0);
+            setVerificationStatus('Starting data consolidation (no batches to process)...');
+            ailogger.info('Starting collapser procedure (no batches)...');
+
+            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            if (!collapserResponse.ok) {
+              const errorText = await collapserResponse.text().catch(() => 'Unknown error');
+              throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
+            }
+            const collapserData = await collapserResponse.json();
+            setVerificationStatus('Data consolidation completed successfully');
+            ailogger.info('Collapser completed successfully (no batches):', collapserData);
+
+            setVerificationStep(1);
+            setVerificationStatus('Finalizing database operations...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            setVerificationStatus('All processing verification completed');
+            setVerificationStep(2);
+          } catch (collapserError: any) {
+            setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+            ailogger.error('Collapser error (no batches):', collapserError.message);
+            throw collapserError;
+          }
+
+          setIsVerifying(false);
+          setProcessed(true);
+          return; // Exit early - no batches to process
+        }
+
         const grouped: Record<string, string[]> = output.reduce(
           (acc, { fileID, batchID }) => {
             if (!acc[fileID]) {
@@ -951,6 +1089,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         );
         const totalBatchCount = Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0);
         setTotalBatches(totalBatchCount);
+        ailogger.info(`Total batches to process: ${totalBatchCount}`);
+
         for (const fileID in grouped) {
           ailogger.info(`Processing FileID: ${fileID}`);
 
@@ -1065,12 +1205,55 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
-            setVerificationStatus(`Processing verification complete: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
-            ailogger.info(`Processing verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining in temporary table`);
+            const totalAccountedFor = verifyData.processedCount + verifyData.failedCount;
+            setVerificationStatus(
+              `Verification: ${verifyData.processedCount} total in coremeasurements, ${verifyData.failedCount} total in failedmeasurements (${totalAccountedFor} cumulative for this census), ${verifyData.remainingCount} remaining to process`
+            );
+            ailogger.info(
+              `Processing verification: ${verifyData.processedCount} cumulative rows in coremeasurements, ${verifyData.failedCount} cumulative rows in failedmeasurements, ${verifyData.remainingCount} remaining in temporarymeasurements. Note: Counts are cumulative for this plot/census combination.`
+            );
           } else {
             setVerificationStatus('Processing verification failed, continuing with data consolidation...');
             ailogger.warn('Processing verification failed, but continuing with collapser');
           }
+
+          // Enhanced Session-Based Verification: Verify each uploaded file individually
+          setVerificationStatus('Performing per-file upload verification...');
+          let totalSessionProcessed = 0;
+          let totalSessionFailed = 0;
+
+          for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
+            const file = acceptedFiles[fileIndex];
+            const fileID = file.name;
+
+            try {
+              const sessionVerifyResponse = await fetch(
+                `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}&fileID=${encodeURIComponent(fileID)}`
+              );
+
+              if (sessionVerifyResponse.ok) {
+                const sessionData = await sessionVerifyResponse.json();
+                totalSessionProcessed += sessionData.processedCount;
+                totalSessionFailed += sessionData.failedCount;
+
+                ailogger.info(
+                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): ${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed, ${sessionData.totalAccounted} total accounted`
+                );
+              } else {
+                ailogger.warn(`Session verification failed for file ${fileID}`);
+              }
+            } catch (sessionError: any) {
+              ailogger.warn(`Error during session verification for ${fileID}:`, sessionError.message);
+            }
+          }
+
+          const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
+          setVerificationStatus(
+            `Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows accounted)`
+          );
+          ailogger.info(
+            `Upload session verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total accounted from this upload: ${totalSessionAccounted} rows.`
+          );
         } catch (verifyError: any) {
           setVerificationStatus(`Processing verification error: ${verifyError.message}`);
           ailogger.warn('Processing verification error:', verifyError.message);
@@ -1122,6 +1305,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       runProcessBatches().catch(error => {
+        // Filter out Application Insights monitoring errors
+        if (isApplicationInsightsError(error)) {
+          ailogger.warn('Application Insights monitoring error detected during batch processing (not a data processing error):', error);
+          ailogger.info('Batch processing continuing despite monitoring system limitation');
+          // Don't set error state or change review state for monitoring errors
+          return;
+        }
+
         setUploadError(error);
         setReviewState(ReviewStates.ERRORS);
       });
@@ -1138,7 +1329,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     queue,
     setReviewState,
     setUploadError,
-    fetchWithTimeout
+    fetchWithTimeout,
+    isApplicationInsightsError
   ]);
 
   useEffect(() => {
@@ -1167,7 +1359,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setIsDataUnsaved(false);
       }
     }
-  }, [uploaded, processed, uploadForm, setReviewState, setIsDataUnsaved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploaded, processed, uploadForm]);
 
   const { palette } = useTheme();
 

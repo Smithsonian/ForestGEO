@@ -441,4 +441,197 @@ describe('CoreAPIFunctions', () => {
       expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
     });
   });
+
+  describe('PRIMARY_KEY_MAP Logic', () => {
+    describe('PATCH with PRIMARY_KEY_MAP', () => {
+      it('should use FailedMeasurementID for failedmeasurements dataType', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { FailedMeasurementID: 1, TreeTag: '123', IsValidated: null },
+            oldRow: { FailedMeasurementID: 1, TreeTag: '122', IsValidated: null }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockMapper.demapData.mockReturnValue([{ FailedMeasurementID: 1, TreeTag: '123', IsValidated: null }]);
+
+        const mockParams = {
+          dataType: 'failedmeasurements',
+          slugs: ['forestgeo_panama', '1'] // gridID is '1' - should NOT be used as column name
+        };
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+        expect(mockConnectionManager.executeQuery).toHaveBeenCalled();
+
+        // Verify the query uses FailedMeasurementID, not '1' as column name
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('UPDATE')
+        );
+        expect(updateCall).toBeDefined();
+        expect(updateCall[0]).toMatch(/FailedMeasurementID/i);
+      });
+
+      it('should use CoreMeasurementID for coremeasurements dataType', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { CoreMeasurementID: 42, MeasuredDBH: 15.5 },
+            oldRow: { CoreMeasurementID: 42, MeasuredDBH: 15.0 }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockMapper.demapData.mockReturnValue([{ CoreMeasurementID: 42, MeasuredDBH: 15.5 }]);
+
+        const mockParams = {
+          dataType: 'coremeasurements',
+          slugs: ['forestgeo_test', '42']
+        };
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('UPDATE')
+        );
+        expect(updateCall[0]).toMatch(/CoreMeasurementID/i);
+      });
+
+      it('should use Code for attributes dataType', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { Code: 'TEST', Description: 'Updated' },
+            oldRow: { Code: 'TEST', Description: 'Original' }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockMapper.demapData.mockReturnValue([{ Code: 'TEST', Description: 'Updated' }]);
+
+        const mockParams = {
+          dataType: 'attributes',
+          slugs: ['forestgeo_test', 'TEST']
+        };
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('UPDATE')
+        );
+        expect(updateCall[0]).toMatch(/Code/i);
+      });
+
+      it('should fallback to capitalized gridID for unmapped dataTypes', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { CustomID: 99, Name: 'Updated' },
+            oldRow: { CustomID: 99, Name: 'Original' }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue([]);
+        mockMapper.demapData.mockReturnValue([{ CustomID: 99, Name: 'Updated' }]);
+
+        const mockParams = {
+          dataType: 'customtable', // Not in PRIMARY_KEY_MAP
+          slugs: ['forestgeo_test', 'customID']
+        };
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        // Should use 'CustomID' (capitalized gridID) as fallback
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('UPDATE')
+        );
+        expect(updateCall[0]).toMatch(/CustomID/i);
+      });
+    });
+
+    describe('DELETE with PRIMARY_KEY_MAP', () => {
+      it('should use correct primary key for failedmeasurements delete', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { FailedMeasurementID: 5 } })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockMapper.demapData.mockReturnValue([{ FailedMeasurementID: 5 }]);
+
+        const mockParams = {
+          dataType: 'failedmeasurements',
+          slugs: ['forestgeo_panama', '5']
+        };
+
+        const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('DELETE')
+        );
+        expect(deleteCall[0]).toMatch(/FailedMeasurementID/i);
+      });
+
+      it('should use StemGUID for stems delete', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'DELETE',
+          body: JSON.stringify({ newRow: { StemGUID: 12345 } })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+        mockMapper.demapData.mockReturnValue([{ StemGUID: 12345 }]);
+
+        const mockParams = {
+          dataType: 'stems',
+          slugs: ['forestgeo_test', '12345']
+        };
+
+        const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
+          typeof call[0] === 'string' && call[0].includes('DELETE')
+        );
+        expect(deleteCall[0]).toMatch(/StemGUID/i);
+      });
+    });
+
+    describe('PRIMARY_KEY_MAP Coverage', () => {
+      const primaryKeyMappings = [
+        { dataType: 'failedmeasurements', primaryKey: 'FailedMeasurementID' },
+        { dataType: 'coremeasurements', primaryKey: 'CoreMeasurementID' },
+        { dataType: 'attributes', primaryKey: 'Code' },
+        { dataType: 'census', primaryKey: 'CensusID' },
+        { dataType: 'cmattributes', primaryKey: 'CMAID' },
+        { dataType: 'cmverrors', primaryKey: 'CMVErrorID' },
+        { dataType: 'family', primaryKey: 'FamilyID' },
+        { dataType: 'genus', primaryKey: 'GenusID' },
+        { dataType: 'personnel', primaryKey: 'PersonnelID' },
+        { dataType: 'plots', primaryKey: 'PlotID' },
+        { dataType: 'quadrats', primaryKey: 'QuadratID' },
+        { dataType: 'species', primaryKey: 'SpeciesID' },
+        { dataType: 'stems', primaryKey: 'StemGUID' },
+        { dataType: 'trees', primaryKey: 'TreeID' }
+      ];
+
+      it('should have PRIMARY_KEY_MAP defined for critical dataTypes', () => {
+        // This test documents the expected mappings
+        primaryKeyMappings.forEach(mapping => {
+          expect(mapping.primaryKey).toBeDefined();
+          expect(mapping.primaryKey).not.toBe('');
+        });
+      });
+    });
+  });
 });

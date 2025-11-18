@@ -123,22 +123,25 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons };
+      const failedMeasurementID = newRow.failedMeasurementID ?? oldRow.failedMeasurementID;
 
       try {
-        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${newRow.failedMeasurementID}`, {
+        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ newRow: updatedRow, oldRow: oldRow })
         });
 
         if (!updateResponse.ok) {
-          throw new Error(`Failed to save row edits: ${updateResponse.status}`);
+          const errorData = await updateResponse.json().catch(() => ({ message: `HTTP ${updateResponse.status}` }));
+          throw new Error(errorData.message || `Failed to save row edits: ${updateResponse.status}`);
         }
 
         if (reasons.length === 0) {
-          const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${newRow.failedMeasurementID}`);
+          const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`);
           if (!reingestResponse.ok) {
-            throw new Error(`Failed to reingest row: ${reingestResponse.status}`);
+            const errorData = await reingestResponse.json().catch(() => ({ message: `HTTP ${reingestResponse.status}` }));
+            throw new Error(errorData.message || `Failed to reingest row: ${reingestResponse.status}`);
           }
 
           await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
@@ -148,7 +151,8 @@ export default function IsolatedFailedMeasurementsDataGrid() {
             body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`)
           });
           if (!reviewResponse.ok) {
-            throw new Error(`Failed to update validation reasons: ${reviewResponse.status}`);
+            const errorData = await reviewResponse.json().catch(() => ({ message: `HTTP ${reviewResponse.status}` }));
+            throw new Error(errorData.message || `Failed to update validation reasons: ${reviewResponse.status}`);
           }
         }
 

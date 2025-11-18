@@ -559,6 +559,8 @@ export default function Sidebar(props: SidebarProps) {
                   variant={'soft'}
                   color={'danger'}
                   onClick={async () => {
+                    // Select the census first before opening delete dialog
+                    await handleCensusSelection(item);
                     setIsClearDropdownOpen(true);
                   }}
                   disabled={
@@ -1221,7 +1223,10 @@ export default function Sidebar(props: SidebarProps) {
                 onClick={async () => {
                   const censusID = currentCensus?.dateRanges?.[0]?.censusID;
                   if (!currentSite?.schemaName || !censusID) {
-                    ailogger.error('Missing required context: schema or censusID');
+                    ailogger.error('Missing required context: schema or censusID', undefined, {
+                      schema: currentSite?.schemaName || 'unknown',
+                      censusID: censusID || 'unknown'
+                    });
                     setIsClearDropdownOpen(false);
                     return;
                   }
@@ -1241,7 +1246,10 @@ export default function Sidebar(props: SidebarProps) {
                 onClick={async () => {
                   const censusID = currentCensus?.dateRanges?.[0]?.censusID;
                   if (!currentSite?.schemaName || !censusID) {
-                    ailogger.error('Missing required context: schema or censusID');
+                    ailogger.error('Missing required context: schema or censusID', undefined, {
+                      schema: currentSite?.schemaName || 'unknown',
+                      censusID: censusID || 'unknown'
+                    });
                     setIsClearDropdownOpen(false);
                     return;
                   }

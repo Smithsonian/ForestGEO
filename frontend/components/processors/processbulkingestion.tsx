@@ -75,6 +75,65 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     // Clean up measurements - set 0 values to null
     await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`));
     await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`));
+
+    // Remove duplicates based on StemGUID and MeasurementDate
+    const removeStemDateDuplicates = `
+      DELETE cm1
+      FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.coremeasurements cm2
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND cm1.StemGUID = cm2.StemGUID
+        AND cm1.MeasurementDate = cm2.MeasurementDate
+        AND cm1.CensusID = ?
+    `;
+    await connectionManager.executeQuery(removeStemDateDuplicates, [censusID]);
+
+    // Remove duplicates based on TreeTag/StemTag combinations within the same census
+    const removeTreeStemTagDuplicates = `
+      DELETE cm1
+      FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.stems s1 ON cm1.StemGUID = s1.StemGUID
+      INNER JOIN ${schema}.trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
+      INNER JOIN ${schema}.coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
+      INNER JOIN ${schema}.stems s2 ON cm2.StemGUID = s2.StemGUID
+      INNER JOIN ${schema}.trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND t1.TreeTag = t2.TreeTag
+        AND s1.StemTag = s2.StemTag
+        AND cm1.CensusID = ?
+        AND t1.CensusID = ?
+        AND s1.CensusID = ?
+    `;
+    await connectionManager.executeQuery(removeTreeStemTagDuplicates, [censusID, censusID, censusID]);
+
+    // Clear duplicate validation errors after deduplication (ValidationID 5 is the duplicate tree/stem tag validation)
+    const clearDuplicateValidationErrors = `
+      DELETE e
+      FROM ${schema}.cmverrors e
+      INNER JOIN ${schema}.coremeasurements cm ON e.CoreMeasurementID = cm.CoreMeasurementID
+      LEFT JOIN (
+        SELECT cm2.CoreMeasurementID
+        FROM ${schema}.coremeasurements cm2
+        JOIN ${schema}.census c ON cm2.CensusID = c.CensusID AND c.IsActive = true
+        JOIN ${schema}.stems s ON cm2.StemGUID = s.StemGUID AND c.CensusID = s.CensusID AND s.IsActive = true
+        JOIN ${schema}.trees t ON s.TreeID = t.TreeID AND c.CensusID = t.CensusID AND t.IsActive = true
+        JOIN (
+          SELECT t2.CensusID, t2.TreeTag, s2.StemTag
+          FROM ${schema}.trees t2
+          JOIN ${schema}.stems s2 ON t2.TreeID = s2.TreeID AND t2.CensusID = s2.CensusID
+          WHERE t2.IsActive = true AND s2.IsActive = true
+          GROUP BY t2.CensusID, t2.TreeTag, s2.StemTag
+          HAVING count(distinct s2.StemGUID) > 1
+        ) AS duplicates ON t.CensusID = duplicates.CensusID
+                       AND t.TreeTag = duplicates.TreeTag
+                       AND s.StemTag = duplicates.StemTag
+        WHERE cm2.CensusID = ?
+      ) AS still_duplicates ON e.CoreMeasurementID = still_duplicates.CoreMeasurementID
+      WHERE e.ValidationErrorID = 5
+        AND cm.CensusID = ?
+        AND still_duplicates.CoreMeasurementID IS NULL
+    `;
+    await connectionManager.executeQuery(clearDuplicateValidationErrors, [censusID, censusID]);
   } catch (error: any) {
     throw createError(`Bulk ingestion collapser failed: ${error.message}`, error);
   }

@@ -28,36 +28,61 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         <div
           style={{
             textAlign: 'center',
-            maxWidth: '600px',
-            padding: '2rem',
+            maxWidth: '700px',
+            padding: '2.5rem',
             backgroundColor: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            borderRadius: '12px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
           }}
         >
+          <div
+            style={{
+              fontSize: '4rem',
+              marginBottom: '1rem',
+              lineHeight: 1
+            }}
+          >
+            ⚠️
+          </div>
           <h1
             style={{
               color: '#d32f2f',
-              marginBottom: '1rem',
-              fontSize: '2rem'
+              marginBottom: '1.5rem',
+              fontSize: '2rem',
+              fontWeight: 700
             }}
           >
             Critical Error
           </h1>
-          <p
+          <div
             style={{
-              color: '#666',
-              marginBottom: '1rem',
-              fontSize: '1.1rem'
+              backgroundColor: '#ffebee',
+              border: '1px solid #ef5350',
+              borderRadius: '8px',
+              padding: '1.5rem',
+              marginBottom: '1.5rem',
+              textAlign: 'left'
             }}
           >
-            {error?.message ?? 'A critical application error has occurred'}
-          </p>
+            <p
+              style={{
+                color: '#333',
+                marginBottom: '0',
+                fontSize: '0.875rem',
+                lineHeight: 1.6,
+                fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                wordBreak: 'break-word',
+                whiteSpace: 'pre-wrap'
+              }}
+            >
+              {error?.message ?? 'A critical application error has occurred'}
+            </p>
+          </div>
           {error?.digest && (
             <p
               style={{
                 color: '#999',
-                fontSize: '0.9rem',
+                fontSize: '0.75rem',
                 marginBottom: '1.5rem'
               }}
             >
@@ -70,16 +95,36 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
               backgroundColor: '#1976d2',
               color: 'white',
               border: 'none',
-              padding: '0.75rem 2rem',
+              padding: '0.875rem 2.5rem',
               fontSize: '1rem',
-              borderRadius: '4px',
+              borderRadius: '8px',
               cursor: 'pointer',
-              fontWeight: '500'
+              fontWeight: 600,
+              minHeight: '44px',
+              minWidth: '200px',
+              boxShadow: '0 2px 8px rgba(25,118,210,0.3)',
+              transition: 'all 0.2s ease'
             }}
-            onMouseOver={e => (e.currentTarget.style.backgroundColor = '#1565c0')}
-            onFocus={e => (e.currentTarget.style.backgroundColor = '#1565c0')}
-            onMouseOut={e => (e.currentTarget.style.backgroundColor = '#1976d2')}
-            onBlur={e => (e.currentTarget.style.backgroundColor = '#1976d2')}
+            onMouseOver={e => {
+              e.currentTarget.style.backgroundColor = '#1565c0';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,118,210,0.4)';
+            }}
+            onFocus={e => {
+              e.currentTarget.style.backgroundColor = '#1565c0';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,118,210,0.4)';
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.backgroundColor = '#1976d2';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(25,118,210,0.3)';
+            }}
+            onBlur={e => {
+              e.currentTarget.style.backgroundColor = '#1976d2';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(25,118,210,0.3)';
+            }}
           >
             Try again
           </button>

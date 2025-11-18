@@ -297,24 +297,26 @@ export async function runValidation(
       transactionID = await connectionManager.beginTransaction();
 
       // Dynamically replace SQL variables with actual TypeScript input values
+      // Use negative lookbehind to prevent replacing already schema-prefixed table names
+      // Process longer table names first to avoid substring issues
       const formattedCursorQuery = cursorQuery
         .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
         .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
-        .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-        .replace(/coremeasurements/g, `${schema}.coremeasurements`)
-        .replace(/stems/g, `${schema}.stems`)
-        .replace(/trees/g, `${schema}.trees`)
-        .replace(/quadrats/g, `${schema}.quadrats`)
-        .replace(/cmverrors/g, `${schema}.cmverrors`)
-        .replace(/species/g, `${schema}.species`)
-        .replace(/specieslimits/g, `${schema}.specieslimits`)
-        .replace(/genus/g, `${schema}.genus`)
-        .replace(/family/g, `${schema}.family`)
-        .replace(/plots/g, `${schema}.plots`)
-        .replace(/census/g, `${schema}.census`)
-        .replace(/personnel/g, `${schema}.personnel`)
-        .replace(/attributes/g, `${schema}.attributes`)
+        .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+        .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`) // Process BEFORE species
+        .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)
+        .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
+        .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
+        .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
+        .replace(/(?<!\w\.)cmverrors\b/g, `${schema}.cmverrors`)
+        .replace(/(?<!\w\.)species\b/g, `${schema}.species`) // Process AFTER specieslimits
+        .replace(/(?<!\w\.)genus\b/g, `${schema}.genus`)
+        .replace(/(?<!\w\.)family\b/g, `${schema}.family`)
+        .replace(/(?<!\w\.)plots\b/g, `${schema}.plots`)
+        .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
+        .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
+        .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
       // Execute the cursor query to get the rows that need validation

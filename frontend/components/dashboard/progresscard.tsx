@@ -11,6 +11,7 @@ import { Card, Box, Typography, CircularProgress, Chip, Stack, Tooltip, Skeleton
 import { designTokens } from '@/config/design-tokens';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
+import React from 'react';
 
 export interface ProgressCardProps {
   totalQuadrats: number;
@@ -21,14 +22,7 @@ export interface ProgressCardProps {
   onViewUnpopulated?: () => void;
 }
 
-export default function ProgressCard({
-  totalQuadrats,
-  populatedQuadrats,
-  populatedPercent,
-  unpopulatedQuadrats,
-  isLoading = false,
-  onViewUnpopulated
-}: ProgressCardProps) {
+function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpopulatedQuadrats, isLoading = false, onViewUnpopulated }: ProgressCardProps) {
   if (isLoading) {
     return <ProgressCardSkeleton />;
   }
@@ -213,6 +207,19 @@ export default function ProgressCard({
   );
 }
 
+// Memoize ProgressCard to prevent unnecessary re-renders
+export default React.memo(ProgressCard, (prevProps, nextProps) => {
+  // Custom comparison function for optimal performance
+  return (
+    prevProps.totalQuadrats === nextProps.totalQuadrats &&
+    prevProps.populatedQuadrats === nextProps.populatedQuadrats &&
+    prevProps.populatedPercent === nextProps.populatedPercent &&
+    prevProps.isLoading === nextProps.isLoading &&
+    JSON.stringify(prevProps.unpopulatedQuadrats) === JSON.stringify(nextProps.unpopulatedQuadrats) &&
+    prevProps.onViewUnpopulated === nextProps.onViewUnpopulated
+  );
+});
+
 /**
  * Skeleton loader for progress card
  */
@@ -225,21 +232,81 @@ export function ProgressCardSkeleton() {
         display: 'flex',
         flexDirection: 'column',
         gap: 3,
-        p: 3
+        p: 3,
+        position: 'relative',
+        overflow: 'hidden',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: '-100%',
+          width: '100%',
+          height: '100%',
+          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%)',
+          animation: 'shimmer 2s infinite',
+          pointerEvents: 'none'
+        },
+        '@keyframes shimmer': {
+          '0%': { left: '-100%' },
+          '100%': { left: '100%' }
+        }
       }}
     >
       <Box>
-        <Skeleton variant="text" width="60%" height={28} sx={{ mb: 1 }} />
-        <Skeleton variant="text" width="80%" height={20} />
+        <Skeleton
+          variant="text"
+          width="60%"
+          height={28}
+          sx={{
+            mb: 1,
+            opacity: 0.3,
+            backgroundColor: 'neutral.200'
+          }}
+        />
+        <Skeleton
+          variant="text"
+          width="80%"
+          height={20}
+          sx={{
+            opacity: 0.25,
+            backgroundColor: 'neutral.200'
+          }}
+        />
       </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-        <Skeleton variant="circular" width={180} height={180} />
+        <Skeleton
+          variant="circular"
+          width={180}
+          height={180}
+          sx={{
+            opacity: 0.3,
+            backgroundColor: 'neutral.200'
+          }}
+        />
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-        <Skeleton variant="rectangular" width={120} height={36} sx={{ borderRadius: 'sm' }} />
-        <Skeleton variant="rectangular" width={100} height={36} sx={{ borderRadius: 'sm' }} />
+        <Skeleton
+          variant="rectangular"
+          width={120}
+          height={36}
+          sx={{
+            borderRadius: 'sm',
+            opacity: 0.25,
+            backgroundColor: 'neutral.200'
+          }}
+        />
+        <Skeleton
+          variant="rectangular"
+          width={100}
+          height={36}
+          sx={{
+            borderRadius: 'sm',
+            opacity: 0.25,
+            backgroundColor: 'neutral.200'
+          }}
+        />
       </Box>
     </Card>
   );

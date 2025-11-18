@@ -59,7 +59,8 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
     };
 
     analyzeFile();
-  }, [file, expectedHeaders, initialDelimiter, onDelimiterChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file, initialDelimiter]);
 
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
@@ -81,7 +82,8 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
     };
 
     validateCurrentDelimiter();
-  }, [selectedDelimiter, file, expectedHeaders, isAnalyzing, onDelimiterChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDelimiter, file, isAnalyzing]);
 
   const handleDelimiterChange = useCallback((newDelimiter: string | null) => {
     if (newDelimiter) {
@@ -222,11 +224,11 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
                       <th
                         key={index}
                         style={{
-                          padding: '4px 8px',
+                          padding: '6px 10px',
                           borderRight: '1px solid var(--joy-palette-neutral-200)',
                           textAlign: 'left',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
+                          fontSize: '12px',
+                          fontWeight: 600,
                           maxWidth: '120px',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -248,9 +250,9 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
                         <td
                           key={cellIndex}
                           style={{
-                            padding: '4px 8px',
+                            padding: '6px 10px',
                             borderRight: '1px solid var(--joy-palette-neutral-100)',
-                            fontSize: '11px',
+                            fontSize: '12px',
                             maxWidth: '120px',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',

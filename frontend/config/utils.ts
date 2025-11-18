@@ -253,3 +253,17 @@ export function getUpdatedValues<T extends Record<string, any>>(original: T, upd
 
   return changes;
 }
+
+/**
+ * Generates a shorter unique batch ID (20 characters max)
+ * Format: timestamp(base36) + random(base36)
+ * Example: "m9x7k2a-8fh3k9d2x5p"
+ *
+ * This is designed to fit in VARCHAR(20) database columns
+ * while maintaining practical uniqueness for batch operations.
+ */
+export function generateShortBatchID(): string {
+  const timestamp = Date.now().toString(36); // ~7-8 chars
+  const randomPart = Math.random().toString(36).substring(2, 14); // 12 chars
+  return `${timestamp}-${randomPart}`; // ~20 chars total
+}

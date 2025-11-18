@@ -11,13 +11,36 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ailogger from '@/ailogger';
 
+// Mapping from dataType to primary key column name
+const PRIMARY_KEY_MAP: Record<string, string> = {
+  failedmeasurements: 'FailedMeasurementID',
+  coremeasurements: 'CoreMeasurementID',
+  attributes: 'Code',
+  census: 'CensusID',
+  cmattributes: 'CMAID',
+  cmverrors: 'CMVErrorID',
+  family: 'FamilyID',
+  genus: 'GenusID',
+  personnel: 'PersonnelID',
+  plots: 'PlotID',
+  quadrats: 'QuadratID',
+  species: 'SpeciesID',
+  stems: 'StemGUID',
+  trees: 'TreeID',
+  rolemapping: 'RoleMappingID',
+  roles: 'RoleID',
+  sites: 'SiteID'
+};
+
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
   const [schema, gridID] = slugs ?? [];
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
   const connectionManager = ConnectionManager.getInstance();
-  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  // Get the primary key column name for this dataType, or fallback to capitalized gridID
+  const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const demappedGridID = primaryKeyColumn;
   const { newRow, oldRow } = await request.json();
   let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
@@ -145,13 +168,21 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         if (updatedFields.MeasuredDBH || updatedFields.MeasuredHOM || updatedFields.MeasurementDate) {
           changesFound = true;
+          // Convert MeasurementDate from ISO format to MySQL format (YYYY-MM-DD) if needed
+          let measurementDate = updatedFields.MeasurementDate ?? mappedUpdatedRow.MeasurementDate;
+          if (measurementDate && typeof measurementDate === 'string' && measurementDate.includes('T')) {
+            const date = new Date(measurementDate);
+            if (!isNaN(date.getTime())) {
+              measurementDate = date.toISOString().split('T')[0];
+            }
+          }
           await connectionManager.executeQuery(
             format(`UPDATE ?? SET ? WHERE ?? = ?`, [
               `${schema}.coremeasurements`,
               {
                 MeasuredDBH: updatedFields.MeasuredDBH ?? mappedUpdatedRow.MeasuredDBH,
                 MeasuredHOM: updatedFields.MeasuredHOM ?? mappedUpdatedRow.MeasuredHOM,
-                MeasurementDate: updatedFields.MeasurementDate ?? mappedUpdatedRow.MeasurementDate
+                MeasurementDate: measurementDate
               },
               'CoreMeasurementID',
               mappedUpdatedRow.CoreMeasurementID
@@ -205,6 +236,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         if (dataType === 'failedmeasurements') {
           const { Hash_ID, ...failedTrimmed } = newRowData;
           failedTrimmed['FailureReasons'] = '';
+          // Convert Date from ISO format to MySQL format (YYYY-MM-DD)
+          if (failedTrimmed['Date']) {
+            const date = new Date(failedTrimmed['Date']);
+            if (!isNaN(date.getTime())) {
+              // Format as YYYY-MM-DD for MySQL DATE column
+              failedTrimmed['Date'] = date.toISOString().split('T')[0];
+            }
+          }
           dataToUpdate = failedTrimmed;
         } else if (dataType === 'plots') {
           const { NumQuadrats, ...plotTrimmed } = newRowData;
@@ -311,6 +350,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       if (params.dataType === 'personnel') delete newRowData.CensusActive;
+
+      // Convert Date from ISO format to MySQL format (YYYY-MM-DD) for failedmeasurements
+      if (params.dataType === 'failedmeasurements' && newRowData['Date']) {
+        const date = new Date(newRowData['Date']);
+        if (!isNaN(date.getTime())) {
+          newRowData['Date'] = date.toISOString().split('T')[0];
+        }
+      }
+
       let insertQuery = '';
       if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
@@ -332,7 +380,9 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
   const connectionManager = ConnectionManager.getInstance();
-  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  // Get the primary key column name for this dataType, or fallback to capitalized gridID
+  const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const demappedGridID = primaryKeyColumn;
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {

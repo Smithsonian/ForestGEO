@@ -6,8 +6,15 @@ import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
+export type ValidationResult = {
+  success: boolean;
+  hasFailedMeasurements: boolean;
+  failedCount: number;
+  errors: string[];
+};
+
 type VCProps = {
-  onValidationComplete?: () => void;
+  onValidationComplete?: (result: ValidationResult) => void;
 };
 
 export default function ValidationCore({ onValidationComplete }: VCProps) {
@@ -40,7 +47,17 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     })
       .then(r => r.json())
       .then(data => {
-        if (data.coreValidations.length === 0) onValidationComplete ? onValidationComplete() : undefined;
+        // If no validations are defined, immediately call completion with success
+        if (data.coreValidations.length === 0) {
+          if (onValidationComplete) {
+            onValidationComplete({
+              success: true,
+              hasFailedMeasurements: false,
+              failedCount: 0,
+              errors: []
+            });
+          }
+        }
         setValidationMessages(data.coreValidations);
         setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
       })
@@ -49,7 +66,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           ailogger.error('Error fetching validation list:', err);
         }
       });
-  }, [currentSite?.schemaName, onValidationComplete]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSite?.schemaName]);
 
   const performValidations = useCallback(async () => {
     try {
@@ -126,18 +144,79 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     }
   }, [validationMessages, currentSite, currentCensus, plotID]);
 
+  // Check for failed measurements after validation
+  const checkForFailedMeasurements = useCallback(async (): Promise<{ hasFailures: boolean; count: number }> => {
+    if (!currentSite?.schemaName || !plotID || !currentCensus?.dateRanges[0]?.censusID) {
+      ailogger.warn('Missing required context for checking failed measurements');
+      return { hasFailures: false, count: 0 };
+    }
+
+    try {
+      ailogger.info('Checking for failed measurements after validation...');
+      const response = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${plotID}/${currentCensus.dateRanges[0].censusID}`, {
+        method: 'GET'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const count = data.recordCount || 0;
+        ailogger.info(`Validation check: ${count} failed measurements found`);
+        return { hasFailures: count > 0, count };
+      } else {
+        ailogger.error(`Failed to check for failed measurements: ${response.status}`);
+        return { hasFailures: false, count: 0 };
+      }
+    } catch (error: any) {
+      ailogger.error('Error checking for failed measurements:', error);
+      return { hasFailures: false, count: 0 };
+    }
+  }, [currentSite?.schemaName, plotID, currentCensus?.dateRanges]);
+
+  // Start validation when validation messages are loaded
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
       performValidations().catch(ailogger.error);
     }
   }, [validationMessages, performValidations]);
 
-  // Only call onValidationComplete when validation is truly complete and not updating rows
+  // Check for failures and notify parent when validation is complete
   useEffect(() => {
-    if (isValidationComplete && !isUpdatingRows && onValidationComplete) {
-      onValidationComplete();
+    if (isValidationComplete && !isUpdatingRows) {
+      // Check for failed measurements before calling completion callback
+      checkForFailedMeasurements()
+        .then(failureCheck => {
+          const result: ValidationResult = {
+            success: apiErrors.length === 0,
+            hasFailedMeasurements: failureCheck.hasFailures,
+            failedCount: failureCheck.count,
+            errors: apiErrors
+          };
+
+          if (failureCheck.hasFailures) {
+            ailogger.warn(`Validation completed with ${failureCheck.count} failed measurements. User should review failed measurements.`);
+          } else {
+            ailogger.info('Validation completed successfully with no failures.');
+          }
+
+          // Call parent callback with validation results
+          if (onValidationComplete) {
+            onValidationComplete(result);
+          }
+        })
+        .catch(error => {
+          ailogger.error('Error during validation completion check:', error);
+          // Still call completion callback even if check fails
+          if (onValidationComplete) {
+            onValidationComplete({
+              success: apiErrors.length === 0,
+              hasFailedMeasurements: false,
+              failedCount: 0,
+              errors: [...apiErrors, 'Failed to check for validation failures']
+            });
+          }
+        });
     }
-  }, [isValidationComplete, isUpdatingRows, onValidationComplete]);
+  }, [isValidationComplete, isUpdatingRows, onValidationComplete, checkForFailedMeasurements, apiErrors]);
 
   const renderProgressBars = () => {
     return Object.keys(validationMessages).map(validationProcedureName => {

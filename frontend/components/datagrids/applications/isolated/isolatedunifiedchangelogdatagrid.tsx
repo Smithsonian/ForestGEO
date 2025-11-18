@@ -68,9 +68,10 @@ export default function IsolatedUnifiedChangelogDataGrid() {
                       flexDirection: 'column',
                       backgroundColor: 'neutral.softBg',
                       borderRadius: '8px',
-                      padding: '8px',
+                      padding: '10px',
                       overflow: 'auto',
-                      fontSize: '12px'
+                      fontSize: '13px',
+                      lineHeight: 1.5
                     }}
                   >
                     {obj &&

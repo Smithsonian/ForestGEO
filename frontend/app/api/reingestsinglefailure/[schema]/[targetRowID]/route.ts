@@ -1,10 +1,10 @@
 // api/reingestsinglefailure/[schema]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
-import { v4 } from 'uuid';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { generateShortBatchID } from '@/config/utils';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -38,7 +38,7 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const staticBatchID = v4();
+  const staticBatchID = generateShortBatchID();
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {

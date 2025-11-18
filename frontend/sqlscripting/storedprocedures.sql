@@ -1131,6 +1131,20 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
+    -- Idempotency check: Skip if this batch has already been processed
+    IF EXISTS (
+        SELECT 1 FROM coremeasurements cm
+        WHERE cm.CensusID = vCurrentCensusID
+          AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+        LIMIT 1
+    ) THEN
+        -- Batch already processed, skip and clean up temporarymeasurements
+        DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
+        SET @disable_triggers = 0;
+        SELECT CONCAT('Batch ', vBatchID, ' already processed, skipped') as message, FALSE as batch_failed;
+        LEAVE main_proc;
+    END IF;
+
     -- Initialize metrics
     INSERT IGNORE INTO uploadmetrics (
         uploadId, fileID, batchID, schema_name, plotID, censusID,
@@ -1559,17 +1573,30 @@ BEGIN
            CASE WHEN f.DBH = 0 THEN NULL ELSE f.DBH END,
            CASE WHEN f.HOM = 0 THEN NULL ELSE f.HOM END,
            COALESCE(f.Comments, ''),
-           JSON_OBJECT('treestemstate',
-                       CASE
-                           WHEN EXISTS(SELECT 1 FROM old_trees ot WHERE ot.id = f.id) THEN 'old tree'
-                           WHEN EXISTS(SELECT 1 FROM multi_stems ms WHERE ms.id = f.id) THEN 'multi stem'
-                           ELSE 'new recruit'
-                       END), 1
+           JSON_OBJECT(
+               'treestemstate',
+               CASE
+                   WHEN EXISTS(SELECT 1 FROM old_trees ot WHERE ot.id = f.id) THEN 'old tree'
+                   WHEN EXISTS(SELECT 1 FROM multi_stems ms WHERE ms.id = f.id) THEN 'multi stem'
+                   ELSE 'new recruit'
+               END,
+               'uploadSession', JSON_OBJECT(
+                   'fileID', vFileID,
+                   'batchID', vBatchID
+               )
+           ), 1
     FROM filtered f
     INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
         AND t.CensusID = f.CensusID AND t.IsActive = 1
     INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
-        AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1;
+        AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
+    -- Idempotency check: prevent duplicate processing of the same batch
+    WHERE NOT EXISTS (
+        SELECT 1 FROM coremeasurements cm_check
+        WHERE cm_check.StemGUID = s.StemGUID
+          AND cm_check.CensusID = f.CensusID
+          AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+    );
 
     SET vProcessedCount = ROW_COUNT();
 

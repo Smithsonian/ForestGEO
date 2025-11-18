@@ -9,7 +9,12 @@
  * - Connection cleanup
  */
 
-import { withDatabase, withQuery, withTransaction, ErrorResponses } from '../db-middleware';
+import {
+  withDatabase as _withDatabase,
+  withQuery as _withQuery,
+  withTransaction as _withTransaction,
+  ErrorResponses as _ErrorResponses
+} from '../db-middleware';
 
 describe('Database Middleware Verification', () => {
   console.log('\n=== DATABASE MIDDLEWARE IMPLEMENTATION VERIFICATION ===\n');
