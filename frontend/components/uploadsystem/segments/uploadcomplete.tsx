@@ -121,22 +121,92 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         display: 'flex',
         flex: 1,
         flexDirection: 'column',
-        alignItems: 'center'
+        alignItems: 'center',
+        '@keyframes fadeIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateY(20px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateY(0)'
+          }
+        },
+        '@keyframes pulse': {
+          '0%, 100%': {
+            opacity: 1,
+            transform: 'scale(1)'
+          },
+          '50%': {
+            opacity: 0.9,
+            transform: 'scale(1.02)'
+          }
+        }
       }}
     >
       {!allLoadsCompleted ? (
-        <Box role="status" aria-live="polite" sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <Typography variant={'solid'} level={'h1'} color={'success'}>
-            Upload Complete!
-          </Typography>
-          <Box sx={{ width: '80%', mt: 3 }}>
-            <Typography level="body-sm" id="census-progress-label" sx={{ mb: 1 }}>
+        <Box
+          role="status"
+          aria-live="polite"
+          sx={{
+            width: '100%',
+            maxWidth: '800px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            p: 4,
+            animation: 'fadeIn 0.5s ease-out'
+          }}
+        >
+          <Box
+            sx={{
+              p: 3,
+              borderRadius: 'lg',
+              background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+              boxShadow: theme => `0 8px 24px ${theme.palette.success.softBg}`,
+              mb: 4,
+              animation: 'pulse 2s ease-in-out infinite'
+            }}
+          >
+            <Typography
+              level={'h1'}
+              sx={{
+                textAlign: 'center',
+                fontWeight: 700,
+                background: theme => `linear-gradient(135deg, ${theme.palette.success[600]} 0%, ${theme.palette.success[800]} 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}
+            >
+              Upload Complete!
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              width: '100%',
+              p: 3,
+              borderRadius: 'md',
+              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              borderLeft: theme => `4px solid ${theme.palette.primary[400]}`,
+              mb: 2
+            }}
+          >
+            <Typography level="body-sm" id="census-progress-label" sx={{ mb: 1, fontWeight: 600 }}>
               Census Data
             </Typography>
             <LinearProgress
               determinate
               value={progress.census}
-              sx={{ width: '100%', mb: 1 }}
+              sx={{
+                width: '100%',
+                mb: 1,
+                height: '8px',
+                borderRadius: 'sm',
+                '& .MuiLinearProgress-bar': {
+                  background: theme => `linear-gradient(90deg, ${theme.palette.primary[500]} 0%, ${theme.palette.primary[700]} 100%)`
+                }
+              }}
               aria-label="Census data loading progress"
               aria-labelledby="census-progress-label"
               aria-valuenow={progress.census}
@@ -144,18 +214,35 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               aria-valuemax={100}
               aria-valuetext={progressText.census}
             />
-            <Typography level="body-xs" aria-live="polite">
+            <Typography level="body-xs" aria-live="polite" sx={{ fontStyle: 'italic', color: 'primary.plainColor' }}>
               {progressText.census}
             </Typography>
           </Box>
-          <Box sx={{ width: '80%', mt: 2 }}>
-            <Typography level="body-sm" id="plots-progress-label" sx={{ mb: 1 }}>
+          <Box
+            sx={{
+              width: '100%',
+              p: 3,
+              borderRadius: 'md',
+              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              borderLeft: theme => `4px solid ${theme.palette.primary[400]}`,
+              mb: 2
+            }}
+          >
+            <Typography level="body-sm" id="plots-progress-label" sx={{ mb: 1, fontWeight: 600 }}>
               Plots Data
             </Typography>
             <LinearProgress
               determinate
               value={progress.plots}
-              sx={{ width: '100%', mb: 1 }}
+              sx={{
+                width: '100%',
+                mb: 1,
+                height: '8px',
+                borderRadius: 'sm',
+                '& .MuiLinearProgress-bar': {
+                  background: theme => `linear-gradient(90deg, ${theme.palette.primary[500]} 0%, ${theme.palette.primary[700]} 100%)`
+                }
+              }}
               aria-label="Plots data loading progress"
               aria-labelledby="plots-progress-label"
               aria-valuenow={progress.plots}
@@ -163,18 +250,34 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               aria-valuemax={100}
               aria-valuetext={progressText.plots}
             />
-            <Typography level="body-xs" aria-live="polite">
+            <Typography level="body-xs" aria-live="polite" sx={{ fontStyle: 'italic', color: 'primary.plainColor' }}>
               {progressText.plots}
             </Typography>
           </Box>
-          <Box sx={{ width: '80%', mt: 2 }}>
-            <Typography level="body-sm" id="quadrats-progress-label" sx={{ mb: 1 }}>
+          <Box
+            sx={{
+              width: '100%',
+              p: 3,
+              borderRadius: 'md',
+              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              borderLeft: theme => `4px solid ${theme.palette.primary[400]}`
+            }}
+          >
+            <Typography level="body-sm" id="quadrats-progress-label" sx={{ mb: 1, fontWeight: 600 }}>
               Quadrats Data
             </Typography>
             <LinearProgress
               determinate
               value={progress.quadrats}
-              sx={{ width: '100%', mb: 1 }}
+              sx={{
+                width: '100%',
+                mb: 1,
+                height: '8px',
+                borderRadius: 'sm',
+                '& .MuiLinearProgress-bar': {
+                  background: theme => `linear-gradient(90deg, ${theme.palette.primary[500]} 0%, ${theme.palette.primary[700]} 100%)`
+                }
+              }}
               aria-label="Quadrats data loading progress"
               aria-labelledby="quadrats-progress-label"
               aria-valuenow={progress.quadrats}
@@ -182,30 +285,86 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               aria-valuemax={100}
               aria-valuetext={progressText.quadrats}
             />
-            <Typography level="body-xs" aria-live="polite">
+            <Typography level="body-xs" aria-live="polite" sx={{ fontStyle: 'italic', color: 'primary.plainColor' }}>
               {progressText.quadrats}
             </Typography>
           </Box>
         </Box>
       ) : (
-        <>
-          <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'success'}>
-            Upload completed successfully!
-          </Typography>
-          <Box sx={{ marginTop: 2, textAlign: 'center' }}>
-            <Typography level="h3" color="success">
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            maxWidth: '600px',
+            p: 4,
+            animation: 'fadeIn 0.6s ease-out'
+          }}
+        >
+          <Box
+            sx={{
+              p: 3,
+              borderRadius: 'lg',
+              background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+              boxShadow: theme => `0 12px 32px ${theme.palette.success.softBg}`,
+              mb: 3,
+              textAlign: 'center'
+            }}
+          >
+            <Typography
+              level={'h1'}
+              sx={{
+                fontWeight: 700,
+                background: theme => `linear-gradient(135deg, ${theme.palette.success[600]} 0%, ${theme.palette.success[800]} 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                mb: 2
+              }}
+            >
+              Upload completed successfully!
+            </Typography>
+            <Typography level="h3" sx={{ color: 'success.solidBg', mb: 1 }}>
               Your data has been processed and uploaded.
             </Typography>
-            <Typography level="body-md" sx={{ marginTop: 1 }}>
-              Any error rows have been automatically moved to the failedmeasurements table for review.
-            </Typography>
+            <Typography level="body-md">Any error rows have been automatically moved to the failedmeasurements table for review.</Typography>
           </Box>
-          <Box sx={{ marginTop: 4 }}>
-            <Button variant="soft" color="primary" onClick={() => setOpenUploadConfirmModal(true)}>
-              Confirm Changes
-            </Button>
-          </Box>
-        </>
+          <Button
+            variant="solid"
+            color="primary"
+            size="lg"
+            onClick={() => setOpenUploadConfirmModal(true)}
+            sx={{
+              background: theme => `linear-gradient(135deg, ${theme.palette.primary[500]} 0%, ${theme.palette.primary[700]} 100%)`,
+              transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+              position: 'relative',
+              overflow: 'hidden',
+              minWidth: '200px',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                left: '-100%',
+                width: '100%',
+                height: '100%',
+                background: theme => `linear-gradient(90deg, transparent, ${theme.palette.primary[300]}, transparent)`,
+                transition: 'left 0.5s ease'
+              },
+              '&:hover': {
+                transform: 'translateY(-4px) scale(1.05)',
+                boxShadow: theme => `0 12px 32px ${theme.palette.primary[300]}`,
+                '&::before': {
+                  left: '100%'
+                }
+              },
+              '&:active': {
+                transform: 'translateY(-2px) scale(0.98)'
+              }
+            }}
+          >
+            Confirm Changes
+          </Button>
+        </Box>
       )}
       <Modal open={openUploadConfirmModal} onClose={() => setOpenUploadConfirmModal(false)}>
         <ModalDialog role={'alertdialog'}>

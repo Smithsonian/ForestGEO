@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
@@ -56,6 +56,10 @@ export default function UploadParent(props: UploadParentProps) {
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
+  const [isReingestionMode, setIsReingestionMode] = useState(false);
+
+  // Track if we've already initialized reingestion to prevent re-triggering
+  const reingestionInitializedRef = useRef(false);
 
   // Context and session
   const _currentPlot = usePlotContext();
@@ -79,8 +83,13 @@ export default function UploadParent(props: UploadParentProps) {
   }, [uploadState.state.isDataUnsaved]);
 
   useEffect(() => {
-    if (uploadState.state.reviewState === ReviewStates.COMPLETE && onUploadComplete) {
-      onUploadComplete();
+    if (uploadState.state.reviewState === ReviewStates.COMPLETE) {
+      // Reset reingestion flag when upload completes
+      setIsReingestionMode(false);
+
+      if (onUploadComplete) {
+        onUploadComplete();
+      }
     }
   }, [uploadState.state.reviewState, onUploadComplete]);
 
@@ -105,6 +114,7 @@ export default function UploadParent(props: UploadParentProps) {
     uploadState.resetToStart();
     fileManagement.clearFiles();
     setParsedData({});
+    setIsReingestionMode(false);
   }
 
   async function resetError() {
@@ -133,15 +143,23 @@ export default function UploadParent(props: UploadParentProps) {
     if (fileManagement.fileCount === 0 && uploadState.state.reviewState === ReviewStates.REVIEW) {
       uploadState.setReviewState(ReviewStates.UPLOAD_FILES);
     }
-  }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState.setReviewState]);
 
-  // Check if we should start with reingestion processing
+  // Check if we should start with reingestion processing (only once on mount)
   useEffect(() => {
     if (skipToProcessing && uploadState.state.uploadForm === FormType.measurements) {
-      ailogger.info('Skipping to reingestion processing stage');
-      uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+      if (!reingestionInitializedRef.current) {
+        ailogger.info('[REINGESTION INIT] Starting reingestion process - setting reviewState to UPLOAD_SQL and reingestion mode');
+        reingestionInitializedRef.current = true;
+        setIsReingestionMode(true);
+        uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+      } else {
+        ailogger.info('[REINGESTION GUARD] Reingestion already initialized - ref guard preventing re-initialization');
+      }
     }
-  }, [skipToProcessing, uploadState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipToProcessing, uploadState.state.uploadForm, uploadState.setReviewState]);
 
   const renderStateContent = () => {
     if (!uploadState.state.uploadForm && uploadState.state.reviewState !== ReviewStates.START) {
@@ -175,8 +193,8 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.UPLOAD_SQL:
-        // If skipToProcessing is true and there are no files, use reingestion component
-        if (skipToProcessing && fileManagement.fileCount === 0) {
+        // If in reingestion mode, use reingestion component
+        if (isReingestionMode) {
           return (
             <UploadReingestion
               schema={currentSite?.schemaName || ''}
@@ -203,17 +221,9 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.VALIDATE:
-        return <UploadValidation setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
+        return <UploadValidation setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} isReingestion={isReingestionMode} />;
       case ReviewStates.VALIDATE_ERRORS_FOUND:
-        return (
-          <UploadValidationErrors
-            setReviewState={uploadState.setReviewState}
-            onViewFailedMeasurements={() => {
-              ailogger.info('Opening Failed Measurements Modal from validation errors screen');
-              setShowFailedMeasurementsModal(true);
-            }}
-          />
-        );
+        return <UploadValidationErrors setReviewState={uploadState.setReviewState} isReingestion={isReingestionMode} />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPLOAD_AZURE:
@@ -273,8 +283,15 @@ export default function UploadParent(props: UploadParentProps) {
           onTriggerReingestion={() => {
             ailogger.info('Triggering reingestion from failed measurements modal');
             setShowFailedMeasurementsModal(false);
-            // Note: Reingestion will be handled by the modal's own logic
-            // which moves data to temporarymeasurements and triggers reprocessing
+
+            // Clear files from original upload so UploadReingestion component renders
+            fileManagement.clearFiles();
+            setParsedData({});
+
+            // Set reingestion mode and start upload cycle
+            setIsReingestionMode(true);
+            uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+            ailogger.info('Starting upload cycle to process temporarymeasurements after bulk reingestion');
           }}
         />
         <Box

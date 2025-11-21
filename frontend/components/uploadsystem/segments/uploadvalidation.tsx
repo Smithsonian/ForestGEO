@@ -4,7 +4,7 @@ import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsyste
 import ValidationCore, { ValidationResult } from '@/components/client/validationcore';
 import ailogger from '@/ailogger';
 
-const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState }) => {
+const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, isReingestion = false }) => {
   function handleValidationComplete(result: ValidationResult) {
     ailogger.info('Validation completed with result:', result);
 
@@ -18,8 +18,15 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState }) =
       setReviewState(ReviewStates.ERRORS);
     } else {
       // Validation completed successfully with no failures
-      ailogger.info('Validation completed successfully. Proceeding to Azure upload.');
-      setReviewState(ReviewStates.UPLOAD_AZURE);
+      if (isReingestion) {
+        // For reingestion, skip Azure upload and go directly to complete
+        ailogger.info('Reingestion validation completed successfully. Proceeding to COMPLETE (skipping Azure upload).');
+        setReviewState(ReviewStates.COMPLETE);
+      } else {
+        // For normal uploads, proceed to Azure upload
+        ailogger.info('Validation completed successfully. Proceeding to Azure upload.');
+        setReviewState(ReviewStates.UPLOAD_AZURE);
+      }
     }
   }
 

@@ -1,6 +1,19 @@
 'use client';
 
-import { Button, CircularProgress, DialogActions, DialogContent, DialogTitle, Divider, Modal, ModalDialog, Sheet, Stack, Typography } from '@mui/joy';
+import {
+  Button,
+  CircularProgress,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  Sheet,
+  Stack,
+  Typography
+} from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
 import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -172,6 +185,15 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     }
   }, [open, fetchRecordCounts]);
 
+  // Auto-close modal when all failed measurements have been resolved
+  useEffect(() => {
+    if (open && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
+      ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
+      setReingested(true);
+      handleCloseModal();
+    }
+  }, [open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
+
   return (
     <Modal open={open} onClose={() => {}}>
       <ModalDialog
@@ -186,6 +208,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
         }}
         role="alertdialog"
       >
+        <ModalClose aria-label="Close failed measurements modal" onClick={handleCloseModal} />
         <DialogTitle sx={{ pb: 1 }}>Failed Measurements</DialogTitle>
         <DialogContent sx={{ flex: 1, overflow: 'hidden', p: 0 }}>
           <Stack spacing={2} sx={{ height: '100%' }}>
@@ -193,7 +216,12 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
               The following measurements failed to be uploaded. You can edit individual measurements in this table, reingest all rows, or clear failed records
               entirely.
             </Typography>
-            <IsolatedFailedMeasurementsDataGrid />
+            <IsolatedFailedMeasurementsDataGrid
+              onRowReingested={() => {
+                ailogger.info('Row successfully reingested - refreshing failed measurement count');
+                fetchRecordCounts();
+              }}
+            />
           </Stack>
         </DialogContent>
         <DialogActions>

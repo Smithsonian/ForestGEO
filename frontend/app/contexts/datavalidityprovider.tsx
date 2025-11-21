@@ -53,10 +53,16 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
             try {
               const response = await ApiWrapper.get(url, {
                 loadingMessage: `Validating ${type}...`,
-                category: 'api'
+                category: 'api',
+                showErrorAlert: false // Don't show alert for 412 - we handle it gracefully
               });
               return { type, isValid: response.ok };
             } catch (error: any) {
+              // HTTP 412 (Precondition Failed) means no data exists, which is a valid state
+              // (e.g., no failed measurements = good, no validation errors = good)
+              if (error.message?.includes('412')) {
+                return { type, isValid: true };
+              }
               ailogger.error(error);
               return { type, isValid: false };
             }

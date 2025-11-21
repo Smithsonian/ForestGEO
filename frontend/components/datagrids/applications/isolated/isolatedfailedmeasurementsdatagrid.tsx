@@ -16,7 +16,11 @@ import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
 
-export default function IsolatedFailedMeasurementsDataGrid() {
+interface IsolatedFailedMeasurementsDataGridProps {
+  onRowReingested?: () => void;
+}
+
+export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: IsolatedFailedMeasurementsDataGridProps = {}) {
   const [refresh, setRefresh] = useState(false);
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
     tag: [],
@@ -145,6 +149,11 @@ export default function IsolatedFailedMeasurementsDataGrid() {
           }
 
           await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
+
+          // Notify parent that a row was successfully reingested
+          if (onRowReingested) {
+            onRowReingested();
+          }
         } else {
           const reviewResponse = await fetch(`/api/query`, {
             method: 'POST',
@@ -163,7 +172,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
         throw error;
       }
     },
-    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts]
+    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested]
   );
 
   const displayFailureReason = useCallback(

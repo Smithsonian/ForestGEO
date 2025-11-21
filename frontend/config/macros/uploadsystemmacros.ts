@@ -98,6 +98,8 @@ export interface UploadValidationProps {
   schema: string;
   // state setters
   setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
+  // flags
+  isReingestion?: boolean;
 }
 
 export interface UploadValidationErrorDisplayProps {

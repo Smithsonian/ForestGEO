@@ -25,6 +25,7 @@ import CategoryIcon from '@mui/icons-material/Category';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
@@ -64,6 +65,7 @@ export default function DashboardPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
   const userRole = session?.user?.userStatus;
@@ -278,7 +280,21 @@ export default function DashboardPage() {
           description="You haven't uploaded any measurements for this census yet. Start by uploading your field data or creating measurement entries."
           primaryAction={{
             label: 'Upload Data',
-            onClick: () => router.push('/measurementshub/uploadedfiles'),
+            onClick: () => {
+              // Route to the first missing prerequisite, or to view data if all prerequisites are met
+              if (!validity.species) {
+                router.push('/fixeddatainput/alltaxonomies');
+              } else if (!validity.quadrats) {
+                router.push('/fixeddatainput/quadrats');
+              } else if (!validity.attributes) {
+                router.push('/fixeddatainput/attributes');
+              } else if (!validity.personnel) {
+                router.push('/fixeddatainput/personnel');
+              } else {
+                // All prerequisites met, go to measurement upload
+                router.push('/measurementshub/summary');
+              }
+            },
             startDecorator: <AddIcon />,
             variant: 'solid',
             color: 'primary'
@@ -627,10 +643,16 @@ export default function DashboardPage() {
                 </Box>
 
                 <Chip
+                  component="div"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Report incorrect profile information"
                   variant="outlined"
                   color="warning"
                   size="sm"
                   startDecorator={<WarningIcon />}
+                  onClick={triggerPulse}
+                  onKeyDown={handleFeedbackKeyDown}
                   sx={{ cursor: 'pointer', transition: 'all 0.2s ease', '&:hover': { bgcolor: 'warning.softBg' } }}
                 >
                   Report incorrect info

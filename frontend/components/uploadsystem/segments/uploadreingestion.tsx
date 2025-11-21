@@ -165,7 +165,10 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   }, [processed, processedChunks, totalBatches]);
 
   useEffect(() => {
-    if (batchProcessingStartedRef.current) {
+    // Prevent re-initialization if already processing or if processing has completed
+    // This guards against context changes (schema/plot/census) during reingestion
+    if (batchProcessingStartedRef.current || processedChunks > 0 || processed) {
+      ailogger.info('[REINGESTION GUARD] Skipping reingestion initialization - already processing or completed');
       return;
     }
     batchProcessingStartedRef.current = true;
@@ -315,11 +318,6 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                   }
 
                   ailogger.info(`Successfully processed batch ${fileID}-${batchID}`);
-                  setProcessedChunks(prev => {
-                    const newValue = prev + 1;
-                    ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
-                    return newValue;
-                  });
                 })
                 .catch(async (e: any) => {
                   const errorMessage = e?.message || e?.toString() || 'Unknown error';
@@ -350,12 +348,12 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                       }
                     }
                   }
-
+                })
+                .finally(() => {
+                  // Consolidate batch progress tracking to prevent double-counting
                   setProcessedChunks(prev => {
                     const newValue = prev + 1;
-                    ailogger.info(
-                      `Batch progress (with ${isMonitoringError ? 'monitoring issue' : 'failure'}): ${newValue}/${totalBatchCount} batches completed`
-                    );
+                    ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
                     return newValue;
                   });
                 })
@@ -471,8 +469,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         if (isMounted) {
           setIsVerifying(false);
         }
-        // Reset the ref to allow re-triggering if needed
-        batchProcessingStartedRef.current = false;
+        // Don't reset batchProcessingStartedRef here to prevent re-triggering on state changes
+        // It will be reset on unmount via cleanup function
       }
     }
 
@@ -487,6 +485,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
   useEffect(() => {
     if (processed) {
+      ailogger.info('[REINGESTION COMPLETE] Reingestion finished successfully - transitioning to VALIDATE state');
       setIsVerifying(false);
       setVerificationStatus('Reingestion completed successfully');
       setVerificationStep(0);

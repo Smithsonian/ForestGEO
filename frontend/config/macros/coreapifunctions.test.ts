@@ -467,9 +467,7 @@ describe('CoreAPIFunctions', () => {
         expect(mockConnectionManager.executeQuery).toHaveBeenCalled();
 
         // Verify the query uses FailedMeasurementID, not '1' as column name
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('UPDATE')
-        );
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall).toBeDefined();
         expect(updateCall[0]).toMatch(/FailedMeasurementID/i);
       });
@@ -495,9 +493,7 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('UPDATE')
-        );
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall[0]).toMatch(/CoreMeasurementID/i);
       });
 
@@ -522,9 +518,7 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('UPDATE')
-        );
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall[0]).toMatch(/Code/i);
       });
 
@@ -550,9 +544,7 @@ describe('CoreAPIFunctions', () => {
         expect(response.status).toBe(200);
 
         // Should use 'CustomID' (capitalized gridID) as fallback
-        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('UPDATE')
-        );
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall[0]).toMatch(/CustomID/i);
       });
     });
@@ -576,9 +568,7 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('DELETE')
-        );
+        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('DELETE'));
         expect(deleteCall[0]).toMatch(/FailedMeasurementID/i);
       });
 
@@ -600,9 +590,7 @@ describe('CoreAPIFunctions', () => {
 
         expect(response.status).toBe(200);
 
-        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) =>
-          typeof call[0] === 'string' && call[0].includes('DELETE')
-        );
+        const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('DELETE'));
         expect(deleteCall[0]).toMatch(/StemGUID/i);
       });
     });

@@ -49,24 +49,52 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
         width: '100%',
         '--StepIndicator-size': '3rem',
         '--Step-connectorInset': '0px',
+        '@keyframes pulse': {
+          '0%, 100%': {
+            opacity: 1,
+            transform: 'scale(1)'
+          },
+          '50%': {
+            opacity: 0.9,
+            transform: 'scale(1.05)'
+          }
+        },
+        '@keyframes slideIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateX(-10px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateX(0)'
+          }
+        },
         [`& .${stepIndicatorClasses.root}`]: {
-          borderWidth: 4
+          borderWidth: 4,
+          transition: 'all 0.3s ease'
         },
         [`& .${stepClasses.root}::after`]: {
-          height: 4
+          height: 4,
+          transition: 'all 0.3s ease'
         },
         [`& .${stepClasses.completed}`]: {
           [`& .${stepIndicatorClasses.root}`]: {
-            borderColor: 'primary.300',
-            color: 'primary.300'
+            borderColor: 'primary.400',
+            color: 'primary.400',
+            background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[100]} 100%)`,
+            boxShadow: theme => `0 4px 12px ${theme.palette.primary.softBg}`
           },
           '&::after': {
-            bgcolor: 'primary.300'
+            background: theme => `linear-gradient(90deg, ${theme.palette.primary[400]} 0%, ${theme.palette.primary[600]} 100%)`
           }
         },
         [`& .${stepClasses.active}`]: {
+          animation: 'slideIn 0.5s ease-out',
           [`& .${stepIndicatorClasses.root}`]: {
-            borderColor: 'currentColor'
+            borderColor: 'currentColor',
+            animation: 'pulse 2s ease-in-out infinite',
+            background: theme => `linear-gradient(135deg, ${theme.palette.primary[500]} 0%, ${theme.palette.primary[700]} 100%)`,
+            boxShadow: theme => `0 8px 24px ${theme.palette.primary[300]}`
           }
         },
         [`& .${stepClasses.disabled} *`]: {

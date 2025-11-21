@@ -43,6 +43,11 @@ export async function GET(
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
     query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
+
+    // Populate failure reasons for the newly inserted failed measurements
+    query = `CALL ${schema}.reviewfailed()`;
+    await connectionManager.executeQuery(query, [], transactionID);
+
     await connectionManager.commitTransaction(transactionID);
   } catch {
     await connectionManager.rollbackTransaction(transactionID ?? '');

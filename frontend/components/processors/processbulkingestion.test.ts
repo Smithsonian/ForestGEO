@@ -83,9 +83,7 @@ describe('processBulkIngestionCollapser', () => {
 
       // Verify no UPDATE for orphaned trees was called
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const hasOrphanedUpdate = calls.some(
-        (call: any) => call[0].includes('UPDATE') && call[0].includes('trees') && call[0].includes('CensusID')
-      );
+      const hasOrphanedUpdate = calls.some((call: any) => call[0].includes('UPDATE') && call[0].includes('trees') && call[0].includes('CensusID'));
       expect(hasOrphanedUpdate).toBe(false);
     });
 
@@ -116,9 +114,7 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const dbhUpdateQuery = calls.find(
-        (call: any) => call[0].includes('UPDATE') && call[0].includes('coremeasurements') && call[0].includes('MeasuredDBH')
-      );
+      const dbhUpdateQuery = calls.find((call: any) => call[0].includes('UPDATE') && call[0].includes('coremeasurements') && call[0].includes('MeasuredDBH'));
 
       expect(dbhUpdateQuery).toBeDefined();
       expect(dbhUpdateQuery[0]).toMatch(/SET MeasuredDBH = NULL WHERE MeasuredDBH = 0/i);
@@ -130,9 +126,7 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const homUpdateQuery = calls.find(
-        (call: any) => call[0].includes('UPDATE') && call[0].includes('coremeasurements') && call[0].includes('MeasuredHOM')
-      );
+      const homUpdateQuery = calls.find((call: any) => call[0].includes('UPDATE') && call[0].includes('coremeasurements') && call[0].includes('MeasuredHOM'));
 
       expect(homUpdateQuery).toBeDefined();
       expect(homUpdateQuery[0]).toMatch(/SET MeasuredHOM = NULL WHERE MeasuredHOM = 0/i);

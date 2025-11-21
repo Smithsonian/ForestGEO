@@ -78,6 +78,16 @@ export default function EmptyState({ icon, title, description, primaryAction, se
         textAlign: 'center',
         py: 8,
         px: 3,
+        '@keyframes fadeIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateY(20px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateY(0)'
+          }
+        },
         ...sx
       }}
     >
@@ -90,13 +100,37 @@ export default function EmptyState({ icon, title, description, primaryAction, se
           color: `${iconColor}.solidBg`,
           margin: '0 auto',
           mb: 3,
-          fontSize: '2.5rem'
+          fontSize: '2.5rem',
+          background: theme => `linear-gradient(135deg, ${theme.palette[iconColor].softBg} 0%, ${theme.palette[iconColor][100]} 100%)`,
+          boxShadow: theme => `0 8px 24px ${theme.palette[iconColor].softBg}`,
+          animation: 'pulse 2s ease-in-out infinite',
+          '@keyframes pulse': {
+            '0%, 100%': {
+              transform: 'scale(1)',
+              boxShadow: theme => `0 8px 24px ${theme.palette[iconColor].softBg}`
+            },
+            '50%': {
+              transform: 'scale(1.05)',
+              boxShadow: theme => `0 12px 32px ${theme.palette[iconColor][200]}`
+            }
+          }
         }}
       >
         {icon}
       </Avatar>
 
-      <Typography level="h3" sx={{ mb: 2, fontWeight: 600 }}>
+      <Typography
+        level="h3"
+        sx={{
+          mb: 2,
+          fontWeight: 600,
+          background: theme => `linear-gradient(135deg, ${theme.palette.text.primary} 0%, ${theme.palette[iconColor][400]} 100%)`,
+          backgroundClip: 'text',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          animation: 'fadeIn 0.6s ease-out'
+        }}
+      >
         {title}
       </Typography>
 
@@ -107,14 +141,22 @@ export default function EmptyState({ icon, title, description, primaryAction, se
           mb: 3,
           maxWidth: '500px',
           mx: 'auto',
-          lineHeight: 1.6
+          lineHeight: 1.6,
+          animation: 'fadeIn 0.8s ease-out'
         }}
       >
         {description}
       </Typography>
 
       {(primaryAction || secondaryAction) && (
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          justifyContent="center"
+          sx={{
+            animation: 'fadeIn 1s ease-out'
+          }}
+        >
           {primaryAction && (
             <Button
               variant={primaryAction.variant || 'solid'}
@@ -123,10 +165,28 @@ export default function EmptyState({ icon, title, description, primaryAction, se
               startDecorator={primaryAction.startDecorator}
               sx={{
                 minWidth: '140px',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+                position: 'relative',
+                overflow: 'hidden',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: '-100%',
+                  width: '100%',
+                  height: '100%',
+                  background: theme => `linear-gradient(90deg, transparent, ${theme.palette[primaryAction.color || 'primary'][300]}, transparent)`,
+                  transition: 'left 0.5s ease'
+                },
                 '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: 'md'
+                  transform: 'translateY(-4px) scale(1.02)',
+                  boxShadow: theme => `0 8px 24px ${theme.palette[primaryAction.color || 'primary'][200]}`,
+                  '&::before': {
+                    left: '100%'
+                  }
+                },
+                '&:active': {
+                  transform: 'translateY(-2px) scale(0.98)'
                 }
               }}
             >
@@ -142,9 +202,14 @@ export default function EmptyState({ icon, title, description, primaryAction, se
               startDecorator={secondaryAction.startDecorator}
               sx={{
                 minWidth: '140px',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
                 '&:hover': {
-                  transform: 'translateY(-2px)'
+                  transform: 'translateY(-2px)',
+                  borderColor: theme => theme.palette[secondaryAction.color || 'neutral'][400],
+                  boxShadow: 'sm'
+                },
+                '&:active': {
+                  transform: 'translateY(0)'
                 }
               }}
             >

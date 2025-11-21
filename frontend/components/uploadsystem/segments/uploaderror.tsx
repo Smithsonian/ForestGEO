@@ -90,47 +90,123 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
   };
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box
+      sx={{
+        p: 2,
+        '@keyframes slideIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateY(-20px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateY(0)'
+          }
+        },
+        '@keyframes shake': {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-5px)' },
+          '20%, 40%, 60%, 80%': { transform: 'translateX(5px)' }
+        }
+      }}
+    >
       <Alert
         color="danger"
         variant="soft"
-        startDecorator={<ErrorIcon sx={{ fontSize: 24 }} />}
+        startDecorator={
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 'md',
+              bgcolor: 'danger.softBg',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <ErrorIcon sx={{ fontSize: 32, color: 'danger.solidBg' }} aria-hidden="true" />
+          </Box>
+        }
         sx={{
           mb: 3,
-          p: 2.5,
-          borderRadius: 'md',
-          boxShadow: 'md'
+          p: 3,
+          borderRadius: 'lg',
+          boxShadow: theme => `0 8px 24px ${theme.palette.danger.softBg}`,
+          background: theme => `linear-gradient(135deg, ${theme.palette.danger.softBg} 0%, rgba(239, 68, 68, 0.05) 100%)`,
+          borderLeft: theme => `4px solid ${theme.palette.danger[500]}`,
+          animation: 'slideIn 0.5s ease-out, shake 0.5s ease-out 0.5s'
         }}
       >
         <Stack spacing={2}>
-          <Typography level="title-lg" sx={{ fontWeight: 700, fontSize: '1.125rem' }}>
-            Error Occurred
-          </Typography>
           <Typography
-            level="body-md"
+            level="title-lg"
             sx={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontSize: '0.875rem',
-              lineHeight: 1.6,
-              fontFamily: 'monospace',
-              backgroundColor: 'rgba(0, 0, 0, 0.05)',
-              p: 1.5,
-              borderRadius: 'sm'
+              fontWeight: 700,
+              fontSize: '1.25rem',
+              color: 'danger.solidBg'
             }}
           >
-            {serializeError(error)}
+            Error Occurred
           </Typography>
-          {component === 'UploadFire' && (
-            <Typography level="body-md" fontWeight="bold" color="danger" sx={{ mt: 1 }}>
-              Please speak to an administrator about this error.
+          <Box
+            sx={{
+              p: 2,
+              borderRadius: 'md',
+              background: theme => `linear-gradient(135deg, ${theme.palette.neutral.softBg} 0%, rgba(0, 0, 0, 0.02) 100%)`,
+              borderLeft: theme => `3px solid ${theme.palette.neutral[400]}`
+            }}
+          >
+            <Typography
+              level="body-md"
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontSize: '0.875rem',
+                lineHeight: 1.6,
+                fontFamily: 'monospace',
+                color: 'text.primary'
+              }}
+            >
+              {serializeError(error)}
             </Typography>
+          </Box>
+          {component === 'UploadFire' && (
+            <Box
+              sx={{
+                p: 2,
+                borderRadius: 'md',
+                background: theme => `linear-gradient(135deg, ${theme.palette.warning.softBg} 0%, ${theme.palette.warning[50]} 100%)`,
+                borderLeft: theme => `3px solid ${theme.palette.warning[500]}`
+              }}
+            >
+              <Typography level="body-md" fontWeight="bold" sx={{ color: 'warning.solidBg' }}>
+                Please speak to an administrator about this error.
+              </Typography>
+            </Box>
           )}
         </Stack>
       </Alert>
-      <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={{
+          flexWrap: 'wrap',
+          animation: 'slideIn 0.7s ease-out'
+        }}
+      >
         {renderErrorAction()}
-        <Button onClick={resetError} variant="outlined" color="neutral">
+        <Button
+          onClick={resetError}
+          variant="outlined"
+          color="neutral"
+          sx={{
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'translateY(-2px)',
+              boxShadow: 'sm'
+            }
+          }}
+        >
           Retry
         </Button>
       </Stack>

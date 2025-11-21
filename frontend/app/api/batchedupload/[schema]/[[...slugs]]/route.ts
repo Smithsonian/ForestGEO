@@ -66,6 +66,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
 
   try {
     await connectionManager.executeQuery(insertQuery);
+
+    // Populate failure reasons for the newly inserted failed measurements
+    const reviewFailedQuery = `CALL ${schema}.reviewfailed()`;
+    await connectionManager.executeQuery(reviewFailedQuery);
+
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Database Error:', error);
