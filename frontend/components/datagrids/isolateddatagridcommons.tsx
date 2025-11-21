@@ -798,12 +798,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
                 fetchPaginatedData,
                 paginationModel
               );
-              setLoading(false);
               return updatedRow;
             } catch (error: any) {
-              setLoading(false);
               setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
               return Promise.reject(error);
+            } finally {
+              setLoading(false);
             }
           },
           reject: reason => {
@@ -830,12 +830,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           fetchPaginatedData,
           paginationModel
         );
-        setLoading(false);
         return updatedRow;
       } catch (error: any) {
-        setLoading(false);
         setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
         return Promise.reject(error);
+      } finally {
+        setLoading(false);
       }
     },
     [

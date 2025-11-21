@@ -32,6 +32,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMounted = useRef<boolean>(true);
+  const hasCalledCompletionRef = useRef<boolean>(false);
 
   useEffect(() => {
     abortControllerRef.current = new AbortController();
@@ -49,7 +50,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       .then(data => {
         // If no validations are defined, immediately call completion with success
         if (data.coreValidations.length === 0) {
-          if (onValidationComplete) {
+          if (onValidationComplete && !hasCalledCompletionRef.current) {
+            hasCalledCompletionRef.current = true;
             onValidationComplete({
               success: true,
               hasFailedMeasurements: false,
@@ -172,6 +174,13 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     }
   }, [currentSite?.schemaName, plotID, currentCensus?.dateRanges]);
 
+  // Reset completion guard when new validation messages arrive (new validation cycle)
+  useEffect(() => {
+    if (Object.keys(validationMessages).length > 0) {
+      hasCalledCompletionRef.current = false;
+    }
+  }, [validationMessages]);
+
   // Start validation when validation messages are loaded
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
@@ -181,10 +190,14 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   // Check for failures and notify parent when validation is complete
   useEffect(() => {
-    if (isValidationComplete && !isUpdatingRows) {
+    if (isValidationComplete && !isUpdatingRows && !hasCalledCompletionRef.current) {
       // Check for failed measurements before calling completion callback
       checkForFailedMeasurements()
         .then(failureCheck => {
+          // Guard against duplicate callback execution
+          if (hasCalledCompletionRef.current) return;
+          hasCalledCompletionRef.current = true;
+
           const result: ValidationResult = {
             success: apiErrors.length === 0,
             hasFailedMeasurements: failureCheck.hasFailures,
@@ -204,6 +217,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           }
         })
         .catch(error => {
+          // Guard against duplicate callback execution
+          if (hasCalledCompletionRef.current) return;
+          hasCalledCompletionRef.current = true;
+
           ailogger.error('Error during validation completion check:', error);
           // Still call completion callback even if check fails
           if (onValidationComplete) {

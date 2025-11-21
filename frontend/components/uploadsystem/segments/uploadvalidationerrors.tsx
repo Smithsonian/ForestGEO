@@ -20,8 +20,11 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
   const [tempCount, setTempCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Extract census ID to satisfy ESLint dependency rules
+  const censusID = currentCensus?.dateRanges[0]?.censusID;
+
   const fetchCounts = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !censusID) {
       ailogger.error('Missing required context for fetching validation error counts');
       return;
     }
@@ -29,10 +32,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
     setIsLoading(true);
     try {
       // Get failed measurements count
-      const failedResponse = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
-        { method: 'GET' }
-      );
+      const failedResponse = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${censusID}`, { method: 'GET' });
 
       if (failedResponse.ok) {
         const failedData = await failedResponse.json();
@@ -40,10 +40,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
       }
 
       // Get temporary measurements count
-      const tempResponse = await fetch(
-        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
-        { method: 'GET' }
-      );
+      const tempResponse = await fetch(`/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${censusID}`, { method: 'GET' });
 
       if (tempResponse.ok) {
         const tempData = await tempResponse.json();
@@ -54,7 +51,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
     } finally {
       setIsLoading(false);
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, censusID]);
 
   useEffect(() => {
     fetchCounts();

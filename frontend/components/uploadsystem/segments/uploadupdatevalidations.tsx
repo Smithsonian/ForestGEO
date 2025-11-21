@@ -13,14 +13,17 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
+  // Extract census ID to satisfy ESLint dependency rules
+  const censusID = currentCensus?.dateRanges[0]?.censusID;
+
   const updateValidations = useCallback(async () => {
     setIsUpdateValidationComplete(false);
     const response = await fetch(
-      `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.dateRanges[0].censusID.toString()}`
+      `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${censusID?.toString()}`
     );
     const _result = await response.json();
     setIsUpdateValidationComplete(true);
-  }, [schema, currentPlot?.id, currentCensus?.dateRanges]);
+  }, [schema, currentPlot?.id, censusID]);
 
   useEffect(() => {
     updateValidations().catch(ailogger.error);
@@ -33,9 +36,10 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       }, 500);
 
       return () => clearInterval(ellipsisTimer);
-    } else setReviewState(ReviewStates.UPLOAD_AZURE);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUpdateValidationComplete]);
+    } else {
+      setReviewState(ReviewStates.UPLOAD_AZURE);
+    }
+  }, [isUpdateValidationComplete, setReviewState]);
 
   return (
     <Box sx={{ display: 'flex', flex: 1, width: '100%', p: 2 }}>
