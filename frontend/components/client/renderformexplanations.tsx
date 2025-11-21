@@ -50,7 +50,7 @@ export default function RenderFormExplanations(uploadForm: FormType) {
         <Accordion>
           <AccordionSummary
             sx={{
-              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              bgcolor: 'primary.softBg',
               borderRadius: 'md',
               transition: 'all 0.3s ease',
               '&:hover': {

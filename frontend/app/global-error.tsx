@@ -84,7 +84,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
             {error?.digest && (
               <p
                 style={{
-                  color: '#999',
+                  color: '#666',
                   fontSize: '0.75rem',
                   marginBottom: '1.5rem'
                 }}

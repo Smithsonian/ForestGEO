@@ -151,33 +151,30 @@ export async function POST(
             WHERE vft.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-              ${
-                filterModel.visible.length > 0
-                  ? ` AND (${filterModel.visible
-                      .map(v => {
-                        switch (v) {
-                          case 'valid':
-                            return `vft.IsValidated = TRUE`;
-                          case 'errors':
-                            return `vft.IsValidated = FALSE`;
-                          case 'pending':
-                            return `vft.IsValidated IS NULL`;
-                          default:
-                            return null;
-                        }
-                      })
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ''
-              }
-              ${
-                filterModel.tss.length > 0
-                  ? ` AND (${filterModel.tss
-                      .map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ``
-              }
+              ${(() => {
+                const visibleConditions = filterModel.visible
+                  .map(v => {
+                    switch (v) {
+                      case 'valid':
+                        return `vft.IsValidated = TRUE`;
+                      case 'errors':
+                        return `vft.IsValidated = FALSE`;
+                      case 'pending':
+                        return `vft.IsValidated IS NULL`;
+                      default:
+                        return null;
+                    }
+                  })
+                  .filter(Boolean);
+                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
+              })()}
+              ${(() => {
+                // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
+                const validTss = filterModel.tss.filter(tss => ['multi stem', 'old tree', 'new recruit'].includes(tss));
+                return validTss.length > 0
+                  ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
+                  : ``;
+              })()}
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
             ORDER BY vft.MeasurementDate ASC`;
           queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);

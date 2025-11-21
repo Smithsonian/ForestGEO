@@ -476,12 +476,16 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
     runProcessBatches();
 
+    // Cleanup only on unmount - don't reset isMounted on re-renders
+    // The guard at the top prevents re-initialization during re-renders
     return () => {
+      ailogger.info('[REINGESTION CLEANUP] Component unmounting, setting isMounted = false');
       isMounted = false;
       batchProcessingStartedRef.current = false;
     };
+    // Empty dependency array - only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, currentPlot, currentCensus]);
+  }, []);
 
   useEffect(() => {
     if (processed) {

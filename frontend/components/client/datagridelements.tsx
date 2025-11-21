@@ -12,8 +12,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  Dropdown,
   FormLabel,
   IconButton,
+  ListItemDecorator,
+  Menu,
+  MenuButton,
+  MenuItem,
   Modal,
   ModalDialog,
   Skeleton,
@@ -49,7 +54,7 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { CallSplit, Forest, Grass, RuleOutlined, UnfoldLess, UnfoldMore } from '@mui/icons-material';
+import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -72,6 +77,7 @@ declare module '@mui/x-data-grid' {
     filterModel?: ExtendedGridFilterModel;
     apiRef?: RefObject<GridApiCommunity>;
     dynamicButtons?: any;
+    validationMenu?: React.ReactNode;
     locked?: boolean;
     currentSite?: Site;
     currentPlot?: Plot;
@@ -106,6 +112,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     handleQuickFilterChange,
     filterModel,
     dynamicButtons = [],
+    validationMenu,
     currentSite,
     currentPlot,
     currentCensus,
@@ -248,34 +255,27 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
 
   return (
     <>
-      <Toolbar color="primary" style={{ width: '100%', justifyContent: 'space-between', alignItems: 'center', overflow: 'auto' }}>
+      <Toolbar color="primary" style={{ width: '100%', alignItems: 'center' }}>
         <Box
           sx={{
             display: 'flex',
-            flex: 1,
-            maxWidth: '100%',
-            justifyContent: 'space-evenly',
+            width: '100%',
+            justifyContent: 'flex-start',
             alignItems: 'center',
-            overflowX: 'auto',
-            gap: 1
+            gap: 0.5
           }}
         >
-          <Box sx={{ display: 'flex', flex: 1, width: '100%', minWidth: 'fit-content' }}>
-            <Box display={'flex'} alignItems={'center'} sx={{ flex: 0.75, display: 'flex', justifyContent: 'space-evenly', minWidth: 'fit-content' }}>
-              <ColumnsPanelTrigger
-                style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
-                render={<ToolbarButton>Columns</ToolbarButton>}
-              />
+          {/* Left section - filters and controls */}
+          <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5 }}>
+            <Box display={'flex'} alignItems={'center'} sx={{ minWidth: 'fit-content' }}>
+              <ColumnsPanelTrigger style={{ display: 'flex', justifyContent: 'center' }} render={<ToolbarButton>Columns</ToolbarButton>} />
               <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
-              <FilterPanelTrigger
-                style={{ flex: 0.5, display: 'flex', justifyContent: 'center', maxWidth: '15%' }}
-                render={<ToolbarButton>Filter</ToolbarButton>}
-              />
+              <FilterPanelTrigger style={{ display: 'flex', justifyContent: 'center' }} render={<ToolbarButton>Filter</ToolbarButton>} />
               <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
               <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-                <QuickFilter style={{ flex: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '-20px' }}>
+                <QuickFilter style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <QuickFilterControl
-                    style={{ flex: 1, display: 'flex', justifyContent: 'center' }}
+                    style={{ display: 'flex', justifyContent: 'center', minWidth: '150px' }}
                     placeholder={'Search All Fields...'}
                     value={inputValue}
                     onKeyDown={handleKeyDown}
@@ -301,9 +301,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 </QuickFilter>
               </Tooltip>
             </Box>
-            <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
+            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
             <Button
-              style={{ display: 'flex', flex: 0.15, maxWidth: '15%', marginRight: '0.75%', minWidth: 'fit-content' }}
+              style={{ display: 'flex', minWidth: 'fit-content' }}
               color={'primary'}
               startDecorator={<RefreshIcon />}
               onClick={async () => await handleRefresh()}
@@ -312,12 +312,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               Refresh
             </Button>
             {gridType === 'measurements' && (
-              <Stack
-                direction={'row'}
-                gap={1}
-                spacing={1}
-                sx={{ display: 'flex', flex: 0.25, alignItems: 'center', justifyContent: 'center', minWidth: 'fit-content' }}
-              >
+              <Stack direction={'row'} spacing={0.5} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 'fit-content', ml: 1 }}>
                 <Tooltip title={`Invalid: (${errorControls.count})`}>
                   <Badge badgeContent={errorControls.count} size={'sm'}>
                     <IconButton
@@ -425,127 +420,99 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 </Tooltip>
               </Stack>
             )}
-            <Divider orientation={'vertical'} sx={{ mx: 1.5 }} />
-            <Stack
-              direction={'row'}
-              spacing={1.5}
-              sx={{
-                display: 'flex',
-                flex: 0.5,
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: 1.5,
-                minWidth: 'fit-content'
-              }}
-            >
-              {hasAnyExport && (
-                <Tooltip title={'Export as CSV'} placement="top" arrow>
-                  <IconButton
-                    variant="soft"
-                    color="primary"
-                    onClick={async () => {
-                      if (handleExport) {
-                        setOpenExportModal(true);
-                      } else if (handleExportCSV) {
-                        await handleExportCSV();
-                      } else {
-                        await handleExportAll!();
-                      }
-                    }}
-                    sx={theme => ({
-                      width: theme.spacing(6),
-                      height: theme.spacing(6),
-                      minWidth: theme.spacing(6),
-                      padding: theme.spacing(0.5),
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        transform: 'translateY(-2px)'
-                      }
-                    })}
-                    aria-label="Export data as CSV"
-                    data-testid="export-button"
-                  >
-                    <CloudDownloadIcon />
-                  </IconButton>
+          </Box>
+          <Divider orientation={'vertical'} sx={{ ml: 0.5, mr: 1 }} />
+          {/* Right section - action buttons equally spaced */}
+          <Stack direction="row" spacing={1.5} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, ml: 'auto' }}>
+            {dynamicButtons
+              .filter((button: any) => button.label === 'Manual Entry Form' || button.label === 'Upload')
+              .map((button: any, index: number) => (
+                <Tooltip key={index} title={button.tooltip} placement="top" arrow>
+                  <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
+                    {button.label}
+                  </Button>
                 </Tooltip>
-              )}
-              {dynamicButtons.map(
-                (button: any, index: number) =>
-                  button.tooltip && (
-                    <Tooltip key={index} title={button.tooltip} placement="top" arrow>
-                      {button.count ? (
-                        <Badge badgeContent={button.count} size="sm">
-                          <Button
-                            onClick={button.onClick}
-                            variant="soft"
-                            color="primary"
-                            size="sm"
-                            startDecorator={button.icon}
-                            sx={{
-                              minWidth: '130px',
-                              whiteSpace: 'nowrap',
-                              fontSize: '0.875rem',
-                              height: theme => theme.spacing(6),
-                              transition: 'all 0.2s ease',
-                              '&:hover': {
-                                transform: 'translateY(-2px)',
-                                boxShadow: 'sm'
-                              }
-                            }}
-                          >
-                            {button.label}
-                          </Button>
-                        </Badge>
-                      ) : (
-                        <Button
-                          onClick={button.onClick}
-                          variant="soft"
-                          color="primary"
-                          size="sm"
-                          startDecorator={button.icon}
-                          sx={{
-                            minWidth: '130px',
-                            whiteSpace: 'nowrap',
-                            fontSize: '0.875rem',
-                            height: theme => theme.spacing(6),
-                            transition: 'all 0.2s ease',
-                            '&:hover': {
-                              transform: 'translateY(-2px)',
-                              boxShadow: 'sm'
-                            }
-                          }}
-                        >
-                          {button.label}
-                        </Button>
-                      )}
-                    </Tooltip>
-                  )
-              )}
-              <Tooltip title={hidingEmpty ? `Show empty columns` : `Hide empty columns`} placement="top" arrow>
+              ))}
+            {/* Export as CSV button */}
+            {hasAnyExport && (
+              <Tooltip title="Export as CSV" placement="top" arrow>
                 <IconButton
-                  variant="soft"
-                  color={'primary'}
-                  onClick={() => (setHidingEmpty ? setHidingEmpty(!hidingEmpty) : undefined)}
-                  sx={theme => ({
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    width: theme.spacing(6),
-                    height: theme.spacing(6),
-                    minWidth: theme.spacing(6),
-                    padding: theme.spacing(0.5),
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)'
+                  onClick={async () => {
+                    if (handleExport) {
+                      setOpenExportModal(true);
+                    } else if (handleExportCSV) {
+                      await handleExportCSV();
+                    } else {
+                      await handleExportAll!();
                     }
-                  })}
-                  aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
+                  }}
+                  variant="soft"
+                  color="primary"
+                  aria-label="Export as CSV"
                 >
-                  {hidingEmpty ? <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} /> : <UnfoldMore sx={{ transform: 'rotate(90deg)' }} />}
+                  <CloudDownloadIcon />
                 </IconButton>
               </Tooltip>
-            </Stack>
-          </Box>
+            )}
+            {/* Show/Hide empty columns button */}
+            {setHidingEmpty && (
+              <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
+                <IconButton
+                  onClick={() => setHidingEmpty(!hidingEmpty)}
+                  variant="soft"
+                  color="primary"
+                  aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
+                >
+                  {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
+                </IconButton>
+              </Tooltip>
+            )}
+            {/* Kebab menu for additional actions */}
+            <Dropdown>
+              <Tooltip title="More actions" placement="top" arrow>
+                <MenuButton
+                  slots={{ root: Button }}
+                  slotProps={{
+                    root: {
+                      variant: 'soft',
+                      color: 'primary',
+                      size: 'sm',
+                      'aria-label': 'More actions',
+                      startDecorator: <MoreVert />
+                    }
+                  }}
+                >
+                  More
+                </MenuButton>
+              </Tooltip>
+              <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
+                {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+                {dynamicButtons
+                  .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
+                  .map(
+                    (button: any, index: number) =>
+                      button.tooltip && (
+                        <MenuItem key={index} onClick={button.onClick}>
+                          <ListItemDecorator>{button.icon}</ListItemDecorator>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                            <Typography level="body-sm">{button.label}</Typography>
+                            <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
+                              {button.tooltip}
+                            </Typography>
+                          </Box>
+                          {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
+                        </MenuItem>
+                      )
+                  )}
+                {validationMenu && (
+                  <Box>
+                    <Divider />
+                    {validationMenu}
+                  </Box>
+                )}
+              </Menu>
+            </Dropdown>
+          </Stack>
         </Box>
         {handleExport && (
           <Modal

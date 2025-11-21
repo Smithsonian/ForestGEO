@@ -116,7 +116,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
             gap: 2,
             p: 2,
             borderRadius: 'lg',
-            background: theme => `linear-gradient(135deg, ${theme.palette.warning.softBg} 0%, ${theme.palette.warning[50]} 100%)`,
+            bgcolor: 'warning.softBg',
             border: theme => `2px solid ${theme.palette.warning[200]}`,
             boxShadow: theme => `0 4px 12px ${theme.palette.warning.softBg}`
           }}

@@ -146,7 +146,7 @@ jobs:
             -u "$DB_USER" \
             -p"$DB_PASS" \
             -D "$DB_NAME" \
-            -e "SELECT Email FROM catalog.users WHERE IsAdmin IS TRUE;" \
+            -e "SELECT Email FROM catalog.users WHERE Notifications IS TRUE;" \
             | paste -sd "," -)
           echo "emails=$EMAILS" >> $GITHUB_OUTPUT
 

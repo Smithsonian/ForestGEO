@@ -76,10 +76,25 @@ export const GlobalLoadingIndicator: React.FC = () => {
   if (!isLoading) return null;
 
   // Calculate operation durations
-  const operationsWithDuration = activeOperations.map(op => ({
-    ...op,
-    duration: Math.floor((currentTime - op.startTime) / 1000)
-  }));
+  // CRITICAL FIX: Ensure both timestamps are in milliseconds and handle edge cases
+  const operationsWithDuration = activeOperations.map(op => {
+    const start = typeof op.startTime === 'number' ? op.startTime : Date.now();
+    const duration = Math.floor((currentTime - start) / 1000);
+
+    // If duration is negative or unreasonably large (>10 minutes), reset the operation
+    if (duration < 0 || duration > 600) {
+      return {
+        ...op,
+        duration: 0,
+        startTime: currentTime // Reset to current time to fix timestamp issues
+      };
+    }
+
+    return {
+      ...op,
+      duration
+    };
+  });
 
   const gradients = randomColors.map((color, index, arr) => {
     const nextColor = arr[(index + 1) % arr.length];
@@ -230,7 +245,7 @@ export const GlobalLoadingIndicator: React.FC = () => {
         <Typography
           level="body-xs"
           sx={{
-            color: 'rgba(255, 255, 255, 0.6)',
+            color: 'rgba(255, 255, 255, 0.8)',
             marginTop: 3,
             textAlign: 'center',
             fontStyle: 'italic'

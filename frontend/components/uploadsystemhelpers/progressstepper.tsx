@@ -81,7 +81,7 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
           [`& .${stepIndicatorClasses.root}`]: {
             borderColor: 'primary.400',
             color: 'primary.400',
-            background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[100]} 100%)`,
+            bgcolor: 'primary.softBg',
             boxShadow: theme => `0 4px 12px ${theme.palette.primary.softBg}`
           },
           '&::after': {

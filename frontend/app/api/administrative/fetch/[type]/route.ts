@@ -67,8 +67,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
   const newUserSites = newRow.userSites;
   const { notifications: oldNotifications, userSites: _, ...oldRowRemaining } = oldRow;
   const { notifications: newNotifications, userSites: __, ...newRowRemaining } = newRow;
-  oldRowRemaining.isAdmin = oldNotifications;
-  newRowRemaining.isAdmin = newNotifications;
+  oldRowRemaining.notifications = oldNotifications;
+  newRowRemaining.notifications = newNotifications;
   const mappedOldRow = MapperFactory.getMapper<any, any>(type).demapData([oldRowRemaining])[0];
   const mappedNewRow = MapperFactory.getMapper<any, any>(type).demapData([newRowRemaining])[0];
   let transactionID: string | undefined;

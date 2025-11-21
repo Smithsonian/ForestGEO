@@ -126,16 +126,21 @@ function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+// Escape wildcard characters for LIKE queries (Bug #2 fix)
+function escapeLikeWildcards(value: string): string {
+  return value.replace(/[%_\\]/g, '\\$&');
+}
+
 function buildCondition({ operator, column, value }: { operator: Operator; column: string; value?: number | string | string[] }): string {
   // SQL injection protection: validate and escape column name
   const safeColumn = safeEscapeId(column);
 
   switch (operator) {
     case 'contains':
-      // Use the value as provided since it already includes the % signs
-      return `${safeColumn} LIKE '%${escapeSql(value as string)}%'`;
+      // Escape SQL quotes first, then escape LIKE wildcards (Bug #2 fix)
+      return `${safeColumn} LIKE '%${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
     case 'doesNotContain':
-      return `${safeColumn} NOT LIKE '%${escapeSql(value as string)}%'`;
+      return `${safeColumn} NOT LIKE '%${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
     case 'equals':
     case 'is':
     case '=':
@@ -145,9 +150,9 @@ function buildCondition({ operator, column, value }: { operator: Operator; colum
     case '!=':
       return `${safeColumn} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'startsWith':
-      return `${safeColumn} LIKE '${escapeSql(value as string)}%'`;
+      return `${safeColumn} LIKE '${escapeLikeWildcards(escapeSql(value as string))}%' ESCAPE '\\\\'`;
     case 'endsWith':
-      return `${safeColumn} LIKE '%${escapeSql(value as string)}'`;
+      return `${safeColumn} LIKE '%${escapeLikeWildcards(escapeSql(value as string))}' ESCAPE '\\\\'`;
     case 'isAfter':
     case '>':
       return `${safeColumn} > ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
@@ -180,14 +185,31 @@ export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: strin
     return '';
   }
 
-  return filterModel.items
+  // Bug #5 fix: Filter out incomplete items and empty conditions to prevent malformed SQL
+  const conditions = filterModel.items
     .map((item: GridFilterItem) => {
       const { field, operator, value } = item;
-      if (!field || !operator || !value) return '';
+      // Skip items with missing required fields
+      if (!field || !operator) return null;
+      // For isEmpty/isNotEmpty operators, value is not required
+      if (operator !== 'isEmpty' && operator !== 'isNotEmpty' && (value === undefined || value === null || value === '')) {
+        return null;
+      }
       const aliasedField = `${alias ? `${alias}.` : ''}${capitalizeAndTransformField(field)}`;
-      return buildCondition({ operator: operator as Operator, column: aliasedField, value });
+      try {
+        return buildCondition({ operator: operator as Operator, column: aliasedField, value });
+      } catch {
+        // If buildCondition throws (e.g., unsupported operator), skip this item
+        return null;
+      }
     })
-    .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
+    .filter((condition): condition is string => condition !== null && condition !== '');
+
+  if (conditions.length === 0) {
+    return '';
+  }
+
+  return conditions.join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
 };
 
 export const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {

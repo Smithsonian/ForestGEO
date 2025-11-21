@@ -159,33 +159,30 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
               JOIN ${schema}.quadrats q on q.QuadratID = st.QuadratID and q.IsActive is true
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
               JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
-              WHERE p.PlotID = ? AND cm.CensusID = ? ${
-                filterModel.visible.length > 0
-                  ? ` AND (${filterModel.visible
-                      .map((v: string) => {
-                        switch (v) {
-                          case 'valid':
-                            return `cm.IsValidated = TRUE`;
-                          case 'errors':
-                            return `cm.IsValidated = FALSE`;
-                          case 'pending':
-                            return `cm.IsValidated IS NULL`;
-                          default:
-                            return null;
-                        }
-                      })
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ''
-              } 
-              ${
-                filterModel.tss.length > 0
-                  ? ` AND (${filterModel.tss
-                      .map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ``
-              } 
+              WHERE p.PlotID = ? AND cm.CensusID = ? ${(() => {
+                const visibleConditions = filterModel.visible
+                  .map((v: string) => {
+                    switch (v) {
+                      case 'valid':
+                        return `cm.IsValidated = TRUE`;
+                      case 'errors':
+                        return `cm.IsValidated = FALSE`;
+                      case 'pending':
+                        return `cm.IsValidated IS NULL`;
+                      default:
+                        return null;
+                    }
+                  })
+                  .filter(Boolean);
+                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
+              })()} 
+              ${(() => {
+                // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
+                const validTss = filterModel.tss.filter((tss: any) => ['multi stem', 'old tree', 'new recruit'].includes(tss));
+                return validTss.length > 0
+                  ? ` AND (${validTss.map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
+                  : ``;
+              })()} 
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [censusID, plotID]);
         formMappedResults = results.map((row: any) => ({

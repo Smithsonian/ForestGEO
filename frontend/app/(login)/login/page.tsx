@@ -53,7 +53,7 @@ export default function LoginPage() {
         alignItems: 'center',
         minHeight: '100vh',
         width: '100%',
-        background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+        bgcolor: 'primary.softBg',
         '@keyframes pulse': {
           '0%, 100%': {
             opacity: 1,

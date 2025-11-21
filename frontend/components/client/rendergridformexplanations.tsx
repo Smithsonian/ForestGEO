@@ -66,7 +66,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
             aria-controls="grid-form-explanation-content"
             aria-describedby="accordion-help-text"
             sx={{
-              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              bgcolor: 'primary.softBg',
               borderRadius: 'md',
               transition: 'all 0.3s ease',
               '&:hover': {
@@ -105,7 +105,7 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                 p: 2,
                 mb: 2,
                 borderRadius: 'md',
-                background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+                bgcolor: 'success.softBg',
                 borderLeft: theme => `4px solid ${theme.palette.success[400]}`
               }}
             >

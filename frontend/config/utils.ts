@@ -236,7 +236,55 @@ export function transformSpecialCases(field: string): string {
   return field;
 }
 
+// Bug #6 fix: Explicit column name mapping for common filter fields
+// This ensures filter field names correctly map to database column names
+const columnNameMap: Record<string, string> = {
+  // Measurement fields
+  measuredDBH: 'MeasuredDBH',
+  measuredHOM: 'MeasuredHOM',
+  measurementDate: 'MeasurementDate',
+  // Stem fields
+  stemLocalX: 'StemLocalX',
+  stemLocalY: 'StemLocalY',
+  stemTag: 'StemTag',
+  stemGUID: 'StemGUID',
+  // Tree fields
+  treeTag: 'TreeTag',
+  treeID: 'TreeID',
+  // Quadrat fields
+  quadratID: 'QuadratID',
+  quadratName: 'QuadratName',
+  // Species fields
+  speciesCode: 'SpeciesCode',
+  speciesID: 'SpeciesID',
+  speciesName: 'SpeciesName',
+  // Census fields
+  censusID: 'CensusID',
+  plotCensusNumber: 'PlotCensusNumber',
+  // Plot fields
+  plotID: 'PlotID',
+  plotName: 'PlotName',
+  // Validation fields
+  isValidated: 'IsValidated',
+  // Core measurement fields
+  coreMeasurementID: 'CoreMeasurementID',
+  // Attributes
+  attributes: 'Attributes',
+  description: 'Description',
+  // Personnel
+  personnelID: 'PersonnelID',
+  firstName: 'FirstName',
+  lastName: 'LastName',
+  // User defined fields
+  userDefinedFields: 'UserDefinedFields'
+};
+
 export function capitalizeAndTransformField(field: string): string {
+  // First check explicit mapping
+  if (columnNameMap[field]) {
+    return columnNameMap[field];
+  }
+  // Fall back to original transformation logic
   const capitalized = capitalizeFirstLetter(field);
   return transformSpecialCases(capitalized);
 }

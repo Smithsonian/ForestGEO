@@ -206,71 +206,74 @@ export class ApiWrapper {
     const { startOperation, endOperation } = ApiWrapper.loadingContext;
     const operationId = startOperation(apiOptions.loadingMessage || 'Uploading file...', 'upload');
 
-    try {
-      return new Promise<Response>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+    // FIXED: Handle async completion properly - endOperation must be called inside Promise handlers
+    return new Promise<Response>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
 
-        if (onProgress) {
-          xhr.upload.addEventListener('progress', e => {
-            if (e.lengthComputable) {
-              const progress = Math.round((e.loaded / e.total) * 100);
-              onProgress(progress);
-            }
-          });
-        }
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            // Create a Response-like object
-            const response = new Response(xhr.responseText, {
-              status: xhr.status,
-              statusText: xhr.statusText
-            });
-            resolve(response);
-          } else {
-            reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', e => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 100);
+            onProgress(progress);
           }
         });
-
-        xhr.addEventListener('error', () => {
-          reject(new Error('Upload failed due to network error'));
-        });
-
-        xhr.addEventListener('timeout', () => {
-          reject(new Error('Upload timed out'));
-        });
-
-        xhr.open('POST', url);
-
-        // Set headers (don't set Content-Type for FormData, browser will set it with boundary)
-        Object.entries(headers).forEach(([key, value]) => {
-          xhr.setRequestHeader(key, value);
-        });
-
-        // Send file or FormData
-        const body =
-          file instanceof File
-            ? (() => {
-                const formData = new FormData();
-                formData.append('file', file);
-                return formData;
-              })()
-            : file;
-
-        xhr.send(body);
-      });
-    } catch (error) {
-      endOperation(operationId);
-
-      if (apiOptions.showErrorAlert !== false) {
-        const errorMsg = error instanceof Error ? error.message : 'Upload failed';
-        alert(`Upload failed: ${errorMsg}`);
       }
 
-      throw error;
-    } finally {
-      endOperation(operationId);
-    }
+      xhr.addEventListener('load', () => {
+        endOperation(operationId); // End operation on completion
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Create a Response-like object
+          const response = new Response(xhr.responseText, {
+            status: xhr.status,
+            statusText: xhr.statusText
+          });
+          resolve(response);
+        } else {
+          const error = new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`);
+          if (apiOptions.showErrorAlert !== false) {
+            alert(`Upload failed: ${error.message}`);
+          }
+          reject(error);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        endOperation(operationId); // End operation on error
+        const error = new Error('Upload failed due to network error');
+        if (apiOptions.showErrorAlert !== false) {
+          alert(`Upload failed: ${error.message}`);
+        }
+        reject(error);
+      });
+
+      xhr.addEventListener('timeout', () => {
+        endOperation(operationId); // End operation on timeout
+        const error = new Error('Upload timed out');
+        if (apiOptions.showErrorAlert !== false) {
+          alert(`Upload failed: ${error.message}`);
+        }
+        reject(error);
+      });
+
+      xhr.open('POST', url);
+
+      // Set headers (don't set Content-Type for FormData, browser will set it with boundary)
+      Object.entries(headers).forEach(([key, value]) => {
+        xhr.setRequestHeader(key, value);
+      });
+
+      // Send file or FormData
+      const body =
+        file instanceof File
+          ? (() => {
+              const formData = new FormData();
+              formData.append('file', file);
+              return formData;
+            })()
+          : file;
+
+      xhr.send(body);
+    });
   }
 
   /**

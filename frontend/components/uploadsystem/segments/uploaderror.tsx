@@ -175,7 +175,7 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
               sx={{
                 p: 2,
                 borderRadius: 'md',
-                background: theme => `linear-gradient(135deg, ${theme.palette.warning.softBg} 0%, ${theme.palette.warning[50]} 100%)`,
+                bgcolor: 'warning.softBg',
                 borderLeft: theme => `3px solid ${theme.palette.warning[500]}`
               }}
             >

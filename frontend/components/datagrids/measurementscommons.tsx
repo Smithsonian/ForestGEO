@@ -76,12 +76,13 @@ import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ValidationCore from '@/components/client/validationcore';
-import { ArrowRightAlt, CallSplit, CloudSync, Forest, GppGoodOutlined, Grass, SettingsBackupRestoreRounded } from '@mui/icons-material';
+import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { debounce, EditToolbar } from '../client/datagridelements';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
+import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -326,13 +327,30 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         );
 
         try {
-          const { items, ...rest } = filterModel;
+          // Filter to only include valid, complete filter items (Bug #1 fix)
+          const validItems =
+            filterModel.items?.filter(item => {
+              // Field and operator are always required
+              if (!item.field || item.field === '' || !item.operator || item.operator === '') {
+                return false;
+              }
+              // isEmpty/isNotEmpty operators don't require a value
+              if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
+                return true;
+              }
+              // All other operators require a value
+              return item.value !== undefined && item.value !== null && item.value !== '';
+            }) ?? [];
+
+          const sanitizedFilterModel = {
+            ...filterModel,
+            items: validItems
+          };
+
           const response = await fetch(paginatedQuery, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: filterModel.items.every(item => item.value && item.operator && item.field && item.operator !== '' && item.field !== '')
-              ? JSON.stringify({ filterModel })
-              : JSON.stringify({ filterModel: rest })
+            body: JSON.stringify({ filterModel: sanitizedFilterModel })
           });
 
           const data = await response.json();
@@ -1375,22 +1393,27 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 filterModel: filterModel,
                 gridColumns: gridColumns,
                 gridType: FormType.measurements,
-                dynamicButtons: [
-                  ...dynamicButtons,
-                  { label: 'Run Validations', tooltip: 'Re-trigger validation queries', onClick: () => setIsValidationModalOpen(true), icon: <CloudSync /> },
-                  {
-                    label: 'Override Failed Validations?',
-                    tooltip: 'Forcibly update all validation results to PASSED',
-                    onClick: () => setIsValidationOverrideModalOpen(true),
-                    icon: <GppGoodOutlined />
-                  },
-                  {
-                    label: 'Reset Validation Results?',
-                    tooltip: 'Delete all validation results and set all rows to PENDING',
-                    onClick: () => setIsResetValidationModalOpen(true),
-                    icon: <SettingsBackupRestoreRounded />
-                  }
-                ],
+                dynamicButtons: dynamicButtons,
+                validationMenu: (
+                  <ValidationActionsMenu
+                    onRunValidations={() => setIsValidationModalOpen(true)}
+                    onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
+                    onResetValidations={() => setIsResetValidationModalOpen(true)}
+                    onRefreshView={async () => {
+                      setLoading(true, 'Refreshing Measurements Summary View...');
+                      try {
+                        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+                        if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                      } finally {
+                        setLoading(false);
+                        setRefresh(true);
+                      }
+                    }}
+                    pendingCount={pendingCount}
+                    errorCount={errorCount}
+                  />
+                ),
                 errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: errorCount },
                 validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
                 pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },

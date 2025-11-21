@@ -236,6 +236,37 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
     };
   }, []);
 
+  // Periodic cleanup of stale operations (catches any that slip through)
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      const maxAge = 2 * 60 * 1000; // 2 minutes max age for any operation
+
+      setActiveOperations(prev => {
+        const validOperations = prev.filter(op => {
+          const age = now - op.startTime;
+          // Remove operations older than maxAge or with invalid timestamps
+          if (age > maxAge || age < 0 || !op.startTime) {
+            console.warn(`Cleaning up stale operation: ${op.id} (${op.message}), age: ${age}ms`);
+            // Also clear any associated timeout
+            const timeoutId = operationTimeoutRefs.current.get(op.id);
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              operationTimeoutRefs.current.delete(op.id);
+            }
+            return false;
+          }
+          return true;
+        });
+
+        // Only update if something was removed
+        return validOperations.length === prev.length ? prev : validOperations;
+      });
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
+
   const contextValue: LoadingContextType = {
     isLoading,
     loadingMessage,

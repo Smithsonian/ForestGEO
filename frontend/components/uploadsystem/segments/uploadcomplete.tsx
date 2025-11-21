@@ -162,7 +162,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             sx={{
               p: 3,
               borderRadius: 'lg',
-              background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+              bgcolor: 'success.softBg',
               boxShadow: theme => `0 8px 24px ${theme.palette.success.softBg}`,
               mb: 4,
               animation: 'pulse 2s ease-in-out infinite'
@@ -187,7 +187,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               width: '100%',
               p: 3,
               borderRadius: 'md',
-              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              bgcolor: 'primary.softBg',
               borderLeft: theme => `4px solid ${theme.palette.primary[400]}`,
               mb: 2
             }}
@@ -223,7 +223,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               width: '100%',
               p: 3,
               borderRadius: 'md',
-              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              bgcolor: 'primary.softBg',
               borderLeft: theme => `4px solid ${theme.palette.primary[400]}`,
               mb: 2
             }}
@@ -259,7 +259,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               width: '100%',
               p: 3,
               borderRadius: 'md',
-              background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+              bgcolor: 'primary.softBg',
               borderLeft: theme => `4px solid ${theme.palette.primary[400]}`
             }}
           >
@@ -305,7 +305,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             sx={{
               p: 3,
               borderRadius: 'lg',
-              background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+              bgcolor: 'success.softBg',
               boxShadow: theme => `0 12px 32px ${theme.palette.success.softBg}`,
               mb: 3,
               textAlign: 'center'

@@ -101,7 +101,6 @@ export default function EmptyState({ icon, title, description, primaryAction, se
           margin: '0 auto',
           mb: 3,
           fontSize: '2.5rem',
-          background: theme => `linear-gradient(135deg, ${theme.palette[iconColor].softBg} 0%, ${theme.palette[iconColor][100]} 100%)`,
           boxShadow: theme => `0 8px 24px ${theme.palette[iconColor].softBg}`,
           animation: 'pulse 2s ease-in-out infinite',
           '@keyframes pulse': {
@@ -136,13 +135,13 @@ export default function EmptyState({ icon, title, description, primaryAction, se
 
       <Typography
         level="body-md"
-        color="neutral"
         sx={{
           mb: 3,
           maxWidth: '500px',
           mx: 'auto',
           lineHeight: 1.6,
-          animation: 'fadeIn 0.8s ease-out'
+          animation: 'fadeIn 0.8s ease-out',
+          color: 'neutral.200' // Force accessible color: #e7e5e4 - 9.6:1 contrast on black
         }}
       >
         {description}

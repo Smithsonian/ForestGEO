@@ -55,7 +55,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           width: 'fit-content',
           p: 4,
           borderRadius: 'lg',
-          background: theme => `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, ${theme.palette.primary[50]} 100%)`,
+          bgcolor: 'primary.softBg',
           boxShadow: theme => `0 8px 24px ${theme.palette.primary.softBg}`,
           animation: 'fadeIn 0.6s ease-out',
           minWidth: '400px'
@@ -81,7 +81,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               sx={{
                 p: 2,
                 borderRadius: 'md',
-                background: theme => `linear-gradient(135deg, ${theme.palette.success.softBg} 0%, ${theme.palette.success[50]} 100%)`,
+                bgcolor: 'success.softBg',
                 borderLeft: theme => `4px solid ${theme.palette.success[400]}`,
                 animation: 'slideIn 0.7s ease-out'
               }}

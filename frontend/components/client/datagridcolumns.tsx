@@ -614,6 +614,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     maxWidth: 100,
     editable: true,
     type: 'number',
+    filterOperators: customNumericOperators,
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
@@ -636,6 +637,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     flex: 0.5,
     editable: true,
     type: 'number',
+    filterOperators: customNumericOperators,
     valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
     preProcessEditCellProps: params => preprocessor(params)
   },
@@ -644,6 +646,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'HOM',
     flex: 0.5,
     editable: true,
+    type: 'number',
+    filterOperators: customNumericOperators,
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
