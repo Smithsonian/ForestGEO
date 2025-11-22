@@ -14,6 +14,26 @@ import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import crypto from 'crypto';
+
+/**
+ * Generate idempotency key for a batch of data
+ * This allows us to detect and skip duplicate submissions
+ */
+function generateIdempotencyKey(fileName: string, plotId: number, censusId: number, rowCount: number, firstRowHash: string): string {
+  return `${fileName}_${plotId}_${censusId}_${rowCount}_${firstRowHash}`;
+}
+
+/**
+ * Generate a hash of the first row for idempotency checking
+ */
+function hashFirstRow(fileRowSet: FileRowSet): string {
+  const rows = Object.values(fileRowSet);
+  if (rows.length === 0) return 'empty';
+  const firstRow = rows[0];
+  const data = JSON.stringify(firstRow);
+  return crypto.createHash('md5').update(data).digest('hex').substring(0, 8);
+}
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -74,6 +94,46 @@ export async function POST(request: NextRequest) {
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
+    const rowCount = Object.keys(fileRowSet ?? {}).length;
+    const firstRowHash = hashFirstRow(fileRowSet);
+    const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, firstRowHash);
+
+    // Check for existing batch with same idempotency key (duplicate submission detection)
+    try {
+      const existingBatchSQL = format(
+        `SELECT DISTINCT BatchID, COUNT(*) as count
+         FROM ??.temporarymeasurements
+         WHERE FileID = ? AND PlotID = ? AND CensusID = ?
+         GROUP BY BatchID
+         ORDER BY BatchID DESC
+         LIMIT 1`,
+        [schema]
+      );
+      const existingBatch = await connectionManager.executeQuery(existingBatchSQL, [fileName, plot?.plotID ?? -1, censusCookie]);
+
+      if (existingBatch.length > 0 && existingBatch[0].count === rowCount) {
+        // Duplicate detected - return existing batch info instead of re-inserting
+        ailogger.info(
+          `Duplicate submission detected for ${fileName} (idempotency key: ${idempotencyKey}). Returning existing batch ${existingBatch[0].BatchID}`
+        );
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: `Batch already exists - duplicate submission detected`,
+            failingRows: [],
+            insertedCount: existingBatch[0].count,
+            transactionCompleted: true,
+            batchID: existingBatch[0].BatchID,
+            isDuplicate: true,
+            idempotencyKey
+          }),
+          { status: HTTPResponses.OK }
+        );
+      }
+    } catch (dupCheckError: any) {
+      // Log but continue - better to potentially duplicate than to fail entirely
+      ailogger.warn(`Idempotency check failed for ${fileName}, proceeding with insert: ${dupCheckError.message}`);
+    }
+
     const batchID = generateShortBatchID();
     const placeholders = Object.values(fileRowSet ?? [])
       .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -151,7 +211,8 @@ export async function POST(request: NextRequest) {
             failingRows: Array.from(failingRows),
             insertedCount: countResult[0]?.count || 0,
             transactionCompleted: true,
-            batchID: batchID
+            batchID: batchID,
+            idempotencyKey
           }),
           { status: HTTPResponses.OK }
         );

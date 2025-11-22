@@ -96,14 +96,18 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         reasons.push('Quadrat invalid');
       }
 
-      if (row.x == null || row.x === 0 || row.x === -1) reasons.push('Missing X');
-      if (row.y == null || row.y === 0 || row.y === -1) reasons.push('Missing Y');
+      // Note: x === 0 and y === 0 are valid coordinates (origin point)
+      // Only flag as missing if null or -1 (sentinel value for missing data)
+      if (row.x == null || row.x === -1) reasons.push('Missing X');
+      if (row.y == null || row.y === -1) reasons.push('Missing Y');
 
       const hasCodes = !!row.codes?.trim();
-      if (!hasCodes && (row.dbh == null || row.dbh === 0 || row.dbh === -1)) {
+      // Note: DBH/HOM of 0 may be valid in some contexts
+      // Only flag as missing if null or -1 (sentinel value)
+      if (!hasCodes && (row.dbh == null || row.dbh === -1)) {
         reasons.push('Missing Codes and DBH');
       }
-      if (!hasCodes && (row.hom == null || row.hom === 0 || row.hom === -1)) {
+      if (!hasCodes && (row.hom == null || row.hom === -1)) {
         reasons.push('Missing Codes and HOM');
       }
 
@@ -165,7 +169,8 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
           }
         }
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Trigger refresh immediately - no arbitrary delay needed
+        // The database operations are already complete at this point
         setRefresh(true);
       } catch (error: any) {
         ailogger.error('Failed to save row:', error);

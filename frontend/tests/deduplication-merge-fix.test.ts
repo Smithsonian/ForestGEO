@@ -4,7 +4,7 @@
  * Tests the enhanced deduplication logic that merges information from duplicate
  * records instead of discarding it, resolving the record count discrepancy issue.
  *
- * Fix location: sqlscripting/ingestion_fixed_optimized.sql:114-155
+ * Fix location: sqlscripting/storedprocedures.sql (bulkingestionprocess procedure)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

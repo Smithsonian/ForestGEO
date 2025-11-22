@@ -206,20 +206,28 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     previousRefresh.current = refresh;
   }, [refresh, currentSite, handleRefresh, setRefresh]);
 
+  // Synchronize rowModesModel with current rows - uses functional update to avoid
+  // having rowModesModel in dependencies (which would cause potential infinite loops)
   useEffect(() => {
-    const updatedRowModesModel = rows.reduce((acc, row) => {
-      if (row.id) {
-        acc[row.id] = rowModesModel[row.id] || { mode: GridRowModes.View };
+    setRowModesModel(prevRowModesModel => {
+      // Build new model based on current rows, preserving existing modes
+      const updatedRowModesModel = rows.reduce((acc, row) => {
+        if (row.id) {
+          acc[row.id] = prevRowModesModel[row.id] || { mode: GridRowModes.View };
+        }
+        return acc;
+      }, {} as GridRowModesModel);
+
+      // Remove any entries with key '0' (invalid row IDs)
+      const cleanedRowModesModel = Object.fromEntries(Object.entries(updatedRowModesModel).filter(([key]) => key !== '0'));
+
+      // Only update if there's an actual change (prevents unnecessary re-renders)
+      if (JSON.stringify(cleanedRowModesModel) !== JSON.stringify(prevRowModesModel)) {
+        return cleanedRowModesModel;
       }
-      return acc;
-    }, {} as GridRowModesModel);
-
-    const cleanedRowModesModel = Object.fromEntries(Object.entries(updatedRowModesModel).filter(([key]) => key !== '0'));
-
-    if (JSON.stringify(cleanedRowModesModel) !== JSON.stringify(rowModesModel)) {
-      setRowModesModel(cleanedRowModesModel);
-    }
-  }, [rows, rowModesModel]);
+      return prevRowModesModel;
+    });
+  }, [rows]); // Only depend on rows - rowModesModel accessed via functional update
 
   const fetchFullData = useCallback(async () => {
     setLoading(true);

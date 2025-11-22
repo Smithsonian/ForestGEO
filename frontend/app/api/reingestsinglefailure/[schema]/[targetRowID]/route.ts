@@ -60,5 +60,12 @@ export async function GET(
       ailogger.error('Failed to run reviewfailed after error:', reviewError);
     }
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+  } finally {
+    // Always close connection to prevent connection leaks
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError: any) {
+      ailogger.error('Failed to close connection in reingestsinglefailure:', closeError);
+    }
   }
 }

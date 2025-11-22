@@ -186,11 +186,14 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   }, [open, fetchRecordCounts]);
 
   // Auto-close modal when all failed measurements have been resolved
+  // Note: Only auto-close when failedCount has been explicitly loaded (not null)
+  // and equals 0, to prevent premature closing during initial load
   useEffect(() => {
-    if (open && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
+    if (open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
       ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
       setReingested(true);
-      handleCloseModal();
+      // Use void to explicitly ignore the promise - the async close is fire-and-forget
+      void handleCloseModal();
     }
   }, [open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
 

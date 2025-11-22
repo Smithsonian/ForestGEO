@@ -8,6 +8,21 @@ import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+/**
+ * Helper to check if request was aborted (client disconnected)
+ */
+function isRequestAborted(request: NextRequest): boolean {
+  // Note: Next.js doesn't directly expose AbortSignal, but we can check request state
+  // The request object becomes unusable when client disconnects
+  try {
+    // Accessing headers after abort will throw
+    request.headers.get('x-check');
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export async function GET(
   request: NextRequest,
   props: {
@@ -18,6 +33,12 @@ export async function GET(
   const { fileID, batchID } = await props.params;
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // Get session ID from headers if provided (for tracking)
+  const sessionId = request.headers.get('x-upload-session-id');
+  if (sessionId) {
+    ailogger.info(`Processing batch ${fileID}-${batchID} for session ${sessionId}`);
   }
 
   // Validate schema to prevent SQL injection
@@ -36,6 +57,16 @@ export async function GET(
   let delay = 100;
 
   while (attempt <= maxAttempts) {
+    // Check if client disconnected before starting attempt
+    if (isRequestAborted(request)) {
+      ailogger.warn(`Client disconnected before attempt ${attempt} for ${fileID}-${batchID}`);
+      // Don't return error - just log and exit gracefully
+      // The batch will be handled by cleanup if needed
+      return new NextResponse(JSON.stringify({ error: 'Client disconnected', aborted: true }), {
+        status: 499 // Client Closed Request
+      });
+    }
+
     try {
       attempt++;
       const startTime = Date.now();

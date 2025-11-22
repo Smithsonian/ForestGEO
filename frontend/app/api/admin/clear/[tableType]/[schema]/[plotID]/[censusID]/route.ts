@@ -198,5 +198,12 @@ export async function GET(
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    // Always close connection to prevent connection leaks
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError: any) {
+      ailogger.error(`Error closing connection in admin/clear GET for ${tableType}:`, closeError);
+    }
   }
 }

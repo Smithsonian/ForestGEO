@@ -48,7 +48,7 @@ describe('SQL Stored Procedure Error 1093 Fix', () => {
     // This would be tested with actual SQL execution in a real database environment
     // For now, we verify the fix is syntactically correct by checking the file
 
-    cy.readFile('sqlscripting/ingestion_fixed_optimized.sql').then(content => {
+    cy.readFile('sqlscripting/storedprocedures.sql').then(content => {
       // Verify the fix is in place
       expect(content).to.include('CREATE TEMPORARY TABLE stem_crossid_mapping');
       expect(content).to.include('UPDATE stems s INNER JOIN stem_crossid_mapping scm');
@@ -60,7 +60,7 @@ describe('SQL Stored Procedure Error 1093 Fix', () => {
   });
 
   it('should include proper cleanup in error handlers', () => {
-    cy.readFile('sqlscripting/ingestion_fixed_optimized.sql').then(content => {
+    cy.readFile('sqlscripting/storedprocedures.sql').then(content => {
       // Verify cleanup includes the new temporary table
       expect(content).to.include('stem_crossid_mapping');
 
@@ -71,7 +71,7 @@ describe('SQL Stored Procedure Error 1093 Fix', () => {
   });
 
   it('should maintain all original functionality while fixing the error', () => {
-    cy.readFile('sqlscripting/ingestion_fixed_optimized.sql').then(content => {
+    cy.readFile('sqlscripting/storedprocedures.sql').then(content => {
       // Verify all essential procedure components are still there
       expect(content).to.include('PROCEDURE bulkingestionprocess');
       expect(content).to.include('CREATE TEMPORARY TABLE initial_dup_filter');

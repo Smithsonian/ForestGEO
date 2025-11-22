@@ -13,6 +13,7 @@ import { useSession } from 'next-auth/react';
 import { v4 } from 'uuid';
 import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
+import { useUploadSession } from '@/app/hooks/useUploadSession';
 // TransactionMonitor disabled due to architectural changes
 
 /**
@@ -46,6 +47,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+
+  // Session tracking for client disconnection handling
+  const {
+    sessionId: _sessionId,
+    createSession,
+    updateState,
+    completeSession,
+    cancelSession,
+    isSessionActive: _isSessionActive
+  } = useUploadSession({
+    schema,
+    plotId: currentPlot?.plotID ?? -1,
+    censusId: currentCensus?.dateRanges[0]?.censusID ?? -1
+  });
+
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [totalChunks, setTotalChunks] = useState(0);
@@ -823,6 +839,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           return;
         }
 
+        // Create upload session for tracking and cleanup on disconnection
+        // Note: We use the first file name as the fileId for simplicity
+        // The session tracks the overall upload, not individual files
+        const primaryFileName = acceptedFiles[0]?.name || 'unknown';
+        try {
+          await createSession(primaryFileName, acceptedFiles.length);
+          ailogger.info(`Upload session created for ${acceptedFiles.length} files, primary: ${primaryFileName}`);
+          // Transition to 'uploading' state now that we're about to start uploading
+          updateState('uploading').catch(err => {
+            ailogger.warn(`Failed to update session state to uploading: ${err.message}`);
+          });
+        } catch (sessionError: any) {
+          ailogger.warn(`Failed to create upload session (continuing anyway): ${sessionError.message}`);
+        }
+
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
         setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
@@ -965,6 +996,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         if (isMounted) {
           ailogger.info('Setting uploaded to true - processing should begin');
+          // Update session state to uploaded (ready for processing)
+          updateState('uploaded').catch(err => {
+            ailogger.warn(`Failed to update session state to uploaded: ${err.message}`);
+          });
           setUploaded(true);
         } else {
           ailogger.warn('Component unmounted before upload could complete');
@@ -988,16 +1023,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         ailogger.error('runUploads failed:', error);
+        // Cancel the session on error to allow cleanup
+        cancelSession().catch(cancelErr => {
+          ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
+        });
         setUploadError(error);
         setReviewState(ReviewStates.ERRORS);
       });
     }
     return () => {
-      // Only set isMounted to false if upload hasn't started yet
-      // This prevents the cleanup from interrupting an in-progress upload
-      if (!uploadStartedRef.current) {
-        isMounted = false;
-      }
+      // Set isMounted to false on cleanup to prevent state updates after unmount
+      // Note: The uploadStartedRef guard above ensures upload only starts once,
+      // and async operations check isMounted before updating state
+      isMounted = false;
     };
     // Empty dependency array - upload runs once on mount via uploadStartedRef guard
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1023,6 +1061,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       async function runProcessBatches() {
         setProcessedChunks(0);
         chunkProcessStartTime.current = performance.now();
+
+        // Update session state to processing
+        updateState('processing').catch(err => {
+          ailogger.warn(`Failed to update session state to processing: ${err.message}`);
+        });
+
         ailogger.info(
           `Setting up bulk processor for schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges[0].censusID}`
         );
@@ -1047,6 +1091,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setVerificationStep(0);
             setVerificationStatus('Starting data consolidation (no batches to process)...');
             ailogger.info('Starting collapser procedure (no batches)...');
+
+            // Update session state to collapsing
+            updateState('collapsing').catch(err => {
+              ailogger.warn(`Failed to update session state to collapsing: ${err.message}`);
+            });
 
             const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
               method: 'GET',
@@ -1073,6 +1122,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
 
           setIsVerifying(false);
+
+          // Note: completeSession() is called in the final useEffect when processed becomes true
           setProcessed(true);
           return; // Exit early - no batches to process
         }
@@ -1270,6 +1321,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Starting data consolidation (collapser procedure)...');
           ailogger.info('Starting collapser procedure...');
 
+          // Update session state to collapsing
+          updateState('collapsing').catch(err => {
+            ailogger.warn(`Failed to update session state to collapsing: ${err.message}`);
+          });
+
           const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
@@ -1301,6 +1357,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         setIsVerifying(false);
 
+        // Note: completeSession() is called in the final useEffect when processed becomes true
         setProcessed(true);
       }
 
@@ -1313,10 +1370,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           return;
         }
 
+        // Cancel the session on processing error to allow cleanup
+        cancelSession().catch(cancelErr => {
+          ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
+        });
+
         setUploadError(error);
         setReviewState(ReviewStates.ERRORS);
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- acceptedFiles, cancelSession, updateState intentionally excluded to prevent re-renders; batchProcessingStartedRef guards execution
   }, [
     uploaded,
     uploadForm,
@@ -1342,6 +1405,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setVerificationStep(0);
         setTotalVerificationSteps(0);
 
+        // Complete the upload session to stop heartbeat and mark as done
+        completeSession().catch((err: Error) => {
+          ailogger.warn(`Failed to complete upload session: ${err.message}`);
+        });
+
         hasUploaded.current = true;
         setReviewState(ReviewStates.VALIDATE);
         setIsDataUnsaved(false);
@@ -1353,6 +1421,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setVerificationStatus('Upload completed successfully');
         setVerificationStep(0);
         setTotalVerificationSteps(0);
+
+        // Complete the upload session to stop heartbeat and mark as done
+        completeSession().catch((err: Error) => {
+          ailogger.warn(`Failed to complete upload session: ${err.message}`);
+        });
 
         hasUploaded.current = true;
         setReviewState(ReviewStates.UPLOAD_AZURE);

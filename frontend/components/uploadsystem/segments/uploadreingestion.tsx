@@ -478,10 +478,14 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
     // Cleanup only on unmount - don't reset isMounted on re-renders
     // The guard at the top prevents re-initialization during re-renders
+    // NOTE: Do NOT reset batchProcessingStartedRef here - it could allow re-initialization
+    // on fast remount scenarios. The ref should only be reset when the parent component
+    // fully unmounts and remounts the upload system.
     return () => {
       ailogger.info('[REINGESTION CLEANUP] Component unmounting, setting isMounted = false');
       isMounted = false;
-      batchProcessingStartedRef.current = false;
+      // Removed: batchProcessingStartedRef.current = false;
+      // This was causing potential re-initialization issues on fast remounts
     };
     // Empty dependency array - only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps

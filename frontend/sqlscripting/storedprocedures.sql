@@ -213,6 +213,28 @@ END;
 create
     definer = azureroot@`%` procedure bulkingestioncollapser(IN vCensusID int)
 begin
+    DECLARE vErrorMessage TEXT DEFAULT '';
+    DECLARE vErrorCode VARCHAR(10) DEFAULT '';
+
+    -- Error handler with proper rollback for transaction atomicity
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        GET DIAGNOSTICS CONDITION 1
+            vErrorMessage = MESSAGE_TEXT,
+            vErrorCode = MYSQL_ERRNO;
+
+        -- Rollback any partial changes
+        ROLLBACK;
+
+        -- Clean up temporary tables
+        DROP TEMPORARY TABLE IF EXISTS missing_trees;
+
+        -- Re-signal the error for the application layer to handle
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = vErrorMessage;
+    END;
+
+    -- Start atomic transaction - all changes succeed or all fail together
+    START TRANSACTION;
 
     -- orphaned trees rows should be versioned per specifications -- only versions will be referenced later on!
     create temporary table if not exists missing_trees engine = memory as
@@ -223,8 +245,9 @@ begin
     update trees set CensusID = vCensusID where TreeID in (select TreeID from missing_trees);
     drop temporary table if exists missing_trees;
 
-    update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
-    update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
+    -- Scope NULL updates to the specific census for efficiency and atomicity
+    update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0 AND CensusID = vCensusID;
+    update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0 AND CensusID = vCensusID;
 
     -- Remove duplicates based on StemGUID and MeasurementDate
     DELETE cm1
@@ -249,6 +272,12 @@ begin
       AND cm1.CensusID = vCensusID
       AND t1.CensusID = vCensusID
       AND s1.CensusID = vCensusID;
+
+    -- Commit all changes atomically
+    COMMIT;
+
+    -- Return success message
+    SELECT CONCAT('Census ', vCensusID, ' collapsed successfully') as message;
 end;
 
 create
