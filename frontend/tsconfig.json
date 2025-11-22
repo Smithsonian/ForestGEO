@@ -28,5 +28,5 @@
     "types": ["cypress", "node"]
   },
   "include": ["types/next-auth.d.ts", "next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "build/types/**/*.ts", "**/*.sql", "**/*.d.ts"],
-  "exclude": ["node_modules", "cypress/**/*", "**/*.cy.ts", "**/*.cy.tsx", "**/*.cy.js"]
+  "exclude": ["node_modules", "docs/**/*", "cypress/**/*", "**/*.cy.ts", "**/*.cy.tsx", "**/*.cy.js"]
 }

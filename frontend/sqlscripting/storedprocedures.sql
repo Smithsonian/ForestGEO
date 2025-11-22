@@ -844,14 +844,17 @@ where cm.IsValidated is null and cm.IsActive is true
              join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
              join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive is true
              join (
-                 -- Find duplicate TreeTag+StemTag combinations within same census
-                 select t2.CensusID, t2.TreeTag, s2.StemTag
-                 from trees t2
-                 join stems s2 on t2.TreeID = s2.TreeID and t2.CensusID = s2.CensusID
-                 where t2.IsActive = true and s2.IsActive = true
-                 group by t2.CensusID, t2.TreeTag, s2.StemTag
-                 having count(distinct s2.StemGUID) > 1
-             ) as duplicates ON t.CensusID = duplicates.CensusID
+                 -- FIXED: Find duplicate TreeTag+StemTag combinations in COREMEASUREMENTS within same census
+                 -- Previous query looked at stems/trees tables which could flag single measurements
+                 -- if there were orphaned or inactive stem entries with the same tags
+                 select cm2.CensusID, t2.TreeTag, s2.StemTag
+                 from coremeasurements cm2
+                 join stems s2 on cm2.StemGUID = s2.StemGUID and cm2.CensusID = s2.CensusID
+                 join trees t2 on s2.TreeID = t2.TreeID and s2.CensusID = t2.CensusID
+                 where cm2.IsActive = true and s2.IsActive = true and t2.IsActive = true
+                 group by cm2.CensusID, t2.TreeTag, s2.StemTag
+                 having count(distinct cm2.CoreMeasurementID) > 1
+             ) as duplicates ON cm.CensusID = duplicates.CensusID
                             AND t.TreeTag = duplicates.TreeTag
                             AND s.StemTag = duplicates.StemTag
              left join cmverrors e

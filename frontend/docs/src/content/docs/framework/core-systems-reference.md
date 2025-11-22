@@ -10,9 +10,11 @@ This document provides a comprehensive reference of all core systems in the Fore
 ## System 1: Authentication & User Management
 
 ### Description
+
 Handles user authentication, session management, and access control.
 
 ### Features
+
 - OAuth-based authentication
 - Role-based access (Admin, Site User, Viewer)
 - Multi-site user assignment
@@ -20,6 +22,7 @@ Handles user authentication, session management, and access control.
 - Protected route middleware
 
 ### User-Facing Pages
+
 - `/login` - Login page
 
 ---
@@ -27,9 +30,11 @@ Handles user authentication, session management, and access control.
 ## System 2: Site/Plot/Census Context System
 
 ### Description
+
 Manages hierarchical data selection and global application state.
 
 ### Features
+
 - Site selection dropdown
 - Plot selection (filtered by site)
 - Census selection (filtered by plot)
@@ -37,6 +42,7 @@ Manages hierarchical data selection and global application state.
 - Context-aware data filtering
 
 ### Data Hierarchy
+
 ```
 Site → Plot → Census → (data filtered by selection)
 ```
@@ -46,9 +52,11 @@ Site → Plot → Census → (data filtered by selection)
 ## System 3: Dashboard & Metrics System
 
 ### Description
+
 Provides overview statistics and data health monitoring.
 
 ### Features
+
 - Census progress visualization
 - Stem statistics (old stems, multi-stems, new recruits)
 - Data validity status indicators
@@ -57,6 +65,7 @@ Provides overview statistics and data health monitoring.
 - Plot detail modals
 
 ### User-Facing Pages
+
 - `/dashboard` - Main dashboard
 
 ---
@@ -64,6 +73,7 @@ Provides overview statistics and data health monitoring.
 ## System 4: Data Upload System
 
 ### Description
+
 Multi-stage pipeline for uploading and processing measurement data.
 
 ### Upload Stages
@@ -81,6 +91,7 @@ Multi-stage pipeline for uploading and processing measurement data.
 | ERRORS                | Error handling        |
 
 ### Features
+
 - Drag-and-drop file upload
 - CSV/TSV/TXT support
 - Auto-delimiter detection
@@ -96,9 +107,11 @@ Multi-stage pipeline for uploading and processing measurement data.
 ## System 5: Validation System
 
 ### Description
+
 Automated data quality checking with configurable rules.
 
 ### Available Validations
+
 1. ValidateDBHGrowthExceedsMax
 2. ValidateDBHShrinkageExceedsMax
 3. ValidateFindAllInvalidSpeciesCodes
@@ -113,6 +126,7 @@ Automated data quality checking with configurable rules.
 12. ValidateScreenStemsWithMissingMeasurementsButLiveAttributes
 
 ### Features
+
 - Pre-ingestion format validation
 - Post-ingestion data quality validation
 - Configurable enable/disable per rule
@@ -121,6 +135,7 @@ Automated data quality checking with configurable rules.
 - Custom validation creation
 
 ### User-Facing Pages
+
 - `/measurementshub/validations` - Validation management
 
 ---
@@ -128,6 +143,7 @@ Automated data quality checking with configurable rules.
 ## System 6: Fixed Data Management
 
 ### Description
+
 CRUD operations for reference data (species, personnel, quadrats, attributes).
 
 ### Data Types
@@ -140,6 +156,7 @@ CRUD operations for reference data (species, personnel, quadrats, attributes).
 | Species    | `/fixeddatainput/alltaxonomies` |
 
 ### Features
+
 - Single-row isolated editing
 - Bulk data operations
 - Form validation
@@ -151,9 +168,11 @@ CRUD operations for reference data (species, personnel, quadrats, attributes).
 ## System 7: Measurements Data Management
 
 ### Description
+
 Core measurement record viewing, editing, and management.
 
 ### Features
+
 - View current census measurements
 - View historical data (all censuses)
 - Single-row inline editing
@@ -164,6 +183,7 @@ Core measurement record viewing, editing, and management.
 - Audit trail integration
 
 ### User-Facing Pages
+
 - `/measurementshub/summary` - Current data view
 - `/measurementshub/viewfulltable` - Historical data view
 
@@ -172,9 +192,11 @@ Core measurement record viewing, editing, and management.
 ## System 8: Failed Measurements System
 
 ### Description
+
 Tracking and recovery for measurements that failed processing.
 
 ### Features
+
 - View failed measurements with failure reasons
 - Edit failed records inline
 - Single-record reingestion
@@ -187,9 +209,11 @@ Tracking and recovery for measurements that failed processing.
 ## System 9: Audit Trail System
 
 ### Description
+
 Comprehensive change tracking and logging.
 
 ### Features
+
 - Track all data modifications
 - Before/after value recording
 - User attribution
@@ -198,6 +222,7 @@ Comprehensive change tracking and logging.
 - Export capabilities
 
 ### User-Facing Pages
+
 - `/measurementshub/recentchanges`
 
 ---
@@ -205,9 +230,11 @@ Comprehensive change tracking and logging.
 ## System 10: Administrative System
 
 ### Description
+
 User management, site management, and system administration.
 
 ### Features
+
 - User CRUD operations
 - Site management
 - User-to-site assignment
@@ -216,6 +243,7 @@ User management, site management, and system administration.
 - Data clearing and reset
 
 ### User-Facing Pages
+
 - `/admin/users`
 - `/admin/sites`
 - `/admin/userstosites`
@@ -225,9 +253,11 @@ User management, site management, and system administration.
 ## System 11: File Management System
 
 ### Description
+
 Uploaded file tracking and Azure Blob Storage integration.
 
 ### Features
+
 - File upload to Azure Blob Storage
 - File metadata tracking
 - File download
@@ -235,6 +265,7 @@ Uploaded file tracking and Azure Blob Storage integration.
 - Upload verification
 
 ### User-Facing Pages
+
 - `/measurementshub/uploadedfiles`
 
 ---
@@ -242,15 +273,18 @@ Uploaded file tracking and Azure Blob Storage integration.
 ## System 12: Post-Validation Statistics System
 
 ### Description
+
 Post-census analysis and statistical queries.
 
 ### Features
+
 - User-triggered analysis queries
 - Summary statistics
 - Expandable result display
 - Census quality metrics
 
 ### User-Facing Pages
+
 - `/measurementshub/postvalidation`
 
 ---
@@ -258,9 +292,11 @@ Post-census analysis and statistical queries.
 ## System 13: Feedback System
 
 ### Description
+
 GitHub issue integration for bug reports and feature requests.
 
 ### Features
+
 - In-app feedback submission
 - GitHub Issues integration
 - Bug report templates

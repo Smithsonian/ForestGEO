@@ -167,6 +167,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   // refs
   const hasUploaded = useRef(false);
+  const isMountedRef = useRef(true); // Tracks component mount state for async operations
   const totalCompletionTimeRef = useRef(0);
   const totalProcessCompletionTimeRef = useRef(0);
   const chunkStartTime = useRef(0);
@@ -826,7 +827,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
-    let isMounted = true;
+    // Use ref-based mount tracking to survive Fast Refresh during development
+    // This ensures async operations can safely check mount state even after HMR
+    isMountedRef.current = true;
 
     async function runUploads() {
       try {
@@ -933,7 +936,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         await waitForAllOperationsToComplete();
 
         // Start upload verification process with UI feedback
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(true);
           setTotalVerificationSteps(acceptedFiles.length + 1); // Files + final sync check
           setVerificationStep(0);
@@ -946,13 +949,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Additional verification: Check that data was actually inserted into the database
         try {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus('Verifying uploaded data integrity...');
           }
 
           for (let i = 0; i < acceptedFiles.length; i++) {
             const file = acceptedFiles[i];
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStep(i + 1);
               setVerificationStatus(`Verifying file ${i + 1} of ${acceptedFiles.length}: ${file.name}...`);
             }
@@ -973,13 +976,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await new Promise(resolve => setTimeout(resolve, 500));
           }
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(acceptedFiles.length + 1);
             setVerificationStatus('Upload verification completed successfully');
           }
           ailogger.info('All upload operations and database transactions verified successfully');
         } catch (verificationError: any) {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus(`Upload verification warning: ${verificationError.message}`);
           }
           ailogger.warn('Upload verification failed, but continuing:', verificationError.message);
@@ -990,11 +993,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.info('Final upload synchronization checkpoint...');
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(false);
         }
 
-        if (isMounted) {
+        if (isMountedRef.current) {
           ailogger.info('Setting uploaded to true - processing should begin');
           // Update session state to uploaded (ready for processing)
           updateState('uploaded').catch(err => {
@@ -1032,16 +1035,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       });
     }
     return () => {
-      // Set isMounted to false on cleanup to prevent state updates after unmount
+      // Set isMountedRef to false on cleanup to prevent state updates after unmount
       // Note: The uploadStartedRef guard above ensures upload only starts once,
-      // and async operations check isMounted before updating state
-      isMounted = false;
+      // and async operations check isMountedRef.current before updating state
+      // Using a ref instead of local variable survives Fast Refresh during development
+      isMountedRef.current = false;
     };
     // Empty dependency array - upload runs once on mount via uploadStartedRef guard
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    // The processing condition now relies on 'uploaded' being true, which is only set
+    // after all upload verification is complete. The totalChunks > 0 check ensures
+    // we had actual data to upload (prevents false triggers on initial mount).
+    // The completedChunks === totalChunks check is maintained as a safety measure.
+    const shouldProcess =
+      uploadForm === FormType.measurements &&
+      uploaded &&
+      !processed &&
+      totalChunks > 0 &&
+      completedChunks === totalChunks &&
+      !batchProcessingStartedRef.current;
+
     ailogger.info('Processing useEffect triggered', {
       uploadForm,
       uploaded,
@@ -1049,11 +1065,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       completedChunks,
       totalChunks,
       batchProcessingStarted: batchProcessingStartedRef.current,
-      willProcess: uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks && !batchProcessingStartedRef.current
+      willProcess: shouldProcess
     });
 
     // Guard to prevent batch processing from running multiple times
-    if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks && !batchProcessingStartedRef.current) {
+    if (shouldProcess) {
       batchProcessingStartedRef.current = true;
       queue.clear();
       ailogger.info('Starting batch processing phase (guarded by ref)');

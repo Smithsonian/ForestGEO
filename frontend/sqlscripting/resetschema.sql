@@ -23,6 +23,8 @@ truncate trees;
 truncate temporarymeasurements;
 truncate failedmeasurements;
 truncate unifiedchangelog;
+truncate uploadintegrityalerts;
+truncate uploadmetrics;
 # truncate validationchangelog;
 # truncate viewfulltable;
 set foreign_key_checks = 1;

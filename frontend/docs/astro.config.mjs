@@ -12,13 +12,11 @@ export default defineConfig({
       logo: {
         light: './src/assets/forestgeo-logo-light.svg',
         dark: './src/assets/forestgeo-logo-dark.svg',
-        replacesTitle: false,
+        replacesTitle: false
       },
-      social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/Smithsonian/ForestGEO' },
-      ],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Smithsonian/ForestGEO' }],
       editLink: {
-        baseUrl: 'https://github.com/Smithsonian/ForestGEO/edit/main/frontend/docs/',
+        baseUrl: 'https://github.com/Smithsonian/ForestGEO/edit/main/frontend/docs/'
       },
       customCss: ['./src/styles/custom.css'],
       sidebar: [
@@ -27,19 +25,19 @@ export default defineConfig({
           items: [
             { label: 'Getting Started', slug: 'getting-started' },
             { label: 'Navigation, Dashboard & Tools', slug: 'navigation-dashboard-tools' },
-            { label: 'Adding Historical Data', slug: 'adding-historical-data' },
-          ],
+            { label: 'Adding Historical Data', slug: 'adding-historical-data' }
+          ]
         },
         {
           label: 'Walking Through the Application',
           items: [
             { label: 'Upload Process Breakdown', slug: 'upload-process-breakdown' },
-            { label: 'Understanding SAPD Datagrids', slug: 'understanding-sapd-datagrids' },
-          ],
+            { label: 'Understanding SAPD Datagrids', slug: 'understanding-sapd-datagrids' }
+          ]
         },
         {
           label: 'Validations & Statistics',
-          slug: 'validations-statistics',
+          slug: 'validations-statistics'
         },
         {
           label: 'Error Guide & Troubleshooting',
@@ -50,8 +48,8 @@ export default defineConfig({
             { label: 'Failed Measurements Guide', slug: 'errors/failed-measurements-guide' },
             { label: 'Authentication Errors', slug: 'errors/authentication-errors' },
             { label: 'System Errors', slug: 'errors/system-errors' },
-            { label: 'Error FAQ', slug: 'errors/error-faq' },
-          ],
+            { label: 'Error FAQ', slug: 'errors/error-faq' }
+          ]
         },
         {
           label: 'Documentation Framework',
@@ -62,22 +60,22 @@ export default defineConfig({
             { label: 'Glossary of Terms', slug: 'framework/glossary-of-terms' },
             { label: 'Process Flows Reference', slug: 'framework/process-flows-reference' },
             { label: 'Non-Technical User Guide', slug: 'framework/non-technical-user-guide-outline' },
-            { label: 'Core Systems Reference', slug: 'framework/core-systems-reference' },
-          ],
-        },
+            { label: 'Core Systems Reference', slug: 'framework/core-systems-reference' }
+          ]
+        }
       ],
       head: [
         {
           tag: 'meta',
           attrs: {
             name: 'description',
-            content: 'Documentation for the ForestGEO Data Processing Application',
-          },
-        },
+            content: 'Documentation for the ForestGEO Data Processing Application'
+          }
+        }
       ],
       lastUpdated: true,
       pagination: true,
-      tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
-    }),
-  ],
+      tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 }
+    })
+  ]
 });

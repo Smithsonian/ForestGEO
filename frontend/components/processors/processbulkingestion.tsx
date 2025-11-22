@@ -107,6 +107,7 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     await connectionManager.executeQuery(removeTreeStemTagDuplicates, [censusID, censusID, censusID]);
 
     // Clear duplicate validation errors after deduplication (ValidationID 5 is the duplicate tree/stem tag validation)
+    // FIXED: Now checks for actual duplicate coremeasurements, not duplicate stems/trees entries
     const clearDuplicateValidationErrors = `
       DELETE e
       FROM ${schema}.cmverrors e
@@ -118,13 +119,15 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
         JOIN ${schema}.stems s ON cm2.StemGUID = s.StemGUID AND c.CensusID = s.CensusID AND s.IsActive = true
         JOIN ${schema}.trees t ON s.TreeID = t.TreeID AND c.CensusID = t.CensusID AND t.IsActive = true
         JOIN (
-          SELECT t2.CensusID, t2.TreeTag, s2.StemTag
-          FROM ${schema}.trees t2
-          JOIN ${schema}.stems s2 ON t2.TreeID = s2.TreeID AND t2.CensusID = s2.CensusID
-          WHERE t2.IsActive = true AND s2.IsActive = true
-          GROUP BY t2.CensusID, t2.TreeTag, s2.StemTag
-          HAVING count(distinct s2.StemGUID) > 1
-        ) AS duplicates ON t.CensusID = duplicates.CensusID
+          -- Find duplicate TreeTag+StemTag combinations in COREMEASUREMENTS
+          SELECT cm3.CensusID, t2.TreeTag, s2.StemTag
+          FROM ${schema}.coremeasurements cm3
+          JOIN ${schema}.stems s2 ON cm3.StemGUID = s2.StemGUID AND cm3.CensusID = s2.CensusID
+          JOIN ${schema}.trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+          WHERE cm3.IsActive = true AND s2.IsActive = true AND t2.IsActive = true
+          GROUP BY cm3.CensusID, t2.TreeTag, s2.StemTag
+          HAVING count(distinct cm3.CoreMeasurementID) > 1
+        ) AS duplicates ON cm2.CensusID = duplicates.CensusID
                        AND t.TreeTag = duplicates.TreeTag
                        AND s.StemTag = duplicates.StemTag
         WHERE cm2.CensusID = ?

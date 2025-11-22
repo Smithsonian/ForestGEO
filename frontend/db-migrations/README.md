@@ -1,8 +1,67 @@
-# ForestGEO Database Migration Guide
+# ForestGEO Database Migration & Site Provisioning Guide
 
 ## Overview
 
-This directory contains SQL migration scripts to migrate data from the denormalized `stable_mpala.viewfulltable` to the normalized `forestgeo_testing` schema.
+This directory contains SQL migration scripts and automated provisioning tools to:
+1. Migrate data from denormalized `viewfulltable` schemas to normalized ForestGEO schemas
+2. Create new site schemas from historical MySQL dump files
+3. Register sites in the catalog for application access
+
+---
+
+## NEW: Automated Site Provisioning System
+
+For creating new sites from MySQL dump files, use the automated provisioning system:
+
+### Quick Start (Shell Script)
+
+```bash
+# Basic migration (run from db-migrations directory)
+./provision_new_site.sh \
+  --source-schema stable_newsite \
+  --target-schema forestgeo_newsite \
+  --site-name "New Site Name"
+
+# With user assignment and schema reset
+./provision_new_site.sh \
+  --source-schema stable_newsite \
+  --target-schema forestgeo_newsite \
+  --site-name "New Site Name" \
+  --user-email admin@example.com \
+  --reset-if-exists
+```
+
+### Quick Start (API - for Admin UI)
+
+```bash
+# 1. Upload dump file
+curl -X POST -F "dumpFile=@/path/to/dump.sql" -F "siteName=New Site" \
+  /api/admin/provision/upload
+
+# 2. Start migration
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"sourceSchema":"stable_new_site","targetSchema":"forestgeo_new_site","siteName":"New Site"}' \
+  /api/admin/provision
+
+# 3. Monitor progress
+curl /api/admin/provision?migrationId=migration_xxx
+```
+
+### Key Features
+
+- **15 Checkpoints**: Progress is saved after each step
+- **Resume on Failure**: Use `--resume` to continue failed migrations
+- **Rollback Support**: Return to any previous checkpoint
+- **Automatic Catalog Registration**: Sites are registered in `catalog.sites`
+- **User Assignment**: Optionally assign sites to users
+
+See the **Automated Site Provisioning** section below for full details.
+
+---
+
+## Legacy Manual Migration
+
+This section covers the original SQL migration scripts for manual data migration from `stable_mpala.viewfulltable` to `forestgeo_testing` schema.
 
 ## Source Data
 
@@ -336,3 +395,160 @@ family (FamilyID)
 ## License & Credits
 
 Created for the ForestGEO project to migrate Mpala plot data from legacy schema to normalized schema.
+
+---
+
+## Automated Site Provisioning System (Full Documentation)
+
+### Overview
+
+The `provision_new_site.sh` script automates the complete site creation process:
+
+1. Load dump file into source schema (`stable_<sitename>`)
+2. Create target schema (`forestgeo_<sitename>`)
+3. Deploy table structures, stored procedures, validations
+4. Migrate data through 15 checkpoints
+5. Register in catalog and assign user access
+6. Validate migration success
+
+### Checkpoint System
+
+| Step | Checkpoint | Description |
+|------|------------|-------------|
+| 1 | `01_create_mapping_tables` | Creates ID mapping tables |
+| 2 | `02_migrate_plots` | Migrates plot data |
+| 3 | `03_migrate_quadrats` | Migrates quadrat definitions |
+| 4 | `04_migrate_taxonomy` | Migrates family/genus/species |
+| 5 | `05_migrate_census` | Migrates census periods |
+| 6 | `06_migrate_trees` | Migrates tree records |
+| 7 | `07_migrate_stems` | Migrates stem records |
+| 8 | `08_migrate_coremeasurements` | Migrates measurements |
+| 9 | `09_migrate_attributes` | Migrates attributes |
+| 10 | `10_cleanup` | Removes mapping tables |
+| 11 | `11_deploy_procedures` | Deploys stored procedures |
+| 12 | `12_deploy_validations` | Deploys validation queries |
+| 13 | `13_register_catalog` | Registers in catalog.sites |
+| 14 | `14_refresh_views` | Refreshes materialized views |
+| 15 | `15_final_validation` | Validates migration success |
+
+### Shell Script Usage
+
+```bash
+./provision_new_site.sh [OPTIONS]
+
+Required:
+  --source-schema NAME    Source schema (e.g., stable_newsite)
+  --target-schema NAME    Target schema (e.g., forestgeo_newsite)
+  --site-name NAME        Display name for the site
+
+Optional:
+  --user-email EMAIL      Assign site access to user
+  --reset-if-exists       Reset target if it exists
+  --skip-cleanup          Keep mapping tables
+  --resume                Resume from last checkpoint
+  --rollback CHECKPOINT   Rollback to checkpoint
+  --list-checkpoints      Show all checkpoints
+  --help                  Show help
+```
+
+### Failure Recovery
+
+```bash
+# Resume after failure
+./provision_new_site.sh --source-schema stable_x --target-schema forestgeo_x \
+  --site-name "Site X" --resume
+
+# Rollback to specific checkpoint
+./provision_new_site.sh --source-schema stable_x --target-schema forestgeo_x \
+  --site-name "Site X" --rollback 05_migrate_census
+```
+
+### API Endpoints
+
+#### POST /api/admin/provision/upload
+Upload MySQL dump file.
+
+**Request:** `multipart/form-data` with `dumpFile` and `siteName`
+
+**Response:**
+```json
+{
+  "success": true,
+  "sourceSchema": "stable_new_site",
+  "targetSchema": "forestgeo_new_site",
+  "tablesFound": ["viewfulltable", "stem", ...],
+  "rowCounts": {"viewfulltable": 50000}
+}
+```
+
+#### POST /api/admin/provision
+Start migration.
+
+**Request:**
+```json
+{
+  "sourceSchema": "stable_new_site",
+  "targetSchema": "forestgeo_new_site",
+  "siteName": "New Site",
+  "userEmail": "admin@example.com",
+  "resetIfExists": true
+}
+```
+
+#### GET /api/admin/provision?migrationId=XXX
+Check migration status.
+
+**Response:**
+```json
+{
+  "migrationId": "migration_xxx",
+  "status": "running",
+  "currentCheckpoint": "07_migrate_stems",
+  "progress": 7,
+  "totalSteps": 15
+}
+```
+
+#### PUT /api/admin/provision
+Resume or cancel migration.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_SQL_SERVER` | forestgeo-mysqldataserver... | Database host |
+| `AZURE_SQL_USER` | azureroot | Database user |
+| `AZURE_SQL_PASSWORD` | (required) | Database password |
+| `AZURE_SQL_PORT` | 3306 | Database port |
+
+### Directory Structure
+
+```
+frontend/
+├── db-migrations/
+│   ├── provision_new_site.sh    # Main script
+│   ├── 01-10_*.sql              # Migration scripts
+│   └── .checkpoints/            # Checkpoint state
+├── sqlscripting/
+│   ├── tablestructures.sql      # Schema definitions
+│   ├── storedprocedures.sql     # Stored procedures
+│   └── corequeries.sql          # Validations
+├── app/api/admin/provision/
+│   ├── route.ts                 # Main API
+│   └── upload/route.ts          # Upload API
+└── logs/migrations/             # Migration logs
+```
+
+### Source Data Requirements
+
+The source schema must contain `viewfulltable` with these key columns:
+- `TreeID`, `StemID`, `TreeTag`, `StemTag`
+- `SpeciesCode`, `CensusID`, `QuadratID`
+- `DBH`, `HOM`, `ExactDate`
+- `Status`, `ListOfTSM`
+
+Supporting tables (optional but recommended):
+- `stem` - For accurate coordinates
+- `dbh` - For measurement dates
+- `census` - For date ranges
+- `tsmattributes` - For attribute definitions

@@ -41,6 +41,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   const totalProcessCompletionTimeRef = useRef(0);
   const chunkProcessStartTime = useRef(0);
   const batchProcessingStartedRef = useRef<boolean>(false);
+  // Use a ref for isMounted to survive React 18 Strict Mode's double-effect execution
+  const isMountedRef = useRef<boolean>(true);
 
   const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();
@@ -165,6 +167,12 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   }, [processed, processedChunks, totalBatches]);
 
   useEffect(() => {
+    // ALWAYS reset isMountedRef to true on mount, BEFORE any guard checks
+    // This is critical because the guard may return early, but we still need
+    // the ref to reflect that the component is currently mounted so any
+    // ongoing async operations can continue their state updates
+    isMountedRef.current = true;
+
     // Prevent re-initialization if already processing or if processing has completed
     // This guards against context changes (schema/plot/census) during reingestion
     if (batchProcessingStartedRef.current || processedChunks > 0 || processed) {
@@ -172,8 +180,6 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
       return;
     }
     batchProcessingStartedRef.current = true;
-
-    let isMounted = true;
 
     async function runProcessBatches() {
       try {
@@ -208,7 +214,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
           ailogger.info('No batches to process for reingestion, proceeding to verification and consolidation');
           batchProcessingStartedRef.current = false;
           // Skip batch processing and go directly to verification
-          if (isMounted) {
+          if (isMountedRef.current) {
             setIsVerifying(true);
             setTotalVerificationSteps(3);
             setVerificationStep(0);
@@ -219,7 +225,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
           // Verify batch processing
           try {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStep(1);
               setVerificationStatus('Verifying reingestion batch processing...');
             }
@@ -229,18 +235,18 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
             );
             if (verifyProcessingResponse.ok) {
               const verifyData = await verifyProcessingResponse.json();
-              if (isMounted) {
+              if (isMountedRef.current) {
                 setVerificationStatus(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
               }
               ailogger.info(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
             } else {
-              if (isMounted) {
+              if (isMountedRef.current) {
                 setVerificationStatus('Reingestion verification failed, continuing...');
               }
               ailogger.warn('Reingestion verification failed, but continuing');
             }
           } catch (verifyError: any) {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus(`Reingestion verification error: ${verifyError.message}`);
             }
             ailogger.warn('Reingestion verification error:', verifyError.message);
@@ -250,7 +256,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
           // Run collapser
           try {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStep(2);
               setVerificationStatus('Starting data consolidation...');
             }
@@ -265,22 +271,22 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
               throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorData.message || collapserResponse.statusText}`);
             }
             const collapserData = await collapserResponse.json();
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus('Reingestion data consolidation completed');
             }
             ailogger.info('Reingestion collapser completed successfully:', collapserData);
 
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStep(3);
               setVerificationStatus('Finalizing reingestion...');
             }
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus('Reingestion completed successfully');
             }
           } catch (collapserError: any) {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
             }
             ailogger.error('Reingestion collapser error:', collapserError.message);
@@ -289,7 +295,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
           await new Promise(resolve => setTimeout(resolve, 1000));
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setIsVerifying(false);
             setProcessed(true);
           }
@@ -374,7 +380,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         await queue.onEmpty();
 
         // Start processing verification
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(true);
           setTotalVerificationSteps(3);
           setVerificationStep(0);
@@ -385,7 +391,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         // Verify batch processing
         try {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(1);
             setVerificationStatus('Verifying reingestion batch processing...');
           }
@@ -395,18 +401,18 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
             }
             ailogger.info(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
           } else {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus('Reingestion verification failed, continuing...');
             }
             ailogger.warn('Reingestion verification failed, but continuing');
           }
         } catch (verifyError: any) {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus(`Reingestion verification error: ${verifyError.message}`);
           }
           ailogger.warn('Reingestion verification error:', verifyError.message);
@@ -416,7 +422,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         // Run collapser
         try {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(2);
             setVerificationStatus('Starting data consolidation...');
           }
@@ -431,22 +437,22 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
             throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorData.message || collapserResponse.statusText}`);
           }
           const collapserData = await collapserResponse.json();
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus('Reingestion data consolidation completed');
           }
           ailogger.info('Reingestion collapser completed successfully:', collapserData);
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(3);
             setVerificationStatus('Finalizing reingestion...');
           }
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus('Reingestion completed successfully');
           }
         } catch (collapserError: any) {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
           }
           ailogger.error('Reingestion collapser error:', collapserError.message);
@@ -455,18 +461,18 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(false);
           setProcessed(true);
         }
       } catch (error: any) {
         ailogger.error('Reingestion processing error:', error);
-        if (isMounted) {
+        if (isMountedRef.current) {
           setReviewState(ReviewStates.ERRORS);
         }
       } finally {
         // Ensure cleanup happens even if errors occur
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(false);
         }
         // Don't reset batchProcessingStartedRef here to prevent re-triggering on state changes
@@ -476,14 +482,14 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
     runProcessBatches();
 
-    // Cleanup only on unmount - don't reset isMounted on re-renders
+    // Cleanup only on unmount - don't reset isMountedRef on re-renders
     // The guard at the top prevents re-initialization during re-renders
     // NOTE: Do NOT reset batchProcessingStartedRef here - it could allow re-initialization
     // on fast remount scenarios. The ref should only be reset when the parent component
     // fully unmounts and remounts the upload system.
     return () => {
-      ailogger.info('[REINGESTION CLEANUP] Component unmounting, setting isMounted = false');
-      isMounted = false;
+      ailogger.info('[REINGESTION CLEANUP] Component unmounting, setting isMountedRef.current = false');
+      isMountedRef.current = false;
       // Removed: batchProcessingStartedRef.current = false;
       // This was causing potential re-initialization issues on fast remounts
     };

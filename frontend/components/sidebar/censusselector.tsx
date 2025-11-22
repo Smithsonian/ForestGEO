@@ -124,16 +124,21 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
         return;
       }
 
-      // Rollover data from current census to new census
-      await Promise.all(
-        ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-          await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ incoming: {} })
-          });
-        })
-      );
+      // Rollover data from current census to new census (only if we have a valid source census)
+      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+      if (sourceCensusID !== undefined && sourceCensusID !== null) {
+        await Promise.all(
+          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ incoming: {} })
+            });
+          })
+        );
+      } else {
+        ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
+      }
 
       // Notify parent that census list needs refresh
       if (onCensusListChanged) {

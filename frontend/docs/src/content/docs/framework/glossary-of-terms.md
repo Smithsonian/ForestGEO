@@ -10,18 +10,22 @@ This glossary defines key terminology used throughout the ForestGEO Application.
 ## C
 
 ### Census
+
 A defined time period during which field measurements are collected for a plot.
 
 **Key points:**
+
 - Defined by start and end dates
 - Multiple censuses can exist per plot (Census 1, Census 2, etc.)
 - Measurement dates establish census boundaries
 - Census-dependent data must be re-entered or rolled over for each new census
 
 ### Census Rollover
+
 The process of copying unchanged data from a previous census to a new census.
 
 **Key points:**
+
 - Saves data re-entry time
 - Available for: Personnel, Quadrats, Species, Stem Codes
 - User selects which items to copy
@@ -31,26 +35,32 @@ The process of copying unchanged data from a previous census to a new census.
 ## D
 
 ### Dashboard
+
 The main overview page showing census statistics and data health metrics.
 
 **Key points:**
+
 - Displays progress metrics
 - Shows stem statistics
 - Lists recent changes
 - Indicates data validity status
 
 ### Data Grid
+
 An interactive table interface for viewing and editing records.
 
 **Key points:**
+
 - Supports filtering and sorting
 - Allows inline editing
 - Different types: isolated (single-row) and multi-line (bulk)
 
 ### DBH (Diameter at Breast Height)
+
 The diameter of a tree stem measured at a standardized height (typically 1.3 meters or 4.5 feet above ground).
 
 **Key points:**
+
 - Primary measurement for forest inventory
 - Unit varies by site (millimeters or centimeters)
 - Subject to validation rules (growth limits, shrinkage limits)
@@ -60,17 +70,21 @@ The diameter of a tree stem measured at a standardized height (typically 1.3 met
 ## F
 
 ### Failed Measurements
+
 Measurement records that could not be successfully processed during data ingestion.
 
 **Key points:**
+
 - Stored in dedicated table for review
 - Common causes: invalid species codes, missing fields, duplicate records
 - Can be reviewed, edited, and re-ingested
 
 ### Fixed Data
+
 Reference data that does not change between censuses (or changes rarely).
 
 **Key points:**
+
 - Includes: Species list, Stem Codes
 - Must be set up BEFORE uploading measurements
 - Shared across all censuses in a plot
@@ -80,9 +94,11 @@ Reference data that does not change between censuses (or changes rarely).
 ## H
 
 ### HOM (Height of Measure)
+
 The actual height above ground where the diameter measurement was taken.
 
 **Key points:**
+
 - Often differs from standard 1.3m for irregular stems
 - Important for remeasurement consistency
 
@@ -91,9 +107,11 @@ The actual height above ground where the diameter measurement was taken.
 ## I
 
 ### Ingestion
+
 The process of loading uploaded data from temporary storage into the permanent database.
 
 **Key points:**
+
 - Validates and transforms data
 - Links measurements to existing trees/stems
 - Two-stage process: staging then processing
@@ -103,9 +121,11 @@ The process of loading uploaded data from temporary storage into the permanent d
 ## L
 
 ### Local Coordinates
+
 Position within a quadrat (relative coordinates).
 
 **Key points:**
+
 - X, Y values relative to quadrat origin
 - Used for locating stems within the plot
 
@@ -114,17 +134,21 @@ Position within a quadrat (relative coordinates).
 ## M
 
 ### Measurements (Core Measurements)
+
 The actual diameter and date records for a stem at a specific point in time.
 
 **Key points:**
+
 - Primary data collected during census
 - Includes: DBH, HOM, measurement date, attributes
 - Each linked to a specific stem and census
 
 ### Multi-stem
+
 A tree with more than one woody trunk or branch meeting measurement criteria.
 
 **Key points:**
+
 - Main stem tagged "0"
 - Additional stems tagged "1", "2", etc.
 - All stems share the same Tree Tag
@@ -134,17 +158,21 @@ A tree with more than one woody trunk or branch meeting measurement criteria.
 ## P
 
 ### Personnel
+
 Field staff and data collection team members.
 
 **Key points:**
+
 - Census-dependent (must be added for each census)
 - Includes: name, role
 - Can be assigned to specific quadrats
 
 ### Plot
+
 A specific geographic region marked for data collection within a site.
 
 **Key points:**
+
 - Has defined dimensions and coordinates
 - Divided into quadrats
 - Contains one or more censuses
@@ -154,9 +182,11 @@ A specific geographic region marked for data collection within a site.
 ## Q
 
 ### Quadrat
+
 A subdivision of a plot into smaller geographic sections.
 
 **Key points:**
+
 - Each has specific coordinates and dimensions
 - Named using codes (e.g., "0322")
 - All stems must be assigned to a quadrat
@@ -166,9 +196,11 @@ A subdivision of a plot into smaller geographic sections.
 ## R
 
 ### Reingestion
+
 Re-processing measurements that were previously failed or staged.
 
 **Key points:**
+
 - Allows retry without re-uploading files
 - Used after fixing data errors
 
@@ -177,49 +209,61 @@ Re-processing measurements that were previously failed or staged.
 ## S
 
 ### Site
+
 A collection of plots in a specific geographic location.
 
 **Key points:**
+
 - Top level of data hierarchy
 - Users are assigned to specific sites
 - Has unique database schema
 
 ### Species Code
+
 A shorthand identifier for a species (e.g., "AESPO").
 
 **Key points:**
+
 - Must be unique within a plot
 - Up to 25 characters
 - Must exist in Species List before uploading measurements
 
 ### Species List
+
 Complete inventory of all species found in the plot.
 
 **Key points:**
+
 - Not census-dependent
 - Contains: species code, name, genus, family, authority
 - Can only be reset via admin function
 
 ### Stem
+
 An individual woody trunk or branch of a tree.
 
 **Key points:**
+
 - Each has a Stem Tag
 - Most trees have one stem (tag "0")
 - Has local coordinates within the plot
 
 ### Stem Code (Attribute)
+
 Shorthand codes describing the condition or characteristic of a tree, stem, or measurement.
 
 **Key points:**
+
 - Locally created (can be in any language)
 - Examples: "D" (dead), "L" (leaning), "B" (buttressed)
 - Has status category: Alive, Dead, Missing, etc.
 
 ### Stem Tag
+
 Number distinguishing multiple stems on the same tree.
 
 **Key points:**
+
 - "0" = main stem
 - "1", "2", etc. = additional stems
 - Combined with Tree Tag for unique identification
@@ -229,17 +273,21 @@ Number distinguishing multiple stems on the same tree.
 ## T
 
 ### Tree
+
 An individual plant with a unique Tree Tag.
 
 **Key points:**
+
 - Has single species assigned
 - Can have multiple stems
 - All stems must be in same quadrat
 
 ### Tree Tag
+
 Unique identifier painted/attached to the tree in the field.
 
 **Key points:**
+
 - Permanent identification number
 - Combined with Stem Tag for unique stem identification
 
@@ -248,9 +296,11 @@ Unique identifier painted/attached to the tree in the field.
 ## U
 
 ### Unified Changelog (Audit Trail)
+
 Complete record of all data modifications.
 
 **Key points:**
+
 - Shows: table, old values, new values, who, when
 - Accessible under "Recent Changes"
 - Used for compliance and tracking
@@ -260,18 +310,22 @@ Complete record of all data modifications.
 ## V
 
 ### Validation
+
 Automatic checks that verify data quality and logical consistency.
 
 **Key points:**
+
 - Runs during upload process
 - 12+ configurable rules
 - Errors flagged but data still saved
 - Can be enabled/disabled per rule
 
 ### Validation Error
+
 A flag indicating a measurement failed one or more validation checks.
 
 **Key points:**
+
 - Measurements with errors are still saved
 - Can be reviewed and edited in data grid
 - Cleared by fixing underlying issue

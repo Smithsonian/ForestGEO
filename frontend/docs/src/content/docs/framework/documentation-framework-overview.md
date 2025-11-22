@@ -97,16 +97,19 @@ The ForestGEO Application consists of the following major systems:
 ## 2. Process Flows Summary
 
 ### 2.1 Authentication Flow
+
 - Login page with OAuth
 - Session verification
 - Dashboard redirect
 
 ### 2.2 Context Selection Flow
+
 - Site selection
 - Plot selection
 - Census selection
 
 ### 2.3 Measurement Upload Flow (Primary)
+
 - File selection and preview
 - Database processing
 - Validation
@@ -115,11 +118,13 @@ The ForestGEO Application consists of the following major systems:
 - Completion and cache refresh
 
 ### 2.4 Failed Measurements Reingestion Flow
+
 - Review failed records
 - Clear/retry options
 - Reprocess without re-upload
 
 ### 2.5 Fixed Data Entry Flows
+
 - Quadrat management
 - Personnel management
 - Species/taxonomy management
@@ -130,6 +135,7 @@ The ForestGEO Application consists of the following major systems:
 ## 3. Key Concepts for Non-Technical Users
 
 ### 3.1 Domain Terminology
+
 - Site, Plot, Census, Quadrat
 - Tree, Stem, Tree Tag, Stem Tag
 - DBH (Diameter at Breast Height)
@@ -137,15 +143,18 @@ The ForestGEO Application consists of the following major systems:
 - Species Code
 
 ### 3.2 Data Categories
+
 - Fixed Data vs Measurement Data
 - Census-dependent vs Census-independent data
 
 ### 3.3 Workflow Concepts
+
 - Ingestion and reingestion
 - Validation and post-validation
 - Staging and processing
 
 ### 3.4 Data Relationships
+
 - Site > Plot > Quadrat hierarchy
 - Tree > Stem > Measurement hierarchy
 - Census scoping

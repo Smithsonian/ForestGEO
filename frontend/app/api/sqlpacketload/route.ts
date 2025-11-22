@@ -19,20 +19,24 @@ import crypto from 'crypto';
 /**
  * Generate idempotency key for a batch of data
  * This allows us to detect and skip duplicate submissions
+ * IMPORTANT: Uses content hash to differentiate chunks from the same file
  */
-function generateIdempotencyKey(fileName: string, plotId: number, censusId: number, rowCount: number, firstRowHash: string): string {
-  return `${fileName}_${plotId}_${censusId}_${rowCount}_${firstRowHash}`;
+function generateIdempotencyKey(fileName: string, plotId: number, censusId: number, rowCount: number, contentHash: string): string {
+  return `${fileName}_${plotId}_${censusId}_${rowCount}_${contentHash}`;
 }
 
 /**
- * Generate a hash of the first row for idempotency checking
+ * Generate a hash of the chunk content for idempotency checking
+ * CRITICAL: Hashes ALL rows in the chunk to uniquely identify this specific chunk
+ * This prevents false duplicate detection when different chunks have the same row count
  */
-function hashFirstRow(fileRowSet: FileRowSet): string {
+function hashChunkContent(fileRowSet: FileRowSet): string {
   const rows = Object.values(fileRowSet);
   if (rows.length === 0) return 'empty';
-  const firstRow = rows[0];
-  const data = JSON.stringify(firstRow);
-  return crypto.createHash('md5').update(data).digest('hex').substring(0, 8);
+  // Sort rows by a consistent key to ensure same data produces same hash regardless of order
+  const sortedRows = rows.map(row => JSON.stringify(row)).sort();
+  const data = sortedRows.join('|');
+  return crypto.createHash('md5').update(data).digest('hex').substring(0, 12);
 }
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -95,43 +99,83 @@ export async function POST(request: NextRequest) {
   let retryCount = 0;
   if (formType === 'measurements') {
     const rowCount = Object.keys(fileRowSet ?? {}).length;
-    const firstRowHash = hashFirstRow(fileRowSet);
-    const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, firstRowHash);
+    const contentHash = hashChunkContent(fileRowSet);
+    const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, contentHash);
 
-    // Check for existing batch with same idempotency key (duplicate submission detection)
+    // DUPLICATE DETECTION: Check for exact content match using sample data from the chunk
+    // CRITICAL FIX: Previous logic only compared row counts, causing data loss when
+    // different chunks happened to have the same number of rows. Now we check actual content.
     try {
-      const existingBatchSQL = format(
-        `SELECT DISTINCT BatchID, COUNT(*) as count
-         FROM ??.temporarymeasurements
-         WHERE FileID = ? AND PlotID = ? AND CensusID = ?
-         GROUP BY BatchID
-         ORDER BY BatchID DESC
-         LIMIT 1`,
-        [schema]
-      );
-      const existingBatch = await connectionManager.executeQuery(existingBatchSQL, [fileName, plot?.plotID ?? -1, censusCookie]);
+      // Get sample rows from the current chunk to verify against database
+      const chunkRows = Object.values(fileRowSet);
+      if (chunkRows.length > 0) {
+        // Check if the first and last rows of this chunk already exist
+        const firstRow = chunkRows[0];
+        const lastRow = chunkRows[chunkRows.length - 1];
 
-      if (existingBatch.length > 0 && existingBatch[0].count === rowCount) {
-        // Duplicate detected - return existing batch info instead of re-inserting
-        ailogger.info(
-          `Duplicate submission detected for ${fileName} (idempotency key: ${idempotencyKey}). Returning existing batch ${existingBatch[0].BatchID}`
+        // Build a query to check for these specific rows (not just any rows with same count)
+        const duplicateCheckSQL = format(
+          `SELECT COUNT(*) as matchCount FROM ??.temporarymeasurements
+           WHERE FileID = ? AND PlotID = ? AND CensusID = ?
+           AND TreeTag = ? AND StemTag <=> ? AND SpeciesCode = ? AND QuadratName = ?
+           AND LocalX <=> ? AND LocalY <=> ? AND DBH <=> ? AND MeasurementDate <=> ?`,
+          [schema]
         );
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: `Batch already exists - duplicate submission detected`,
-            failingRows: [],
-            insertedCount: existingBatch[0].count,
-            transactionCompleted: true,
-            batchID: existingBatch[0].BatchID,
-            isDuplicate: true,
-            idempotencyKey
-          }),
-          { status: HTTPResponses.OK }
-        );
+
+        const formattedFirstDate = firstRow.date ? moment(firstRow.date).format('YYYY-MM-DD') : null;
+        const firstRowCheck = await connectionManager.executeQuery(duplicateCheckSQL, [
+          fileName,
+          plot?.plotID ?? -1,
+          censusCookie,
+          firstRow.tag,
+          firstRow.stemtag || null,
+          firstRow.spcode,
+          firstRow.quadrat,
+          firstRow.lx || null,
+          firstRow.ly || null,
+          firstRow.dbh || null,
+          formattedFirstDate
+        ]);
+
+        // Also check last row to reduce false positives
+        const formattedLastDate = lastRow.date ? moment(lastRow.date).format('YYYY-MM-DD') : null;
+        const lastRowCheck = await connectionManager.executeQuery(duplicateCheckSQL, [
+          fileName,
+          plot?.plotID ?? -1,
+          censusCookie,
+          lastRow.tag,
+          lastRow.stemtag || null,
+          lastRow.spcode,
+          lastRow.quadrat,
+          lastRow.lx || null,
+          lastRow.ly || null,
+          lastRow.dbh || null,
+          formattedLastDate
+        ]);
+
+        // Only flag as duplicate if BOTH first and last rows already exist
+        if (firstRowCheck[0]?.matchCount > 0 && lastRowCheck[0]?.matchCount > 0) {
+          ailogger.info(
+            `Duplicate chunk detected for ${fileName} - first and last rows already exist in database. ` +
+              `Idempotency key: ${idempotencyKey}. Skipping to prevent data duplication.`
+          );
+          return new NextResponse(
+            JSON.stringify({
+              responseMessage: `Chunk already exists - duplicate submission detected`,
+              failingRows: [],
+              insertedCount: rowCount,
+              transactionCompleted: true,
+              batchID: 'duplicate-skipped',
+              isDuplicate: true,
+              idempotencyKey
+            }),
+            { status: HTTPResponses.OK }
+          );
+        }
       }
     } catch (dupCheckError: any) {
       // Log but continue - better to potentially duplicate than to fail entirely
-      ailogger.warn(`Idempotency check failed for ${fileName}, proceeding with insert: ${dupCheckError.message}`);
+      ailogger.warn(`Content-based idempotency check failed for ${fileName}, proceeding with insert: ${dupCheckError.message}`);
     }
 
     const batchID = generateShortBatchID();

@@ -106,13 +106,17 @@ Columns with **empty** data (no rows have data for that column) are automaticall
 The following is an outline of unique ancillary buttons present for each datagrid instance in the Stem & Plot Details submenu.
 
 **Stem Codes:**
+
 - No ancillary buttons are present
 
 **Personnel:**
+
 - No ancillary buttons are present
 
 **Quadrats:**
+
 - No ancillary buttons are present
 
 **Species List:**
+
 - RESET Table: click this to reset the table entirely!
