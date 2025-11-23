@@ -61,4 +61,4 @@ CLAUDE.md
 .claudeignore
 .mcp*
 .playwright*
-frontend/docs/.vscode*
+frontend/docs/.vscode/**
