@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
   const session = await auth();
   if (!session?.user) {
     ailogger.warn('Unauthorized file upload attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: 401 }); // 401 Unauthorized
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
   }
 
   const { operation } = await props.params;
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
   if (file.size > MAX_FILE_SIZE) {
     ailogger.warn(`File too large: ${file.size} bytes (max: ${MAX_FILE_SIZE})`);
     return new NextResponse(JSON.stringify({ error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB` }), {
-      status: 413 // 413 Payload Too Large
+      status: HTTPResponses.PAYLOAD_TOO_LARGE
     });
   }
 

@@ -1026,7 +1026,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     }
   };
 
-  if (!currentSite || !currentPlot || !currentCensus) {
+  // Skip redirect for admin/catalog pages (when adminEmail is provided)
+  // Only require site/plot/census context for site-specific data grids
+  if (!adminEmail && (!currentSite || !currentPlot || !currentCensus)) {
     redirect('/dashboard');
   } else {
     return (

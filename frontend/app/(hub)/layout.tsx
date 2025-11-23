@@ -328,6 +328,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   const theme = useTheme();
 
+  // Detect if on admin page
+  const isAdminPage = pathname?.includes('/admin') ?? false;
+
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
       import('@axe-core/react').then(axe => {
@@ -405,9 +408,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           sx={{
             display: 'flex',
             alignItems: 'left',
-            paddingTop: '25px',
+            paddingTop: '20px',
             paddingLeft: '5px',
-            paddingBottom: '20px',
+            paddingBottom: '15px',
             flexDirection: 'column'
           }}
           className={isPulsing ? 'animate-fade-blur-in' : ''}
@@ -423,7 +426,11 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             flexShrink: 1,
             alignItems: 'flex-start',
             flexDirection: 'column',
-            paddingLeft: 2
+            paddingLeft: isAdminPage ? 0 : 1,
+            paddingRight: isAdminPage ? 0 : 1,
+            paddingTop: isAdminPage ? 1 : 0,
+            width: '100%',
+            boxSizing: 'border-box'
           }}
         >
           {session && <>{children}</>}

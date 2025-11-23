@@ -3,6 +3,7 @@
 ## Overview
 
 This directory contains SQL migration scripts and automated provisioning tools to:
+
 1. Migrate data from denormalized `viewfulltable` schemas to normalized ForestGEO schemas
 2. Create new site schemas from historical MySQL dump files
 3. Register sites in the catalog for application access
@@ -413,23 +414,23 @@ The `provision_new_site.sh` script automates the complete site creation process:
 
 ### Checkpoint System
 
-| Step | Checkpoint | Description |
-|------|------------|-------------|
-| 1 | `01_create_mapping_tables` | Creates ID mapping tables |
-| 2 | `02_migrate_plots` | Migrates plot data |
-| 3 | `03_migrate_quadrats` | Migrates quadrat definitions |
-| 4 | `04_migrate_taxonomy` | Migrates family/genus/species |
-| 5 | `05_migrate_census` | Migrates census periods |
-| 6 | `06_migrate_trees` | Migrates tree records |
-| 7 | `07_migrate_stems` | Migrates stem records |
-| 8 | `08_migrate_coremeasurements` | Migrates measurements |
-| 9 | `09_migrate_attributes` | Migrates attributes |
-| 10 | `10_cleanup` | Removes mapping tables |
-| 11 | `11_deploy_procedures` | Deploys stored procedures |
-| 12 | `12_deploy_validations` | Deploys validation queries |
-| 13 | `13_register_catalog` | Registers in catalog.sites |
-| 14 | `14_refresh_views` | Refreshes materialized views |
-| 15 | `15_final_validation` | Validates migration success |
+| Step | Checkpoint                    | Description                   |
+| ---- | ----------------------------- | ----------------------------- |
+| 1    | `01_create_mapping_tables`    | Creates ID mapping tables     |
+| 2    | `02_migrate_plots`            | Migrates plot data            |
+| 3    | `03_migrate_quadrats`         | Migrates quadrat definitions  |
+| 4    | `04_migrate_taxonomy`         | Migrates family/genus/species |
+| 5    | `05_migrate_census`           | Migrates census periods       |
+| 6    | `06_migrate_trees`            | Migrates tree records         |
+| 7    | `07_migrate_stems`            | Migrates stem records         |
+| 8    | `08_migrate_coremeasurements` | Migrates measurements         |
+| 9    | `09_migrate_attributes`       | Migrates attributes           |
+| 10   | `10_cleanup`                  | Removes mapping tables        |
+| 11   | `11_deploy_procedures`        | Deploys stored procedures     |
+| 12   | `12_deploy_validations`       | Deploys validation queries    |
+| 13   | `13_register_catalog`         | Registers in catalog.sites    |
+| 14   | `14_refresh_views`            | Refreshes materialized views  |
+| 15   | `15_final_validation`         | Validates migration success   |
 
 ### Shell Script Usage
 
@@ -466,11 +467,13 @@ Optional:
 ### API Endpoints
 
 #### POST /api/admin/provision/upload
+
 Upload MySQL dump file.
 
 **Request:** `multipart/form-data` with `dumpFile` and `siteName`
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -482,9 +485,11 @@ Upload MySQL dump file.
 ```
 
 #### POST /api/admin/provision
+
 Start migration.
 
 **Request:**
+
 ```json
 {
   "sourceSchema": "stable_new_site",
@@ -496,9 +501,11 @@ Start migration.
 ```
 
 #### GET /api/admin/provision?migrationId=XXX
+
 Check migration status.
 
 **Response:**
+
 ```json
 {
   "migrationId": "migration_xxx",
@@ -510,16 +517,17 @@ Check migration status.
 ```
 
 #### PUT /api/admin/provision
+
 Resume or cancel migration.
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AZURE_SQL_SERVER` | forestgeo-mysqldataserver... | Database host |
-| `AZURE_SQL_USER` | azureroot | Database user |
-| `AZURE_SQL_PASSWORD` | (required) | Database password |
-| `AZURE_SQL_PORT` | 3306 | Database port |
+| Variable             | Default                      | Description       |
+| -------------------- | ---------------------------- | ----------------- |
+| `AZURE_SQL_SERVER`   | forestgeo-mysqldataserver... | Database host     |
+| `AZURE_SQL_USER`     | azureroot                    | Database user     |
+| `AZURE_SQL_PASSWORD` | (required)                   | Database password |
+| `AZURE_SQL_PORT`     | 3306                         | Database port     |
 
 ### Directory Structure
 
@@ -542,12 +550,14 @@ frontend/
 ### Source Data Requirements
 
 The source schema must contain `viewfulltable` with these key columns:
+
 - `TreeID`, `StemID`, `TreeTag`, `StemTag`
 - `SpeciesCode`, `CensusID`, `QuadratID`
 - `DBH`, `HOM`, `ExactDate`
 - `Status`, `ListOfTSM`
 
 Supporting tables (optional but recommended):
+
 - `stem` - For accurate coordinates
 - `dbh` - For measurement dates
 - `census` - For date ranges

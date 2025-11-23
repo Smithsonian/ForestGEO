@@ -159,6 +159,12 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Quadrat-Assigned Personnel';
     case '/fixeddatainput/alltaxonomies':
       return 'Species List';
+    case '/admin/users':
+      return 'User Management';
+    case '/admin/sites':
+      return 'Site Management';
+    case '/admin/userstosites':
+      return 'User-Site Assignments';
     default:
       return '';
   }

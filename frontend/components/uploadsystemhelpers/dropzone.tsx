@@ -4,6 +4,7 @@ import { DropzoneProps, DropzonePureProps } from '@/config/macros';
 import { FileRejection, FileWithPath, useDropzone } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
 import { FileUploadIcon } from '@/components/icons';
+import { useToast } from '@/components/toastnotification';
 
 import '@/styles/dropzone.css';
 import { subtitle } from '@/config/primitives';
@@ -144,6 +145,8 @@ export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive 
  * A drop zone for CSV file uploads.
  */
 export function DropzoneLogic({ onChange }: DropzoneProps) {
+  const toast = useToast();
+
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
@@ -151,11 +154,11 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
 
         reader.onabort = () => {
           console.error('File reading was aborted');
-          // In a real app, you would show a proper accessible error message
+          toast.warning(`File reading was aborted: ${file.name}`);
         };
         reader.onerror = () => {
           console.error('File reading has failed');
-          // In a real app, you would show a proper accessible error message
+          toast.error(`Failed to read file: ${file.name}`);
         };
         reader.onload = () => {
           // Do whatever you want with the file contents
@@ -165,8 +168,7 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
 
           if (results.errors.length) {
             console.error(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
-            // In a real app, you would show a proper accessible error message
-            // Only print the first error for now to avoid dialog clog
+            toast.warning(`Parse warning in ${file.name}: Row ${results.errors[0].row} - ${results.errors[0].message}`);
           }
         };
         reader.readAsText(file);
@@ -174,11 +176,11 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
       onChange(acceptedFiles, rejectedFiles);
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         console.error(`File ${fileRejection.file.name} was rejected:`, fileRejection.errors);
-        // In a real app, you would show a proper accessible error message
-        // instead of using browser alerts
+        const errorMessages = fileRejection.errors.map(e => e.message).join(', ');
+        toast.error(`File rejected: ${fileRejection.file.name} - ${errorMessages}`);
       });
     },
-    [onChange]
+    [onChange, toast]
   );
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

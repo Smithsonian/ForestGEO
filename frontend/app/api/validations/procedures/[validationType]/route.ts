@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ vali
   } catch (error: any) {
     ailogger.error('Error during validation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
-      status: 500
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
 }

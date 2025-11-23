@@ -13,9 +13,17 @@ export const runtime = 'nodejs';
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   const { dataType, slugs } = params;
-  if (!dataType || !slugs) throw new Error('data type or slugs not provided');
+  if (!dataType || !slugs) {
+    return new NextResponse(JSON.stringify({ error: 'data type or slugs not provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
   const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
-  if (!schema) throw new Error('no schema provided');
+  if (!schema) {
+    return new NextResponse(JSON.stringify({ error: 'no schema provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
@@ -39,8 +47,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
     columns = results.map((row: any) => row.COLUMN_NAME);
   } catch (e: any) {
-    ailogger.error('error: ', e);
-    throw new Error(e);
+    ailogger.error('Error fetching columns in formdownload:', e);
+    return new NextResponse(JSON.stringify({ error: e.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   }
   if (filterModel !== undefined && filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
   if (filterModel !== undefined && filterModel.items) filterStub = buildFilterModelStub(filterModel);
@@ -202,10 +212,15 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:
-        throw new Error('incorrect data type passed in');
+        return new NextResponse(JSON.stringify({ error: 'incorrect data type passed in' }), {
+          status: HTTPResponses.INVALID_REQUEST
+        });
     }
   } catch (e: any) {
-    throw new Error(e);
+    ailogger.error('Error in formdownload GET:', e);
+    return new NextResponse(JSON.stringify({ error: e.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     await connectionManager.closeConnection();
   }

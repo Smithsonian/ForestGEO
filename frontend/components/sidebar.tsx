@@ -161,6 +161,9 @@ export default function Sidebar(props: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Detect if we're on an admin page
+  const isAdminPage = pathname?.includes('/admin') ?? false;
+
   const [measurementsToggle, setMeasurementsToggle] = useState(true);
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
@@ -177,6 +180,22 @@ export default function Sidebar(props: SidebarProps) {
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
   const [isCreatingCensus, setIsCreatingCensus] = useState(false);
+  const [adminResetDone, setAdminResetDone] = useState(false);
+
+  // Clear selections when entering admin pages
+  useEffect(() => {
+    if (isAdminPage && !adminResetDone) {
+      const clearSelections = async () => {
+        if (currentSite && siteDispatch) await siteDispatch({ site: undefined });
+        if (currentPlot && plotDispatch) await plotDispatch({ plot: undefined });
+        if (currentCensus && censusDispatch) await censusDispatch({ census: undefined });
+      };
+      clearSelections();
+      setAdminResetDone(true);
+    } else if (!isAdminPage) {
+      setAdminResetDone(false);
+    }
+  }, [isAdminPage, adminResetDone, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
@@ -257,6 +276,10 @@ export default function Sidebar(props: SidebarProps) {
     }
     if (selectedSite === undefined) {
       await handlePlotSelection(undefined);
+    }
+    // If on admin page and a site is selected, navigate to dashboard
+    if (isAdminPage && selectedSite) {
+      router.push('/dashboard');
     }
   };
 
@@ -840,13 +863,55 @@ export default function Sidebar(props: SidebarProps) {
                 </Typography>
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
+              {/* Admin page: show user's own sites and site selector instruction */}
+              {isAdminPage && (
+                <Box sx={{ width: '100%', mb: 2 }}>
+                  {session?.user?.sites && session.user.sites.length > 0 && (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 'md',
+                        bgcolor: 'background.level1',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        mb: 1.5
+                      }}
+                    >
+                      <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1, fontWeight: 600, textTransform: 'uppercase' }}>
+                        Your Site Access
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {session.user.sites.map(site => (
+                          <Box
+                            key={site.siteID}
+                            sx={{
+                              px: 1,
+                              py: 0.25,
+                              borderRadius: 'sm',
+                              bgcolor: 'primary.softBg',
+                              color: 'primary.softColor',
+                              fontSize: '0.75rem',
+                              fontWeight: 500
+                            }}
+                          >
+                            {site.siteName}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                  <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1 }}>
+                    Select a site to exit admin and go to dashboard:
+                  </Typography>
+                </Box>
+              )}
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
                 <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
                 <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
               </Box>
-              {currentSite !== undefined && (
+              {currentSite !== undefined && !isAdminPage && (
                 <>
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
                     <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>

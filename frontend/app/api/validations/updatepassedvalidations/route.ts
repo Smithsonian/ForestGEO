@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     ailogger.error('Error in update operation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
-      status: 500
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
 }

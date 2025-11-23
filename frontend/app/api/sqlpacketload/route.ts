@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
         responseMessage: 'Unauthorized - authentication required',
         error: 'You must be logged in to upload data'
       }),
-      { status: 401 } // 401 Unauthorized
+      { status: HTTPResponses.UNAUTHORIZED }
     );
   }
 
