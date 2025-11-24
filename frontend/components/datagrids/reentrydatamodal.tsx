@@ -20,7 +20,7 @@ import {
 } from '@mui/joy';
 import { DatePicker } from '@mui/x-date-pickers';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 
 interface ReEnterDataModalProps {
   gridType: string;

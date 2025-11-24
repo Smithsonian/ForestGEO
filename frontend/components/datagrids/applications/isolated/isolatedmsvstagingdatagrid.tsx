@@ -1,7 +1,7 @@
 'use client';
 
 import { MeasurementsSummaryStagingRDS } from '@/config/sqlrdsdefinitions/views';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import React, { useState } from 'react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';

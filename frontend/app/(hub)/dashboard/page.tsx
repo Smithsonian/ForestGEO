@@ -24,7 +24,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import CategoryIcon from '@mui/icons-material/Category';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';

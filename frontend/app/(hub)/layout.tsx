@@ -13,9 +13,12 @@ import {
   usePlotContext,
   usePlotDispatch,
   useSiteContext,
-  useSiteDispatch
-} from '@/app/contexts/userselectionprovider';
-import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
+  useSiteDispatch,
+  useOrgCensusListDispatch,
+  usePlotListDispatch,
+  useQuadratListDispatch,
+  useSiteListDispatch
+} from '@/app/contexts/compat-hooks';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -79,12 +82,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
 
-  const lastExecutedRef = useRef<number | null>(null);
-  // Refs for debouncing
-
-  // Debounce delay
-  const debounceDelay = 300;
-
   // Create stable async operations that won't cause cascade effects
   const { execute: executeFetchSiteList } = useAsyncOperation(
     async () => {
@@ -130,11 +127,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     async () => {
       if (currentSite && currentPlot && !censusListLoaded) {
         const response = await fetch(
-          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot?.plotID ?? 0}`
         );
         const censusRDSLoad = await response.json();
         if (!censusRDSLoad) throw new Error('Failed to load census data');
-        const censusList = await createAndUpdateCensusList(censusRDSLoad);
+        const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
+        const censusList = await createAndUpdateCensusList(censusArray);
         if (censusListDispatch) await censusListDispatch({ censusList });
         setCensusListLoaded(true);
       }
@@ -162,35 +160,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       preventDuplicates: true
     }
   );
-
-  const _fetchSiteList = useCallback(async () => {
-    const now = Date.now();
-    if (lastExecutedRef.current && now - lastExecutedRef.current < debounceDelay + 200) {
-      return;
-    }
-
-    // Update last executed timestamp
-    lastExecutedRef.current = now;
-
-    try {
-      setLoading(true, 'Loading Sites...');
-      if (session && !siteListLoaded && !currentSite) {
-        const sites = session?.user?.allsites ?? [];
-        if (sites.length === 0) {
-          throw new Error('Session sites undefined');
-        } else {
-          if (siteListDispatch) await siteListDispatch({ siteList: sites });
-        }
-      }
-    } catch {
-      const allsites = await (
-        await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json();
-      if (siteListDispatch) await siteListDispatch({ siteList: allsites });
-    } finally {
-      setLoading(false, 'Loading Sites...');
-    }
-  }, [session, siteListLoaded, siteListDispatch, setLoading, currentSite, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {

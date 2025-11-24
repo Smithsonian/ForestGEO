@@ -29,15 +29,21 @@ export function useAsyncOperation<T extends any[], R>(asyncFunction: (...args: T
         if (preventDuplicates) {
           const argsKey = JSON.stringify(args);
 
-          // Check if same operation is already running
-          if (activeOperationRef.current && isOperationActive(activeOperationRef.current)) {
-            console.warn('Duplicate operation prevented:', loadingMessage);
-            return;
+          // Check if same operation is already running (check ref first to prevent race condition)
+          if (activeOperationRef.current) {
+            // Either it's a pending marker or an active operation
+            if (activeOperationRef.current.startsWith('pending:') || isOperationActive(activeOperationRef.current)) {
+              // Silently prevent duplicates - don't spam console in StrictMode
+              return;
+            }
           }
+
+          // Set pending marker IMMEDIATELY to prevent race condition with concurrent calls
+          activeOperationRef.current = `pending:${loadingMessage}`;
 
           // Check if same arguments were used recently (only for non-data loading operations)
           if (lastArgsRef.current === argsKey && !loadingMessage.toLowerCase().includes('loading')) {
-            console.warn('Duplicate operation with same arguments prevented:', loadingMessage);
+            activeOperationRef.current = null;
             return;
           }
 

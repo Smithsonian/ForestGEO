@@ -6,7 +6,7 @@ import { Box, Checkbox, Chip, IconButton, Modal, ModalDialog, Typography } from 
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { formatHeader, PersonnelGridColumns } from '@/components/client/datagridcolumns';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import CloseIcon from '@mui/icons-material/Close';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';

@@ -5,7 +5,7 @@ import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystem
 import { FileWithPath } from 'react-dropzone';
 import { Box, Button, Typography, Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({

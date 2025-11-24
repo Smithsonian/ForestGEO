@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Box, LinearProgress, Typography, CircularProgress } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;

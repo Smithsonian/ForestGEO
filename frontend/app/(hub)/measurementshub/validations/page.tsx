@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
 import dynamic from 'next/dynamic';

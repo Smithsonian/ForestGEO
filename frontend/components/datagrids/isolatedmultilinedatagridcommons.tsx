@@ -11,7 +11,7 @@ import { darken } from '@mui/system';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { Add } from '@mui/icons-material';
 import { getColumnVisibilityModel } from '@/config/datagridhelpers';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 

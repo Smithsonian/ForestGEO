@@ -13,7 +13,7 @@
 
 import { Box, Typography, Stack, Card, CardContent, Alert, Chip, Avatar } from '@mui/joy';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useCallback, useEffect, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';

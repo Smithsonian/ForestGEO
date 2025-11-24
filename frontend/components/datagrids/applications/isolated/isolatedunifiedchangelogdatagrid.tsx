@@ -3,7 +3,7 @@
 // isolated unifiedchangelog datagrid
 import React, { ReactNode, useMemo, useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { UnifiedChangelogGridColumns } from '@/components/client/datagridcolumns';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import { Box, Divider, Stack, Typography } from '@mui/joy';

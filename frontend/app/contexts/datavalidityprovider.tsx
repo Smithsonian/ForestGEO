@@ -2,7 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { UnifiedValidityFlags } from '@/config/macros';
 
-import { useOrgCensusContext, usePlotContext, useSiteContext } from './userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from './compat-hooks';
 import { useApiWrapper } from '@/utils/apiWrapper';
 import ailogger from '@/ailogger';
 
@@ -54,15 +54,14 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
               const response = await ApiWrapper.get(url, {
                 loadingMessage: `Validating ${type}...`,
                 category: 'api',
-                showErrorAlert: false // Don't show alert for 412 - we handle it gracefully
+                showErrorAlert: false, // Don't show alert for 412 - we handle it gracefully
+                acceptedStatuses: [412] // 412 means no data exists, which is a valid state for validation
               });
-              return { type, isValid: response.ok };
+              // 200 = data exists, 412 = no data exists (both are valid states)
+              // For validation purposes, having no failed measurements (412) is actually good
+              const isValid = response.status === 200 || response.status === 412;
+              return { type, isValid };
             } catch (error: any) {
-              // HTTP 412 (Precondition Failed) means no data exists, which is a valid state
-              // (e.g., no failed measurements = good, no validation errors = good)
-              if (error.message?.includes('412')) {
-                return { type, isValid: true };
-              }
               ailogger.error(error);
               return { type, isValid: false };
             }

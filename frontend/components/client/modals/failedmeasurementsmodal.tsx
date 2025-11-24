@@ -16,7 +16,7 @@ import {
 } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
 import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 interface FailedMeasurementsModalProps {

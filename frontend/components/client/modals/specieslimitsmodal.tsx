@@ -26,7 +26,7 @@ import {
 } from '@mui/joy';
 import SouthIcon from '@mui/icons-material/South';
 import NorthIcon from '@mui/icons-material/North';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { Info } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 

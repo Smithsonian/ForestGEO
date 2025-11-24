@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AutocompleteFixedData from './autocompletefixeddata';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 // Mock dependencies

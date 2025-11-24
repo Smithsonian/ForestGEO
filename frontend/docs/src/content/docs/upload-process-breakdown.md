@@ -3,119 +3,344 @@ title: Upload Process Breakdown
 description: A complete guide to the file upload cycle in the ForestGEO application.
 ---
 
-The following is an outline of the upload cycle.
+The file upload system is a multi-stage process that handles data parsing, validation, database insertion, and cloud backup. This guide explains each stage in detail.
 
-The core cycle remains the same between the data types in Stem & Plot Details menu, but there are some additional steps incorporated into the measurements upload interface. The following is a breakdown of the process, in order:
+---
 
-### Important Notes about Uploading
+## Overview
 
-Before you dive deeper into the upload cycle, there're some important points to note:
+The upload cycle follows this general flow:
 
-1. The upload cycle is **update-forward**. This means that the system will ALWAYS try to update data wherever it can instead of ignoring it outright. With this in mind, please **always try to re-upload data whenever possible!**
-2. The upload cycle triggers **system updates** as part of its process. **Please ensure you don't navigate away from the page, reload it, or close it when uploading a file!**
+```
+[Select File] → [Parse & Preview] → [Upload to Database] → [Validate] → [Azure Backup] → [Complete]
+                                          ↓
+                             [Failed Rows] → [Review & Fix] → [Reingest]
+```
+
+The core cycle is the same for all data types, but **measurements** have additional processing steps due to their complexity.
+
+---
+
+## Important Notes Before Uploading
+
+:::caution
+**Read before uploading!**
+:::
+
+1. **Update-forward behavior**: The system ALWAYS tries to update existing data rather than ignoring duplicates. If you upload a file with existing records, those records will be updated.
+
+2. **Don't navigate away**: The upload cycle triggers system updates. **Do not** navigate away, reload the page, or close the browser while an upload is in progress!
+
+3. **Large files**: Files with 50,000+ rows may take several minutes. Monitor the progress bar and estimated time.
+
+4. **File format**: Only CSV, TSV, and TXT files are accepted. UTF-8 encoding is recommended.
+
+---
 
 ## Stage 1: Reviewing Headers & File Dropzone
 
-Here is the first view you'll see after clicking on the Upload button:
+When you click the Upload button, you'll see the file upload interface:
 
 ![upload stage 1](../../assets/uploadstage1.png)
 
-:::note
-If you click on the **Understanding the Headers** text, an accordion should dropdown, showing you the details of the headers required for the form type
-:::
+### Understanding the Headers Accordion
 
-### Example Headers View
-
-Here's what the headers accordion will look like when uploading an `attributes` form:
+Click on **Understanding the Headers** to see the column requirements for the form type:
 
 ![stem codes headers](../../assets/stemcodesheaders.png)
 
-## Stage 2: Uploading View
+This accordion shows:
+- **Required headers** (marked with asterisk or bold)
+- **Optional headers**
+- **Data type requirements** for each column
+- **Example values**
 
-Next, you'll see a simple loading bar that shows the progress of the upload. Depending on the size of the file, you might also see a distribution of the file into "chunks" that are then uploaded individually. This is done to ensure that uploading is performed efficiently.
+:::tip
+Review this before uploading to ensure your file headers match the expected format.
+:::
 
-## Stage 3: File Backup to Azure
+### Uploading Your File
 
-As part of the upload cycle, all uploaded files will **automatically** be backed up to the application's Azure Storage account.
+You have two options:
+1. **Drag and drop** your file into the dropzone
+2. **Click** the dropzone to open a file browser
 
-Please navigate to the **Recently Uploaded** page after your upload completes, and you should be able to see (and download) your file there!
+The system automatically detects:
+- **File format** (CSV, TSV, TXT)
+- **Delimiter** (comma, tab, semicolon)
+- **Encoding** (UTF-8, etc.)
 
-## Stage 4: Failed Row Processing
+---
 
-After the upload completes, you'll be directed to this view:
+## Stage 2: Data Preview & Processing
+
+After selecting a file, you'll see:
+
+1. **Parsing progress** - The file is read and parsed
+2. **Data preview** - A sample of parsed rows is displayed
+3. **Header validation** - The system checks for required headers
+
+If there are parsing issues, you'll see warnings here. Common issues:
+- Missing required headers
+- Malformed rows
+- Encoding problems
+
+### Large File Handling
+
+For large files, the system:
+- Splits the file into **32KB chunks**
+- Processes chunks in parallel
+- Shows a progress bar with **ETC** (Estimated Time to Completion)
+
+---
+
+## Stage 3: Database Upload
+
+The parsed data is uploaded to the database. During this stage:
+
+- A progress bar shows upload completion percentage
+- The ETC updates as processing continues
+- Rows are inserted or updated in batches
+
+:::caution
+**Do not close the browser or navigate away during this stage!**
+:::
+
+---
+
+## Stage 4: Pre-processing Error Review
+
+After upload completes, you'll see the completion view:
 
 ![upload complete view](../../assets/upload-complete-view.png)
 
-### Understanding the Preprocessing View
+### Understanding Pre-processing Errors
 
-This view is intended to provide you with a direct view of any rows that might have failed processing.
+This view shows rows that **failed pre-processing**:
 
-:::caution
-This is **not** the same as a row with inaccurate or incorrect data!
-
-It only denotes rows that were **missing required fields** or that did not pass initial parsing in the first place.
-:::
-
-Because these rows did **not** pass pre-processing and were thus fully exempt from the upload, you can **download these rows immediately** using the `Download All Rows as CSV` button. This will download the rows in a form-friendly format, and will also include an additional column describing the pre-processing error encountered.
-
-:::tip
-Using this, you can then **immediately** re-upload the failed rows by editing them and removing the added Error Description column.
-:::
-
-## Stage 5: System update & Upload Completion
-
-After clicking the `Confirm` button as indicated in the upload completion screenshot, you will see a series of reload progress bars appear and disappear in a rapid fashion. Finally, you will be directed to a final popup informing you that **if you are uploading measurements**, failed measurements will be redirected to a dedicated table. Otherwise, they will be discarded.
-
-## Uploading Measurements
-
-Uploading measurements to the system follow the same cycle as described earlier, but introduces some additional steps and views. Here is an explanation of the additional steps you'll see and what they mean.
-
-:::caution
-As a reminder, remember that you can **only** upload measurements after you have added **some** data to each of the data types in the **Stem & Plot Details** menu!
-:::
-
-## Stage 1.5: Ingestion Processing
-
-One of the core differences between uploading measurements and uploading the other data types is the **density** that a measurement row contains.
-
-As a quick review, the `measurements` data type specifies the following fields:
-
-| field   | explanation                                                | source table                 |
-| ------- | ---------------------------------------------------------- | ---------------------------- |
-| tag     | the **tree's** tag (unique ID)                             | `trees`                      |
-| stemtag | the **stem's** tag (unique ID)                             | `stems`                      |
-| spcode  | the **species** code (unique ID)                           | `species`                    |
-| quadrat | the name of the quadrat where the stem is located          | `quadrats`                   |
-| lx      | the stem's **x-coordinate**                                | `stems`                      |
-| ly      | the stem's **y-coordinate**                                | `stems`                      |
-| dbh     | the stem's **diameter at breast height**                   | `coremeasurements`           |
-| hom     | the **breast height** at which diameter was measured       | `coremeasurements`           |
-| date    | the **date** when measurement was taken                    | `coremeasurements`           |
-| codes   | a `;`-separated list of **attributes** describing the stem | `cmattributes`, `attributes` |
-
-As you can see, there is a great deal more table interaction needed in order to ingest a single measurements row. Because of this, the upload system breaks the upload down into **two steps** instead of the usual one for other data types:
-
-1. Direct upload to staging table
-2. SQL ingestion process from staging table --> source tables
-
-The secondary process here is the **ingestion process** - where SQL itself handles the ingestion and processing of the rows found in the staging table. This step was added to increase the efficiency of the overall process.
-
-## Stage 2.5: Data Validation
-
-When you upload a measurements file, you will see an additional set of progress bars as the upload completes. These progress bars denote the progress of the **data validation procedures** applied to the newly uploaded data.
-
-Data validations are scheduled to occur immediately after data is fully ingested into your site's schema. This ensures that any validation errors are immediately found.
-
-The various validation sequences can be seen in more detail in the **Validations** page found in the **Census Hub** page.
-
-:::tip
-If you have sufficient permissions, you should be able to **enable/disable** validations there, and further **edit** them if desired!
-:::
-
-## Stage 4.5: Failed Row Processing
-
-In addition to showing rows that were preemptively removed before the upload cycle, the failed measurements system will **automatically** add any rows that fail during the upload cycle to a dedicated holding table (`failedmeasurements`) for review.
+| Error Type | Cause | Example |
+|------------|-------|---------|
+| Missing required field | A required column is empty | Empty `tag` value |
+| Invalid data type | Value doesn't match expected type | Text in numeric field |
+| Parsing failure | Row couldn't be parsed | Malformed CSV syntax |
 
 :::note
-However, this will **not** be displayed within the failed row view shown during the upload cycle!
+Pre-processing errors are different from **validation errors**. Pre-processing errors prevent the row from being uploaded at all.
 :::
+
+### Downloading Failed Rows
+
+Click **Download All Rows as CSV** to get:
+- All failed rows in a form-friendly format
+- An additional **Error Description** column explaining each failure
+
+To fix and re-upload:
+1. Download the failed rows
+2. Fix the issues in the CSV
+3. Remove the Error Description column
+4. Re-upload the corrected file
+
+---
+
+## Stage 5: Azure Backup & Completion
+
+### Automatic Cloud Backup
+
+All uploaded files are automatically backed up to Azure Blob Storage. This provides:
+- **File history** - Access previously uploaded files
+- **Disaster recovery** - Files are preserved if local copies are lost
+- **Audit trail** - Track what was uploaded and when
+
+### Accessing Uploaded Files
+
+Navigate to **Census Hub → Uploaded Files** to:
+- View all uploaded files
+- Download original files
+- See upload timestamps and metadata
+
+---
+
+## Stage 6: System Refresh
+
+After clicking **Confirm**, the system:
+1. Refreshes application state
+2. Updates cached data
+3. Redirects you back to the data grid
+
+You should see your newly uploaded data in the grid.
+
+---
+
+## Uploading Measurements (Additional Steps)
+
+Measurements uploads follow the same cycle but include **additional stages** due to their complexity.
+
+:::caution
+Remember: You can **only** upload measurements after adding at least one record to each Fixed Data type (Stem Codes, Personnel, Quadrats, Species).
+:::
+
+### Why Measurements Are Different
+
+A measurement row references multiple database tables:
+
+| Field | Description | Source Table |
+|-------|-------------|--------------|
+| `tag` | Tree tag (unique ID) | `trees` |
+| `stemtag` | Stem tag (unique ID) | `stems` |
+| `spcode` | Species code | `species` |
+| `quadrat` | Quadrat name | `quadrats` |
+| `lx` | X-coordinate within quadrat | `stems` |
+| `ly` | Y-coordinate within quadrat | `stems` |
+| `dbh` | Diameter at breast height | `coremeasurements` |
+| `hom` | Height of measurement | `coremeasurements` |
+| `date` | Measurement date | `coremeasurements` |
+| `codes` | Attribute codes (semicolon-separated) | `cmattributes`, `attributes` |
+
+This complexity requires a **two-step ingestion process**.
+
+---
+
+### Stage 1.5: Staging & Ingestion
+
+For measurements, the upload splits into two steps:
+
+```
+Step 1: Upload to Staging Table
+           ↓
+Step 2: SQL Ingestion to Source Tables
+```
+
+**Step 1: Staging**
+- Raw data is uploaded to a temporary staging table
+- This is fast and allows the UI to remain responsive
+
+**Step 2: Ingestion**
+- SQL procedures process the staging data
+- Records are distributed to the correct tables (trees, stems, coremeasurements, etc.)
+- References are resolved (species codes → species IDs, etc.)
+
+You'll see additional progress indicators during ingestion.
+
+---
+
+### Stage 2.5: Automatic Validation
+
+After measurements are ingested, **validation procedures run automatically**:
+
+1. Growth validations (DBH change limits)
+2. Species validations (valid codes, consistency)
+3. Location validations (coordinates within plot)
+4. Duplicate detection
+
+You'll see validation progress bars during this stage.
+
+:::note
+Validation errors do **not** prevent data from being saved. Data is saved but flagged for review.
+:::
+
+See [Validations & Statistics](/ForestGEO/validations-statistics/) for details on validation rules.
+
+---
+
+### Stage 4.5: Failed Measurements System
+
+Measurements that fail during ingestion are automatically stored in a dedicated **Failed Measurements** table.
+
+**Common failure reasons:**
+
+| Reason | Cause | Solution |
+|--------|-------|----------|
+| Species not found | `spcode` doesn't exist in Species List | Add the species, then reingest |
+| Quadrat not found | `quadrat` doesn't exist in Quadrats | Add the quadrat, then reingest |
+| Invalid tree/stem reference | Tag combination doesn't exist | Check tag numbers |
+| Duplicate record | Same tag combo already exists | Remove duplicate |
+
+### Accessing Failed Measurements
+
+Failed measurements appear in a **modal popup** accessible from:
+- The View Data page
+- The completion notification after upload
+
+### Reingesting Failed Measurements
+
+To recover failed measurements:
+
+1. **Review** the failed records and their error reasons
+2. **Fix** the underlying issue (e.g., add missing species)
+3. **Click "Reingest All"** to reprocess all failed records
+4. **Or reingest individually** by clicking reingest on specific rows
+
+:::tip
+Reingestion uses the **same data** that originally failed - you don't need to re-upload the file!
+:::
+
+### Clearing Failed Measurements
+
+If the failed records are bad data that shouldn't be imported:
+
+1. Navigate to the Failed Measurements modal
+2. Select records to remove (or all)
+3. Click **Clear** to delete them
+
+---
+
+## Upload Process Summary
+
+### For Fixed Data (Attributes, Personnel, Quadrats, Species)
+
+```
+1. Select File
+2. Parse & Preview
+3. Upload to Database
+4. Review Pre-processing Errors (if any)
+5. Azure Backup
+6. Complete
+```
+
+### For Measurements
+
+```
+1. Select File
+2. Parse & Preview
+3. Upload to Staging Table
+4. SQL Ingestion Processing
+5. Automatic Validation
+6. Review Pre-processing Errors
+7. Review Failed Measurements
+8. Azure Backup
+9. Complete
+```
+
+---
+
+## Troubleshooting Upload Issues
+
+### Upload Stuck at 0%
+
+- Check your internet connection
+- Try a smaller file first
+- Refresh the page and retry
+
+### Progress Bar Freezes
+
+- Large files may pause while processing batches
+- Wait at least 5 minutes before assuming it's stuck
+- If truly stuck, refresh and retry
+
+### "Headers not recognized"
+
+- Check header names match exactly (case-insensitive)
+- Remove extra spaces from headers
+- Ensure first row contains headers (not data)
+
+### Upload Completes but No Data Appears
+
+- Check you're viewing the correct census
+- Refresh the data grid
+- Check Failed Measurements for ingestion errors
+
+### File Too Large
+
+- Split into multiple files (50,000 rows or less each)
+- Upload in batches
+- Try during off-peak hours

@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { Box, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';

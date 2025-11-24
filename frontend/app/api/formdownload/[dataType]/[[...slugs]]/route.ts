@@ -117,7 +117,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'quadrats':
-        query = `SELECT 
+        query = `SELECT
           q.QuadratName  AS quadrat,
           q.StartX       AS startx,
           q.StartY       AS starty,
@@ -126,17 +126,17 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           q.Area         AS area,
           q.QuadratShape AS quadratshape
         FROM ${schema}.quadrats q
-        JOIN ${schema}.census c ON cq.CensusID = c.CensusID and c.IsActive IS TRUE
-        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query);
+        WHERE q.PlotID = ? AND q.IsActive IS TRUE
+        ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query, [plotID]);
         formMappedResults = results.map((row: any) => ({
-          quadrat: row.QuadratName,
-          startx: row.StartX,
-          starty: row.StartY,
-          dimx: row.DimensionX,
-          dimy: row.DimensionY,
-          area: row.Area,
-          quadratshape: row.QuadratShape
+          quadrat: row.quadrat,
+          startx: row.startx,
+          starty: row.starty,
+          dimx: row.dimx,
+          dimy: row.dimy,
+          area: row.area,
+          quadratshape: row.quadratshape
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
@@ -194,7 +194,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                   : ``;
               })()} 
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [censusID, plotID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           stemID: row.StemGUID,
           treeID: row.TreeID,

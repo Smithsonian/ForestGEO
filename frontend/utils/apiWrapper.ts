@@ -9,6 +9,7 @@ interface ApiWrapperOptions {
   retryAttempts?: number;
   retryDelay?: number;
   timeout?: number; // Timeout in milliseconds (default: 60000ms = 1 minute)
+  acceptedStatuses?: number[]; // Additional status codes to treat as success (e.g., [412] for validation endpoints)
 }
 
 /**
@@ -33,7 +34,8 @@ export class ApiWrapper {
       showErrorAlert = true,
       retryAttempts = 1,
       retryDelay = 1000,
-      timeout = 60000 // Default 60 second timeout
+      timeout = 60000, // Default 60 second timeout
+      acceptedStatuses = [] // Additional status codes to treat as success
     } = options;
 
     if (!ApiWrapper.loadingContext) {
@@ -59,7 +61,9 @@ export class ApiWrapper {
 
         clearTimeout(timeoutId);
 
-        if (!response.ok) {
+        // Check if response is ok OR if status is in acceptedStatuses
+        const isAccepted = response.ok || acceptedStatuses.includes(response.status);
+        if (!isAccepted) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 

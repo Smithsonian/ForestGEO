@@ -9,7 +9,7 @@ import MultilinePersonnelDataGrid from '@/components/datagrids/applications/mult
 import MultilineMeasurementsDataGrid from '@/components/datagrids/applications/multiline/multilinemeasurementsdatagrid';
 import { useEffect, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSiteContext } from '@/app/contexts/compat-hooks';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';

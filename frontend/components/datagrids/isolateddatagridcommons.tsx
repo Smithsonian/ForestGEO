@@ -29,7 +29,7 @@ import {
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
 import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';

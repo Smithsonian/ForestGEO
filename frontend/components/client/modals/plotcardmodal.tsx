@@ -23,7 +23,7 @@ import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'reac
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import Grid from '@mui/joy/Grid';
 import { createPostPatchQuery } from '@/config/datagridhelpers';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSiteContext } from '@/app/contexts/compat-hooks';
 import { Portal } from '@mui/base';
 import CircularProgress from '@mui/joy/CircularProgress';
 import Filter5Icon from '@mui/icons-material/Filter5';

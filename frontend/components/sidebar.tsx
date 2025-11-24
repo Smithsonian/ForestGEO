@@ -19,7 +19,7 @@ import {
   usePlotDispatch,
   useSiteContext,
   useSiteDispatch
-} from '@/app/contexts/userselectionprovider';
+} from '@/app/contexts/compat-hooks';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Badge,
@@ -41,7 +41,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
-import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
+import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { TransitionComponent } from '@/components/client/clientmacros';
@@ -360,13 +360,13 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
-  const renderSiteValue = (option: SelectOption<string> | null) => {
+  const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-site-select'}>Select a Site</Typography>;
     }
 
     const selectedValue = option.value;
-    const selectedSite = siteListContext?.find(c => c?.siteName?.toString() === selectedValue);
+    const selectedSite = siteListContext?.find(c => c?.siteID === selectedValue);
     return (
       <>
         {selectedSite ? (
@@ -392,13 +392,13 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
 
-  const renderPlotValue = (option: SelectOption<string> | null) => {
+  const renderPlotValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-plot-select'}>Select a Plot</Typography>;
     }
 
     const selectedValue = option.value;
-    const selectedPlot = plotListContext?.find(c => c?.plotName === selectedValue);
+    const selectedPlot = plotListContext?.find(c => c?.plotID === selectedValue);
 
     return (
       <>
@@ -608,7 +608,7 @@ export default function Sidebar(props: SidebarProps) {
   );
 
   const renderPlotOptions = () => (
-    <Select
+    <Select<number>
       placeholder="Select a Plot"
       className="plot-selection"
       name="None"
@@ -617,7 +617,7 @@ export default function Sidebar(props: SidebarProps) {
       data-testid={'plot-select-component'}
       aria-label="Select a Plot"
       renderValue={renderPlotValue}
-      value={currentPlot?.plotName || ''}
+      value={currentPlot?.plotID ?? null}
       listboxOpen={isPlotDropdownOpen}
       onListboxOpenChange={() => {
         setSiteDropdownOpen(false);
@@ -626,15 +626,15 @@ export default function Sidebar(props: SidebarProps) {
       }}
       onClose={() => setPlotDropdownOpen(false)}
       onFocus={event => event.preventDefault()}
-      onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
+      onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
         event?.preventDefault();
-        const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
+        const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
         await handlePlotSelection(selectedPlot);
       }}
     >
       {Array.isArray(plotListContext) &&
         plotListContext.map(item => (
-          <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
+          <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotID} key={item?.plotID} data-testid={'plot-selection-option'}>
             <Box
               sx={{
                 display: 'flex',
@@ -719,7 +719,7 @@ export default function Sidebar(props: SidebarProps) {
         size={'md'}
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
-        value={currentSite ? siteListContext?.find(i => i.siteName === currentSite.siteName)?.siteName : ''}
+        value={currentSite?.siteID ?? null}
         listboxOpen={isSiteDropdownOpen}
         onListboxOpenChange={() => {
           setSiteDropdownOpen(true);
@@ -727,8 +727,8 @@ export default function Sidebar(props: SidebarProps) {
           setCensusDropdownOpen(false);
         }}
         onClose={() => setSiteDropdownOpen(false)}
-        onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
-          const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
+        onChange={async (_event: React.SyntheticEvent | null, newValue: number | null) => {
+          const selectedSite = newValue ? siteListContext?.find(site => site?.siteID === newValue) : undefined;
           await handleSiteSelection(selectedSite);
         }}
       >
@@ -738,7 +738,7 @@ export default function Sidebar(props: SidebarProps) {
               Deselect Site (will trigger app reset!):
             </Typography>
           </ListItem>
-          <Option key="none" value="" aria-label="Deselect site, will trigger application reset">
+          <Option key="none" value={null as unknown as number} aria-label="Deselect site, will trigger application reset">
             None
           </Option>
         </List>
@@ -755,7 +755,7 @@ export default function Sidebar(props: SidebarProps) {
             </Typography>
           </ListItem>
           {allowedSites.map(site => (
-            <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
+            <Option key={site.siteID} value={site.siteID} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
               {site.siteName}
             </Option>
           ))}
@@ -775,7 +775,7 @@ export default function Sidebar(props: SidebarProps) {
           {otherSites.map(site => (
             <Option
               key={site.siteID}
-              value={site.siteName}
+              value={site.siteID}
               disabled
               data-testid={'site-selection-option-other'}
               aria-label={`${site.siteName} site, not accessible to current user`}

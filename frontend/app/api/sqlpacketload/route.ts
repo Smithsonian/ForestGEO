@@ -204,10 +204,74 @@ export async function POST(request: NextRequest) {
         await connectionManager.executeQuery(insertSQL, values, transactionID);
         await connectionManager.commitTransaction(transactionID);
 
-        // Log successful insertion count - use format() for schema identifier
+        // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
+        const expectedRowCount = Object.keys(fileRowSet ?? {}).length;
         const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
         const countResult = await connectionManager.executeQuery(countSQL, [fileName, batchID]);
-        ailogger.info(`Successfully inserted ${countResult[0]?.count || 0} rows for ${fileName}-${batchID}`);
+        const actualInsertedCount = countResult[0]?.count || 0;
+
+        // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
+        const droppedRowCount = expectedRowCount - actualInsertedCount;
+
+        if (droppedRowCount > 0) {
+          ailogger.error(
+            `DATA INTEGRITY WARNING: Expected ${expectedRowCount} rows but only ${actualInsertedCount} were inserted for ${fileName}-${batchID}. ` +
+            `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
+          );
+
+          // Try to identify which rows were dropped by checking what's NOT in the temp table
+          // This is expensive but necessary to track data integrity issues
+          const droppedRows: FileRow[] = [];
+          const chunkRows = Object.values(fileRowSet);
+
+          for (const row of chunkRows) {
+            const formattedDate = row.date ? moment(row.date).format('YYYY-MM-DD') : null;
+            const checkSQL = format(
+              `SELECT COUNT(*) as cnt FROM ??.temporarymeasurements
+               WHERE FileID = ? AND BatchID = ? AND TreeTag = ? AND StemTag <=> ?
+               AND SpeciesCode = ? AND QuadratName = ? AND MeasurementDate <=> ?`,
+              [schema]
+            );
+            const checkResult = await connectionManager.executeQuery(checkSQL, [
+              fileName, batchID, row.tag, row.stemtag || null, row.spcode, row.quadrat, formattedDate
+            ]);
+
+            if (checkResult[0]?.cnt === 0) {
+              // This row was dropped - add to failing rows with reason
+              droppedRows.push({
+                ...row,
+                failureReason: 'Row was silently dropped by INSERT IGNORE - likely duplicate or constraint violation'
+              });
+            }
+          }
+
+          // Insert dropped rows into failedmeasurements for tracking
+          if (droppedRows.length > 0) {
+            const failedInsertSQL = format(
+              `INSERT INTO ??.failedmeasurements
+               (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, FailureReason)
+               VALUES ?`,
+              [schema]
+            );
+            const failedValues = droppedRows.map(row => [
+              fileName, batchID, plot?.plotID ?? -1, censusCookie,
+              row.tag, row.stemtag || null, row.spcode, row.quadrat,
+              row.lx || null, row.ly || null, row.dbh || null, row.hom || null,
+              row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+              row.codes || null,
+              'Row silently dropped by INSERT IGNORE - likely duplicate or constraint violation'
+            ]);
+
+            try {
+              await connectionManager.executeQuery(failedInsertSQL, [failedValues]);
+              ailogger.info(`Moved ${droppedRows.length} dropped rows to failedmeasurements for ${fileName}-${batchID}`);
+            } catch (failedInsertError: any) {
+              ailogger.error(`Failed to track dropped rows in failedmeasurements: ${failedInsertError.message}`);
+            }
+          }
+        } else {
+          ailogger.info(`Successfully inserted ${actualInsertedCount} rows for ${fileName}-${batchID} (expected: ${expectedRowCount}, no data loss detected)`);
+        }
 
         // Track file upload in unifiedchangelog (single row per file, not per batch)
         try {
@@ -225,7 +289,8 @@ export async function POST(request: NextRequest) {
             const uploadMetadata = JSON.stringify({
               fileName,
               formType,
-              rowCount: countResult[0]?.count || 0,
+              rowCount: actualInsertedCount,
+              droppedCount: droppedRowCount,
               batchCount: 1
             });
             const insertChangelogSQL = format(
@@ -239,7 +304,8 @@ export async function POST(request: NextRequest) {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-            metadata.rowCount = (metadata.rowCount || 0) + (countResult[0]?.count || 0);
+            metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
+            metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
             metadata.batchCount = (metadata.batchCount || 1) + 1;
             const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
             await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
@@ -251,9 +317,14 @@ export async function POST(request: NextRequest) {
 
         return new NextResponse(
           JSON.stringify({
-            responseMessage: `Bulk insert to SQL completed`,
+            responseMessage: droppedRowCount > 0
+              ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check failedmeasurements table`
+              : `Bulk insert to SQL completed`,
             failingRows: Array.from(failingRows),
-            insertedCount: countResult[0]?.count || 0,
+            insertedCount: actualInsertedCount,
+            expectedCount: expectedRowCount,
+            droppedCount: droppedRowCount,
+            dataIntegrityWarning: droppedRowCount > 0,
             transactionCompleted: true,
             batchID: batchID,
             idempotencyKey

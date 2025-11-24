@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import moment from 'moment';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';

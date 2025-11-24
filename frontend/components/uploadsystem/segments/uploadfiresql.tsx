@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 // Note: TransactionAwarePQueue moved to server-side to avoid client-side MySQL imports
@@ -151,6 +151,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // Simplified approach: track operations with completion callbacks
   const activeOperations = useRef(new Set<string>());
   const operationCompletionCallbacks = useRef<(() => void)[]>([]);
+
+  // Track expected row counts per file for end-to-end verification
+  const expectedRowCounts = useRef<Map<string, number>>(new Map());
 
   // Function to wait for all active operations to complete
   const waitForAllOperationsToComplete = useCallback((): Promise<void> => {
@@ -392,9 +395,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               ailogger.info(`Received ${data.failingRows.length} failing rows for ${fileName}`);
             }
 
+            // CRITICAL: Check for data integrity warnings (silent row drops from INSERT IGNORE)
+            if (data.dataIntegrityWarning) {
+              ailogger.error(
+                `DATA INTEGRITY WARNING for ${fileName} (batchID: ${data.batchID}): ` +
+                  `Expected ${data.expectedCount} rows, only ${data.insertedCount} were inserted. ` +
+                  `${data.droppedCount} row(s) were dropped and moved to failedmeasurements.`
+              );
+            }
+
             // Check if the server indicates transaction completion
             if (data.transactionCompleted) {
-              ailogger.info(`Server confirmed transaction completion for ${fileName} (batchID: ${data.batchID || 'N/A'})`);
+              ailogger.info(
+                `Server confirmed transaction completion for ${fileName} (batchID: ${data.batchID || 'N/A'})` +
+                  (data.dataIntegrityWarning ? ` - WARNING: ${data.droppedCount} rows dropped` : '')
+              );
             }
 
             // Mark operation as complete
@@ -770,7 +785,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   // The error will be handled at a higher level
                 } finally {
                   // Always increment completed chunks to ensure progress updates
-                  setCompletedChunks(prev => prev + 1);
+                  // Check isMountedRef to prevent state updates after unmount
+                  if (isMountedRef.current) {
+                    setCompletedChunks(prev => prev + 1);
+                  }
                 }
               });
             } catch (err: any) {
@@ -790,12 +808,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
             }
 
+            // Store expected row count for end-to-end verification
+            expectedRowCounts.current.set(file.name, totalRows);
+
             // Enhanced processing summary
             const validRowsCount = totalRows - parsingInvalidRows.length;
             const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
 
             ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
-            ailogger.info(`  • Total rows processed: ${totalRows}`);
+            ailogger.info(`  • Total rows processed: ${totalRows} (stored for verification)`);
             ailogger.info(`  • Valid rows: ${validRowsCount}`);
             ailogger.info(`  • Invalid/rejected rows: ${parsingInvalidRows.length}`);
             ailogger.info(`  • Processing efficiency: ${processingEfficiency}%`);
@@ -833,6 +854,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     async function runUploads() {
       try {
+        // Clear expected row counts from any previous upload
+        expectedRowCounts.current.clear();
+
         // Validate required data before proceeding
         if (!currentPlot || !currentCensus || !schema || !session?.user?.name) {
           const contextStatus = `currentPlot: ${!!currentPlot}, currentCensus: ${!!currentCensus}, schema: ${!!schema}, session: ${!!session?.user?.name}`;
@@ -1096,6 +1120,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // If there are no batches to process, skip batch processing entirely
         if (output.length === 0) {
           ailogger.info('No batches to process - all data was processed directly or moved to failedmeasurements');
+
+          // Check if component is still mounted
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted - skipping no-batches processing');
+            return;
+          }
+
           setTotalBatches(0);
           setProcessedChunks(0);
           setCompletedOperations(prev => prev + 1);
@@ -1122,6 +1153,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
             }
             const collapserData = await collapserResponse.json();
+
+            // Check mount status after async operation
+            if (!isMountedRef.current) {
+              ailogger.warn('Component unmounted during collapser (no batches) - skipping completion');
+              return;
+            }
+
             setVerificationStatus('Data consolidation completed successfully');
             ailogger.info('Collapser completed successfully (no batches):', collapserData);
 
@@ -1129,10 +1167,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setVerificationStatus('Finalizing database operations...');
             await new Promise(resolve => setTimeout(resolve, 2000));
 
+            // Final mount check
+            if (!isMountedRef.current) {
+              ailogger.warn('Component unmounted during final sync (no batches) - skipping completion');
+              return;
+            }
+
             setVerificationStatus('All processing verification completed');
             setVerificationStep(2);
           } catch (collapserError: any) {
-            setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+            if (isMountedRef.current) {
+              setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+            }
             ailogger.error('Collapser error (no batches):', collapserError.message);
             throw collapserError;
           }
@@ -1181,11 +1227,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
 
                   ailogger.info(`Successfully processed batch ${fileID}-${batchID}`);
-                  setProcessedChunks(prev => {
-                    const newValue = prev + 1;
-                    ailogger.info(`Batch progress: ${newValue}/${totalBatchCount} batches completed`);
-                    return newValue;
-                  });
+                  // Check isMountedRef to prevent state updates after unmount
+                  if (isMountedRef.current) {
+                    setProcessedChunks(prev => {
+                      const newValue = prev + 1;
+                      ailogger.info(`Batch progress: ${newValue}/${totalBatchCount} batches completed`);
+                      return newValue;
+                    });
+                  }
                 })
                 .catch(async (e: any) => {
                   const errorMessage = e?.message || e?.toString() || 'Unknown error';
@@ -1218,13 +1267,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
 
                   // Still increment progress even for failed batches so UI doesn't hang
-                  setProcessedChunks(prev => {
-                    const newValue = prev + 1;
-                    ailogger.info(
-                      `Batch progress (with ${isMonitoringError ? 'monitoring issue' : 'failure'}): ${newValue}/${totalBatchCount} batches completed`
-                    );
-                    return newValue;
-                  });
+                  // Check isMountedRef to prevent state updates after unmount
+                  if (isMountedRef.current) {
+                    setProcessedChunks(prev => {
+                      const newValue = prev + 1;
+                      ailogger.info(
+                        `Batch progress (with ${isMonitoringError ? 'monitoring issue' : 'failure'}): ${newValue}/${totalBatchCount} batches completed`
+                      );
+                      return newValue;
+                    });
+                  }
 
                   // Don't re-throw for monitoring errors or internally handled batches
                   if (!isMonitoringError && !errorMessage.includes('handled internally')) {
@@ -1251,6 +1303,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Wait for all batch processing to complete, then increment completedOperations once
         await queue.onEmpty();
+
+        // Check if component is still mounted before continuing with verification
+        if (!isMountedRef.current) {
+          ailogger.warn('Component unmounted during batch processing - skipping verification');
+          return;
+        }
 
         // Start processing verification with UI feedback
         setIsVerifying(true);
@@ -1288,10 +1346,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Performing per-file upload verification...');
           let totalSessionProcessed = 0;
           let totalSessionFailed = 0;
+          let totalExpectedRows = 0;
+          let dataIntegrityIssuesFound = false;
 
           for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
             const file = acceptedFiles[fileIndex];
             const fileID = file.name;
+
+            // Get expected row count from parsing phase
+            const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
+            totalExpectedRows += expectedForFile;
 
             try {
               const sessionVerifyResponse = await fetch(
@@ -1303,8 +1367,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 totalSessionProcessed += sessionData.processedCount;
                 totalSessionFailed += sessionData.failedCount;
 
+                const actualTotal = sessionData.processedCount + sessionData.failedCount;
+                const discrepancy = expectedForFile - actualTotal;
+
+                if (discrepancy !== 0) {
+                  dataIntegrityIssuesFound = true;
+                  ailogger.error(
+                    `DATA INTEGRITY MISMATCH for ${fileID}: Expected ${expectedForFile} rows from file, but only ${actualTotal} accounted for (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). MISSING: ${discrepancy} row(s)!`
+                  );
+                }
+
                 ailogger.info(
-                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): ${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed, ${sessionData.totalAccounted} total accounted`
+                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - DISCREPANCY: ${discrepancy} rows` : ''}`
                 );
               } else {
                 ailogger.warn(`Session verification failed for file ${fileID}`);
@@ -1315,12 +1389,23 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
 
           const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-          setVerificationStatus(
-            `Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows accounted)`
-          );
-          ailogger.info(
-            `Upload session verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total accounted from this upload: ${totalSessionAccounted} rows.`
-          );
+          const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
+
+          if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
+            setVerificationStatus(
+              `⚠️ DATA INTEGRITY WARNING: Expected ${totalExpectedRows} rows, but only ${totalSessionAccounted} accounted (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). MISSING: ${totalDiscrepancy} row(s)!`
+            );
+            ailogger.error(
+              `CRITICAL DATA INTEGRITY ISSUE: Expected ${totalExpectedRows} rows from input files, only ${totalSessionAccounted} rows accounted for in database. ${totalDiscrepancy} row(s) were lost during processing!`
+            );
+          } else {
+            setVerificationStatus(
+              `✓ Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows - matches expected ${totalExpectedRows})`
+            );
+            ailogger.info(
+              `Upload session verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total accounted: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ No data loss detected.`
+            );
+          }
         } catch (verifyError: any) {
           setVerificationStatus(`Processing verification error: ${verifyError.message}`);
           ailogger.warn('Processing verification error:', verifyError.message);
@@ -1328,6 +1413,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Synchronization checkpoint before collapser
         await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Check if component is still mounted before collapser
+        if (!isMountedRef.current) {
+          ailogger.warn('Component unmounted during verification - skipping collapser');
+          return;
+        }
 
         setCompletedOperations(prev => prev + 1);
 
@@ -1351,6 +1442,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
           }
           const collapserData = await collapserResponse.json();
+
+          // Check mount status after collapser
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted after collapser - skipping completion');
+            return;
+          }
+
           setVerificationStatus('Data consolidation completed successfully');
           ailogger.info('Collapser completed successfully:', collapserData);
 
@@ -1360,9 +1458,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.info('Allowing 2 seconds for database operations to settle...');
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          setVerificationStatus('All processing verification completed');
+          if (isMountedRef.current) {
+            setVerificationStatus('All processing verification completed');
+          }
         } catch (collapserError: any) {
-          setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+          if (isMountedRef.current) {
+            setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+          }
           ailogger.error('Collapser error:', collapserError.message);
           throw collapserError;
         }
@@ -1370,6 +1472,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Final processing synchronization checkpoint
         ailogger.info('Final processing synchronization checkpoint...');
         await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Final mount check before completing
+        if (!isMountedRef.current) {
+          ailogger.warn('Component unmounted during final sync - skipping completion');
+          return;
+        }
 
         setIsVerifying(false);
 

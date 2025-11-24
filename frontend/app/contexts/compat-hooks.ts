@@ -15,6 +15,7 @@ import { useAppStore } from '@/config/store/appstore';
 import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { UnifiedValidityFlags } from '@/config/macros';
+import { submitCookie } from '@/app/actions/cookiemanager';
 
 // ============================================================================
 // Loading Context Compatibility
@@ -108,6 +109,7 @@ export function useSiteDispatch(): EnhancedDispatch<Site | undefined> | undefine
   const setSite = useAppStore(state => state.setSite);
 
   return async (action: { site?: Site }) => {
+    await submitCookie('schema', action.site?.schemaName ?? '');
     setSite(action.site);
   };
 }
@@ -120,6 +122,7 @@ export function usePlotDispatch(): EnhancedDispatch<Plot | undefined> | undefine
   const setPlot = useAppStore(state => state.setPlot);
 
   return async (action: { plot?: Plot }) => {
+    await submitCookie('plotID', action.plot?.plotID?.toString() ?? '');
     setPlot(action.plot);
   };
 }
@@ -132,6 +135,7 @@ export function useOrgCensusDispatch(): EnhancedDispatch<OrgCensus | undefined> 
   const setCensus = useAppStore(state => state.setCensus);
 
   return async (action: { census?: OrgCensus }) => {
+    await submitCookie('censusID', action.census?.dateRanges?.[0]?.censusID?.toString() ?? '');
     setCensus(action.census);
   };
 }
@@ -144,6 +148,7 @@ export function useQuadratDispatch(): EnhancedDispatch<Quadrat | undefined> | un
   const setQuadrat = useAppStore(state => state.setQuadrat);
 
   return async (action: { quadrat?: Quadrat }) => {
+    await submitCookie('quadratID', action.quadrat?.quadratID?.toString() ?? '');
     setQuadrat(action.quadrat);
   };
 }
@@ -199,52 +204,44 @@ export function useFirstLoadContext(): boolean | undefined {
 /**
  * Compatibility hook for useSiteListDispatch()
  */
-export function useSiteListDispatch(): EnhancedDispatch<SitesRDS[]> | undefined {
+export function useSiteListDispatch(): EnhancedDispatch<SitesRDS[] | undefined> | undefined {
   const setSiteList = useAppStore(state => state.setSiteList);
 
   return async (action: { siteList?: SitesRDS[] }) => {
-    if (action.siteList) {
-      setSiteList(action.siteList);
-    }
+    setSiteList(action.siteList ?? []);
   };
 }
 
 /**
  * Compatibility hook for usePlotListDispatch()
  */
-export function usePlotListDispatch(): EnhancedDispatch<PlotRDS[]> | undefined {
+export function usePlotListDispatch(): EnhancedDispatch<PlotRDS[] | undefined> | undefined {
   const setPlotList = useAppStore(state => state.setPlotList);
 
   return async (action: { plotList?: PlotRDS[] }) => {
-    if (action.plotList) {
-      setPlotList(action.plotList);
-    }
+    setPlotList(action.plotList ?? []);
   };
 }
 
 /**
  * Compatibility hook for useOrgCensusListDispatch()
  */
-export function useOrgCensusListDispatch(): EnhancedDispatch<OrgCensus[]> | undefined {
+export function useOrgCensusListDispatch(): EnhancedDispatch<OrgCensus[] | undefined> | undefined {
   const setCensusList = useAppStore(state => state.setCensusList);
 
   return async (action: { censusList?: OrgCensus[] }) => {
-    if (action.censusList) {
-      setCensusList(action.censusList);
-    }
+    setCensusList(action.censusList ?? []);
   };
 }
 
 /**
  * Compatibility hook for useQuadratListDispatch()
  */
-export function useQuadratListDispatch(): EnhancedDispatch<QuadratRDS[]> | undefined {
+export function useQuadratListDispatch(): EnhancedDispatch<QuadratRDS[] | undefined> | undefined {
   const setQuadratList = useAppStore(state => state.setQuadratList);
 
   return async (action: { quadratList?: QuadratRDS[] }) => {
-    if (action.quadratList) {
-      setQuadratList(action.quadratList);
-    }
+    setQuadratList(action.quadratList ?? []);
   };
 }
 

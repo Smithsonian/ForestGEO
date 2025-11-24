@@ -16,7 +16,7 @@ export default function SiteSelector() {
   const siteList = useAppStore(state => state.siteList);
   const setSite = useAppStore(state => state.setSite);
 
-  const renderSiteValue = (option: SelectOption<string> | null) => {
+  const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return (
         <Typography data-testid="pending-site-select" level="body-lg" className="sidebar-item">
@@ -26,7 +26,7 @@ export default function SiteSelector() {
     }
 
     const selectedValue = option.value;
-    const selectedSite = siteList?.find(s => s?.siteName === selectedValue);
+    const selectedSite = siteList?.find(s => s?.siteID === selectedValue);
 
     if (!selectedSite) {
       return (
@@ -50,17 +50,17 @@ export default function SiteSelector() {
     );
   };
 
-  const handleSiteChange = async (_event: React.SyntheticEvent | null, selectedSiteName: string | null) => {
-    if (selectedSiteName === '' || selectedSiteName === null) {
+  const handleSiteChange = async (_event: React.SyntheticEvent | null, selectedSiteID: number | null) => {
+    if (selectedSiteID === null) {
       setSite(undefined);
     } else {
-      const selected = siteList?.find(s => s?.siteName === selectedSiteName);
+      const selected = siteList?.find(s => s?.siteID === selectedSiteID);
       setSite(selected as Site);
     }
   };
 
   return (
-    <Select
+    <Select<number>
       suppressHydrationWarning
       placeholder="Select a Site. Required"
       className="site-select sidebar-item"
@@ -68,7 +68,7 @@ export default function SiteSelector() {
       required
       size="md"
       renderValue={renderSiteValue}
-      value={currentSite?.siteName || ''}
+      value={currentSite?.siteID ?? null}
       onChange={handleSiteChange}
       data-testid="site-select-component"
       aria-label="Select a Site. Required field for accessing measurement tools"
@@ -79,7 +79,7 @@ export default function SiteSelector() {
             aria-label={`Site: ${site?.siteName}, Schema: ${site?.schemaName}`}
             data-testid="site-selection-option"
             key={site?.siteID}
-            value={site?.siteName}
+            value={site?.siteID}
           >
             <Stack direction="column" alignItems="start" className="sidebar-item">
               <Typography level="body-lg" data-testid="site-selection-option-name">

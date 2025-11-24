@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useMemo } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 
 export interface ContextValidationResult {
   isValid: boolean;

@@ -26,7 +26,7 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [selectedPlotForMenu, setSelectedPlotForMenu] = useState<Plot | undefined>(undefined);
 
-  const renderPlotValue = (option: SelectOption<string> | null) => {
+  const renderPlotValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return (
         <Typography data-testid="pending-plot-select" level="body-lg" className="sidebar-item">
@@ -36,7 +36,7 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
     }
 
     const selectedValue = option.value;
-    const selectedPlot = plotList?.find(p => p?.plotName === selectedValue);
+    const selectedPlot = plotList?.find(p => p?.plotID === selectedValue);
 
     if (!selectedPlot) {
       return (
@@ -60,13 +60,13 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
     );
   };
 
-  const handlePlotChange = async (_event: React.SyntheticEvent | null, selectedPlotName: string | null) => {
-    if (selectedPlotName === '' || selectedPlotName === null) {
+  const handlePlotChange = async (_event: React.SyntheticEvent | null, selectedPlotID: number | null) => {
+    if (selectedPlotID === null) {
       setPlot(undefined);
       // Clear census when plot is cleared
       setCensus(undefined);
     } else {
-      const selected = plotList?.find(p => p?.plotName === selectedPlotName);
+      const selected = plotList?.find(p => p?.plotID === selectedPlotID);
       setPlot(selected as Plot);
       // Clear census when plot changes (census is plot-specific)
       setCensus(undefined);
@@ -93,7 +93,7 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
 
   return (
     <>
-      <Select
+      <Select<number>
         suppressHydrationWarning
         placeholder="Select a Plot. Required"
         className="plot-select sidebar-item"
@@ -101,7 +101,7 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
         required
         size="md"
         renderValue={renderPlotValue}
-        value={currentPlot?.plotName || ''}
+        value={currentPlot?.plotID ?? null}
         onChange={handlePlotChange}
         data-testid="plot-select-component"
         aria-label="Select a Plot. Required field for accessing measurement tools"
@@ -112,7 +112,7 @@ export default function PlotSelector({ onPlotEdit }: PlotSelectorProps) {
               aria-label={`Plot: ${plot?.plotName}${plot?.numQuadrats !== undefined ? `, Quadrats: ${plot.numQuadrats}` : ''}`}
               data-testid="plot-selection-option"
               key={plot?.plotID}
-              value={plot?.plotName}
+              value={plot?.plotID}
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }} className="sidebar-item">
                 <Stack direction="column" alignItems="start">

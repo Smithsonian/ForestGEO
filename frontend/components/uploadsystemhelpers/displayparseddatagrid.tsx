@@ -7,7 +7,7 @@ import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { usePlotContext } from '@/app/contexts/userselectionprovider';
+import { usePlotContext } from '@/app/contexts/compat-hooks';
 import { Checkbox, Divider } from '@mui/joy';
 import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/taxonomies';
 import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/zones';

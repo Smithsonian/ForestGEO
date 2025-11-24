@@ -3,7 +3,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { useSession } from 'next-auth/react';
 import React, { useEffect, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
 import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';

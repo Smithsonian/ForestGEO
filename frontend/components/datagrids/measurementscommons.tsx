@@ -57,7 +57,7 @@ import {
   VisibleFilter
 } from '@/config/datagridhelpers';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { redirect } from 'next/navigation';
 import moment from 'moment';
 import CheckIcon from '@mui/icons-material/Check';
@@ -528,7 +528,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             if (value === undefined || value === null || value === '') {
               return null;
             }
-            const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+            // Convert to string to safely call .match() on any value type
+            const strValue = String(value);
+            const match = strValue.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
 
             if (match) {
               let normalizedDate;
@@ -543,20 +545,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 return parsedDate.format('YYYY-MM-DD');
               }
             }
-            if (/^0[0-9]+$/.test(value)) {
-              return value; // Return as a string if it has leading zeroes
+            if (/^0[0-9]+$/.test(strValue)) {
+              return strValue; // Return as a string if it has leading zeroes
             }
             // Attempt to parse as a float
-            const parsedValue = parseFloat(value);
+            const parsedValue = parseFloat(strValue);
             if (!isNaN(parsedValue)) {
               return parsedValue;
             }
-            if (typeof value === 'string') {
-              value = value.replace(/"/g, '""');
-              value = `"${value}"`;
-            }
+            // Quote strings with special characters
+            let quotedValue = strValue.replace(/"/g, '""');
+            quotedValue = `"${quotedValue}"`;
 
-            return value;
+            return quotedValue;
           });
         csvRows += values.join(',') + '\n';
       });

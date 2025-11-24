@@ -13,7 +13,7 @@ import { render, screen, waitFor, within as _within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './page';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 // Mock dependencies

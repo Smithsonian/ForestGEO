@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Typography } from '@mui/joy';
 import { ReviewStates, UploadUpdateValidationsProps } from '@/config/macros/uploadsystemmacros';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
