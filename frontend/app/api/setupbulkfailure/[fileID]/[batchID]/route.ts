@@ -24,8 +24,10 @@ export async function GET(
   try {
     transactionID = await connectionManager.beginTransaction();
     let query = `
-    insert into ${schema}.failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments)
-    select distinct PlotID,
+    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments)
+    select distinct FileID,
+                    BatchID,
+                    PlotID,
                     CensusID,
                     nullif(TreeTag, '')                   as Tag,
                     nullif(StemTag, '')                   as StemTag,

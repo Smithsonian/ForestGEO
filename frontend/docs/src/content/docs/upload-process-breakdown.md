@@ -50,6 +50,7 @@ Click on **Understanding the Headers** to see the column requirements for the fo
 ![stem codes headers](../../assets/stemcodesheaders.png)
 
 This accordion shows:
+
 - **Required headers** (marked with asterisk or bold)
 - **Optional headers**
 - **Data type requirements** for each column
@@ -62,10 +63,12 @@ Review this before uploading to ensure your file headers match the expected form
 ### Uploading Your File
 
 You have two options:
+
 1. **Drag and drop** your file into the dropzone
 2. **Click** the dropzone to open a file browser
 
 The system automatically detects:
+
 - **File format** (CSV, TSV, TXT)
 - **Delimiter** (comma, tab, semicolon)
 - **Encoding** (UTF-8, etc.)
@@ -81,6 +84,7 @@ After selecting a file, you'll see:
 3. **Header validation** - The system checks for required headers
 
 If there are parsing issues, you'll see warnings here. Common issues:
+
 - Missing required headers
 - Malformed rows
 - Encoding problems
@@ -88,6 +92,7 @@ If there are parsing issues, you'll see warnings here. Common issues:
 ### Large File Handling
 
 For large files, the system:
+
 - Splits the file into **32KB chunks**
 - Processes chunks in parallel
 - Shows a progress bar with **ETC** (Estimated Time to Completion)
@@ -118,11 +123,11 @@ After upload completes, you'll see the completion view:
 
 This view shows rows that **failed pre-processing**:
 
-| Error Type | Cause | Example |
-|------------|-------|---------|
-| Missing required field | A required column is empty | Empty `tag` value |
-| Invalid data type | Value doesn't match expected type | Text in numeric field |
-| Parsing failure | Row couldn't be parsed | Malformed CSV syntax |
+| Error Type             | Cause                             | Example               |
+| ---------------------- | --------------------------------- | --------------------- |
+| Missing required field | A required column is empty        | Empty `tag` value     |
+| Invalid data type      | Value doesn't match expected type | Text in numeric field |
+| Parsing failure        | Row couldn't be parsed            | Malformed CSV syntax  |
 
 :::note
 Pre-processing errors are different from **validation errors**. Pre-processing errors prevent the row from being uploaded at all.
@@ -131,10 +136,12 @@ Pre-processing errors are different from **validation errors**. Pre-processing e
 ### Downloading Failed Rows
 
 Click **Download All Rows as CSV** to get:
+
 - All failed rows in a form-friendly format
 - An additional **Error Description** column explaining each failure
 
 To fix and re-upload:
+
 1. Download the failed rows
 2. Fix the issues in the CSV
 3. Remove the Error Description column
@@ -147,6 +154,7 @@ To fix and re-upload:
 ### Automatic Cloud Backup
 
 All uploaded files are automatically backed up to Azure Blob Storage. This provides:
+
 - **File history** - Access previously uploaded files
 - **Disaster recovery** - Files are preserved if local copies are lost
 - **Audit trail** - Track what was uploaded and when
@@ -154,6 +162,7 @@ All uploaded files are automatically backed up to Azure Blob Storage. This provi
 ### Accessing Uploaded Files
 
 Navigate to **Census Hub → Uploaded Files** to:
+
 - View all uploaded files
 - Download original files
 - See upload timestamps and metadata
@@ -163,6 +172,7 @@ Navigate to **Census Hub → Uploaded Files** to:
 ## Stage 6: System Refresh
 
 After clicking **Confirm**, the system:
+
 1. Refreshes application state
 2. Updates cached data
 3. Redirects you back to the data grid
@@ -183,18 +193,18 @@ Remember: You can **only** upload measurements after adding at least one record 
 
 A measurement row references multiple database tables:
 
-| Field | Description | Source Table |
-|-------|-------------|--------------|
-| `tag` | Tree tag (unique ID) | `trees` |
-| `stemtag` | Stem tag (unique ID) | `stems` |
-| `spcode` | Species code | `species` |
-| `quadrat` | Quadrat name | `quadrats` |
-| `lx` | X-coordinate within quadrat | `stems` |
-| `ly` | Y-coordinate within quadrat | `stems` |
-| `dbh` | Diameter at breast height | `coremeasurements` |
-| `hom` | Height of measurement | `coremeasurements` |
-| `date` | Measurement date | `coremeasurements` |
-| `codes` | Attribute codes (semicolon-separated) | `cmattributes`, `attributes` |
+| Field     | Description                           | Source Table                 |
+| --------- | ------------------------------------- | ---------------------------- |
+| `tag`     | Tree tag (unique ID)                  | `trees`                      |
+| `stemtag` | Stem tag (unique ID)                  | `stems`                      |
+| `spcode`  | Species code                          | `species`                    |
+| `quadrat` | Quadrat name                          | `quadrats`                   |
+| `lx`      | X-coordinate within quadrat           | `stems`                      |
+| `ly`      | Y-coordinate within quadrat           | `stems`                      |
+| `dbh`     | Diameter at breast height             | `coremeasurements`           |
+| `hom`     | Height of measurement                 | `coremeasurements`           |
+| `date`    | Measurement date                      | `coremeasurements`           |
+| `codes`   | Attribute codes (semicolon-separated) | `cmattributes`, `attributes` |
 
 This complexity requires a **two-step ingestion process**.
 
@@ -211,10 +221,12 @@ Step 2: SQL Ingestion to Source Tables
 ```
 
 **Step 1: Staging**
+
 - Raw data is uploaded to a temporary staging table
 - This is fast and allows the UI to remain responsive
 
 **Step 2: Ingestion**
+
 - SQL procedures process the staging data
 - Records are distributed to the correct tables (trees, stems, coremeasurements, etc.)
 - References are resolved (species codes → species IDs, etc.)
@@ -248,16 +260,17 @@ Measurements that fail during ingestion are automatically stored in a dedicated 
 
 **Common failure reasons:**
 
-| Reason | Cause | Solution |
-|--------|-------|----------|
-| Species not found | `spcode` doesn't exist in Species List | Add the species, then reingest |
-| Quadrat not found | `quadrat` doesn't exist in Quadrats | Add the quadrat, then reingest |
-| Invalid tree/stem reference | Tag combination doesn't exist | Check tag numbers |
-| Duplicate record | Same tag combo already exists | Remove duplicate |
+| Reason                      | Cause                                  | Solution                       |
+| --------------------------- | -------------------------------------- | ------------------------------ |
+| Species not found           | `spcode` doesn't exist in Species List | Add the species, then reingest |
+| Quadrat not found           | `quadrat` doesn't exist in Quadrats    | Add the quadrat, then reingest |
+| Invalid tree/stem reference | Tag combination doesn't exist          | Check tag numbers              |
+| Duplicate record            | Same tag combo already exists          | Remove duplicate               |
 
 ### Accessing Failed Measurements
 
 Failed measurements appear in a **modal popup** accessible from:
+
 - The View Data page
 - The completion notification after upload
 

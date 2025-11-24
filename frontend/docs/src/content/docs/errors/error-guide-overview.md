@@ -77,28 +77,28 @@ Technical errors related to database and server issues.
 
 ## Quick Reference: Most Common Errors
 
-| Error | Cause | Quick Fix |
-|-------|-------|-----------|
-| "Species code not found" | Species not in Species List | Add species before uploading |
-| "Invalid quadrat name" | Quadrat not defined | Add quadrat in Fixed Data |
-| "Duplicate tree/stem combination" | Same tags recorded twice | Remove duplicate from file |
-| "Missing required field" | Empty required column | Fill in the missing data |
-| "DBH growth exceeds maximum" | Growth > 65mm | Verify both measurements |
-| "Request timeout" | Network or server issue | Wait and retry |
-| "Missing required context" | No plot/census selected | Select plot and census |
-| "Session expired" | Login timed out | Log in again |
-| "Unauthorized" | Insufficient permissions | Contact administrator |
-| "Foreign key constraint" | Referenced data missing | Add referenced data first |
+| Error                             | Cause                       | Quick Fix                    |
+| --------------------------------- | --------------------------- | ---------------------------- |
+| "Species code not found"          | Species not in Species List | Add species before uploading |
+| "Invalid quadrat name"            | Quadrat not defined         | Add quadrat in Fixed Data    |
+| "Duplicate tree/stem combination" | Same tags recorded twice    | Remove duplicate from file   |
+| "Missing required field"          | Empty required column       | Fill in the missing data     |
+| "DBH growth exceeds maximum"      | Growth > 65mm               | Verify both measurements     |
+| "Request timeout"                 | Network or server issue     | Wait and retry               |
+| "Missing required context"        | No plot/census selected     | Select plot and census       |
+| "Session expired"                 | Login timed out             | Log in again                 |
+| "Unauthorized"                    | Insufficient permissions    | Contact administrator        |
+| "Foreign key constraint"          | Referenced data missing     | Add referenced data first    |
 
 ---
 
 ## Error Severity Levels
 
-| Severity | Icon | Meaning | Action Required |
-|----------|------|---------|-----------------|
-| **Critical** | 🔴 Red | Data cannot be processed | Must fix before proceeding |
-| **Warning** | 🟡 Yellow | Data flagged but saved | Review and correct if needed |
-| **Info** | 🔵 Blue | Informational only | No action required |
+| Severity     | Icon      | Meaning                  | Action Required              |
+| ------------ | --------- | ------------------------ | ---------------------------- |
+| **Critical** | 🔴 Red    | Data cannot be processed | Must fix before proceeding   |
+| **Warning**  | 🟡 Yellow | Data flagged but saved   | Review and correct if needed |
+| **Info**     | 🔵 Blue   | Informational only       | No action required           |
 
 :::note
 **Validation errors** are typically warnings - your data is saved but flagged for review. **Upload errors** are typically critical - the data was not saved.
@@ -127,25 +127,25 @@ Before diving into specific error guides, try these steps:
 
 Most error messages include:
 
-| Component | Example | Purpose |
-|-----------|---------|---------|
-| **Error Type** | "Validation Error" | Categorizes the error |
-| **Error Message** | "Species code ABCDE not found" | Describes what went wrong |
-| **Error ID** | "err-abc123" | Unique identifier for support |
-| **Affected Data** | "Row 45, Column 'spcode'" | Location of the problem |
+| Component         | Example                        | Purpose                       |
+| ----------------- | ------------------------------ | ----------------------------- |
+| **Error Type**    | "Validation Error"             | Categorizes the error         |
+| **Error Message** | "Species code ABCDE not found" | Describes what went wrong     |
+| **Error ID**      | "err-abc123"                   | Unique identifier for support |
+| **Affected Data** | "Row 45, Column 'spcode'"      | Location of the problem       |
 
 ### Interpreting HTTP Error Codes
 
-| Code | Name | Meaning | Action |
-|------|------|---------|--------|
-| 400 | Bad Request | Invalid data submitted | Check your input data |
-| 401 | Unauthorized | Not logged in | Log in and retry |
-| 403 | Forbidden | No permission | Contact administrator |
-| 404 | Not Found | Resource doesn't exist | Check if data was deleted |
-| 408 | Timeout | Request took too long | Wait and retry |
-| 409 | Conflict | Data conflict | Resolve duplicate/conflict |
-| 500 | Server Error | Internal error | Wait and retry; report if persistent |
-| 503 | Unavailable | Server overloaded | Wait and try later |
+| Code | Name         | Meaning                | Action                               |
+| ---- | ------------ | ---------------------- | ------------------------------------ |
+| 400  | Bad Request  | Invalid data submitted | Check your input data                |
+| 401  | Unauthorized | Not logged in          | Log in and retry                     |
+| 403  | Forbidden    | No permission          | Contact administrator                |
+| 404  | Not Found    | Resource doesn't exist | Check if data was deleted            |
+| 408  | Timeout      | Request took too long  | Wait and retry                       |
+| 409  | Conflict     | Data conflict          | Resolve duplicate/conflict           |
+| 500  | Server Error | Internal error         | Wait and retry; report if persistent |
+| 503  | Unavailable  | Server overloaded      | Wait and try later                   |
 
 ---
 
@@ -187,6 +187,7 @@ For issues they can help with:
 ### Q: Is my data lost when I see an error?
 
 **A:** Usually no. The system is designed to preserve data:
+
 - Validation errors: Data is saved but flagged
 - Upload errors: Data may not be saved - check Failed Measurements
 - System errors: Completed operations are saved; interrupted ones can be retried

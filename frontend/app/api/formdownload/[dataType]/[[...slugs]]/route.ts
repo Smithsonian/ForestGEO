@@ -82,10 +82,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
-          firstname: row.FirstName,
-          lastname: row.LastName,
-          role: row.RoleName,
-          roledescription: row.RoleDescription
+          firstname: row.firstname,
+          lastname: row.lastname,
+          role: row.role,
+          roledescription: row.roledescription
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'species':
@@ -106,14 +106,14 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
-          spcode: row.SpeciesCode,
-          family: row.Family,
-          genus: row.Genus,
-          species: row.SpeciesName,
-          subspecies: row.SubspeciesName,
-          idlevel: row.IDLevel,
-          authority: row.SpeciesAuthority,
-          subspeciesauthority: row.SubspeciesAuthority
+          spcode: row.spcode,
+          family: row.family,
+          genus: row.genus,
+          species: row.species,
+          subspecies: row.subspecies,
+          idlevel: row.idlevel,
+          authority: row.authority,
+          subspeciesauthority: row.subspeciesauthority
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'quadrats':

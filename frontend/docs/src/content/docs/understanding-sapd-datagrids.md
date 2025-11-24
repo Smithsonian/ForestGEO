@@ -52,15 +52,15 @@ All the components described here are present across **all** datagrid implementa
 
 ### Toolbar Components Overview
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Columns Button | Left | Show/hide columns |
-| Filter Button | Left | Add data filters |
-| Search Box | Center | Quick search across all fields |
-| Refresh Button | Center | Reload grid data |
-| Manual Entry | Right | Open bulk entry form |
-| Upload Button | Right | Upload data from file |
-| Ancillary Actions | Far Right | Grid-specific actions |
+| Component         | Location  | Purpose                        |
+| ----------------- | --------- | ------------------------------ |
+| Columns Button    | Left      | Show/hide columns              |
+| Filter Button     | Left      | Add data filters               |
+| Search Box        | Center    | Quick search across all fields |
+| Refresh Button    | Center    | Reload grid data               |
+| Manual Entry      | Right     | Open bulk entry form           |
+| Upload Button     | Right     | Upload data from file          |
+| Ancillary Actions | Far Right | Grid-specific actions          |
 
 ---
 
@@ -100,16 +100,16 @@ Each filter will only trigger after all **three** categories of the filter row a
 
 **Available Operators:**
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| equals | Exact match | Status equals "alive" |
-| contains | Partial match | Code contains "D" |
-| starts with | Begins with | QuadratName starts with "03" |
-| ends with | Ends with | Code ends with "1" |
-| is empty | No value | Description is empty |
-| is not empty | Has value | Status is not empty |
-| > | Greater than | DBH > 100 |
-| < | Less than | DBH < 50 |
+| Operator     | Description   | Example                      |
+| ------------ | ------------- | ---------------------------- |
+| equals       | Exact match   | Status equals "alive"        |
+| contains     | Partial match | Code contains "D"            |
+| starts with  | Begins with   | QuadratName starts with "03" |
+| ends with    | Ends with     | Code ends with "1"           |
+| is empty     | No value      | Description is empty         |
+| is not empty | Has value     | Status is not empty          |
+| >            | Greater than  | DBH > 100                    |
+| <            | Less than     | DBH < 50                     |
 
 ---
 
@@ -203,11 +203,11 @@ This helps focus on relevant data when many optional columns exist.
 
 #### Unique Ancillary Actions by Grid
 
-| Grid | Additional Actions |
-|------|-------------------|
-| **Stem Codes** | None |
-| **Personnel** | None |
-| **Quadrats** | None |
+| Grid             | Additional Actions                                     |
+| ---------------- | ------------------------------------------------------ |
+| **Stem Codes**   | None                                                   |
+| **Personnel**    | None                                                   |
+| **Quadrats**     | None                                                   |
 | **Species List** | **RESET Table** - Clears all species data (admin only) |
 
 :::caution

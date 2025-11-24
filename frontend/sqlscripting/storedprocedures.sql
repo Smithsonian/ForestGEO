@@ -1123,9 +1123,9 @@ BEGIN
             );
 
             -- Move all batch to failedmeasurements
-            INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
+            INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
                                                    Date, Codes, Comments, FailureReasons)
-            SELECT PlotID, CensusID,
+            SELECT vFileID, vBatchID, PlotID, CensusID,
                    NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                    NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
@@ -1240,9 +1240,9 @@ BEGIN
     IF EXISTS(SELECT 1 FROM validation_failures) THEN
         SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
 
-        INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
+        INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
                                        Date, Codes, Comments, FailureReasons)
-        SELECT PlotID, CensusID,
+        SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
@@ -1283,9 +1283,9 @@ BEGIN
     IF EXISTS(SELECT 1 FROM initial_dup_filter WHERE duplicate_count > 1) THEN
         SET @dup_count = (SELECT SUM(duplicate_count - 1) FROM initial_dup_filter WHERE duplicate_count > 1);
 
-        INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
+        INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
                                        Date, Codes, Comments, FailureReasons)
-        SELECT tm.PlotID, tm.CensusID,
+        SELECT vFileID, vBatchID, tm.PlotID, tm.CensusID,
                NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
                NULLIF(tm.LocalX, 0), NULLIF(tm.LocalY, 0), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
                NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
@@ -1354,9 +1354,9 @@ BEGIN
     IF EXISTS(SELECT 1 FROM filter_validity WHERE Valid = false) THEN
         SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = false);
 
-        INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
+        INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
                                        Comments, FailureReasons)
-        SELECT PlotID, CensusID,
+        SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
@@ -1504,9 +1504,9 @@ BEGIN
         );
 
         -- Insert quadrat mismatch failures
-        INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
+        INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
                                        Date, Codes, Comments, FailureReasons)
-        SELECT PlotID, CensusID,
+        SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
@@ -1514,9 +1514,9 @@ BEGIN
         FROM quadrat_mismatch_failures;
 
         -- Insert coordinate drift failures
-        INSERT IGNORE INTO failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
+        INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
                                        Date, Codes, Comments, FailureReasons)
-        SELECT PlotID, CensusID,
+        SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),

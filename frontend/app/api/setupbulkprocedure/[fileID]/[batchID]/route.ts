@@ -77,9 +77,11 @@ export async function GET(
           ailogger.info(`Transaction ${transactionID} started for ${fileID}-${batchID} (attempt ${attempt})`);
 
           // Acquire application-level lock for this file to prevent concurrent processing
-          const lockAcquired = await connectionManager.acquireApplicationLock(`file:${fileID}`, transactionID, 60000);
+          // Lock timeout should match transaction timeout to avoid premature failures when other batches are processing
+          const lockTimeoutMs = 5 * 60 * 1000; // 5 minutes - allow time for other batches to complete
+          const lockAcquired = await connectionManager.acquireApplicationLock(`file:${fileID}`, transactionID, lockTimeoutMs);
           if (!lockAcquired) {
-            throw new Error(`Failed to acquire application lock for file ${fileID}`);
+            throw new Error(`Failed to acquire application lock for file ${fileID} after ${lockTimeoutMs / 1000}s`);
           }
 
           // Get plotID and censusID for plot+census-level locking
@@ -93,7 +95,8 @@ export async function GET(
             const { PlotID, CensusID } = plotCensusResult[0];
 
             // Acquire plot+census-level lock to prevent concurrent uploads to same plot/census
-            const plotCensusLockAcquired = await connectionManager.acquireApplicationLock(`plot:${PlotID}:census:${CensusID}`, transactionID, 60000);
+            // Use same timeout as file lock for consistency
+            const plotCensusLockAcquired = await connectionManager.acquireApplicationLock(`plot:${PlotID}:census:${CensusID}`, transactionID, lockTimeoutMs);
             if (!plotCensusLockAcquired) {
               throw new Error(`Another upload is in progress for Plot ${PlotID}, Census ${CensusID}. Please wait for it to complete.`);
             }
@@ -137,12 +140,14 @@ export async function GET(
       const isTimeout = e.message?.includes('timed out');
       const isConnectionError = e.code === 'ECONNRESET' || e.code === 'PROTOCOL_CONNECTION_LOST' || e.errno === 1927 || e.errno === 2013;
       const isDeadlock = e.code === 'ER_LOCK_DEADLOCK' || e.errno === 1213;
+      const isLockContention = e.message?.includes('Failed to acquire application lock') || e.message?.includes('Another upload is in progress');
 
       ailogger.error(`Attempt ${attempt}: Error encountered for ${fileID}-${batchID}`, e, {
         code: (e as any).code || (e as any).errno || 'UNKNOWN',
         isTimeout,
         isConnectionError,
         isDeadlock,
+        isLockContention,
         attempt,
         maxAttempts
       });
@@ -153,8 +158,15 @@ export async function GET(
         break;
       }
 
-      // For connection errors, wait longer before retry
-      if (isConnectionError) {
+      // Lock contention means another batch is actively processing - wait significantly longer
+      // Since we already waited up to 5 minutes for the lock, don't retry many times
+      if (isLockContention) {
+        if (attempt >= 3) {
+          ailogger.error(`Lock contention persists after ${attempt} attempts, aborting for ${fileID}-${batchID}`);
+          break;
+        }
+        delay = 30000; // Wait 30 seconds before retry - the other batch should finish soon
+      } else if (isConnectionError) {
         delay = Math.min(delay * 3, 15000); // Longer delay for connection issues
       } else if (isDeadlock) {
         delay = Math.min(delay * 1.5, 3000); // Shorter delay for deadlocks

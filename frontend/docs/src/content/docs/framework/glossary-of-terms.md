@@ -22,6 +22,7 @@ See [Unified Changelog](#unified-changelog-audit-trail).
 Cloud storage service where uploaded files are automatically backed up.
 
 **Key points:**
+
 - Files are preserved for disaster recovery
 - Accessible via Census Hub → Uploaded Files
 - Includes metadata about upload date and user
@@ -35,6 +36,7 @@ Cloud storage service where uploaded files are automatically backed up.
 A defined time period during which field measurements are collected for a plot.
 
 **Key points:**
+
 - Defined by start and end dates
 - Multiple censuses can exist per plot (Census 1, Census 2, etc.)
 - Measurement dates establish census boundaries
@@ -45,6 +47,7 @@ A defined time period during which field measurements are collected for a plot.
 The main navigation section for working with measurement data.
 
 **Pages included:**
+
 - View Data
 - Post-Census Statistics
 - Recent Changes
@@ -57,6 +60,7 @@ The main navigation section for working with measurement data.
 The process of copying unchanged data from a previous census to a new census.
 
 **Key points:**
+
 - Saves data re-entry time
 - Available for: Personnel, Quadrats
 - User selects which items to copy
@@ -75,6 +79,7 @@ See [Measurements](#measurements-core-measurements).
 The main overview page showing census statistics and data health metrics.
 
 **Key points:**
+
 - Displays progress metrics and tachometer visualizations
 - Shows stem statistics (old stems, multi-stems, new recruits)
 - Lists recent changes
@@ -85,6 +90,7 @@ The main overview page showing census statistics and data health metrics.
 An interactive table interface for viewing and editing records.
 
 **Key points:**
+
 - Supports filtering and sorting
 - Allows inline editing
 - Features toolbar with columns, filters, search, upload, and export
@@ -95,6 +101,7 @@ An interactive table interface for viewing and editing records.
 The diameter of a tree stem measured at a standardized height (typically 1.3 meters or 4.5 feet above ground).
 
 **Key points:**
+
 - Primary measurement for forest inventory
 - Unit varies by site (millimeters or centimeters)
 - Subject to validation rules (growth limits, shrinkage limits)
@@ -109,6 +116,7 @@ The diameter of a tree stem measured at a standardized height (typically 1.3 met
 The calculated remaining time for an upload or processing operation.
 
 **Key points:**
+
 - Displayed during file uploads
 - Updates as processing continues
 - Helps estimate when to expect completion
@@ -122,6 +130,7 @@ The calculated remaining time for an upload or processing operation.
 Measurement records that could not be successfully processed during data ingestion.
 
 **Key points:**
+
 - Stored in dedicated table for review
 - Common causes: invalid species codes, missing fields, duplicate records
 - Can be reviewed, edited, and re-ingested
@@ -132,6 +141,7 @@ Measurement records that could not be successfully processed during data ingesti
 Reference data that does not change between censuses (or changes rarely).
 
 **Key points:**
+
 - Includes: Species List, Stem Codes
 - Must be set up BEFORE uploading measurements
 - Shared across all censuses in a plot
@@ -142,6 +152,7 @@ Reference data that does not change between censuses (or changes rarely).
 A file type accepted for upload (CSV, TSV, or TXT format).
 
 **Key points:**
+
 - Each data type has specific required headers
 - Headers can be viewed in the "Understanding the Headers" accordion
 - Forms must contain required fields to be accepted
@@ -155,6 +166,7 @@ A file type accepted for upload (CSV, TSV, or TXT format).
 Absolute geographic position (UTM or GPS coordinates) of a stem.
 
 **Key points:**
+
 - Calculated from quadrat position plus local coordinates
 - Used for mapping and spatial analysis
 - Subject to validation (must be within plot boundaries)
@@ -168,6 +180,7 @@ Absolute geographic position (UTM or GPS coordinates) of a stem.
 The actual height above ground where the diameter measurement was taken.
 
 **Key points:**
+
 - Often differs from standard 1.3m for irregular stems
 - Important for remeasurement consistency
 - Recorded in the `hom` column of measurements
@@ -181,6 +194,7 @@ The actual height above ground where the diameter measurement was taken.
 The process of loading uploaded data from temporary storage into the permanent database.
 
 **Key points:**
+
 - Validates and transforms data
 - Links measurements to existing trees/stems or creates new records
 - Two-stage process: staging then SQL processing
@@ -195,6 +209,7 @@ The process of loading uploaded data from temporary storage into the permanent d
 Position within a quadrat (relative coordinates).
 
 **Key points:**
+
 - X, Y values (lx, ly) relative to quadrat origin
 - Used for locating stems within the plot
 - Combined with quadrat position to calculate global coordinates
@@ -208,6 +223,7 @@ Position within a quadrat (relative coordinates).
 The actual diameter and date records for a stem at a specific point in time.
 
 **Key points:**
+
 - Primary data collected during census
 - Includes: DBH, HOM, measurement date, attributes
 - Each linked to a specific stem and census
@@ -218,6 +234,7 @@ The actual diameter and date records for a stem at a specific point in time.
 A tree with more than one woody trunk or branch meeting measurement criteria.
 
 **Key points:**
+
 - Main stem tagged "0"
 - Additional stems tagged "1", "2", etc.
 - All stems share the same Tree Tag
@@ -232,6 +249,7 @@ A tree with more than one woody trunk or branch meeting measurement criteria.
 Field staff and data collection team members.
 
 **Key points:**
+
 - Census-dependent (must be added for each census or rolled over)
 - Includes: first name, last name, role, role description
 - Managed in Stem & Plot Details → Personnel
@@ -241,6 +259,7 @@ Field staff and data collection team members.
 A specific geographic region marked for data collection within a site.
 
 **Key points:**
+
 - Has defined dimensions and coordinates
 - Divided into quadrats
 - Contains one or more censuses
@@ -251,6 +270,7 @@ A specific geographic region marked for data collection within a site.
 Statistical analyses run on completed census data.
 
 **Key points:**
+
 - Manually triggered by user
 - Provides summary metrics and reports
 - Accessed via Census Hub → Post-Census Statistics
@@ -261,6 +281,7 @@ Statistical analyses run on completed census data.
 Initial validation that occurs before data ingestion.
 
 **Key points:**
+
 - Checks for missing required fields, formatting errors
 - Failures can be downloaded and corrected
 - Different from post-ingestion validation
@@ -275,6 +296,7 @@ Initial validation that occurs before data ingestion.
 A subdivision of a plot into smaller geographic sections.
 
 **Key points:**
+
 - Each has specific coordinates (startX, startY) and dimensions (dimX, dimY)
 - Named using codes (e.g., "0322")
 - All stems must be assigned to a quadrat
@@ -289,6 +311,7 @@ A subdivision of a plot into smaller geographic sections.
 The page showing the audit trail of all data modifications.
 
 **Key points:**
+
 - Shows what changed, old/new values, who, when
 - Accessed via Census Hub → Recent Changes
 - Useful for tracking modifications and compliance
@@ -298,6 +321,7 @@ The page showing the audit trail of all data modifications.
 Re-processing measurements that were previously failed or staged.
 
 **Key points:**
+
 - Allows retry without re-uploading files
 - Used after fixing underlying data errors (e.g., adding missing species)
 - Available from Failed Measurements modal
@@ -311,6 +335,7 @@ Re-processing measurements that were previously failed or staged.
 The database structure specific to each site.
 
 **Key points:**
+
 - Contains all data for a site's plots, censuses, measurements
 - Each site has a unique schema
 - Selected automatically when you choose a site
@@ -320,6 +345,7 @@ The database structure specific to each site.
 A collection of plots in a specific geographic location (e.g., "Panama", "BCI").
 
 **Key points:**
+
 - Top level of data hierarchy
 - Users are assigned to specific sites by administrators
 - Has unique database schema
@@ -330,6 +356,7 @@ A collection of plots in a specific geographic location (e.g., "Panama", "BCI").
 A shorthand identifier for a species (e.g., "AESPO").
 
 **Key points:**
+
 - Must be unique within a plot
 - Up to 25 characters
 - Must exist in Species List before uploading measurements
@@ -340,6 +367,7 @@ A shorthand identifier for a species (e.g., "AESPO").
 Complete inventory of all species found in the plot.
 
 **Key points:**
+
 - NOT census-dependent (shared across all censuses)
 - Contains: species code, name, genus, family, authority
 - Can only be reset via admin function
@@ -350,6 +378,7 @@ Complete inventory of all species found in the plot.
 Temporary storage for uploaded measurements before final processing.
 
 **Key points:**
+
 - Holds data during ingestion validation
 - Data moves to permanent tables or failed measurements after processing
 - Specific to measurements upload process
@@ -359,6 +388,7 @@ Temporary storage for uploaded measurements before final processing.
 An individual woody trunk or branch of a tree.
 
 **Key points:**
+
 - Each has a Stem Tag (0 for main stem, 1+ for additional)
 - Most trees have one stem (tag "0")
 - Has local coordinates within the quadrat
@@ -369,6 +399,7 @@ An individual woody trunk or branch of a tree.
 The navigation section for managing Fixed Data.
 
 **Pages included:**
+
 - Stem Codes (Attributes)
 - Personnel
 - Quadrats
@@ -379,6 +410,7 @@ The navigation section for managing Fixed Data.
 Shorthand codes describing the condition or characteristic of a tree, stem, or measurement.
 
 **Key points:**
+
 - Locally created (can be in any language)
 - Examples: "D" (dead), "L" (leaning), "B" (buttressed)
 - Has status category: Alive, Dead, Missing, Broken Below, etc.
@@ -389,6 +421,7 @@ Shorthand codes describing the condition or characteristic of a tree, stem, or m
 Number distinguishing multiple stems on the same tree.
 
 **Key points:**
+
 - "0" = main stem
 - "1", "2", etc. = additional stems
 - Combined with Tree Tag for unique stem identification
@@ -403,6 +436,7 @@ Number distinguishing multiple stems on the same tree.
 An individual plant with a unique Tree Tag.
 
 **Key points:**
+
 - Has single species assigned
 - Can have multiple stems (multi-stem trees)
 - All stems must be in same quadrat
@@ -413,6 +447,7 @@ An individual plant with a unique Tree Tag.
 Unique identifier painted/attached to the tree in the field.
 
 **Key points:**
+
 - Permanent identification number
 - Combined with Stem Tag for unique stem identification
 - Used in the `tag` column of measurements
@@ -426,6 +461,7 @@ Unique identifier painted/attached to the tree in the field.
 Complete record of all data modifications.
 
 **Key points:**
+
 - Shows: table, field, old values, new values, who, when
 - Accessible under "Recent Changes" in Census Hub
 - Used for compliance and tracking
@@ -436,6 +472,7 @@ Complete record of all data modifications.
 Page showing history of all files uploaded to the system.
 
 **Key points:**
+
 - Accessed via Census Hub → Uploaded Files
 - Allows download of original uploaded files
 - Shows upload date, user, and file metadata
@@ -450,6 +487,7 @@ Page showing history of all files uploaded to the system.
 Automatic checks that verify data quality and logical consistency.
 
 **Key points:**
+
 - Runs automatically during measurements upload
 - 12+ configurable rules
 - Errors flagged but data still saved
@@ -460,6 +498,7 @@ Automatic checks that verify data quality and logical consistency.
 A flag indicating a measurement failed one or more validation checks.
 
 **Key points:**
+
 - Measurements with errors are still saved
 - Can be reviewed and edited in data grid
 - Cleared by fixing underlying issue
@@ -470,6 +509,7 @@ A flag indicating a measurement failed one or more validation checks.
 The main page for viewing and editing measurements for the current census.
 
 **Key points:**
+
 - Shows measurements in data grid format
 - Supports upload, filtering, sorting, editing
 - Requires all Fixed Data to be populated first

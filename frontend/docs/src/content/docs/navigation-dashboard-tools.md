@@ -66,12 +66,12 @@ The home page showing census statistics and data health metrics. See the [Dashbo
 
 This section contains interfaces for managing **Fixed Data** - reference data required before you can upload measurements.
 
-| Page | Description |
-|------|-------------|
-| **Stem Codes** | Attribute codes describing tree/stem conditions (e.g., "D" for dead, "L" for leaning) |
-| **Personnel** | Field staff and data collection team members for the census |
-| **Quadrats** | Geographic subdivisions of the plot |
-| **Species List** | Inventory of all species found in the plot with taxonomy information |
+| Page             | Description                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------- |
+| **Stem Codes**   | Attribute codes describing tree/stem conditions (e.g., "D" for dead, "L" for leaning) |
+| **Personnel**    | Field staff and data collection team members for the census                           |
+| **Quadrats**     | Geographic subdivisions of the plot                                                   |
+| **Species List** | Inventory of all species found in the plot with taxonomy information                  |
 
 :::caution
 You must add at least **one record** to each of these data types before the **View Data** page becomes accessible!
@@ -81,14 +81,14 @@ You must add at least **one record** to each of these data types before the **Vi
 
 This section contains interfaces for working with measurement data and census analysis.
 
-| Page | Description |
-|------|-------------|
-| **View Data** | View and edit measurements for the current census |
-| **Post-Census Statistics** | Run statistical analyses on your census data |
-| **Recent Changes** | Audit trail showing all data modifications |
-| **Uploaded Files** | History of files uploaded to the system with download links |
-| **View All Historical Data** | Browse measurements across all censuses |
-| **Validations** | Configure and manage data validation rules |
+| Page                         | Description                                                 |
+| ---------------------------- | ----------------------------------------------------------- |
+| **View Data**                | View and edit measurements for the current census           |
+| **Post-Census Statistics**   | Run statistical analyses on your census data                |
+| **Recent Changes**           | Audit trail showing all data modifications                  |
+| **Uploaded Files**           | History of files uploaded to the system with download links |
+| **View All Historical Data** | Browse measurements across all censuses                     |
+| **Validations**              | Configure and manage data validation rules                  |
 
 ---
 
@@ -108,11 +108,11 @@ The dashboard displays visual indicators showing:
 
 Key statistics about your census data:
 
-| Metric | Description |
-|--------|-------------|
-| **Old Stems** | Stems measured in previous censuses being remeasured |
-| **Multi-Stems** | Trees with more than one stem |
-| **New Recruits** | Stems being measured for the first time |
+| Metric           | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| **Old Stems**    | Stems measured in previous censuses being remeasured |
+| **Multi-Stems**  | Trees with more than one stem                        |
+| **New Recruits** | Stems being measured for the first time              |
 
 ### Data Validity Status
 
@@ -167,18 +167,18 @@ If these references don't exist, measurements will fail to process and end up in
 
 ## Quick Reference: Navigation Paths
 
-| To Access... | Navigate to... |
-|--------------|----------------|
-| Add stem codes | Stem & Plot Details → Stem Codes |
-| Add personnel | Stem & Plot Details → Personnel |
-| Define quadrats | Stem & Plot Details → Quadrats |
-| Add species | Stem & Plot Details → Species List |
-| Upload measurements | Census Hub → View Data |
-| Run statistics | Census Hub → Post-Census Statistics |
-| View audit trail | Census Hub → Recent Changes |
-| Download uploaded files | Census Hub → Uploaded Files |
+| To Access...            | Navigate to...                        |
+| ----------------------- | ------------------------------------- |
+| Add stem codes          | Stem & Plot Details → Stem Codes      |
+| Add personnel           | Stem & Plot Details → Personnel       |
+| Define quadrats         | Stem & Plot Details → Quadrats        |
+| Add species             | Stem & Plot Details → Species List    |
+| Upload measurements     | Census Hub → View Data                |
+| Run statistics          | Census Hub → Post-Census Statistics   |
+| View audit trail        | Census Hub → Recent Changes           |
+| Download uploaded files | Census Hub → Uploaded Files           |
 | See all historical data | Census Hub → View All Historical Data |
-| Configure validations | Census Hub → Validations |
+| Configure validations   | Census Hub → Validations              |
 
 ---
 

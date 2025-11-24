@@ -11,6 +11,7 @@
  * - Once all components are migrated, these hooks can be removed
  */
 
+import { useCallback } from 'react';
 import { useAppStore } from '@/config/store/appstore';
 import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -108,10 +109,13 @@ export interface EnhancedDispatch<T> {
 export function useSiteDispatch(): EnhancedDispatch<Site | undefined> | undefined {
   const setSite = useAppStore(state => state.setSite);
 
-  return async (action: { site?: Site }) => {
-    await submitCookie('schema', action.site?.schemaName ?? '');
-    setSite(action.site);
-  };
+  return useCallback(
+    async (action: { site?: Site }) => {
+      await submitCookie('schema', action.site?.schemaName ?? '');
+      setSite(action.site);
+    },
+    [setSite]
+  );
 }
 
 /**
@@ -121,10 +125,13 @@ export function useSiteDispatch(): EnhancedDispatch<Site | undefined> | undefine
 export function usePlotDispatch(): EnhancedDispatch<Plot | undefined> | undefined {
   const setPlot = useAppStore(state => state.setPlot);
 
-  return async (action: { plot?: Plot }) => {
-    await submitCookie('plotID', action.plot?.plotID?.toString() ?? '');
-    setPlot(action.plot);
-  };
+  return useCallback(
+    async (action: { plot?: Plot }) => {
+      await submitCookie('plotID', action.plot?.plotID?.toString() ?? '');
+      setPlot(action.plot);
+    },
+    [setPlot]
+  );
 }
 
 /**
@@ -134,10 +141,13 @@ export function usePlotDispatch(): EnhancedDispatch<Plot | undefined> | undefine
 export function useOrgCensusDispatch(): EnhancedDispatch<OrgCensus | undefined> | undefined {
   const setCensus = useAppStore(state => state.setCensus);
 
-  return async (action: { census?: OrgCensus }) => {
-    await submitCookie('censusID', action.census?.dateRanges?.[0]?.censusID?.toString() ?? '');
-    setCensus(action.census);
-  };
+  return useCallback(
+    async (action: { census?: OrgCensus }) => {
+      await submitCookie('censusID', action.census?.dateRanges?.[0]?.censusID?.toString() ?? '');
+      setCensus(action.census);
+    },
+    [setCensus]
+  );
 }
 
 /**
@@ -147,10 +157,13 @@ export function useOrgCensusDispatch(): EnhancedDispatch<OrgCensus | undefined> 
 export function useQuadratDispatch(): EnhancedDispatch<Quadrat | undefined> | undefined {
   const setQuadrat = useAppStore(state => state.setQuadrat);
 
-  return async (action: { quadrat?: Quadrat }) => {
-    await submitCookie('quadratID', action.quadrat?.quadratID?.toString() ?? '');
-    setQuadrat(action.quadrat);
-  };
+  return useCallback(
+    async (action: { quadrat?: Quadrat }) => {
+      await submitCookie('quadratID', action.quadrat?.quadratID?.toString() ?? '');
+      setQuadrat(action.quadrat);
+    },
+    [setQuadrat]
+  );
 }
 
 // ============================================================================
@@ -207,9 +220,12 @@ export function useFirstLoadContext(): boolean | undefined {
 export function useSiteListDispatch(): EnhancedDispatch<SitesRDS[] | undefined> | undefined {
   const setSiteList = useAppStore(state => state.setSiteList);
 
-  return async (action: { siteList?: SitesRDS[] }) => {
-    setSiteList(action.siteList ?? []);
-  };
+  return useCallback(
+    async (action: { siteList?: SitesRDS[] }) => {
+      setSiteList(action.siteList ?? []);
+    },
+    [setSiteList]
+  );
 }
 
 /**
@@ -218,9 +234,12 @@ export function useSiteListDispatch(): EnhancedDispatch<SitesRDS[] | undefined> 
 export function usePlotListDispatch(): EnhancedDispatch<PlotRDS[] | undefined> | undefined {
   const setPlotList = useAppStore(state => state.setPlotList);
 
-  return async (action: { plotList?: PlotRDS[] }) => {
-    setPlotList(action.plotList ?? []);
-  };
+  return useCallback(
+    async (action: { plotList?: PlotRDS[] }) => {
+      setPlotList(action.plotList ?? []);
+    },
+    [setPlotList]
+  );
 }
 
 /**
@@ -229,9 +248,12 @@ export function usePlotListDispatch(): EnhancedDispatch<PlotRDS[] | undefined> |
 export function useOrgCensusListDispatch(): EnhancedDispatch<OrgCensus[] | undefined> | undefined {
   const setCensusList = useAppStore(state => state.setCensusList);
 
-  return async (action: { censusList?: OrgCensus[] }) => {
-    setCensusList(action.censusList ?? []);
-  };
+  return useCallback(
+    async (action: { censusList?: OrgCensus[] }) => {
+      setCensusList(action.censusList ?? []);
+    },
+    [setCensusList]
+  );
 }
 
 /**
@@ -240,9 +262,12 @@ export function useOrgCensusListDispatch(): EnhancedDispatch<OrgCensus[] | undef
 export function useQuadratListDispatch(): EnhancedDispatch<QuadratRDS[] | undefined> | undefined {
   const setQuadratList = useAppStore(state => state.setQuadratList);
 
-  return async (action: { quadratList?: QuadratRDS[] }) => {
-    setQuadratList(action.quadratList ?? []);
-  };
+  return useCallback(
+    async (action: { quadratList?: QuadratRDS[] }) => {
+      setQuadratList(action.quadratList ?? []);
+    },
+    [setQuadratList]
+  );
 }
 
 /**
@@ -251,9 +276,12 @@ export function useQuadratListDispatch(): EnhancedDispatch<QuadratRDS[] | undefi
 export function useFirstLoadDispatch(): ((action: { firstLoad: boolean }) => void) | undefined {
   const setFirstLoad = useAppStore(state => state.setFirstLoad);
 
-  return (action: { firstLoad: boolean }) => {
-    setFirstLoad(action.firstLoad);
-  };
+  return useCallback(
+    (action: { firstLoad: boolean }) => {
+      setFirstLoad(action.firstLoad);
+    },
+    [setFirstLoad]
+  );
 }
 
 // ============================================================================

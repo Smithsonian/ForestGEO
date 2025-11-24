@@ -27,13 +27,13 @@ The app accepts file uploads (called `forms`) in either **CSV** or **TSV** forma
 
 A "complete" census comprises the following data types:
 
-| Form Type | Description | Census-Dependent |
-|-----------|-------------|------------------|
-| **Attributes** (Stem Codes) | Codes describing stem conditions | No |
-| **Personnel** | Field staff for the census | Yes (can rollover) |
-| **Quadrats** | Plot subdivisions | Yes (can rollover) |
-| **Species** | Species inventory | No |
-| **Measurements** | DBH measurements and dates | Yes |
+| Form Type                   | Description                      | Census-Dependent   |
+| --------------------------- | -------------------------------- | ------------------ |
+| **Attributes** (Stem Codes) | Codes describing stem conditions | No                 |
+| **Personnel**               | Field staff for the census       | Yes (can rollover) |
+| **Quadrats**                | Plot subdivisions                | Yes (can rollover) |
+| **Species**                 | Species inventory                | No                 |
+| **Measurements**            | DBH measurements and dates       | Yes                |
 
 :::caution
 **Measurements are locked** until at least one record exists in each of the other data types!
@@ -65,13 +65,14 @@ Files that do not contain the required headers will be rejected!
 
 **Navigation**: Stem & Plot Details → Stem Codes → Upload
 
-| Header | Required | Type | Description | Constraints |
-|--------|----------|------|-------------|-------------|
-| `code` | Yes | String | Attribute code | Max 10 characters |
-| `description` | No | String | Explanation of the attribute | |
-| `status` | No | String | Classification category | See values below |
+| Header        | Required | Type   | Description                  | Constraints       |
+| ------------- | -------- | ------ | ---------------------------- | ----------------- |
+| `code`        | Yes      | String | Attribute code               | Max 10 characters |
+| `description` | No       | String | Explanation of the attribute |                   |
+| `status`      | No       | String | Classification category      | See values below  |
 
 **Valid `status` values:**
+
 - `alive` - Stem is living and measured
 - `alive-not measured` - Living but not measured this census
 - `dead` - Entire tree is dead
@@ -83,59 +84,59 @@ Files that do not contain the required headers will be rejected!
 
 **Navigation**: Stem & Plot Details → Personnel → Upload
 
-| Header | Required | Type | Description |
-|--------|----------|------|-------------|
-| `firstname` | Yes | String | First name |
-| `lastname` | Yes | String | Last name |
-| `role` | Yes | String | Brief task description |
-| `roledescription` | No | String | Detailed role explanation |
+| Header            | Required | Type   | Description               |
+| ----------------- | -------- | ------ | ------------------------- |
+| `firstname`       | Yes      | String | First name                |
+| `lastname`        | Yes      | String | Last name                 |
+| `role`            | Yes      | String | Brief task description    |
+| `roledescription` | No       | String | Detailed role explanation |
 
 ### The `quadrats` Form
 
 **Navigation**: Stem & Plot Details → Quadrats → Upload
 
-| Header | Required | Type | Description |
-|--------|----------|------|-------------|
-| `quadrat` | Yes | String | Unique quadrat identifier (e.g., "0322") |
-| `startx` | Yes | Decimal | X-coordinate of quadrat origin |
-| `starty` | Yes | Decimal | Y-coordinate of quadrat origin |
-| `dimx` | Yes | Decimal | Width along X-axis |
-| `dimy` | Yes | Decimal | Width along Y-axis |
-| `area` | Yes | Decimal | Total area of quadrat |
-| `quadratshape` | No | String | Shape description |
+| Header         | Required | Type    | Description                              |
+| -------------- | -------- | ------- | ---------------------------------------- |
+| `quadrat`      | Yes      | String  | Unique quadrat identifier (e.g., "0322") |
+| `startx`       | Yes      | Decimal | X-coordinate of quadrat origin           |
+| `starty`       | Yes      | Decimal | Y-coordinate of quadrat origin           |
+| `dimx`         | Yes      | Decimal | Width along X-axis                       |
+| `dimy`         | Yes      | Decimal | Width along Y-axis                       |
+| `area`         | Yes      | Decimal | Total area of quadrat                    |
+| `quadratshape` | No       | String  | Shape description                        |
 
 ### The `species` Form
 
 **Navigation**: Stem & Plot Details → Species List → Upload
 
-| Header | Required | Type | Description |
-|--------|----------|------|-------------|
-| `spcode` | Yes | String | Unique species code (e.g., "AESPO") |
-| `family` | No | String | Taxonomic family |
-| `genus` | No | String | Taxonomic genus |
-| `species` | Yes | String | Species name |
-| `subspecies` | No | String | Subspecies taxonomy |
-| `idlevel` | No | String | Deepest identification level |
-| `authority` | No | String | Taxonomic authority |
-| `subspeciesauthority` | No | String | Subspecies authority |
+| Header                | Required | Type   | Description                         |
+| --------------------- | -------- | ------ | ----------------------------------- |
+| `spcode`              | Yes      | String | Unique species code (e.g., "AESPO") |
+| `family`              | No       | String | Taxonomic family                    |
+| `genus`               | No       | String | Taxonomic genus                     |
+| `species`             | Yes      | String | Species name                        |
+| `subspecies`          | No       | String | Subspecies taxonomy                 |
+| `idlevel`             | No       | String | Deepest identification level        |
+| `authority`           | No       | String | Taxonomic authority                 |
+| `subspeciesauthority` | No       | String | Subspecies authority                |
 
 ### The `measurements` Form
 
 **Navigation**: Census Hub → View Data → Upload
 
-| Header | Required | Type | Description |
-|--------|----------|------|-------------|
-| `tag` | Yes | String/Number | Tree tag identifier |
-| `stemtag` | No | String/Number | Stem identifier (default: 0) |
-| `spcode` | Yes | String | Species code (must exist in Species List) |
-| `quadrat` | Yes | String | Quadrat name (must exist in Quadrats) |
-| `lx` | Yes | Decimal | X-coordinate within quadrat |
-| `ly` | Yes | Decimal | Y-coordinate within quadrat |
-| `dbh` | No | Decimal | Diameter at breast height |
-| `hom` | No | Decimal | Height of measurement |
-| `date` | Yes | Date | Measurement date (YYYY-MM-DD) |
-| `codes` | No | String | Comma-separated attribute codes |
-| `comments` | No | String | Additional notes |
+| Header     | Required | Type          | Description                               |
+| ---------- | -------- | ------------- | ----------------------------------------- |
+| `tag`      | Yes      | String/Number | Tree tag identifier                       |
+| `stemtag`  | No       | String/Number | Stem identifier (default: 0)              |
+| `spcode`   | Yes      | String        | Species code (must exist in Species List) |
+| `quadrat`  | Yes      | String        | Quadrat name (must exist in Quadrats)     |
+| `lx`       | Yes      | Decimal       | X-coordinate within quadrat               |
+| `ly`       | Yes      | Decimal       | Y-coordinate within quadrat               |
+| `dbh`      | No       | Decimal       | Diameter at breast height                 |
+| `hom`      | No       | Decimal       | Height of measurement                     |
+| `date`     | Yes      | Date          | Measurement date (YYYY-MM-DD)             |
+| `codes`    | No       | String        | Comma-separated attribute codes           |
+| `comments` | No       | String        | Additional notes                          |
 
 ---
 
@@ -146,6 +147,7 @@ If you have data from multiple past censuses, follow this workflow:
 ### Step 1: Plan Your Census Order
 
 Start with the **oldest** census and work forward chronologically. This ensures:
+
 - Tree/stem references are established in order
 - Growth validations work correctly (they compare to previous census)
 
@@ -189,6 +191,7 @@ Rollover saves significant time when the same field team and quadrat structure a
 **Cause**: The `spcode` in your measurements file doesn't exist in the Species List.
 
 **Solution**:
+
 1. Add the missing species to the Species List
 2. Re-upload measurements, or use "Reingest" for failed records
 
@@ -197,6 +200,7 @@ Rollover saves significant time when the same field team and quadrat structure a
 **Cause**: The `quadrat` value doesn't match any defined quadrat.
 
 **Solution**:
+
 1. Check for typos or case sensitivity
 2. Add the missing quadrat to the Quadrats data
 3. Re-upload or reingest
@@ -206,6 +210,7 @@ Rollover saves significant time when the same field team and quadrat structure a
 **Cause**: A required column is empty for one or more rows.
 
 **Solution**:
+
 1. Download the error report
 2. Fill in missing values
 3. Re-upload the corrected file
@@ -215,6 +220,7 @@ Rollover saves significant time when the same field team and quadrat structure a
 **Cause**: Header names don't match expected values.
 
 **Solution**:
+
 - Headers are case-insensitive
 - Remove extra spaces
 - Use exact header names from the tables above

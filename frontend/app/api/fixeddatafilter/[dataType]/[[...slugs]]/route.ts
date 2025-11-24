@@ -248,7 +248,9 @@ export async function POST(
       paginatedQuery += ` LIMIT ?, ?;`;
 
       if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-        ailogger.error(`Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`);
+        ailogger.error(
+          `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
+        );
         return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
           status: HTTPResponses.INTERNAL_SERVER_ERROR
         });

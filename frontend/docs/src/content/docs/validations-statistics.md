@@ -9,10 +9,10 @@ A key part of this application is the **Validations** and **Statistics** systems
 
 ## Overview
 
-| System | Purpose | When It Runs |
-|--------|---------|--------------|
-| **Validations** | Check data quality and flag potential errors | Automatically after measurements upload |
-| **Post-Census Statistics** | Analyze census data and generate summary reports | Manually triggered by user |
+| System                     | Purpose                                          | When It Runs                            |
+| -------------------------- | ------------------------------------------------ | --------------------------------------- |
+| **Validations**            | Check data quality and flag potential errors     | Automatically after measurements upload |
+| **Post-Census Statistics** | Analyze census data and generate summary reports | Manually triggered by user              |
 
 ---
 
@@ -44,20 +44,20 @@ Navigate to **Census Hub → Validations** to:
 
 The following table lists all validation checks and their default status:
 
-| Validation Name | Description | Default State |
-|-----------------|-------------|---------------|
-| **ValidateDBHGrowthExceedsMax** | Flag DBH measurements showing more than 65mm growth from previous census | Enabled |
-| **ValidateDBHShrinkageExceedsMax** | Flag DBH measurements showing more than 5% decrease from previous census | Enabled |
-| **ValidateFindAllInvalidSpeciesCodes** | Flag stems with species codes not defined in the Species List | Enabled |
-| **ValidateFindDuplicatedQuadratsByName** | Flag quadrats with duplicate names within a plot | Enabled |
-| **ValidateFindDuplicateStemTreeTagCombinationsPerCensus** | Flag tree/stem combinations recorded more than once in the same census | Enabled |
-| **ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat** | Flag measurements with dates outside the census date range | Enabled |
-| **ValidateFindStemsInTreeWithDifferentSpecies** | Flag stems on the same tree with different species designations | Enabled |
-| **ValidateFindStemsOutsidePlots** | Flag stems with coordinates outside the plot boundaries | Enabled |
-| **ValidateFindTreeStemsInDifferentQuadrats** | Flag stems on the same tree assigned to different quadrats | Enabled |
-| **ValidateScreenMeasuredDiameterMinMax** | Flag DBH measurements outside species-defined min/max bounds | Enabled |
-| **ValidateScreenStemsWithMeasurementsButDeadAttributes** | Flag stems marked as dead but still have measurements | **Disabled** |
-| **ValidateScreenStemsWithMissingMeasurementsButLiveAttributes** | Flag live stems that are missing measurements | **Disabled** |
+| Validation Name                                                   | Description                                                              | Default State |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------- |
+| **ValidateDBHGrowthExceedsMax**                                   | Flag DBH measurements showing more than 65mm growth from previous census | Enabled       |
+| **ValidateDBHShrinkageExceedsMax**                                | Flag DBH measurements showing more than 5% decrease from previous census | Enabled       |
+| **ValidateFindAllInvalidSpeciesCodes**                            | Flag stems with species codes not defined in the Species List            | Enabled       |
+| **ValidateFindDuplicatedQuadratsByName**                          | Flag quadrats with duplicate names within a plot                         | Enabled       |
+| **ValidateFindDuplicateStemTreeTagCombinationsPerCensus**         | Flag tree/stem combinations recorded more than once in the same census   | Enabled       |
+| **ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat** | Flag measurements with dates outside the census date range               | Enabled       |
+| **ValidateFindStemsInTreeWithDifferentSpecies**                   | Flag stems on the same tree with different species designations          | Enabled       |
+| **ValidateFindStemsOutsidePlots**                                 | Flag stems with coordinates outside the plot boundaries                  | Enabled       |
+| **ValidateFindTreeStemsInDifferentQuadrats**                      | Flag stems on the same tree assigned to different quadrats               | Enabled       |
+| **ValidateScreenMeasuredDiameterMinMax**                          | Flag DBH measurements outside species-defined min/max bounds             | Enabled       |
+| **ValidateScreenStemsWithMeasurementsButDeadAttributes**          | Flag stems marked as dead but still have measurements                    | **Disabled**  |
+| **ValidateScreenStemsWithMissingMeasurementsButLiveAttributes**   | Flag live stems that are missing measurements                            | **Disabled**  |
 
 ### Understanding Validation Categories
 
@@ -140,27 +140,27 @@ The Post-Census Statistics system can generate various summary reports, includin
 
 #### Census Summary Statistics
 
-| Statistic | Description |
-|-----------|-------------|
+| Statistic                | Description                                  |
+| ------------------------ | -------------------------------------------- |
 | **Total Stems Measured** | Count of all stem measurements in the census |
-| **Total Trees** | Count of unique trees (by TreeTag) |
-| **Multi-Stem Trees** | Count of trees with more than one stem |
-| **New Recruits** | Stems measured for the first time |
-| **Mortality Rate** | Percentage of stems marked as dead |
+| **Total Trees**          | Count of unique trees (by TreeTag)           |
+| **Multi-Stem Trees**     | Count of trees with more than one stem       |
+| **New Recruits**         | Stems measured for the first time            |
+| **Mortality Rate**       | Percentage of stems marked as dead           |
 
 #### Species Statistics
 
-| Statistic | Description |
-|-----------|-------------|
-| **Species Count** | Number of unique species in the census |
-| **Species Distribution** | Breakdown of stems by species |
-| **Most Common Species** | Top species by stem count |
+| Statistic                | Description                            |
+| ------------------------ | -------------------------------------- |
+| **Species Count**        | Number of unique species in the census |
+| **Species Distribution** | Breakdown of stems by species          |
+| **Most Common Species**  | Top species by stem count              |
 
 #### Quadrat Statistics
 
-| Statistic | Description |
-|-----------|-------------|
-| **Stems per Quadrat** | Distribution of stems across quadrats |
+| Statistic              | Description                            |
+| ---------------------- | -------------------------------------- |
+| **Stems per Quadrat**  | Distribution of stems across quadrats  |
 | **Quadrat Completion** | Progress of data collection by quadrat |
 
 ### Interpreting Results

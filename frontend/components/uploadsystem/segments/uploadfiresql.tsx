@@ -77,9 +77,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
   const { data: session } = useSession();
-  const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 1024 * 32; // Increased from 8KB to 32KB to reduce AJAX call count (4x reduction)
-  const connectionLimit = 8; // Reduced concurrency for production stability
+  const connectionLimit = 1; // Process batches sequentially to prevent lock contention (file-level locks require serial processing)
   const uploadStartedRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
 
@@ -367,7 +366,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 fileName,
                 plot: currentPlot,
                 census: currentCensus,
-                user: userID,
+                user: session?.user?.name ?? null,
                 fileRowSet: fileData[fileName]
               })
             },
@@ -465,7 +464,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // If we reach here, all retries failed but error wasn't thrown (shouldn't happen)
       throw new Error(`Upload failed for ${fileName} after ${maxRetries + 1} attempts`);
     },
-    [uploadForm, currentPlot, currentCensus, userID, schema, fetchWithTimeout]
+    [uploadForm, currentPlot, currentCensus, session, schema, fetchWithTimeout]
   );
 
   const parseFileInChunks = useCallback(
@@ -598,8 +597,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         if (row['__parsed_extra'] !== undefined) {
-          errors.push(
-            `Extra columns detected: "${row['__parsed_extra']}". This may indicate delimiter mismatch or improperly quoted fields. Expected delimiter: "${delimiter}"`
+          // Log warning but don't reject row - extra columns are common when re-uploading
+          // exported data that includes reference columns like stemID, treeID, errors
+          ailogger.warn(
+            `Row has extra columns (will be ignored): "${row['__parsed_extra']}". ` + `This is normal when re-uploading exported data with reference columns.`
           );
           extraData = true;
         }
@@ -884,25 +885,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
         setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
-
-        // Try to fetch user ID, but don't fail if it's not available
-        try {
-          const nameParts = session.user.name.split(' ');
-          const firstName = nameParts[0] || '';
-          const lastName = nameParts.slice(1).join(' ') || nameParts[0] || '';
-
-          const userIDResponse = await fetch(`/api/catalog/${encodeURIComponent(firstName)}/${encodeURIComponent(lastName)}`, { method: 'GET' });
-          if (userIDResponse.ok) {
-            setUserID(await userIDResponse.json());
-            ailogger.info(`User ID fetched successfully for ${firstName} ${lastName}`);
-          } else {
-            ailogger.warn(`Could not fetch user ID for ${firstName} ${lastName} (status: ${userIDResponse.status}). Continuing without user ID.`);
-            setUserID(null);
-          }
-        } catch (userIdError: any) {
-          ailogger.warn(`Error fetching user ID: ${userIdError.message}. Continuing without user ID.`);
-          setUserID(null);
-        }
 
         // CRITICAL FIX: Detect delimiters FIRST, then count chunks and parse
         // This ensures chunk count matches actual parsing

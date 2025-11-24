@@ -12,14 +12,7 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
-import {
-  useOrgCensusContext,
-  useOrgCensusDispatch,
-  usePlotContext,
-  usePlotDispatch,
-  useSiteContext,
-  useSiteDispatch
-} from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Badge,

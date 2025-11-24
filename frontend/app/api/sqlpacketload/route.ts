@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
         if (droppedRowCount > 0) {
           ailogger.error(
             `DATA INTEGRITY WARNING: Expected ${expectedRowCount} rows but only ${actualInsertedCount} were inserted for ${fileName}-${batchID}. ` +
-            `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
+              `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
           );
 
           // Try to identify which rows were dropped by checking what's NOT in the temp table
@@ -233,7 +233,13 @@ export async function POST(request: NextRequest) {
               [schema]
             );
             const checkResult = await connectionManager.executeQuery(checkSQL, [
-              fileName, batchID, row.tag, row.stemtag || null, row.spcode, row.quadrat, formattedDate
+              fileName,
+              batchID,
+              row.tag,
+              row.stemtag || null,
+              row.spcode,
+              row.quadrat,
+              formattedDate
             ]);
 
             if (checkResult[0]?.cnt === 0) {
@@ -254,9 +260,18 @@ export async function POST(request: NextRequest) {
               [schema]
             );
             const failedValues = droppedRows.map(row => [
-              fileName, batchID, plot?.plotID ?? -1, censusCookie,
-              row.tag, row.stemtag || null, row.spcode, row.quadrat,
-              row.lx || null, row.ly || null, row.dbh || null, row.hom || null,
+              fileName,
+              batchID,
+              plot?.plotID ?? -1,
+              censusCookie,
+              row.tag,
+              row.stemtag || null,
+              row.spcode,
+              row.quadrat,
+              row.lx || null,
+              row.ly || null,
+              row.dbh || null,
+              row.hom || null,
               row.date ? moment(row.date).format('YYYY-MM-DD') : null,
               row.codes || null,
               'Row silently dropped by INSERT IGNORE - likely duplicate or constraint violation'
@@ -317,9 +332,10 @@ export async function POST(request: NextRequest) {
 
         return new NextResponse(
           JSON.stringify({
-            responseMessage: droppedRowCount > 0
-              ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check failedmeasurements table`
-              : `Bulk insert to SQL completed`,
+            responseMessage:
+              droppedRowCount > 0
+                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check failedmeasurements table`
+                : `Bulk insert to SQL completed`,
             failingRows: Array.from(failingRows),
             insertedCount: actualInsertedCount,
             expectedCount: expectedRowCount,
@@ -387,9 +403,11 @@ export async function POST(request: NextRequest) {
         const bulkAttributes = Object.values(fileRowSet).map(
           row =>
             ({
-              Code: row.code,
-              Description: row.description,
-              Status: row.status
+              // Handle both original and transformed header names (client transforms code->codes, description->comments)
+              Code: row.code || row.codes,
+              Description: row.description || row.comments,
+              // Convert empty string to null - ENUM columns don't accept empty strings
+              Status: row.status && row.status.trim() !== '' ? row.status : null
             }) as Partial<AttributesResult>
         );
         const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
