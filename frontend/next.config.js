@@ -8,10 +8,14 @@ const nextConfig = withBundleAnalyzer({
   experimental: {
     serverMinification: false,
     // Optimize for runtime speed over bundle size
-    optimizePackageImports: ['@mui/material', '@mui/icons-material', '@mui/joy', '@mui/lab']
+    optimizePackageImports: ['@mui/material', '@mui/icons-material', '@mui/joy', '@mui/lab'],
     // Note: optimizeCss requires 'critters' package
     // Install with: npm install critters
     // Then uncomment: optimizeCss: true
+    // Increase body size limit for large measurement file uploads
+    serverActions: {
+      bodySizeLimit: '10mb'
+    }
   },
   // Compiler optimizations for faster runtime (larger bundle)
   compiler: {

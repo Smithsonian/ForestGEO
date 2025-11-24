@@ -206,6 +206,7 @@ and q.StartX >= 0 and q.StartY >= 0
 and p.GlobalX >= 0 and p.GlobalY >= 0
 and p.DimensionX > 0 and p.DimensionY > 0
 -- Flag if stem coordinates are NULL, negative, or outside boundaries (inclusive boundaries - stems can be on edge)
+-- IMPORTANT: Exclude dead stems (DN, DS, DTR) - dead stems do not require coordinates
 and (
     s.LocalX is null
     or s.LocalY is null
@@ -215,6 +216,13 @@ and (
     or (s.LocalX + q.StartX) > p.DimensionX
     or (s.LocalY + q.StartY) < 0
     or (s.LocalY + q.StartY) > p.DimensionY
+)
+-- Do NOT flag dead stems (status = ''dead'' or ''stem dead'') for missing coordinates
+and NOT EXISTS (
+    SELECT 1 FROM cmattributes cma
+    JOIN attributes a ON cma.Code = a.Code
+    WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
+    AND a.Status IN (''dead'', ''stem dead'')
 );', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats',

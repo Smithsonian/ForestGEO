@@ -203,6 +203,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [nrCount, setNRCount] = useState<number>(0);
   const [failedCount, setFailedCount] = useState<number>(0);
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
+  const [attributesMap, setAttributesMap] = useState<Map<string, AttributesResult>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
     tag: [],
     stemTag: [],
@@ -738,6 +739,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         });
         const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
         setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+        // Create a map for quick lookup of attribute details by code
+        const attrMap = new Map<string, AttributesResult>();
+        data.forEach(attr => {
+          if (attr.code) attrMap.set(attr.code, attr);
+        });
+        setAttributesMap(attrMap);
         setReloadAttrs(false);
       } catch (e: any) {
         ailogger.error('Failed to reload attributes:', e);
@@ -1132,11 +1139,23 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           }
 
           function renderAttributeDetails() {
-            return attributeValues.map((value: string, index: number) => (
-              <Chip key={index} size={'sm'}>
-                {value}
-              </Chip>
-            ));
+            return attributeValues.map((value: string, index: number) => {
+              const attributeDetails = attributesMap.get(value);
+              const tooltipContent = attributeDetails
+                ? [
+                    attributeDetails.description && `Description: ${attributeDetails.description}`,
+                    attributeDetails.status && `Status: ${attributeDetails.status}`
+                  ]
+                    .filter(Boolean)
+                    .join('\n') || value
+                : value;
+
+              return (
+                <Tooltip key={index} title={tooltipContent} placement="top" variant="soft" size="sm">
+                  <Chip size={'sm'}>{value}</Chip>
+                </Tooltip>
+              );
+            });
           }
 
           return (
