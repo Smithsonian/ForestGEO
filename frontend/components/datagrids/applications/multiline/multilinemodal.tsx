@@ -9,7 +9,7 @@ import MultilinePersonnelDataGrid from '@/components/datagrids/applications/mult
 import MultilineMeasurementsDataGrid from '@/components/datagrids/applications/multiline/multilinemeasurementsdatagrid';
 import { useEffect, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSiteContext } from '@/app/contexts/compat-hooks';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -19,10 +19,11 @@ interface MultilineModalProps {
   isManualEntryFormOpen: boolean;
   handleCloseManualEntryForm: () => void;
   formType: string;
+  onSubmitComplete?: () => void;
 }
 
 export default function MultilineModal(props: MultilineModalProps) {
-  const { isManualEntryFormOpen, handleCloseManualEntryForm, formType } = props;
+  const { isManualEntryFormOpen, handleCloseManualEntryForm, formType, onSubmitComplete } = props;
 
   const [changesSubmitted, setChangesSubmitted] = useState(false);
   const [openValidations, setOpenValidations] = useState(false);
@@ -52,10 +53,15 @@ export default function MultilineModal(props: MultilineModalProps) {
       if (formType === 'measurements' && tempReviewState === ReviewStates.VALIDATE) {
         setOpenValidations(true);
         setOpenUpdateValidations(false);
-      } else handleCloseManualEntryForm();
+      } else {
+        handleCloseManualEntryForm();
+      }
       triggerRefresh();
+      if (onSubmitComplete) {
+        onSubmitComplete();
+      }
     }
-  }, [changesSubmitted]);
+  }, [changesSubmitted, formType, tempReviewState, handleCloseManualEntryForm, triggerRefresh, onSubmitComplete]);
 
   useEffect(() => {
     // monitor changes in tempReviewState and trigger update once they're done
@@ -63,7 +69,7 @@ export default function MultilineModal(props: MultilineModalProps) {
       setOpenValidations(false);
       setOpenUpdateValidations(true);
     }
-  }, [tempReviewState]);
+  }, [tempReviewState, openValidations]);
 
   return (
     <Modal

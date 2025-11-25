@@ -17,7 +17,8 @@ export function initializeAppInsights(connectionString: string) {
     enableDebug: process.env.NODE_ENV !== 'production',
     name: 'forestgeo-client',
     // Increase limits for bulk upload operations
-    maxAjaxCallsPerView: 1000, // Default is 500
+    // Large CSV files (10MB+) can generate 2000+ AJAX calls during upload/processing
+    maxAjaxCallsPerView: 5000, // Increased from 1000 to handle large bulk uploads (default is 500)
     maxBatchSize: 100,
     maxBatchInterval: 15000
   };

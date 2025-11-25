@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import ailogger from '@/ailogger';
 
 export default function Error(props: { error: Error & { digest?: string }; reset: () => void }) {
-  const { error, reset } = props;
+  const { error, reset: _reset } = props;
   const { data: session } = useSession();
   useEffect(() => {
     // Log the error to an error reporting service

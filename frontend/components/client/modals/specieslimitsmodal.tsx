@@ -26,7 +26,7 @@ import {
 } from '@mui/joy';
 import SouthIcon from '@mui/icons-material/South';
 import NorthIcon from '@mui/icons-material/North';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { Info } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
@@ -64,7 +64,7 @@ export default function SpeciesLimitsModal(props: {
       min: Math.min(range.min, lower - BUFFER),
       max: Math.max(range.max, upper + BUFFER)
     });
-  }, [originalLimit, defaultLower, defaultUpper]);
+  }, [originalLimit, defaultLower, defaultUpper, range.min, range.max]);
 
   function handleSliderChange(_: Event, newValue: number | number[]) {
     if (Array.isArray(newValue) && newValue.length === 2) {

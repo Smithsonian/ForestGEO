@@ -1,0 +1,12 @@
+tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,comments
+TEST-APOSTROPHE,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,O'Malley tree - apostrophe test
+TEST-QUOTES,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,"Tree with ""quotes"" in comment"
+TEST-UNICODE-中文,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Chinese characters in tag
+TEST-UNICODE-РУС,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Russian characters in tag
+TEST-EMPTY-STRING,,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Empty StemTag - should FAIL
+TEST-WHITESPACE,   ,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Whitespace StemTag - should FAIL
+TEST-SEMICOLON,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Comments with; semicolons; in them
+TEST-NEWLINE,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,"Comments with
+newlines in them"
+TEST-LONG-COMMENT,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,This is a very long comment that might exceed the 255 character limit for the comments field in the database schema which would cause truncation or validation errors depending on how it is handled by the procedure and the database constraints
+TEST-NORMAL,1,ACACBR,0101,5.5,10.2,15.3,1.30,2020-06-15,Normal ASCII characters only

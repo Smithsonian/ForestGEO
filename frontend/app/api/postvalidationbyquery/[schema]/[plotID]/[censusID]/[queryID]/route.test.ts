@@ -113,7 +113,7 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
   it('200 on success: replaces ${schema|currentPlotID|currentCensusID}, runs update with timestamp+result, commits, closes', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
+    const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
     const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
@@ -144,7 +144,7 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     expect(String(updateSQL)).toMatch(/LastRunStatus = 'success'/i);
     expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }])]);
 
-    expect(begin).toHaveBeenCalledWith();
+    expect(_begin).toHaveBeenCalledWith();
     expect(commit).toHaveBeenCalledWith('tx-1');
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -181,7 +181,7 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
   it('500 on unexpected error; rolls back (if tx id present) and closes', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-err');
+    const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-err');
     const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 

@@ -3,7 +3,7 @@
 // isolated unifiedchangelog datagrid
 import React, { ReactNode, useMemo, useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { UnifiedChangelogGridColumns } from '@/components/client/datagridcolumns';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import { Box, Divider, Stack, Typography } from '@mui/joy';
@@ -35,7 +35,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
     if (typeof value === 'object') {
       try {
         return JSON.stringify(value);
-      } catch (error) {
+      } catch {
         return '[Circular Object]';
       }
     }
@@ -53,7 +53,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
               if (typeof raw === 'string') {
                 try {
                   raw = JSON.parse(raw);
-                } catch (e) {
+                } catch {
                   return <Typography>Invalid JSON</Typography>;
                 }
               }
@@ -68,9 +68,10 @@ export default function IsolatedUnifiedChangelogDataGrid() {
                       flexDirection: 'column',
                       backgroundColor: 'neutral.softBg',
                       borderRadius: '8px',
-                      padding: '8px',
+                      padding: '10px',
                       overflow: 'auto',
-                      fontSize: '12px'
+                      fontSize: '13px',
+                      lineHeight: 1.5
                     }}
                   >
                     {obj &&
@@ -99,7 +100,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
         }
         return col;
       }),
-    [UnifiedChangelogGridColumns]
+    []
   );
 
   return (

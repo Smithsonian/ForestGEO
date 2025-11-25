@@ -7,7 +7,7 @@ import { QuadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
-import { usePlotContext } from '@/app/contexts/userselectionprovider';
+import { usePlotContext } from '@/app/contexts/compat-hooks';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 
 export default function IsolatedQuadratsDataGrid() {
@@ -25,7 +25,7 @@ export default function IsolatedQuadratsDataGrid() {
     quadratShape: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
+  const { data: _session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 

@@ -40,12 +40,52 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
     .trim();
 
   return (
-    <Box role="region" aria-labelledby="grid-form-explanations-heading" sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+    <Box
+      role="region"
+      aria-labelledby="grid-form-explanations-heading"
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        '@keyframes fadeSlideIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateY(-10px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateY(0)'
+          }
+        }
+      }}
+    >
       <AccordionGroup>
         <Accordion aria-label="Grid and upload form headers explanation">
-          <AccordionSummary id="grid-form-explanation-summary" aria-controls="grid-form-explanation-content" aria-describedby="accordion-help-text">
-            <Typography id="grid-form-explanations-heading" level="title-lg" component="h2" sx={{ textAlign: 'center', my: 2 }}>
-              Understanding Grid and Upload Form Headers
+          <AccordionSummary
+            id="grid-form-explanation-summary"
+            aria-controls="grid-form-explanation-content"
+            aria-describedby="accordion-help-text"
+            sx={{
+              bgcolor: 'primary.softBg',
+              borderRadius: 'md',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                boxShadow: theme => `0 4px 12px ${theme.palette.primary.softBg}`
+              }
+            }}
+          >
+            <Typography
+              id="grid-form-explanations-heading"
+              level="title-lg"
+              component="h2"
+              sx={{
+                textAlign: 'center',
+                my: 2,
+                fontWeight: 700,
+                color: 'primary.solidBg'
+              }}
+            >
+              🔄 Understanding Grid and Upload Form Headers
             </Typography>
             <Typography id="accordion-help-text" level="body-xs" sx={{ display: 'none' }} aria-hidden="true">
               Expand to view detailed header mappings between grid and form
@@ -60,9 +100,27 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
               }
             }}
           >
-            <FormHelperText role="note" aria-live="polite" sx={{ mb: 1 }}>
-              Remember that Form headers are <strong>bold</strong> if required for upload!
-            </FormHelperText>
+            <Box
+              sx={{
+                p: 2,
+                mb: 2,
+                borderRadius: 'md',
+                bgcolor: 'success.softBg',
+                borderLeft: theme => `4px solid ${theme.palette.success[400]}`
+              }}
+            >
+              <FormHelperText
+                role="note"
+                aria-live="polite"
+                sx={{
+                  fontSize: '0.875rem',
+                  color: 'success.plainColor',
+                  fontWeight: 600
+                }}
+              >
+                💡 <strong>Pro Tip:</strong> Form headers are <strong>bold</strong> if required for upload!
+              </FormHelperText>
+            </Box>
 
             <Box
               role="list"
@@ -77,16 +135,69 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
               }}
             >
               {HeadersByDatagridType[datagridType].map((header, index) => (
-                <Card key={index} role="group" aria-labelledby={`grid-header-label-${index}`} size="sm">
+                <Card
+                  key={index}
+                  role="group"
+                  aria-labelledby={`grid-header-label-${index}`}
+                  size="sm"
+                  sx={{
+                    animation: `fadeSlideIn 0.${5 + index}s ease-out`,
+                    background: theme =>
+                      header.category === 'required'
+                        ? `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, rgba(34, 197, 94, 0.05) 100%)`
+                        : `linear-gradient(135deg, ${theme.palette.neutral.softBg} 0%, rgba(120, 113, 108, 0.05) 100%)`,
+                    borderLeft: theme => `4px solid ${header.category === 'required' ? theme.palette.primary[400] : theme.palette.neutral[300]}`,
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: theme =>
+                        header.category === 'required' ? `0 8px 24px ${theme.palette.primary.softBg}` : `0 8px 24px ${theme.palette.neutral.softBg}`
+                    }
+                  }}
+                >
                   <CardContent>
-                    <Chip role="presentation" aria-hidden="true" variant="soft" sx={{ mb: 1 }}>
-                      Grid Header
-                    </Chip>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip
+                        role="presentation"
+                        aria-hidden="true"
+                        variant="soft"
+                        color="primary"
+                        size="sm"
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: '0.7rem'
+                        }}
+                      >
+                        📊 Grid Header
+                      </Chip>
+                      {header.category === 'required' && (
+                        <Chip
+                          size="sm"
+                          variant="soft"
+                          color="primary"
+                          sx={{
+                            fontWeight: 600,
+                            fontSize: '0.7rem',
+                            px: 1,
+                            animation: 'pulse 2s ease-in-out infinite',
+                            '@keyframes pulse': {
+                              '0%, 100%': { opacity: 1 },
+                              '50%': { opacity: 0.7 }
+                            }
+                          }}
+                        >
+                          REQUIRED
+                        </Chip>
+                      )}
+                    </Box>
                     <Typography
                       id={`grid-header-label-${index}`}
                       level="title-sm"
                       color="primary"
-                      sx={{ fontWeight: header.category === 'required' ? 'bold' : 'normal' }}
+                      sx={{
+                        fontWeight: header.category === 'required' ? 700 : 600,
+                        mb: 1
+                      }}
                     >
                       {header.label}
                     </Typography>
@@ -109,15 +220,43 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
                     )}
                   </CardContent>
 
-                  <Divider component="div" aria-orientation="horizontal" sx={{ my: 1 }}>
-                    <Typography level="body-sm" fontWeight="bold" component="span">
-                      maps to
-                    </Typography>
+                  <Divider
+                    component="div"
+                    aria-orientation="horizontal"
+                    sx={{
+                      my: 2,
+                      '&::before, &::after': {
+                        borderColor: theme => theme.palette.success[300]
+                      }
+                    }}
+                  >
+                    <Chip
+                      variant="solid"
+                      color="success"
+                      size="sm"
+                      sx={{
+                        fontWeight: 700,
+                        fontSize: '0.7rem'
+                      }}
+                    >
+                      ⬇️ MAPS TO
+                    </Chip>
                   </Divider>
 
                   <CardContent>
-                    <Chip role="presentation" aria-hidden="true" variant="soft" sx={{ mb: 1 }}>
-                      Form Header
+                    <Chip
+                      role="presentation"
+                      aria-hidden="true"
+                      variant="soft"
+                      color="neutral"
+                      size="sm"
+                      sx={{
+                        mb: 1,
+                        fontWeight: 600,
+                        fontSize: '0.7rem'
+                      }}
+                    >
+                      📝 Form Header
                     </Chip>
                     <Typography
                       id={`form-header-label-${index}`}

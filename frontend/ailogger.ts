@@ -29,7 +29,12 @@ class Logger {
   private readonly ai: ApplicationInsights | null = null;
 
   constructor() {
-    this.ai = getAppInsights();
+    try {
+      this.ai = getAppInsights();
+    } catch (error) {
+      console.warn('[ailogger] Failed to initialize Application Insights:', error);
+      this.ai = null;
+    }
   }
 
   debug(message: string, context?: LogContext) {
@@ -47,13 +52,17 @@ class Logger {
   error(message: string, error?: Error, context?: LogContext) {
     const mergedContext = { ...context, stack: error?.stack, name: error?.name };
     if (this.ai) {
-      this.ai.trackException(
-        {
-          exception: error ?? new Error(message),
-          severityLevel: levelToSeverityCode[LogLevel.ERROR]
-        },
-        this.normalizeProps(mergedContext)
-      );
+      try {
+        this.ai.trackException(
+          {
+            exception: error ?? new Error(message),
+            severityLevel: levelToSeverityCode[LogLevel.ERROR]
+          },
+          this.normalizeProps(mergedContext)
+        );
+      } catch (aiError) {
+        console.warn('[ailogger] Failed to track exception to Application Insights:', aiError);
+      }
     }
     this.trackTrace(LogLevel.ERROR, message, mergedContext);
   }
@@ -61,27 +70,39 @@ class Logger {
   critical(message: string, error?: Error, context?: LogContext) {
     const mergedContext = { ...context, stack: error?.stack, name: error?.name };
     if (this.ai) {
-      this.ai.trackException(
-        {
-          exception: error ?? new Error(message),
-          severityLevel: levelToSeverityCode[LogLevel.CRITICAL]
-        },
-        this.normalizeProps(mergedContext)
-      );
+      try {
+        this.ai.trackException(
+          {
+            exception: error ?? new Error(message),
+            severityLevel: levelToSeverityCode[LogLevel.CRITICAL]
+          },
+          this.normalizeProps(mergedContext)
+        );
+      } catch (aiError) {
+        console.warn('[ailogger] Failed to track critical exception to Application Insights:', aiError);
+      }
     }
     this.trackTrace(LogLevel.CRITICAL, message, mergedContext);
   }
 
   event(name: string, properties?: LogContext) {
     if (this.ai) {
-      this.ai.trackEvent({ name }, this.normalizeProps(properties));
+      try {
+        this.ai.trackEvent({ name }, this.normalizeProps(properties));
+      } catch (aiError) {
+        console.warn('[ailogger] Failed to track event to Application Insights:', aiError);
+      }
     }
     console.log(`[EVENT] ${name}`, this.normalizeProps(properties));
   }
 
   metric(name: string, value: number, properties?: LogContext) {
     if (this.ai) {
-      this.ai.trackMetric({ name, average: value }, this.normalizeProps(properties));
+      try {
+        this.ai.trackMetric({ name, average: value }, this.normalizeProps(properties));
+      } catch (aiError) {
+        console.warn('[ailogger] Failed to track metric to Application Insights:', aiError);
+      }
     }
     console.log(`[METRIC] ${name}=${value}`, this.normalizeProps(properties));
   }
@@ -97,30 +118,44 @@ class Logger {
   private trackTrace(level: LogLevel, message: string, context?: LogContext) {
     const normalized = this.normalizeProps(context);
     if (this.ai) {
-      this.ai.trackTrace(
-        {
-          message,
-          severityLevel: levelToSeverityCode[level]
-        },
-        normalized
-      );
+      try {
+        this.ai.trackTrace(
+          {
+            message,
+            severityLevel: levelToSeverityCode[level]
+          },
+          normalized
+        );
+      } catch (aiError) {
+        console.warn('[ailogger] Failed to track trace to Application Insights:', aiError);
+      }
     }
 
     // Fallback to console (respecting level)
-    switch (level) {
-      case LogLevel.DEBUG:
-        console.debug(`[DEBUG] ${message}`, normalized);
-        break;
-      case LogLevel.INFO:
-        console.info(`[INFO] ${message}`, normalized);
-        break;
-      case LogLevel.WARN:
-        console.warn(`[WARN] ${message}`, normalized);
-        break;
-      case LogLevel.ERROR:
-      case LogLevel.CRITICAL:
-        console.error(`[${level.toUpperCase()}] ${message}`, normalized);
-        break;
+    // Ensure console logging never throws errors
+    try {
+      switch (level) {
+        case LogLevel.DEBUG:
+          console.debug(`[DEBUG] ${message}`, normalized);
+          break;
+        case LogLevel.INFO:
+          console.info(`[INFO] ${message}`, normalized);
+          break;
+        case LogLevel.WARN:
+          console.warn(`[WARN] ${message}`, normalized);
+          break;
+        case LogLevel.ERROR:
+        case LogLevel.CRITICAL:
+          console.error(`[${level.toUpperCase()}] ${message}`, normalized);
+          break;
+      }
+    } catch (consoleError) {
+      // Last resort - if even console fails, try basic console.log
+      try {
+        console.log(`[${level.toUpperCase()}] ${message}`);
+      } catch {
+        // Silently fail if all logging mechanisms fail
+      }
     }
   }
 }

@@ -110,6 +110,25 @@ jobs:
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: frontend/build/standalone
 
+      - name: Setup Node.js for validation deployment
+        uses: actions/setup-node@v4.0.4
+        with:
+          node-version: '24.x'
+
+      - name: Checkout code for validation deployment
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Deploy validation queries to all schemas
+        env:
+          AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+        run: |
+          cd repo/frontend
+          npm install --production=false
+          npx tsx scripts/deploy-validations-to-all-schemas.ts
+        continue-on-error: false
+
       - name: Install MySQL client
         run: sudo apt-get update && sudo apt-get install -y mysql-client
           
@@ -127,7 +146,7 @@ jobs:
             -u "$DB_USER" \
             -p"$DB_PASS" \
             -D "$DB_NAME" \
-            -e "SELECT Email FROM catalog.users WHERE IsAdmin IS TRUE;" \
+            -e "SELECT Email FROM catalog.users WHERE Notifications IS TRUE;" \
             | paste -sd "," -)
           echo "emails=$EMAILS" >> $GITHUB_OUTPUT
 

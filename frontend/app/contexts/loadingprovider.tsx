@@ -35,11 +35,25 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const operationTimeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // Use ref to avoid activeOperations in setLoading dependencies (prevents cascade rerenders)
+  const activeOperationsRef = useRef<LoadingOperation[]>([]);
   useAppInsightsUserSync();
 
   // Generate unique operation ID
   const generateOperationId = useCallback(() => {
     return `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }, []);
+
+  // End an operation
+  const endOperation = useCallback((operationId: string) => {
+    setActiveOperations(prev => prev.filter(op => op.id !== operationId));
+
+    // Clear timeout
+    const timeoutId = operationTimeoutRefs.current.get(operationId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      operationTimeoutRefs.current.delete(operationId);
+    }
   }, []);
 
   // Start a new operation
@@ -66,20 +80,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
 
       return operationId;
     },
-    [generateOperationId]
+    [generateOperationId, endOperation]
   );
-
-  // End an operation
-  const endOperation = useCallback((operationId: string) => {
-    setActiveOperations(prev => prev.filter(op => op.id !== operationId));
-
-    // Clear timeout
-    const timeoutId = operationTimeoutRefs.current.get(operationId);
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      operationTimeoutRefs.current.delete(operationId);
-    }
-  }, []);
 
   // Check if operation is active
   const isOperationActive = useCallback(
@@ -127,7 +129,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
           }
         } else {
           // Fallback: end the most recent operation if no identifier provided
-          const lastOperation = activeOperations[activeOperations.length - 1];
+          // Use ref instead of state to avoid dependency on activeOperations
+          const lastOperation = activeOperationsRef.current[activeOperationsRef.current.length - 1];
           if (lastOperation) {
             endOperation(lastOperation.id);
             // Clean up from legacy tracking
@@ -141,8 +144,13 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
         }
       }
     },
-    [startOperation, endOperation, isOperationActive, activeOperations]
+    [startOperation, endOperation, isOperationActive]
   );
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeOperationsRef.current = activeOperations;
+  }, [activeOperations]);
 
   // Update loading state based on active operations
   useEffect(() => {
@@ -217,13 +225,46 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
 
   // Cleanup timeouts and legacy operations on unmount
   useEffect(() => {
+    const timeoutRefs = operationTimeoutRefs.current;
+    const legacyRefs = legacyOperationsRef.current;
     return () => {
-      operationTimeoutRefs.current.forEach(timeoutId => {
+      timeoutRefs.forEach(timeoutId => {
         clearTimeout(timeoutId);
       });
-      operationTimeoutRefs.current.clear();
-      legacyOperationsRef.current.clear();
+      timeoutRefs.clear();
+      legacyRefs.clear();
     };
+  }, []);
+
+  // Periodic cleanup of stale operations (catches any that slip through)
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      const maxAge = 2 * 60 * 1000; // 2 minutes max age for any operation
+
+      setActiveOperations(prev => {
+        const validOperations = prev.filter(op => {
+          const age = now - op.startTime;
+          // Remove operations older than maxAge or with invalid timestamps
+          if (age > maxAge || age < 0 || !op.startTime) {
+            console.warn(`Cleaning up stale operation: ${op.id} (${op.message}), age: ${age}ms`);
+            // Also clear any associated timeout
+            const timeoutId = operationTimeoutRefs.current.get(op.id);
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              operationTimeoutRefs.current.delete(op.id);
+            }
+            return false;
+          }
+          return true;
+        });
+
+        // Only update if something was removed
+        return validOperations.length === prev.length ? prev : validOperations;
+      });
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(cleanupInterval);
   }, []);
 
   const contextValue: LoadingContextType = {

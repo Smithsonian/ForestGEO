@@ -55,7 +55,7 @@ export const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: st
 
   useEffect(() => {
     setError(!(isArea ? getClosestAreaUnit(value) : getClosestUnit(value)));
-  }, [value]);
+  }, [value, isArea]);
 
   const handleCommit = () => {
     const isValid = isArea ? getClosestAreaUnit(value) : getClosestUnit(value);
@@ -237,6 +237,7 @@ const InnerInput = React.forwardRef<
   );
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const EditStatusCell = (params: GridRenderEditCellParams) => {
   const apiRef = useGridApiContext();
   const { id, hasFocus } = params;
@@ -308,7 +309,7 @@ const getFieldMetadata = (formType: FormType, field: string) => {
   return TableHeadersByFormType[formType]?.find(header => header.label === field) || null;
 };
 
-const renderCustomHeader = (formType: FormType, field: string) => {
+const _renderCustomHeader = (formType: FormType, field: string) => {
   const metadata = getFieldMetadata(formType, field);
 
   if (!metadata) return field; // Default to field name if no metadata is found.

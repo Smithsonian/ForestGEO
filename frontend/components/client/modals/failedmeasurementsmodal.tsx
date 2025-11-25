@@ -1,9 +1,22 @@
 'use client';
 
-import { Button, CircularProgress, DialogActions, DialogContent, DialogTitle, Divider, Modal, ModalDialog, Sheet, Stack, Typography } from '@mui/joy';
+import {
+  Button,
+  CircularProgress,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  Sheet,
+  Stack,
+  Typography
+} from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 interface FailedMeasurementsModalProps {
@@ -26,7 +39,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
 
-  const fetchRecordCounts = async () => {
+  const fetchRecordCounts = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
       return;
     }
@@ -54,7 +67,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     } catch (error: any) {
       ailogger.error('Failed to fetch record counts:', error);
     }
-  };
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
 
   const handleClearFailedMeasurements = async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
@@ -170,7 +183,19 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     if (open) {
       fetchRecordCounts();
     }
-  }, [open, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges[0]?.censusID]);
+  }, [open, fetchRecordCounts]);
+
+  // Auto-close modal when all failed measurements have been resolved
+  // Note: Only auto-close when failedCount has been explicitly loaded (not null)
+  // and equals 0, to prevent premature closing during initial load
+  useEffect(() => {
+    if (open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
+      ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
+      setReingested(true);
+      // Use void to explicitly ignore the promise - the async close is fire-and-forget
+      void handleCloseModal();
+    }
+  }, [open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
 
   return (
     <Modal open={open} onClose={() => {}}>
@@ -186,6 +211,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
         }}
         role="alertdialog"
       >
+        <ModalClose aria-label="Close failed measurements modal" onClick={handleCloseModal} />
         <DialogTitle sx={{ pb: 1 }}>Failed Measurements</DialogTitle>
         <DialogContent sx={{ flex: 1, overflow: 'hidden', p: 0 }}>
           <Stack spacing={2} sx={{ height: '100%' }}>
@@ -193,7 +219,12 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
               The following measurements failed to be uploaded. You can edit individual measurements in this table, reingest all rows, or clear failed records
               entirely.
             </Typography>
-            <IsolatedFailedMeasurementsDataGrid />
+            <IsolatedFailedMeasurementsDataGrid
+              onRowReingested={() => {
+                ailogger.info('Row successfully reingested - refreshing failed measurement count');
+                fetchRecordCounts();
+              }}
+            />
           </Stack>
         </DialogContent>
         <DialogActions>

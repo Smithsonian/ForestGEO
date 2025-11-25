@@ -391,8 +391,8 @@
             <column autoIncrement="true" name="id" type="BIGINT UNSIGNED">
                 <constraints nullable="false" primaryKey="true"/>
             </column>
-            <column name="FileID" type="VARCHAR(36)"/>
-            <column name="BatchID" type="VARCHAR(36)">
+            <column name="FileID" type="VARCHAR(50)"/>
+            <column name="BatchID" type="VARCHAR(50)">
                 <constraints nullable="false"/>
             </column>
             <column name="PlotID" type="INT"/>

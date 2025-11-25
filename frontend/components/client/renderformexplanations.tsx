@@ -33,14 +33,43 @@ export default function RenderFormExplanations(uploadForm: FormType) {
       sx={{
         display: 'inherit', // Ensure layout is flex-based
         flexDirection: 'column',
-        width: '100%'
+        width: '100%',
+        '@keyframes fadeSlideIn': {
+          from: {
+            opacity: 0,
+            transform: 'translateY(-10px)'
+          },
+          to: {
+            opacity: 1,
+            transform: 'translateY(0)'
+          }
+        }
       }}
     >
       <AccordionGroup>
         <Accordion>
-          <AccordionSummary>
-            <Typography level="title-lg" sx={{ alignSelf: 'center', justifyContent: 'center', alignContent: 'center', my: 2 }}>
-              Understanding Form Headers
+          <AccordionSummary
+            sx={{
+              bgcolor: 'primary.softBg',
+              borderRadius: 'md',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                boxShadow: theme => `0 4px 12px ${theme.palette.primary.softBg}`
+              }
+            }}
+          >
+            <Typography
+              level="title-lg"
+              sx={{
+                alignSelf: 'center',
+                justifyContent: 'center',
+                alignContent: 'center',
+                my: 2,
+                fontWeight: 700,
+                color: 'primary.solidBg'
+              }}
+            >
+              📋 Understanding Form Headers
             </Typography>
           </AccordionSummary>
           <AccordionDetails>
@@ -55,10 +84,54 @@ export default function RenderFormExplanations(uploadForm: FormType) {
               }}
             >
               {TableHeadersByFormType[uploadForm].map((header, index) => (
-                <Card key={index} size="sm" sx={{ flex: 1 }}>
-                  <Typography level="title-sm" color={header.category === 'required' ? 'primary' : 'neutral'}>
-                    {header.label}
-                  </Typography>
+                <Card
+                  key={index}
+                  size="sm"
+                  sx={{
+                    flex: 1,
+                    animation: `fadeSlideIn 0.${5 + index}s ease-out`,
+                    background: theme =>
+                      header.category === 'required'
+                        ? `linear-gradient(135deg, ${theme.palette.primary.softBg} 0%, rgba(34, 197, 94, 0.05) 100%)`
+                        : `linear-gradient(135deg, ${theme.palette.neutral.softBg} 0%, rgba(120, 113, 108, 0.05) 100%)`,
+                    borderLeft: theme => `4px solid ${header.category === 'required' ? theme.palette.primary[400] : theme.palette.neutral[300]}`,
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: theme =>
+                        header.category === 'required' ? `0 8px 24px ${theme.palette.primary.softBg}` : `0 8px 24px ${theme.palette.neutral.softBg}`
+                    }
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <Typography
+                      level="title-sm"
+                      color={header.category === 'required' ? 'primary' : 'neutral'}
+                      sx={{
+                        fontWeight: header.category === 'required' ? 700 : 600,
+                        flex: 1
+                      }}
+                    >
+                      {header.label}
+                    </Typography>
+                    <Chip
+                      size="sm"
+                      variant="soft"
+                      color={header.category === 'required' ? 'primary' : 'neutral'}
+                      sx={{
+                        fontWeight: 600,
+                        fontSize: '0.7rem',
+                        px: 1,
+                        animation: header.category === 'required' ? 'pulse 2s ease-in-out infinite' : 'none',
+                        '@keyframes pulse': {
+                          '0%, 100%': { opacity: 1 },
+                          '50%': { opacity: 0.7 }
+                        }
+                      }}
+                    >
+                      {header.category?.toUpperCase()}
+                    </Chip>
+                  </Box>
                   <CardContent>
                     {header.label === 'status' ? (
                       <Box display="flex" flex={1} flexDirection="column">

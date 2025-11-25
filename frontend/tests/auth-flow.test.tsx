@@ -216,7 +216,7 @@ describe('Authentication Flow Tests', () => {
           email: 'test@example.com'
           // Missing userStatus, sites, allsites
         }
-      };
+      } as any;
 
       expect(incompleteSession.user.email).toBeDefined();
       expect(incompleteSession.user.userStatus).toBeUndefined();

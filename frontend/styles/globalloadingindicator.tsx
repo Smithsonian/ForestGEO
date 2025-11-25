@@ -76,10 +76,25 @@ export const GlobalLoadingIndicator: React.FC = () => {
   if (!isLoading) return null;
 
   // Calculate operation durations
-  const operationsWithDuration = activeOperations.map(op => ({
-    ...op,
-    duration: Math.floor((currentTime - op.startTime) / 1000)
-  }));
+  // CRITICAL FIX: Ensure both timestamps are in milliseconds and handle edge cases
+  const operationsWithDuration = activeOperations.map(op => {
+    const start = typeof op.startTime === 'number' ? op.startTime : Date.now();
+    const duration = Math.floor((currentTime - start) / 1000);
+
+    // If duration is negative or unreasonably large (>10 minutes), reset the operation
+    if (duration < 0 || duration > 600) {
+      return {
+        ...op,
+        duration: 0,
+        startTime: currentTime // Reset to current time to fix timestamp issues
+      };
+    }
+
+    return {
+      ...op,
+      duration
+    };
+  });
 
   const gradients = randomColors.map((color, index, arr) => {
     const nextColor = arr[(index + 1) % arr.length];
@@ -94,8 +109,11 @@ export const GlobalLoadingIndicator: React.FC = () => {
 
   return (
     <>
-      {/* Main loading overlay */}
       <Box
+        role="alert"
+        aria-live="assertive"
+        aria-busy="true"
+        aria-label={loadingMessage || 'Loading'}
         sx={{
           position: 'fixed',
           top: 0,
@@ -119,9 +137,8 @@ export const GlobalLoadingIndicator: React.FC = () => {
           e.stopPropagation();
         }}
       >
-        {/* Loading animation */}
-        <Box sx={{ textAlign: 'center', marginBottom: 3 }}>
-          <svg height={120} width={120} viewBox="0 0 52 52">
+        <Box sx={{ textAlign: 'center', marginBottom: 3 }} aria-hidden="true">
+          <svg height={120} width={120} viewBox="0 0 52 52" role="presentation">
             <defs>{gradients}</defs>
             {randomColors.map((_, index) => (
               <StyledSegment
@@ -137,11 +154,11 @@ export const GlobalLoadingIndicator: React.FC = () => {
           </svg>
         </Box>
 
-        {/* Main loading message */}
         {loadingMessage && (
           <Typography
             color="neutral"
             level="h2"
+            id="loading-message"
             sx={{
               color: 'white',
               textAlign: 'center',
@@ -153,7 +170,6 @@ export const GlobalLoadingIndicator: React.FC = () => {
           </Typography>
         )}
 
-        {/* Operation details */}
         {operationsWithDuration.length > 1 && (
           <Box
             sx={{
@@ -214,7 +230,6 @@ export const GlobalLoadingIndicator: React.FC = () => {
           </Box>
         )}
 
-        {/* Single operation duration */}
         {operationsWithDuration.length === 1 && operationsWithDuration[0].duration > 2 && (
           <Typography
             level="body-sm"
@@ -227,11 +242,10 @@ export const GlobalLoadingIndicator: React.FC = () => {
           </Typography>
         )}
 
-        {/* User instruction */}
         <Typography
           level="body-xs"
           sx={{
-            color: 'rgba(255, 255, 255, 0.6)',
+            color: 'rgba(255, 255, 255, 0.8)',
             marginTop: 3,
             textAlign: 'center',
             fontStyle: 'italic'

@@ -1,6 +1,6 @@
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { ColumnStates } from '@/config/macros';
+import type { ColumnStates } from '@/config/macros';
 
 export interface SpeciesRDS {
   id?: number;

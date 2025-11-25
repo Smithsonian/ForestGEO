@@ -57,3 +57,9 @@ frontend/liquibase/
 *.sh
 *.properties
 .jscpd
+CLAUDE.md
+.claudeignore
+.mcp*
+.playwright*
+frontend/docs/.vscode/**
+.logs/*

@@ -1,14 +1,15 @@
 // codeeditor.tsx
 'use client';
 
-import React, { Dispatch, SetStateAction, useEffect, useState, useRef } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useState, useRef, useCallback } from 'react';
 import { basicSetup } from 'codemirror';
 import { sql } from '@codemirror/lang-sql';
 import { format as sqlFormat } from 'sql-formatter';
 import { autocompletion, CompletionContext } from '@codemirror/autocomplete';
 import { linter, lintGutter } from '@codemirror/lint';
 import CodeMirror, { EditorView, ViewUpdate } from '@uiw/react-codemirror';
-import { Box, Alert } from '@mui/material';
+import { Box, Alert, Button, CircularProgress } from '@mui/joy';
+import { FormatAlignLeft, PlayArrow } from '@mui/icons-material';
 
 type CodeEditorProps = {
   value: string;
@@ -19,6 +20,10 @@ type CodeEditorProps = {
   readOnly?: boolean;
   schema?: string;
   enableValidation?: boolean;
+  showFormatButton?: boolean;
+  showTestButton?: boolean;
+  testButtonLabel?: string;
+  onTestQuery?: () => void;
 };
 
 const CodeEditor: React.FC<CodeEditorProps> = ({
@@ -29,41 +34,93 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   isDarkMode = false,
   readOnly = false,
   schema,
-  enableValidation = false
+  enableValidation = false,
+  showFormatButton = false,
+  showTestButton = false,
+  testButtonLabel = 'Test Query',
+  onTestQuery
 }) => {
-  const [editorValue, setEditorValue] = useState(() => sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }));
+  const [editorValue, setEditorValue] = useState(() => {
+    try {
+      return value ? sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }) : '';
+    } catch (error) {
+      console.error('SQL formatting error:', error);
+      return value || '';
+    }
+  });
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+  const [isValidating, setIsValidating] = useState(false);
   const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
-    setEditorValue(sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }));
+    try {
+      setEditorValue(value ? sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }) : '');
+    } catch (error) {
+      console.error('SQL formatting error:', error);
+      setEditorValue(value || '');
+    }
   }, [value]);
 
-  // Debounced validation function
-  const validateQuery = async (query: string) => {
-    if (!enableValidation || !schema || !query.trim()) {
-      setValidationErrors([]);
-      setValidationWarnings([]);
-      return;
-    }
-
+  // Format the SQL query
+  const handleFormatQuery = () => {
     try {
-      const response = await fetch(`/api/validations/validate-query?schema=${schema}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        setValidationErrors(result.errors || []);
-        setValidationWarnings(result.warnings || []);
-      }
+      const formatted = sqlFormat(editorValue, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' });
+      setEditorValue(formatted);
+      if (setValue) setValue(formatted);
     } catch (error) {
-      console.error('Validation error:', error);
+      console.error('SQL formatting error:', error);
     }
   };
+
+  // Debounced validation function
+  const validateQuery = useCallback(
+    async (query: string) => {
+      if (!enableValidation || !schema || !query.trim()) {
+        if (isMountedRef.current) {
+          setValidationErrors([]);
+          setValidationWarnings([]);
+          setIsValidating(false);
+        }
+        return;
+      }
+
+      if (isMountedRef.current) setIsValidating(true);
+      try {
+        const response = await fetch(`/api/validations/validate-query?schema=${schema}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
+
+        if (!isMountedRef.current) return; // Prevent state updates after unmount
+
+        if (response.ok) {
+          const result = await response.json();
+          setValidationErrors(result.errors || []);
+          setValidationWarnings(result.warnings || []);
+        } else {
+          setValidationErrors(['Failed to validate query']);
+        }
+      } catch (error) {
+        console.error('Validation error:', error);
+        if (isMountedRef.current) {
+          setValidationErrors(['Error connecting to validation service']);
+        }
+      } finally {
+        if (isMountedRef.current) setIsValidating(false);
+      }
+    },
+    [enableValidation, schema]
+  );
 
   // Debounced validation on value change
   useEffect(() => {
@@ -80,7 +137,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
         clearTimeout(validationTimeoutRef.current);
       }
     };
-  }, [editorValue, enableValidation, schema]);
+  }, [editorValue, enableValidation, schema, validateQuery]);
 
   const autoHeightExt = EditorView.updateListener.of((update: ViewUpdate) => {
     if (update.docChanged || update.viewportChanged) {
@@ -150,6 +207,28 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
 
   return (
     <Box>
+      {/* Action Buttons */}
+      {!readOnly && (showFormatButton || showTestButton || enableValidation) && (
+        <Box sx={{ mb: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
+          {showFormatButton && (
+            <Button size="sm" variant="outlined" startDecorator={<FormatAlignLeft />} onClick={handleFormatQuery}>
+              Format SQL
+            </Button>
+          )}
+          {showTestButton && onTestQuery && (
+            <Button size="sm" variant="solid" color="primary" startDecorator={<PlayArrow />} onClick={onTestQuery} disabled={isValidating}>
+              {testButtonLabel}
+            </Button>
+          )}
+          {enableValidation && isValidating && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CircularProgress size="sm" />
+              <Box sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>Validating...</Box>
+            </Box>
+          )}
+        </Box>
+      )}
+
       <CodeMirror
         value={editorValue}
         {...(cmHeight ? { height: cmHeight } : {})}
@@ -165,12 +244,12 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
       {enableValidation && (validationErrors.length > 0 || validationWarnings.length > 0) && (
         <Box sx={{ mt: 1 }}>
           {validationErrors.map((error, index) => (
-            <Alert key={`error-${index}`} severity="error" sx={{ mb: 0.5 }}>
+            <Alert key={`error-${index}`} color="danger" sx={{ mb: 0.5 }}>
               {error}
             </Alert>
           ))}
           {validationWarnings.map((warning, index) => (
-            <Alert key={`warning-${index}`} severity="warning" sx={{ mb: 0.5 }}>
+            <Alert key={`warning-${index}`} color="warning" sx={{ mb: 0.5 }}>
               {warning}
             </Alert>
           ))}

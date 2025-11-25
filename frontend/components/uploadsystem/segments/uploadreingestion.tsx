@@ -1,8 +1,8 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import moment from 'moment';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
@@ -40,6 +40,9 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   const connectionLimit = 8;
   const totalProcessCompletionTimeRef = useRef(0);
   const chunkProcessStartTime = useRef(0);
+  const batchProcessingStartedRef = useRef<boolean>(false);
+  // Use a ref for isMounted to survive React 18 Strict Mode's double-effect execution
+  const isMountedRef = useRef<boolean>(true);
 
   const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();
@@ -74,6 +77,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
     let isEmpty = true;
     let emptyResolvers: (() => void)[] = [];
 
+    // Use iterative approach instead of recursion to prevent stack overflow on large queues
     const processNext = async () => {
       if (pending.length === 0) {
         if (running === 0) {
@@ -94,7 +98,14 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         ailogger.error('Task failed:', error instanceof Error ? error : new Error(String(error)));
       } finally {
         running--;
-        processNext();
+        // Use setTimeout to break recursion chain and prevent stack overflow
+        if (pending.length > 0 && running < concurrency) {
+          setTimeout(() => processNext(), 0);
+        } else if (running === 0 && pending.length === 0) {
+          isEmpty = true;
+          emptyResolvers.forEach(resolve => resolve());
+          emptyResolvers = [];
+        }
       }
     };
 
@@ -122,7 +133,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
     };
   };
 
-  const queue = createTransactionAwareQueue(connectionLimit);
+  const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
 
   useEffect(() => {
     if (processedChunks > 0) {
@@ -156,7 +167,19 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   }, [processed, processedChunks, totalBatches]);
 
   useEffect(() => {
-    let isMounted = true;
+    // ALWAYS reset isMountedRef to true on mount, BEFORE any guard checks
+    // This is critical because the guard may return early, but we still need
+    // the ref to reflect that the component is currently mounted so any
+    // ongoing async operations can continue their state updates
+    isMountedRef.current = true;
+
+    // Prevent re-initialization if already processing or if processing has completed
+    // This guards against context changes (schema/plot/census) during reingestion
+    if (batchProcessingStartedRef.current || processedChunks > 0 || processed) {
+      ailogger.info('[REINGESTION GUARD] Skipping reingestion initialization - already processing or completed');
+      return;
+    }
+    batchProcessingStartedRef.current = true;
 
     async function runProcessBatches() {
       try {
@@ -168,7 +191,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
         if (!response.ok) {
-          throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
+          const errorData = await response.json().catch(() => ({ message: response.statusText }));
+          throw new Error(`Failed to setup bulk processor: ${response.status} - ${errorData.message || response.statusText}`);
         }
         const output: { fileID: string; batchID: string }[] = await response.json();
         ailogger.info(`Received ${output.length} batches to process for reingestion:`, output);
@@ -186,6 +210,98 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         const totalBatchCount = Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0);
         setTotalBatches(totalBatchCount);
 
+        if (totalBatchCount === 0) {
+          ailogger.info('No batches to process for reingestion, proceeding to verification and consolidation');
+          batchProcessingStartedRef.current = false;
+          // Skip batch processing and go directly to verification
+          if (isMountedRef.current) {
+            setIsVerifying(true);
+            setTotalVerificationSteps(3);
+            setVerificationStep(0);
+            setVerificationStatus('Preparing reingestion verification...');
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
+          // Verify batch processing
+          try {
+            if (isMountedRef.current) {
+              setVerificationStep(1);
+              setVerificationStatus('Verifying reingestion batch processing...');
+            }
+
+            const verifyProcessingResponse = await fetch(
+              `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+            );
+            if (verifyProcessingResponse.ok) {
+              const verifyData = await verifyProcessingResponse.json();
+              if (isMountedRef.current) {
+                setVerificationStatus(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
+              }
+              ailogger.info(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
+            } else {
+              if (isMountedRef.current) {
+                setVerificationStatus('Reingestion verification failed, continuing...');
+              }
+              ailogger.warn('Reingestion verification failed, but continuing');
+            }
+          } catch (verifyError: any) {
+            if (isMountedRef.current) {
+              setVerificationStatus(`Reingestion verification error: ${verifyError.message}`);
+            }
+            ailogger.warn('Reingestion verification error:', verifyError.message);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Run collapser
+          try {
+            if (isMountedRef.current) {
+              setVerificationStep(2);
+              setVerificationStatus('Starting data consolidation...');
+            }
+            ailogger.info('Starting collapser for reingestion...');
+
+            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            if (!collapserResponse.ok) {
+              const errorData = await collapserResponse.json().catch(() => ({ message: collapserResponse.statusText }));
+              throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorData.message || collapserResponse.statusText}`);
+            }
+            const collapserData = await collapserResponse.json();
+            if (isMountedRef.current) {
+              setVerificationStatus('Reingestion data consolidation completed');
+            }
+            ailogger.info('Reingestion collapser completed successfully:', collapserData);
+
+            if (isMountedRef.current) {
+              setVerificationStep(3);
+              setVerificationStatus('Finalizing reingestion...');
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            if (isMountedRef.current) {
+              setVerificationStatus('Reingestion completed successfully');
+            }
+          } catch (collapserError: any) {
+            if (isMountedRef.current) {
+              setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+            }
+            ailogger.error('Reingestion collapser error:', collapserError.message);
+            throw collapserError;
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          if (isMountedRef.current) {
+            setIsVerifying(false);
+            setProcessed(true);
+          }
+          return;
+        }
+
         for (const fileID in grouped) {
           ailogger.info(`Processing FileID: ${fileID} for reingestion`);
 
@@ -198,7 +314,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
               )
                 .then(async response => {
                   if (!response.ok) {
-                    throw new Error(`API returned status ${response.status} for batch ${fileID}-${batchID}`);
+                    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+                    throw new Error(`API returned status ${response.status} for batch ${fileID}-${batchID}: ${errorData.message || response.statusText}`);
                   }
                   const result = await response.json();
 
@@ -207,11 +324,6 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                   }
 
                   ailogger.info(`Successfully processed batch ${fileID}-${batchID}`);
-                  setProcessedChunks(prev => {
-                    const newValue = prev + 1;
-                    ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
-                    return newValue;
-                  });
                 })
                 .catch(async (e: any) => {
                   const errorMessage = e?.message || e?.toString() || 'Unknown error';
@@ -232,19 +344,22 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                           `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
                         );
                         if (!failureResponse.ok) {
-                          throw new Error(`Failed to move batch to failed measurements: ${failureResponse.status}`);
+                          const errorData = await failureResponse.json().catch(() => ({ message: failureResponse.statusText }));
+                          throw new Error(
+                            `Failed to move batch to failed measurements: ${failureResponse.status} - ${errorData.message || failureResponse.statusText}`
+                          );
                         }
                       } catch (failureError: any) {
                         ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
                       }
                     }
                   }
-
+                })
+                .finally(() => {
+                  // Consolidate batch progress tracking to prevent double-counting
                   setProcessedChunks(prev => {
                     const newValue = prev + 1;
-                    ailogger.info(
-                      `Batch progress (with ${isMonitoringError ? 'monitoring issue' : 'failure'}): ${newValue}/${totalBatchCount} batches completed`
-                    );
+                    ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
                     return newValue;
                   });
                 })
@@ -265,7 +380,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         await queue.onEmpty();
 
         // Start processing verification
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(true);
           setTotalVerificationSteps(3);
           setVerificationStep(0);
@@ -276,7 +391,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         // Verify batch processing
         try {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(1);
             setVerificationStatus('Verifying reingestion batch processing...');
           }
@@ -286,18 +401,18 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
             }
             ailogger.info(`Reingestion verification: ${verifyData.processedCount} rows processed, ${verifyData.remainingCount} remaining`);
           } else {
-            if (isMounted) {
+            if (isMountedRef.current) {
               setVerificationStatus('Reingestion verification failed, continuing...');
             }
             ailogger.warn('Reingestion verification failed, but continuing');
           }
         } catch (verifyError: any) {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus(`Reingestion verification error: ${verifyError.message}`);
           }
           ailogger.warn('Reingestion verification error:', verifyError.message);
@@ -307,7 +422,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         // Run collapser
         try {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(2);
             setVerificationStatus('Starting data consolidation...');
           }
@@ -318,26 +433,26 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
             headers: { 'Content-Type': 'application/json' }
           });
           if (!collapserResponse.ok) {
-            const errorText = await collapserResponse.text().catch(() => 'Unknown error');
-            throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
+            const errorData = await collapserResponse.json().catch(() => ({ message: collapserResponse.statusText }));
+            throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorData.message || collapserResponse.statusText}`);
           }
           const collapserData = await collapserResponse.json();
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus('Reingestion data consolidation completed');
           }
           ailogger.info('Reingestion collapser completed successfully:', collapserData);
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStep(3);
             setVerificationStatus('Finalizing reingestion...');
           }
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus('Reingestion completed successfully');
           }
         } catch (collapserError: any) {
-          if (isMounted) {
+          if (isMountedRef.current) {
             setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
           }
           ailogger.error('Reingestion collapser error:', collapserError.message);
@@ -346,27 +461,45 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if (isMounted) {
+        if (isMountedRef.current) {
           setIsVerifying(false);
           setProcessed(true);
         }
       } catch (error: any) {
         ailogger.error('Reingestion processing error:', error);
-        if (isMounted) {
+        if (isMountedRef.current) {
           setReviewState(ReviewStates.ERRORS);
         }
+      } finally {
+        // Ensure cleanup happens even if errors occur
+        if (isMountedRef.current) {
+          setIsVerifying(false);
+        }
+        // Don't reset batchProcessingStartedRef here to prevent re-triggering on state changes
+        // It will be reset on unmount via cleanup function
       }
     }
 
     runProcessBatches();
 
+    // Cleanup only on unmount - don't reset isMountedRef on re-renders
+    // The guard at the top prevents re-initialization during re-renders
+    // NOTE: Do NOT reset batchProcessingStartedRef here - it could allow re-initialization
+    // on fast remount scenarios. The ref should only be reset when the parent component
+    // fully unmounts and remounts the upload system.
     return () => {
-      isMounted = false;
+      ailogger.info('[REINGESTION CLEANUP] Component unmounting, setting isMountedRef.current = false');
+      isMountedRef.current = false;
+      // Removed: batchProcessingStartedRef.current = false;
+      // This was causing potential re-initialization issues on fast remounts
     };
-  }, [schema, currentPlot, currentCensus]);
+    // Empty dependency array - only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (processed) {
+      ailogger.info('[REINGESTION COMPLETE] Reingestion finished successfully - transitioning to VALIDATE state');
       setIsVerifying(false);
       setVerificationStatus('Reingestion completed successfully');
       setVerificationStep(0);
@@ -374,7 +507,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
       setReviewState(ReviewStates.VALIDATE);
       setIsDataUnsaved(false);
     }
-  }, [processed, setReviewState, setIsDataUnsaved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processed]);
 
   const { palette } = useTheme();
 

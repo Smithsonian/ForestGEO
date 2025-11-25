@@ -1,7 +1,3 @@
-/**
- * Defines templates for new rows in data grids
- */
-// datagridhelpers.ts
 import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
@@ -29,17 +25,11 @@ export type FetchQueryFunction = (
   plotID?: number,
   plotCensusNumber?: number,
   quadratID?: number,
-  speciesID?: number // This is a special case for specieslimits
+  speciesID?: number,
+  filtered?: boolean
 ) => string;
 
-export type ProcessPostPatchQueryFunction = (
-  // incorporated validation system into this too
-  siteSchema: string,
-  dataType: string,
-  gridID: string,
-  plotID?: number,
-  censusID?: number
-) => string;
+export type ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string, plotID?: number, censusID?: number) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
 const columnVisibilityMap: Record<string, Record<string, boolean>> = {
@@ -50,7 +40,6 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
     id: false,
     ...getAllViewFullTableViewsHCs()
   },
-  // views
   alltaxonomiesview: {
     id: false,
     ...getAllTaxonomiesViewHCs()
@@ -118,11 +107,14 @@ export const createFetchQuery: FetchQueryFunction = (
   plotID?,
   plotCensusNumber?,
   quadratID?: number,
-  speciesID?: number
+  speciesID?: number,
+  filtered: boolean = false
 ): string => {
-  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  const endpoint = filtered ? 'fixeddatafilter' : 'fixeddata';
+  return `/api/${endpoint}/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
+// Deprecated: Use createFetchQuery with filtered=true instead
 export const createQFFetchQuery: FetchQueryFunction = (
   siteSchema: string,
   gridType,
@@ -133,48 +125,16 @@ export const createQFFetchQuery: FetchQueryFunction = (
   quadratID?: number,
   speciesID?: number
 ): string => {
-  return `/api/fixeddatafilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  return createFetchQuery(siteSchema, gridType, page, pageSize, plotID, plotCensusNumber, quadratID, speciesID, true);
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
-export function getGridID(gridType: string): string {
-  switch (gridType.trim()) {
-    case 'coremeasurements':
-    case 'measurementssummaryview':
-    case 'viewfulltableview':
-    case 'measurementssummary': // materialized view --> should not be modified
-    case 'viewfulltable': // materialized view --> should not be modified
-      return 'coreMeasurementID';
-    case 'attributes':
-      return 'code';
-    case 'census':
-      return 'censusID';
-    case 'personnel':
-      return 'personnelID';
-    case 'quadrats':
-      return 'quadratID';
-    case 'quadratpersonnel':
-      return 'quadratPersonnelID';
-    case 'roles':
-      return 'roleID';
-    case 'subquadrats':
-      return 'subquadratID';
-    case 'alltaxonomiesview':
-    case 'species':
-      return 'speciesID';
-    case 'specieslimits':
-      return 'speciesLimitID';
-    case 'sitespecificvalidations':
-      return 'validationID';
-    case 'failedmeasurements':
-      return 'failedMeasurementID';
-    default:
-      return 'breakage';
-  }
-}
+// Re-export server-safe utilities for backward compatibility
+// Client components can import from here, server components should import from servergridhelpers
+export { getGridID } from './servergridhelpers';
 
 export type VisibleFilter = 'valid' | 'errors' | 'pending';
 export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';
@@ -226,11 +186,11 @@ export interface IsolatedDataGridCommonProps {
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
-  onDataUpdate?: (updatedRow: GridRowModel) => Promise<void>; // Add the onDataUpdate prop
+  onDataUpdate?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<void>;
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
-  adminEmail?: string; // need to distinguish between admin and non-admin users --> should ONLY be populated for admin datagrids
+  adminEmail?: string;
 }
 
 export interface DataGridCommonProps {
@@ -260,7 +220,6 @@ export interface DataGridCommonProps {
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
 }
 
-// Define types for the new states and props
 export interface PendingAction {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
@@ -274,16 +233,10 @@ export const CellItemContainer = styled('div')({
   height: '100%'
 });
 
-/**
- * Function to determine if all entries in a column are null
- */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
   return rows.length > 0 && rows.every(row => field === undefined || row[field] === undefined || row[field] === null || row[field] === '');
 }
 
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
   return columns.filter(
     col =>

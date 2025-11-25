@@ -132,7 +132,7 @@ describe('GET /api/changelog/overview/[changelogType]/[[...options]]', () => {
 
   it('unifiedchangelog: 200 with empty body when no rows; mapper not called; closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]);
+    const _exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api?schema=myschema');

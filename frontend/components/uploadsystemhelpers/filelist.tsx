@@ -3,10 +3,8 @@ import React from 'react';
 import { FileListProps } from '@/config/macros/formdetails';
 
 import '@/styles/dropzone.css';
-import { Card, CardContent, CardHeader, Pagination } from '@mui/material';
-import Chip from '@mui/joy/Chip';
-import Divider from '@mui/joy/Divider';
-import { Box, Stack } from '@mui/joy';
+import { Pagination } from '@mui/material';
+import { Box, Card, CardContent, Chip, Divider, Stack, Typography } from '@mui/joy';
 
 /**
  * A simple list of files with their sizes.
@@ -17,8 +15,10 @@ export function FileList(props: Readonly<FileListProps>) {
     setDataViewActive(value); // Directly update the dataViewActive in the parent component
   };
   return (
-    <Card sx={{ display: 'flex', flex: 1, width: '100%' }}>
-      <CardHeader>File Preview:</CardHeader>
+    <Card sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%' }}>
+      <CardContent>
+        <Typography level="title-lg">File Preview:</Typography>
+      </CardContent>
       <CardContent sx={{ display: 'flex', flex: 1, width: '100%' }}>
         <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
           <Stack direction={'column'}>

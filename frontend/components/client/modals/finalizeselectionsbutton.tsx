@@ -1,5 +1,5 @@
 'use client';
-import { Button, Grow } from '@mui/material';
+import { Button } from '@mui/joy';
 import React from 'react';
 
 interface FinalizeSelectionsButtonProps {
@@ -11,29 +11,28 @@ const FinalizeSelectionsButton: React.FC<FinalizeSelectionsButtonProps> = ({ onF
   if (!show) return null;
 
   return (
-    <Grow in={show} style={{ transformOrigin: '0 0 0' }} timeout={1000}>
-      <Button
-        variant="contained"
-        color="primary"
-        onClick={onFinish}
-        sx={{
-          width: 'fit-content',
-          mb: 2,
-          bgcolor: 'secondary.main',
-          ':hover': {
-            bgcolor: 'secondary.dark',
-            animation: 'pulse 1s infinite'
-          },
-          '@keyframes pulse': {
-            '0%': { transform: 'scale(1)' },
-            '50%': { transform: 'scale(1.05)' },
-            '100%': { transform: 'scale(1)' }
-          }
-        }}
-      >
-        Finalize selections
-      </Button>
-    </Grow>
+    <Button
+      variant="solid"
+      color="primary"
+      onClick={onFinish}
+      sx={{
+        width: 'fit-content',
+        mb: 2,
+        opacity: show ? 1 : 0,
+        transform: show ? 'scale(1)' : 'scale(0)',
+        transition: 'all 1s ease-in-out',
+        ':hover': {
+          animation: 'pulse 1s infinite'
+        },
+        '@keyframes pulse': {
+          '0%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.05)' },
+          '100%': { transform: 'scale(1)' }
+        }
+      }}
+    >
+      Finalize selections
+    </Button>
   );
 };
 

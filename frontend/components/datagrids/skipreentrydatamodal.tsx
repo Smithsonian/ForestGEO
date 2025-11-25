@@ -10,7 +10,7 @@ interface ReEnterDataModalProps {
   handleSave: (confirmedRow: GridRowModel) => void;
 }
 
-const SkipReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ gridType, row, handleClose, handleSave }) => {
+const SkipReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ gridType: _gridType, row, handleClose, handleSave }) => {
   const [isConfirmStep, setIsConfirmStep] = useState(true);
 
   const handleConfirm = () => {

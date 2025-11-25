@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -12,14 +12,7 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
-import {
-  useOrgCensusContext,
-  useOrgCensusDispatch,
-  usePlotContext,
-  usePlotDispatch,
-  useSiteContext,
-  useSiteDispatch
-} from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Badge,
@@ -41,8 +34,9 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
-import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
+import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
+import { useLoading } from '@/app/contexts/loadingprovider';
 import { TransitionComponent } from '@/components/client/clientmacros';
 import ListDivider from '@mui/joy/ListDivider';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
@@ -54,6 +48,7 @@ import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, MoreHoriz } from '@mui/icons-material';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -151,6 +146,7 @@ export default function Sidebar(props: SidebarProps) {
   const siteListContext = useSiteListContext();
   const plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
+  const { setLoading } = useLoading();
   const isAllValiditiesTrue = Object.entries(validity)
     .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
@@ -158,11 +154,14 @@ export default function Sidebar(props: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Detect if we're on an admin page
+  const isAdminPage = pathname?.includes('/admin') ?? false;
+
   const [measurementsToggle, setMeasurementsToggle] = useState(true);
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
+  const { siteListLoaded: _siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
@@ -174,26 +173,45 @@ export default function Sidebar(props: SidebarProps) {
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
   const [isCreatingCensus, setIsCreatingCensus] = useState(false);
+  const [adminResetDone, setAdminResetDone] = useState(false);
+
+  // Clear selections when entering admin pages
+  useEffect(() => {
+    if (isAdminPage && !adminResetDone) {
+      const clearSelections = async () => {
+        if (currentSite && siteDispatch) await siteDispatch({ site: undefined });
+        if (currentPlot && plotDispatch) await plotDispatch({ plot: undefined });
+        if (currentCensus && censusDispatch) await censusDispatch({ census: undefined });
+      };
+      clearSelections();
+      setAdminResetDone(true);
+    } else if (!isAdminPage) {
+      setAdminResetDone(false);
+    }
+  }, [isAdminPage, adminResetDone, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch]);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
   };
 
-  const handleClose = (event?: MouseEvent) => {
-    const target = event?.target as HTMLElement;
-    const selectElement = sidebarRef.current?.querySelector('.plot-selection');
-    const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
-    if (menuElement?.contains(target)) {
-      return;
-    }
-    if (selectElement?.contains(target)) {
-      if (anchorPlotEdit) {
-        setAnchorPlotEdit(null);
+  const handleClose = useCallback(
+    (event?: MouseEvent) => {
+      const target = event?.target as HTMLElement;
+      const selectElement = sidebarRef.current?.querySelector('.plot-selection');
+      const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
+      if (menuElement?.contains(target)) {
+        return;
       }
-      return;
-    }
-    setAnchorPlotEdit(null);
-  };
+      if (selectElement?.contains(target)) {
+        if (anchorPlotEdit) {
+          setAnchorPlotEdit(null);
+        }
+        return;
+      }
+      setAnchorPlotEdit(null);
+    },
+    [anchorPlotEdit]
+  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -204,7 +222,7 @@ export default function Sidebar(props: SidebarProps) {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [anchorPlotEdit]);
+  }, [handleClose]);
 
   const handleOptionClick = () => {
     setOpenPlotCardModal(true);
@@ -212,45 +230,38 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   useEffect(() => {
+    let debounceTimer: NodeJS.Timeout | null = null;
+
     const updateSidebarWidth = () => {
       if (sidebarRef.current) {
-        const sidebarElements = sidebarRef.current.querySelectorAll('*');
-        let maxWidth = 340; // Minimum width
+        const scrollWidth = sidebarRef.current.scrollWidth;
+        const calculatedWidth = Math.max(scrollWidth, 340); // Minimum width
 
-        sidebarElements.forEach(element => {
-          if (sidebarRef.current) {
-            const elementRect = element.getBoundingClientRect();
-            const sidebarRect = sidebarRef.current.getBoundingClientRect();
-            const elementWidth = elementRect.right - sidebarRect.left;
-
-            if (elementWidth > maxWidth) {
-              maxWidth = elementWidth;
-            }
-          }
-        });
-
-        setSidebarWidth(Math.min(maxWidth + 10, 500));
+        setSidebarWidth(Math.min(calculatedWidth + 10, 380)); // Reduced max width from 500 to 380
       }
     };
 
-    const resizeObserver = new ResizeObserver(() => {
-      updateSidebarWidth();
-    });
+    // Debounce resize updates to prevent excessive recalculations
+    const debouncedUpdate = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateSidebarWidth, 300);
+    };
 
+    const resizeObserver = new ResizeObserver(debouncedUpdate);
+
+    // Only observe the container, not all children
     if (sidebarRef.current) {
-      const sidebarElements = sidebarRef.current.querySelectorAll('*');
-      sidebarElements.forEach(element => {
-        resizeObserver.observe(element);
-      });
+      resizeObserver.observe(sidebarRef.current);
     }
 
     // Initial calculation
     updateSidebarWidth();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       resizeObserver.disconnect();
     };
-  }, [currentSite, currentPlot, currentCensus]);
+  }, []); // Remove context dependencies - observer doesn't need to recreate
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (siteDispatch) {
@@ -258,6 +269,10 @@ export default function Sidebar(props: SidebarProps) {
     }
     if (selectedSite === undefined) {
       await handlePlotSelection(undefined);
+    }
+    // If on admin page and a site is selected, navigate to dashboard
+    if (isAdminPage && selectedSite) {
+      router.push('/dashboard');
     }
   };
 
@@ -313,15 +328,21 @@ export default function Sidebar(props: SidebarProps) {
         return;
       }
 
-      await Promise.all(
-        ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-          await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ incoming: {} })
-          });
-        })
-      );
+      // Rollover data from current census to new census (only if we have a valid source census)
+      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+      if (sourceCensusID !== undefined && sourceCensusID !== null) {
+        await Promise.all(
+          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ incoming: {} })
+            });
+          })
+        );
+      } else {
+        console.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
+      }
       setCensusListLoaded(false);
     } catch (error) {
       console.error('Error creating census:', error);
@@ -332,13 +353,13 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
-  const renderSiteValue = (option: SelectOption<string> | null) => {
+  const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-site-select'}>Select a Site</Typography>;
     }
 
     const selectedValue = option.value;
-    const selectedSite = siteListContext?.find(c => c?.siteName?.toString() === selectedValue);
+    const selectedSite = siteListContext?.find(c => c?.siteID === selectedValue);
     return (
       <>
         {selectedSite ? (
@@ -364,13 +385,13 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
 
-  const renderPlotValue = (option: SelectOption<string> | null) => {
+  const renderPlotValue = (option: SelectOption<number> | null) => {
     if (!option) {
       return <Typography data-testid={'pending-plot-select'}>Select a Plot</Typography>;
     }
 
     const selectedValue = option.value;
-    const selectedPlot = plotListContext?.find(c => c?.plotName === selectedValue);
+    const selectedPlot = plotListContext?.find(c => c?.plotID === selectedValue);
 
     return (
       <>
@@ -560,6 +581,8 @@ export default function Sidebar(props: SidebarProps) {
                   variant={'soft'}
                   color={'danger'}
                   onClick={async () => {
+                    // Select the census first before opening delete dialog
+                    await handleCensusSelection(item);
                     setIsClearDropdownOpen(true);
                   }}
                   disabled={
@@ -578,15 +601,16 @@ export default function Sidebar(props: SidebarProps) {
   );
 
   const renderPlotOptions = () => (
-    <Select
+    <Select<number>
       placeholder="Select a Plot"
       className="plot-selection"
       name="None"
       required
       size={'md'}
       data-testid={'plot-select-component'}
+      aria-label="Select a Plot"
       renderValue={renderPlotValue}
-      value={currentPlot?.plotName || ''}
+      value={currentPlot?.plotID ?? null}
       listboxOpen={isPlotDropdownOpen}
       onListboxOpenChange={() => {
         setSiteDropdownOpen(false);
@@ -595,61 +619,62 @@ export default function Sidebar(props: SidebarProps) {
       }}
       onClose={() => setPlotDropdownOpen(false)}
       onFocus={event => event.preventDefault()}
-      onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
+      onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
         event?.preventDefault();
-        const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
+        const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
         await handlePlotSelection(selectedPlot);
       }}
     >
-      {Array.isArray(plotListContext) && plotListContext.map(item => (
-        <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              width: '100%'
-            }}
-            className="sidebar-item"
-          >
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
-              <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
-                <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
-                  {item?.plotName}
-                </Typography>
-                <IconButton
-                  variant={'soft'}
-                  sx={{
-                    justifyContent: 'center',
-                    alignSelf: 'center'
-                  }}
-                  aria-label={`Plot options for ${item?.plotName}`}
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={event => {
-                    event.preventDefault();
-                    setSelectedPlot(item);
-                    handleOpen(event);
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter' || event.key === ' ') {
+      {Array.isArray(plotListContext) &&
+        plotListContext.map(item => (
+          <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotID} key={item?.plotID} data-testid={'plot-selection-option'}>
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%'
+              }}
+              className="sidebar-item"
+            >
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
+                  <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
+                    {item?.plotName}
+                  </Typography>
+                  <IconButton
+                    variant={'soft'}
+                    sx={{
+                      justifyContent: 'center',
+                      alignSelf: 'center'
+                    }}
+                    aria-label={`Plot options for ${item?.plotName}`}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={event => {
                       event.preventDefault();
                       setSelectedPlot(item);
-                      setAnchorPlotEdit(event.currentTarget);
-                    }
-                  }}
-                  // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
-                  disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
-                >
-                  <MoreHoriz />
-                </IconButton>
-              </Stack>
-              <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
-                {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
-              </Typography>
+                      handleOpen(event);
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedPlot(item);
+                        setAnchorPlotEdit(event.currentTarget);
+                      }
+                    }}
+                    // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
+                    disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
+                  >
+                    <MoreHoriz />
+                  </IconButton>
+                </Stack>
+                <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
+                  {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
+                </Typography>
+              </Box>
             </Box>
-          </Box>
-        </Option>
-      ))}
+          </Option>
+        ))}
     </Select>
   );
   const renderSiteOptions = () => {
@@ -687,7 +712,7 @@ export default function Sidebar(props: SidebarProps) {
         size={'md'}
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
-        value={currentSite ? siteListContext?.find(i => i.siteName === currentSite.siteName)?.siteName : ''}
+        value={currentSite?.siteID ?? null}
         listboxOpen={isSiteDropdownOpen}
         onListboxOpenChange={() => {
           setSiteDropdownOpen(true);
@@ -695,8 +720,8 @@ export default function Sidebar(props: SidebarProps) {
           setCensusDropdownOpen(false);
         }}
         onClose={() => setSiteDropdownOpen(false)}
-        onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
-          const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
+        onChange={async (_event: React.SyntheticEvent | null, newValue: number | null) => {
+          const selectedSite = newValue ? siteListContext?.find(site => site?.siteID === newValue) : undefined;
           await handleSiteSelection(selectedSite);
         }}
       >
@@ -706,7 +731,7 @@ export default function Sidebar(props: SidebarProps) {
               Deselect Site (will trigger app reset!):
             </Typography>
           </ListItem>
-          <Option key="none" value="" aria-label="Deselect site, will trigger application reset">
+          <Option key="none" value={null as unknown as number} aria-label="Deselect site, will trigger application reset">
             None
           </Option>
         </List>
@@ -723,7 +748,7 @@ export default function Sidebar(props: SidebarProps) {
             </Typography>
           </ListItem>
           {allowedSites.map(site => (
-            <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
+            <Option key={site.siteID} value={site.siteID} data-testid={'site-selection-option-allowed'} aria-label={`Select ${site.siteName} site`}>
               {site.siteName}
             </Option>
           ))}
@@ -743,7 +768,7 @@ export default function Sidebar(props: SidebarProps) {
           {otherSites.map(site => (
             <Option
               key={site.siteID}
-              value={site.siteName}
+              value={site.siteID}
               disabled
               data-testid={'site-selection-option-other'}
               aria-label={`${site.siteName} site, not accessible to current user`}
@@ -790,6 +815,7 @@ export default function Sidebar(props: SidebarProps) {
       <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           ref={sidebarRef}
+          id="side-navigation"
           className="Sidebar"
           sx={{
             position: 'sticky',
@@ -830,13 +856,55 @@ export default function Sidebar(props: SidebarProps) {
                 </Typography>
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
+              {/* Admin page: show user's own sites and site selector instruction */}
+              {isAdminPage && (
+                <Box sx={{ width: '100%', mb: 2 }}>
+                  {session?.user?.sites && session.user.sites.length > 0 && (
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        borderRadius: 'md',
+                        bgcolor: 'background.level1',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        mb: 1.5
+                      }}
+                    >
+                      <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1, fontWeight: 600, textTransform: 'uppercase' }}>
+                        Your Site Access
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {session.user.sites.map(site => (
+                          <Box
+                            key={site.siteID}
+                            sx={{
+                              px: 1,
+                              py: 0.25,
+                              borderRadius: 'sm',
+                              bgcolor: 'primary.softBg',
+                              color: 'primary.softColor',
+                              fontSize: '0.75rem',
+                              fontWeight: 500
+                            }}
+                          >
+                            {site.siteName}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                  <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1 }}>
+                    Select a site to exit admin and go to dashboard:
+                  </Typography>
+                </Box>
+              )}
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
                 <Avatar sx={{ marginRight: 1 }} alt={'site options icon'}>
                   <TravelExploreIcon />
                 </Avatar>
                 <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
               </Box>
-              {currentSite !== undefined && (
+              {currentSite !== undefined && !isAdminPage && (
                 <>
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
                     <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
@@ -1217,18 +1285,46 @@ export default function Sidebar(props: SidebarProps) {
             <DialogActions>
               <Button
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+                  if (!currentSite?.schemaName || !censusID) {
+                    ailogger.error('Missing required context: schema or censusID', undefined, {
+                      schema: currentSite?.schemaName || 'unknown',
+                      censusID: censusID || 'unknown'
+                    });
+                    setIsClearDropdownOpen(false);
+                    return;
+                  }
+                  setLoading(true, 'Deleting census measurements...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
-                  setManualReset(true);
+                  try {
+                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=msmts`);
+                    setManualReset(true);
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
               >
                 Partial Deletion
               </Button>
               <Button
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+                  if (!currentSite?.schemaName || !censusID) {
+                    ailogger.error('Missing required context: schema or censusID', undefined, {
+                      schema: currentSite?.schemaName || 'unknown',
+                      censusID: censusID || 'unknown'
+                    });
+                    setIsClearDropdownOpen(false);
+                    return;
+                  }
+                  setLoading(true, 'Deleting census measurements and fixed data...');
                   setIsClearDropdownOpen(!isClearDropdownOpen);
-                  setManualReset(true);
+                  try {
+                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=full`);
+                    setManualReset(true);
+                  } finally {
+                    setLoading(false);
+                  }
                 }}
               >
                 Full Deletion

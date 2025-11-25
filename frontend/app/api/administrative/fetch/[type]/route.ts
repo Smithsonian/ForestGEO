@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { getCookie } from '@/app/actions/cookiemanager';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
+import { format } from 'mysql2/promise';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -11,6 +12,7 @@ export const runtime = 'nodejs';
 export async function GET(_request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
+  const usePaginatedFormat = _request.nextUrl.searchParams.has('email');
 
   try {
     let query = '';
@@ -20,18 +22,32 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
         query = `SELECT * FROM catalog.${type};`;
         break;
       case 'usersiterelations':
-        query = `SELECT usr.UserSiteRelationID as UserSiteRelationID, 
-                        u.UserID as UserID, 
-                        CONCAT(u.FirstName, ' ', u.LastName) as FullName, 
-                        s.SiteName as SiteName, 
-                        s.SiteID as SiteID 
-                        FROM catalog.usersiterelations usr 
-                        JOIN catalog.users u on usr.UserID = u.UserID 
+        query = `SELECT usr.UserSiteRelationID as UserSiteRelationID,
+                        u.UserID as UserID,
+                        CONCAT(u.FirstName, ' ', u.LastName) as UserName,
+                        s.SiteName as SiteName,
+                        s.SiteID as SiteID
+                        FROM catalog.usersiterelations usr
+                        JOIN catalog.users u on usr.UserID = u.UserID
                         JOIN catalog.sites s on usr.SiteID = s.SiteID;`;
     }
     const results = await connectionManager.executeQuery(query);
-    return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(type).mapData(results)), { status: HTTPResponses.OK });
-  } catch (e) {
+    const mappedData = MapperFactory.getMapper<any, any>(type).mapData(results);
+
+    // Return paginated format when email param is present (for IsolatedDataGridCommons)
+    // Otherwise return raw array for backward compatibility with admin pages
+    if (usePaginatedFormat) {
+      return new NextResponse(
+        JSON.stringify({
+          output: mappedData,
+          totalCount: mappedData.length,
+          finishedQuery: query
+        }),
+        { status: HTTPResponses.OK }
+      );
+    }
+    return new NextResponse(JSON.stringify(mappedData), { status: HTTPResponses.OK });
+  } catch {
     return new NextResponse(JSON.stringify({ message: 'BREAKAGE' }), { status: HTTPResponses.CONFLICT });
   }
 }
@@ -46,9 +62,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
   let transactionID: string | undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
-    await connectionManager.executeQuery(`INSERT IGNORE INTO ?? SET ?`, [`catalog.${type}`, newRow]);
+    const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`catalog.${type}`, newRow]);
+    await connectionManager.executeQuery(insertQuery);
     await connectionManager.commitTransaction(transactionID);
-  } catch (e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Insertion into catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -67,8 +84,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
   const newUserSites = newRow.userSites;
   const { notifications: oldNotifications, userSites: _, ...oldRowRemaining } = oldRow;
   const { notifications: newNotifications, userSites: __, ...newRowRemaining } = newRow;
-  oldRowRemaining.isAdmin = oldNotifications;
-  newRowRemaining.isAdmin = newNotifications;
+  // Only include notifications for users table, not sites
+  if (type === 'users') {
+    oldRowRemaining.notifications = oldNotifications;
+    newRowRemaining.notifications = newNotifications;
+  }
   const mappedOldRow = MapperFactory.getMapper<any, any>(type).demapData([oldRowRemaining])[0];
   const mappedNewRow = MapperFactory.getMapper<any, any>(type).demapData([newRowRemaining])[0];
   let transactionID: string | undefined;
@@ -82,14 +102,17 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
         i
       ]);
       // remove the old connections
-      await connectionManager.executeQuery(`DELETE FROM ?? WHERE UserID = ?`, [`catalog.usersiterelations`, newRowRemaining.userID]);
+      const deleteQuery = format(`DELETE FROM ?? WHERE UserID = ?`, [`catalog.usersiterelations`, newRowRemaining.userID]);
+      await connectionManager.executeQuery(deleteQuery);
       // add new connections
-      await connectionManager.executeQuery('INSERT INTO ?? (UserID, SiteID) VALUES ?', ['catalog.usersiterelations', updatedSites]);
+      const insertQuery = format('INSERT INTO ?? (UserID, SiteID) VALUES ?', ['catalog.usersiterelations', updatedSites]);
+      await connectionManager.executeQuery(insertQuery);
     }
-    const { UserSites, ...remaining } = mappedNewRow;
-    await connectionManager.executeQuery(`UPDATE ?? SET ? WHERE ?? = ?`, [`catalog.${type}`, remaining, gridID, mappedOldRow[gridID]]);
+    const { UserSites, [gridID]: _gridIdValue, ...remaining } = mappedNewRow;
+    const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`catalog.${type}`, remaining, gridID, mappedOldRow[gridID]]);
+    await connectionManager.executeQuery(updateQuery);
     await connectionManager.commitTransaction(transactionID);
-  } catch (e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Update of catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
@@ -108,10 +131,11 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
   let transactionID: string | undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
-    await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
+    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
+    await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID);
     return new NextResponse(JSON.stringify({ message: 'Successfully deleted' }), { status: HTTPResponses.OK });
-  } catch (e) {
+  } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Deletion failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }

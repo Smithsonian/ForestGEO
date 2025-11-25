@@ -22,7 +22,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     } else {
       const columns = Object.keys(mapping.columnMappings);
       if (columns.includes('plotID')) rowData['plotID'] = subProps.plot?.plotID?.toString() ?? null;
-      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges[0]?.censusID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges?.[0]?.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => {
@@ -112,7 +112,7 @@ export async function handleUpsertForSlices<Result>(
 }
 
 // Helper function to get the immediate previous slice based on dependencies
-function getPreviousSlice(currentSlice: string, slices: Record<string, any>): string | null {
+function getPreviousSlice(currentSlice: string, _slices: Record<string, any>): string | null {
   const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
   const currentIndex = dependencyOrder.indexOf(currentSlice);
 
@@ -198,7 +198,7 @@ export const allTaxonomiesFields = [
   'Description'
 ];
 
-const stemTaxonomiesViewFields = [
+const _stemTaxonomiesViewFields = [
   'StemTag',
   'TreeTag',
   'SpeciesCode',
@@ -214,7 +214,7 @@ const stemTaxonomiesViewFields = [
   'FieldFamily'
 ];
 
-const measurementSummaryViewFields = [
+const _measurementSummaryViewFields = [
   'PlotID',
   'CensusID',
   'QuadratName', // needs custom handling -- context values plot/census needed
@@ -232,17 +232,18 @@ const measurementSummaryViewFields = [
   'Attributes'
 ];
 
-export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
-  fieldList: measurementSummaryViewFields,
-  slices: {
-    quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
-    species: { range: [1, 4], primaryKey: 'SpeciesID' },
-    trees: { range: [4, 5], primaryKey: 'TreeID' },
-    stems: { range: [5, 9], primaryKey: 'StemGUID' },
-    coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
-    cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
-  }
-};
+// UNUSED: MeasurementsSummaryViewQueryConfig - removed to reduce bundle size
+// export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
+//   fieldList: measurementSummaryViewFields,
+//   slices: {
+//     quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
+//     species: { range: [1, 4], primaryKey: 'SpeciesID' },
+//     trees: { range: [4, 5], primaryKey: 'TreeID' },
+//     stems: { range: [5, 9], primaryKey: 'StemGUID' },
+//     coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
+//     cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
+//   }
+// };
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
@@ -253,19 +254,20 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   }
 };
 
-export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
-  fieldList: stemTaxonomiesViewFields,
-  slices: {
-    family: { range: [2, 3], primaryKey: 'FamilyID' },
-    genus: { range: [3, 5], primaryKey: 'GenusID' },
-    species: {
-      range: [5, stemTaxonomiesViewFields.length],
-      primaryKey: 'SpeciesID'
-    },
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemGUID' }
-  }
-};
+// UNUSED: StemTaxonomiesViewQueryConfig - removed to reduce bundle size
+// export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
+//   fieldList: stemTaxonomiesViewFields,
+//   slices: {
+//     family: { range: [2, 3], primaryKey: 'FamilyID' },
+//     genus: { range: [3, 5], primaryKey: 'GenusID' },
+//     species: {
+//       range: [5, stemTaxonomiesViewFields.length],
+//       primaryKey: 'SpeciesID'
+//     },
+//     trees: { range: [0, 1], primaryKey: 'TreeID' },
+//     stems: { range: [1, 2], primaryKey: 'StemGUID' }
+//   }
+// };
 
 function isDeadlockError(error: any) {
   return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;
@@ -280,15 +282,14 @@ export async function runValidation(
   params: {
     p_CensusID?: number | null;
     p_PlotID?: number | null;
-    minDBH?: number | null;
-    maxDBH?: number | null;
   } = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
   let delay = 100;
+  const MAX_ATTEMPTS = 10; // CRITICAL FIX: Prevent infinite retry loop
 
-  while (true) {
+  while (attempt < MAX_ATTEMPTS) {
     let transactionID: string = '';
 
     try {
@@ -296,68 +297,44 @@ export async function runValidation(
       transactionID = await connectionManager.beginTransaction();
 
       // Dynamically replace SQL variables with actual TypeScript input values
+      // Use negative lookbehind to prevent replacing already schema-prefixed table names
+      // Process longer table names first to avoid substring issues
       const formattedCursorQuery = cursorQuery
         .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
         .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        // .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
-        .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-        .replace(/coremeasurements/g, `${schema}.coremeasurements`)
-        .replace(/stems/g, `${schema}.stems`)
-        .replace(/trees/g, `${schema}.trees`)
-        .replace(/quadrats/g, `${schema}.quadrats`)
-        .replace(/cmverrors/g, `${schema}.cmverrors`)
-        .replace(/species/g, `${schema}.species`)
-        .replace(/genus/g, `${schema}.genus`)
-        .replace(/family/g, `${schema}.family`)
-        .replace(/plots/g, `${schema}.plots`)
-        .replace(/census/g, `${schema}.census`)
-        .replace(/personnel/g, `${schema}.personnel`)
-        .replace(/attributes/g, `${schema}.attributes`)
+        .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+        .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`) // Process BEFORE species
+        .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)
+        .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
+        .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
+        .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
+        .replace(/(?<!\w\.)cmverrors\b/g, `${schema}.cmverrors`)
+        .replace(/(?<!\w\.)species\b/g, `${schema}.species`) // Process AFTER specieslimits
+        .replace(/(?<!\w\.)genus\b/g, `${schema}.genus`)
+        .replace(/(?<!\w\.)family\b/g, `${schema}.family`)
+        .replace(/(?<!\w\.)plots\b/g, `${schema}.plots`)
+        .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
+        .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
+        .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
-      // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
-      if (params.minDBH === null || params.maxDBH === null) {
-        const speciesLimitsQuery = `
-        SELECT sp.SpeciesID, sl.LimitType,
-          IF(sl.LimitType = 'DBH', sl.LowerBound, NULL) AS minDBH,
-          IF(sl.LimitType = 'DBH', sl.UpperBound, NULL) AS maxDBH
-        FROM ${schema}.specieslimits sl
-               JOIN
-             ${schema}.species sp ON sp.SpeciesID = sl.SpeciesID
-               JOIN
-             ${schema}.trees t ON t.SpeciesID = sp.SpeciesID and t.CensusID = sl.CensusID
-               JOIN
-             ${schema}.stems st ON st.TreeID = t.TreeID and st.CensusID = sl.CensusID
-               JOIN
-             ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
-               JOIN
-             ${schema}.coremeasurements cm ON cm.StemGUID = st.StemGUID
-        WHERE cm.IsValidated IS NULL
-          AND (${params.p_CensusID !== null ? `sl.CensusID = ${params.p_CensusID}` : '1 = 1'})
-          AND (${params.p_PlotID !== null ? `sl.PlotID = ${params.p_PlotID}` : '1 = 1'})
-        LIMIT 1;
-      `;
-        const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
-        if (speciesLimits.length > 0) {
-          // If any species-specific limits were fetched, update the variables
-          params.minDBH = speciesLimits[0].minDBH || params.minDBH;
-          params.maxDBH = speciesLimits[0].maxDBH || params.maxDBH;
-        }
-      }
-
-      // Reformat the query after potentially updating the parameters with species-specific limits
-      const reformattedCursorQuery = formattedCursorQuery
-        .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL');
-
       // Execute the cursor query to get the rows that need validation
-      await connectionManager.executeQuery(reformattedCursorQuery);
+      await connectionManager.executeQuery(formattedCursorQuery);
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {
       if (isDeadlockError(e)) {
+        if (attempt >= MAX_ATTEMPTS) {
+          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          try {
+            await connectionManager.rollbackTransaction(transactionID);
+          } catch (rollbackError: any) {
+            ailogger.error('Rollback error:', rollbackError);
+          }
+          return false;
+        }
+
         ailogger.info(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
@@ -366,7 +343,7 @@ export async function runValidation(
         }
         // Wait for an exponentially increasing delay before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // exponential backoff
+        delay = Math.min(delay * 2, 5000); // Exponential backoff capped at 5 seconds
       } else {
         try {
           await connectionManager.rollbackTransaction(transactionID);
@@ -377,11 +354,20 @@ export async function runValidation(
       }
     }
   }
+
+  // If we exit the loop without success, max retries exceeded
+  ailogger.error(`Validation failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
+  return false;
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
+
+  // Use parameterized query to prevent SQL injection
+  const censusID = params.p_CensusID ?? null;
+  const plotID = params.p_PlotID ?? null;
+
   const updateQuery = `
   UPDATE ${schema}.coremeasurements cm
   JOIN ${schema}.census c ON cm.CensusID = c.CensusID
@@ -394,15 +380,15 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     ELSE FALSE
   END
   WHERE cm.IsValidated IS NULL
-    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+    AND (? IS NULL OR c.CensusID = ?)
+    AND (? IS NULL OR c.PlotID = ?);
     `;
 
   try {
     // Begin transaction
     transactionID = await connectionManager.beginTransaction();
 
-    await connectionManager.executeQuery(updateQuery);
+    await connectionManager.executeQuery(updateQuery, [censusID, censusID, plotID, plotID]);
 
     await connectionManager.commitTransaction(transactionID ?? '');
   } catch (error: any) {

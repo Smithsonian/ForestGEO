@@ -1,0 +1,230 @@
+---
+title: Validations & Statistics
+description: Learn about the validation system and post-census statistics in ForestGEO.
+---
+
+A key part of this application is the **Validations** and **Statistics** systems. These tools help ensure data quality and provide insights into your census data.
+
+---
+
+## Overview
+
+| System                     | Purpose                                          | When It Runs                            |
+| -------------------------- | ------------------------------------------------ | --------------------------------------- |
+| **Validations**            | Check data quality and flag potential errors     | Automatically after measurements upload |
+| **Post-Census Statistics** | Analyze census data and generate summary reports | Manually triggered by user              |
+
+---
+
+## The Validations System
+
+The validation system performs automated checks on your measurement data to identify potential errors and data quality issues.
+
+### How Validations Work
+
+1. **During Upload**: When you upload measurements, validations run automatically
+2. **Error Flagging**: Records that fail validation are flagged but **still saved** to the database
+3. **Review & Fix**: You can review flagged records in the data grid and correct them
+4. **Re-validation**: Corrections are re-validated to clear the error flags
+
+:::note
+Validation errors do **not** prevent your data from being saved. Data is saved but flagged for review, allowing you to fix issues after upload.
+:::
+
+### Accessing the Validations Page
+
+Navigate to **Census Hub → Validations** to:
+
+- View all available validation rules
+- See which validations are enabled or disabled
+- View the SQL query behind each validation
+- Enable or disable specific validations (if you have permissions)
+
+### Available Validations
+
+The following table lists all validation checks and their default status:
+
+| Validation Name                                                   | Description                                                              | Default State |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------- |
+| **ValidateDBHGrowthExceedsMax**                                   | Flag DBH measurements showing more than 65mm growth from previous census | Enabled       |
+| **ValidateDBHShrinkageExceedsMax**                                | Flag DBH measurements showing more than 5% decrease from previous census | Enabled       |
+| **ValidateFindAllInvalidSpeciesCodes**                            | Flag stems with species codes not defined in the Species List            | Enabled       |
+| **ValidateFindDuplicatedQuadratsByName**                          | Flag quadrats with duplicate names within a plot                         | Enabled       |
+| **ValidateFindDuplicateStemTreeTagCombinationsPerCensus**         | Flag tree/stem combinations recorded more than once in the same census   | Enabled       |
+| **ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat** | Flag measurements with dates outside the census date range               | Enabled       |
+| **ValidateFindStemsInTreeWithDifferentSpecies**                   | Flag stems on the same tree with different species designations          | Enabled       |
+| **ValidateFindStemsOutsidePlots**                                 | Flag stems with coordinates outside the plot boundaries                  | Enabled       |
+| **ValidateFindTreeStemsInDifferentQuadrats**                      | Flag stems on the same tree assigned to different quadrats               | Enabled       |
+| **ValidateScreenMeasuredDiameterMinMax**                          | Flag DBH measurements outside species-defined min/max bounds             | Enabled       |
+| **ValidateScreenStemsWithMeasurementsButDeadAttributes**          | Flag stems marked as dead but still have measurements                    | **Disabled**  |
+| **ValidateScreenStemsWithMissingMeasurementsButLiveAttributes**   | Flag live stems that are missing measurements                            | **Disabled**  |
+
+### Understanding Validation Categories
+
+#### Growth Validations
+
+These check for biologically implausible growth patterns:
+
+- **Growth > 65mm**: Trees typically don't grow more than 65mm diameter between censuses
+- **Shrinkage > 5%**: Trees rarely shrink significantly; large shrinkage often indicates measurement error
+
+#### Reference Data Validations
+
+These ensure measurements reference valid Fixed Data:
+
+- **Invalid Species Codes**: Species must exist in Species List
+- **Invalid Quadrats**: Quadrat names must be defined
+
+#### Consistency Validations
+
+These check for logical consistency:
+
+- **Different Species Same Tree**: All stems on a tree must have the same species
+- **Stems in Different Quadrats**: All stems on a tree must be in the same quadrat
+- **Stems Outside Plot**: Coordinates must fall within plot boundaries
+
+#### Duplicate Detection
+
+These identify potential data entry errors:
+
+- **Duplicate Tree/Stem Combos**: Each tag combination should appear only once per census
+- **Duplicate Quadrat Names**: Quadrat names must be unique within a plot
+
+### Viewing Validation Queries
+
+Each validation is powered by a SQL query. To view the query:
+
+1. Navigate to **Census Hub → Validations**
+2. Find the validation you're interested in
+3. Click the **dropdown/expand button** to reveal the SQL query
+
+This is useful for understanding exactly what conditions trigger each validation.
+
+### Enabling/Disabling Validations
+
+If you have sufficient permissions, you can enable or disable specific validations:
+
+1. Navigate to **Census Hub → Validations**
+2. Find the validation you want to modify
+3. Toggle the **enable/disable switch**
+4. Changes take effect on the next validation run
+
+:::caution
+Disabling validations may allow data quality issues to go undetected. Only disable validations if you have a specific reason and understand the implications.
+:::
+
+---
+
+## Post-Census Statistics
+
+The Post-Census Statistics page provides analytical tools to summarize and evaluate your census data after data collection is complete.
+
+### Accessing Post-Census Statistics
+
+Navigate to **Census Hub → Post-Census Statistics** to access this feature.
+
+:::note
+This page requires **manual triggering**. Unlike validations, statistics are not calculated automatically.
+:::
+
+### How to Run Statistics
+
+1. Navigate to **Census Hub → Post-Census Statistics**
+2. Review the available statistical queries
+3. Click on a query to execute it
+4. View the results in the expandable results panel
+
+### Available Statistics
+
+The Post-Census Statistics system can generate various summary reports, including:
+
+#### Census Summary Statistics
+
+| Statistic                | Description                                  |
+| ------------------------ | -------------------------------------------- |
+| **Total Stems Measured** | Count of all stem measurements in the census |
+| **Total Trees**          | Count of unique trees (by TreeTag)           |
+| **Multi-Stem Trees**     | Count of trees with more than one stem       |
+| **New Recruits**         | Stems measured for the first time            |
+| **Mortality Rate**       | Percentage of stems marked as dead           |
+
+#### Species Statistics
+
+| Statistic                | Description                            |
+| ------------------------ | -------------------------------------- |
+| **Species Count**        | Number of unique species in the census |
+| **Species Distribution** | Breakdown of stems by species          |
+| **Most Common Species**  | Top species by stem count              |
+
+#### Quadrat Statistics
+
+| Statistic              | Description                            |
+| ---------------------- | -------------------------------------- |
+| **Stems per Quadrat**  | Distribution of stems across quadrats  |
+| **Quadrat Completion** | Progress of data collection by quadrat |
+
+### Interpreting Results
+
+Statistics results are displayed in expandable panels showing:
+
+- **Query name and description**
+- **Result count**
+- **Tabular data** with sortable columns
+- **Export options** (where available)
+
+### When to Use Post-Census Statistics
+
+Use this feature:
+
+- **After completing data upload** to verify census completeness
+- **Before finalizing a census** to identify any gaps
+- **For reporting** to generate summary statistics for stakeholders
+- **For quality assurance** to spot unexpected patterns
+
+---
+
+## Best Practices
+
+### For Validations
+
+1. **Review validation errors promptly** - Don't let flagged records accumulate
+2. **Understand before disabling** - Know why a validation exists before turning it off
+3. **Document exceptions** - If data legitimately fails validation, add a note in Comments
+4. **Check the query** - Use the SQL query view to understand exactly what's being checked
+
+### For Statistics
+
+1. **Run after each upload batch** - Track progress during data collection
+2. **Compare across censuses** - Look for unexpected changes from previous censuses
+3. **Investigate anomalies** - Unusual statistics often indicate data issues
+4. **Export for records** - Keep statistical summaries for documentation
+
+---
+
+## Troubleshooting
+
+### Validation Errors Keep Appearing
+
+If the same records keep failing validation:
+
+1. Verify your fix was actually saved (refresh the page)
+2. Check for case sensitivity in codes
+3. Ensure you're in the correct plot/census context
+4. Review the validation query to understand exact requirements
+
+### Statistics Not Loading
+
+If statistics fail to run:
+
+1. Ensure you have a census selected
+2. Check that measurements exist in the current census
+3. Try refreshing the page
+4. Contact administrator if the issue persists
+
+### Missing Validations
+
+If you don't see expected validations:
+
+1. Check if they're disabled in the Validations page
+2. Verify you have permission to view all validations
+3. Contact administrator if validations appear to be missing

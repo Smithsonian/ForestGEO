@@ -1,4 +1,5 @@
 // connectionlogger.ts
+import ailogger from '@/ailogger';
 
 interface TableConfig {
   pk: string;
@@ -16,6 +17,7 @@ async function getCookiesSafely() {
     return null;
   } catch (error) {
     // Return null if cookies can't be accessed (e.g., in client context)
+    ailogger.error('Failed to access cookies in connectionlogger:', error instanceof Error ? error : new Error(String(error)));
     return null;
   }
 }
@@ -41,7 +43,7 @@ export function patchConnectionManager(cm: any) {
   cm.executeQuery = async function (sql: string, params?: any[], transactionId?: string) {
     const store = await getCookiesSafely();
     if (!store || !store.has('user') || !store.has('schema') || !store.has('plotID') || !store.has('censusID')) {
-      return orig(sql, params, transactionId); // don't log anything
+      return orig(sql, params, transactionId); // don't log anything - missing required cookies
     }
     const user = String(store.get('user')?.value);
     const schema = String(store.get('schema')?.value);
@@ -51,7 +53,7 @@ export function patchConnectionManager(cm: any) {
     const regexOutput = /^(UPDATE|DELETE)\s+(?:FROM\s+)?(?:\w+\.)?(\w+)/i.exec(cleaned) || [];
     const op = regexOutput?.[1]?.toUpperCase() as 'UPDATE' | 'DELETE' | undefined;
     const table = regexOutput?.[2];
-    if (!op || !table || !tableConfigs[table]) return orig(sql, params, transactionId); // don't log anything
+    if (!op || !table || !tableConfigs[table]) return orig(sql, params, transactionId); // don't log - not a tracked operation/table
     const { pk, fk } = tableConfigs[table];
 
     let coreKey = pk;
@@ -87,28 +89,50 @@ export function patchConnectionManager(cm: any) {
     }
 
     if (coreValue == null) {
+      ailogger.warn(`Changelog tracking skipped: Could not extract ${pk}${fk ? ` or ${fk}` : ''} from query for table ${table}`);
       return orig(sql, params, transactionId);
     }
+
     // shifting all to bulk updating:
     const where = cleaned.toUpperCase().indexOf(' WHERE ') > 0 ? cleaned.slice(cleaned.toUpperCase().indexOf(' WHERE ')) : '';
-    if (!where) return orig(sql, params, transactionId);
-    const searchQuery = `SELECT * FROM \`${schema}\`.\`${table}\` ${where}`;
-    const beforeImages = (await orig(searchQuery, params, transactionId)) as any[];
-    const recordIDs = beforeImages.map(r => r[coreKey]);
-
-    const result = await orig(sql, params, transactionId);
-
-    const afterImages = (await orig(searchQuery, params, transactionId)) as any[];
-
-    if (JSON.stringify(beforeImages) === JSON.stringify(afterImages)) {
-      return result; // returning result since we've already executed the orig query
+    if (!where) {
+      ailogger.warn(`Changelog tracking skipped: No WHERE clause found for ${table} ${op}`);
+      return orig(sql, params, transactionId);
     }
 
-    await orig(
-      `INSERT INTO \`${schema}\`.\`unifiedchangelog\` (TableName, RecordID, Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [table, recordIDs.join('|'), op, JSON.stringify(beforeImages), JSON.stringify(afterImages), user, plotID, censusID],
-      transactionId
-    );
-    return result;
+    try {
+      const searchQuery = `SELECT * FROM \`${schema}\`.\`${table}\` ${where}`;
+      const beforeImages = (await orig(searchQuery, params, transactionId)) as any[];
+      const recordIDs = beforeImages.map(r => r[coreKey]);
+
+      const result = await orig(sql, params, transactionId);
+
+      const afterImages = (await orig(searchQuery, params, transactionId)) as any[];
+
+      if (JSON.stringify(beforeImages) === JSON.stringify(afterImages)) {
+        return result; // returning result since we've already executed the orig query (no actual changes)
+      }
+
+      // Insert changelog entry - wrap in try-catch to prevent changelog failures from breaking the request
+      try {
+        await orig(
+          `INSERT INTO \`${schema}\`.\`unifiedchangelog\` (TableName, RecordID, Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [table, recordIDs.join('|'), op, JSON.stringify(beforeImages), JSON.stringify(afterImages), user, plotID, censusID],
+          transactionId
+        );
+      } catch (changelogError: any) {
+        // Log the error but don't fail the request
+        ailogger.error(
+          `Failed to insert changelog entry for ${table} ${op}:`,
+          changelogError instanceof Error ? changelogError : new Error(String(changelogError))
+        );
+      }
+
+      return result;
+    } catch (error: any) {
+      ailogger.error(`Error in changelog tracking for ${table} ${op}:`, error instanceof Error ? error : new Error(String(error)));
+      // Re-throw the error since this is a failure in the original operation, not just changelog
+      throw error;
+    }
   };
 }

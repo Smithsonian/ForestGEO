@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -49,22 +50,34 @@ export async function GET(
   return await processReset(gridType, schema!, plotID!, censusID!);
 }
 
-async function processReset(gridType: string, schema: string, plotID: number, censusID: number): Promise<NextResponse> {
+async function processReset(gridType: string, schema: string, _plotID: number, _censusID: number): Promise<NextResponse> {
+  // Validate schema to prevent SQL injection
+  let updateTreesSQL: string, truncateSpeciesSQL: string, truncateGenusSQL: string, truncateFamilySQL: string;
+  try {
+    updateTreesSQL = safeFormatQuery(schema, 'UPDATE ??.trees SET SpeciesID = NULL');
+    truncateSpeciesSQL = safeFormatQuery(schema, 'TRUNCATE ??.species');
+    truncateGenusSQL = safeFormatQuery(schema, 'TRUNCATE ??.genus');
+    truncateFamilySQL = safeFormatQuery(schema, 'TRUNCATE ??.family');
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in resettableview: ${schema}`);
+    return NextResponse.json({ error: error.message }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
   try {
     transactionID = await connectionManager.beginTransaction();
     switch (gridType) {
       case 'alltaxonomiesview':
-        await connectionManager.executeQuery(`update ${schema}.trees set SpeciesID = null;`);
-        await connectionManager.executeQuery('set foreign_key_checks = 0;');
-        await connectionManager.executeQuery(`truncate ${schema}.species`);
-        await connectionManager.executeQuery(`truncate ${schema}.genus`);
-        await connectionManager.executeQuery(`truncate ${schema}.family`);
-        await connectionManager.executeQuery('set foreign_key_checks = 1;');
+        await connectionManager.executeQuery(updateTreesSQL, [], transactionID);
+        await connectionManager.executeQuery('SET foreign_key_checks = 0', [], transactionID);
+        await connectionManager.executeQuery(truncateSpeciesSQL, [], transactionID);
+        await connectionManager.executeQuery(truncateGenusSQL, [], transactionID);
+        await connectionManager.executeQuery(truncateFamilySQL, [], transactionID);
+        await connectionManager.executeQuery('SET foreign_key_checks = 1', [], transactionID);
         break;
       case 'quadrats':
-        await connectionManager.executeQuery(``);
+        await connectionManager.executeQuery('', [], transactionID);
         break;
       case 'attributes':
         break;

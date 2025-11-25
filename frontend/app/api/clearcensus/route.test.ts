@@ -4,6 +4,37 @@ import { HTTPResponses } from '@/config/macros';
 import { GET } from './route';
 import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
 
+// ---- Mock SQL security utilities ----
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  validateSchemaOrThrow: vi.fn(),
+  safeFormatQuery: vi.fn((schema, query) => query)
+}));
+
+// ---- Mock ailogger ----
+vi.mock('@/ailogger', () => ({
+  default: {
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn()
+  }
+}));
+
+// ---- Mock mysql2/promise format function ----
+vi.mock('mysql2/promise', () => ({
+  format: vi.fn((sql, params) => {
+    // Mock implementation that properly replaces ?? and ? placeholders in order
+    let result = sql;
+    params.forEach((param: any) => {
+      if (result.includes('??')) {
+        result = result.replace('??', param);
+      } else if (result.includes('?')) {
+        result = result.replace('?', param);
+      }
+    });
+    return result;
+  })
+}));
+
 // ---- Wrap ConnectionManager BEFORE importing the route ----
 vi.mock('@/config/connectionmanager', async () => {
   const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
@@ -48,20 +79,25 @@ describe('GET /api/clearcensus', () => {
     vi.clearAllMocks();
   });
 
-  it('503 when schema or censusID is missing', async () => {
-    // missing both
+  it('400 when schema, censusID, or type is missing', async () => {
+    // missing all
     let res = await GET(makeRequest('http://localhost/api/clearcensus'));
-    expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(await res.text()).toMatch(/Missing required parameters/i);
 
-    // missing censusID
+    // missing censusID and type
     res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema'));
-    expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(await res.text()).toMatch(/Missing required parameters/i);
 
-    // missing schema
+    // missing schema and type
     res = await GET(makeRequest('http://localhost/api/clearcensus?censusID=7'));
-    expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(await res.text()).toMatch(/Missing required parameters/i);
+
+    // missing type
+    res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=7'));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(await res.text()).toMatch(/Missing required parameters/i);
   });
 
@@ -72,7 +108,7 @@ describe('GET /api/clearcensus', () => {
     const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
     const rollback = vi.spyOn(cm, 'rollbackTransaction');
 
-    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=view'));
+    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
 
     expect(res.status).toBe(HTTPResponses.OK);
     const body = await res.json();
@@ -82,28 +118,29 @@ describe('GET /api/clearcensus', () => {
     expect(exec).toHaveBeenCalledTimes(1);
 
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/^CALL myschema\.clearcensusview\(\?\);?$/i);
-    expect(params).toEqual(['12']);
+    // format() replaces placeholders, so we get the formatted SQL
+    expect(String(sql)).toMatch(/^CALL myschema\.clearcensusmsmts\((12|\?)\);?$/i);
+    expect(params).toEqual([]);
 
     expect(commit).toHaveBeenCalledWith('tx-1');
     expect(rollback).not.toHaveBeenCalled();
   });
 
-  it('503 on DB error: rolls back with transaction id and returns error text', async () => {
+  it('500 on DB error: rolls back with transaction id and returns error text', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-err');
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
     const commit = vi.spyOn(cm, 'commitTransaction');
 
-    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=99&type=all'));
+    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=99&type=full'));
 
     expect(begin).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-err');
     expect(commit).not.toHaveBeenCalled();
 
-    expect(res.status).toBe(HTTPResponses.SERVICE_UNAVAILABLE);
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const text = await res.text();
     expect(text).toMatch(/boom/i);
   });
@@ -114,9 +151,17 @@ describe('GET /api/clearcensus', () => {
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce({});
     vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-    await GET(makeRequest('http://localhost/api/clearcensus?schema=s1&censusID=5&type=custom'));
+    await GET(makeRequest('http://localhost/api/clearcensus?schema=s1&censusID=5&type=attributes'));
 
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/^CALL s1\.clearcensuscustom\(\?\);?$/i);
+    // format() replaces placeholders, so we get the formatted SQL
+    expect(String(sql)).toMatch(/^CALL s1\.clearcensusattributes\((5|\?)\);?$/i);
+  });
+
+  it('400 when invalid type is provided', async () => {
+    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=5&type=invalid'));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const text = await res.text();
+    expect(text).toMatch(/Invalid census type/i);
   });
 });

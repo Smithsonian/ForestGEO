@@ -150,14 +150,20 @@ export const AllTaxonomiesViewHeaders = [
 export const MeasurementSummaryViewHeaders = [
   'Quadrat Name',
   'Species Code',
+  'Species Name',
+  'Subspecies Name',
   'Tree Tag',
   'Stem Tag',
   'X (Stem)',
   'Y (Stem)',
+  'Measurement Date',
   'DBH (Diameter at Breast Height)',
   'HOM (Height of Measure)',
+  'Validated',
   'Description',
-  'Attributes'
+  'Attributes',
+  'User Defined Fields',
+  'Errors'
 ];
 
 export const StemHeaders = ['Stem Tag', 'Local X', 'Local Y', 'Moved', 'Stem Description'];
@@ -169,27 +175,32 @@ export const RolesHeaders = ['Role Name', 'Role Description'];
 export const UnifiedChangelogHeaders = ['Table', 'Record', 'Operation', 'Old Row', 'New Row', 'Change Time', 'Changed By'];
 
 export const ViewFullTableHeaders = [
-  'Quadrat',
-  'Species Code',
-  'Tree',
-  'Stem',
-  'X (Stem)',
-  'Y (Stem)',
+  'Measurement Date',
   'DBH (Diameter at Breast Height)',
   'HOM (Height of Measure)',
   'Description',
-  'Attributes',
-  'Stem Tag',
+  'Validated',
+  'Quadrat Name',
+  'Quadrat Dimension X',
+  'Quadrat Dimension Y',
+  'Quadrat Area',
+  'Quadrat Start X',
+  'Quadrat Start Y',
+  'Quadrat Shape',
   'Tree Tag',
-  'Family',
-  'Genus',
-  'Species',
-  'Subspecies',
-  'Genus Authority',
-  'Species Authority',
+  'Stem Tag',
+  'X (Stem)',
+  'Y (Stem)',
+  'Species Code',
+  'Species Name',
+  'Subspecies Name',
   'Subspecies Authority',
   'Species ID Level',
-  'Species Field Family'
+  'Genus',
+  'Genus Authority',
+  'Family',
+  'Attributes',
+  'User Defined Fields'
 ];
 
 const DatagridToFormTypeMap: Record<DatagridType, FormType | undefined> = {
@@ -339,14 +350,20 @@ export const HeadersByDatagridType: Record<DatagridType, { label: string; explan
     explanation: {
       'Quadrat Name': 'The name of the quadrat where measurements were taken.',
       'Species Code': 'The unique code for the species measured.',
+      'Species Name': 'The scientific name of the species.',
+      'Subspecies Name': 'The subspecies name if applicable.',
       'Tree Tag': 'The tag or identifier for the tree measured.',
       'Stem Tag': 'The tag or identifier for the stem measured.',
       'X (Stem)': 'The local X-coordinate of the stem.',
       'Y (Stem)': 'The local Y-coordinate of the stem.',
+      'Measurement Date': 'The date when the measurement was taken.',
       'DBH (Diameter at Breast Height)': 'The diameter at breast height of the tree.',
       'HOM (Height of Measure)': 'The height from the ground where DBH was measured.',
+      Validated: 'Indicates whether the measurement has been validated.',
       Description: 'A text description of the measurement.',
-      Attributes: 'Additional attributes associated with the measurement.'
+      Attributes: 'Additional attribute codes associated with the measurement.',
+      'User Defined Fields': 'Custom fields defined by the user for this measurement.',
+      Errors: 'Validation errors or issues with this measurement.'
     }[header],
     category: 'required'
   })),
@@ -406,27 +423,32 @@ export const HeadersByDatagridType: Record<DatagridType, { label: string; explan
     label: header,
     explanation:
       {
-        Quadrat: 'The name of the quadrat where the data is located.',
-        'Species Code': 'The unique code for the species.',
-        Tree: 'The tag or identifier for the tree.',
-        Stem: 'The tag or identifier for the stem.',
-        X: 'The local X-coordinate of the stem.',
-        Y: 'The local Y-coordinate of the stem.',
-        DBH: 'The diameter at breast height of the tree.',
-        HOM: 'The height from the ground where DBH was measured.',
+        'Measurement Date': 'The date when the measurement was taken.',
+        'DBH (Diameter at Breast Height)': 'The diameter at breast height of the tree.',
+        'HOM (Height of Measure)': 'The height from the ground where DBH was measured.',
         Description: 'A text description of the measurement.',
-        Attributes: 'Additional attributes associated with the measurement.',
-        'Stem Tag': 'A unique identifier for the stem in the field.',
+        Validated: 'Indicates whether the measurement has been validated.',
+        'Quadrat Name': 'The name of the quadrat where the data is located.',
+        'Quadrat Dimension X': 'The dimension of the quadrat along the X-axis.',
+        'Quadrat Dimension Y': 'The dimension of the quadrat along the Y-axis.',
+        'Quadrat Area': 'The total area of the quadrat.',
+        'Quadrat Start X': 'The starting X-coordinate of the quadrat.',
+        'Quadrat Start Y': 'The starting Y-coordinate of the quadrat.',
+        'Quadrat Shape': 'The shape of the quadrat (e.g., square, rectangle).',
         'Tree Tag': 'A unique identifier for the tree in the field.',
-        Family: 'The family taxon for the species.',
-        Genus: 'The genus taxon for the species.',
-        Species: 'The specific epithet (species name) of the taxon.',
-        Subspecies: 'The subspecies name, if applicable.',
-        'Genus Authority': 'The authority responsible for the classification of the genus.',
-        'Species Authority': 'The authority responsible for the species classification.',
+        'Stem Tag': 'A unique identifier for the stem in the field.',
+        'X (Stem)': 'The local X-coordinate of the stem.',
+        'Y (Stem)': 'The local Y-coordinate of the stem.',
+        'Species Code': 'The unique code for the species.',
+        'Species Name': 'The scientific name of the species.',
+        'Subspecies Name': 'The subspecies name, if applicable.',
         'Subspecies Authority': 'The authority responsible for the subspecies classification.',
         'Species ID Level': 'The taxonomic identification level of the species.',
-        'Species Field Family': 'The family as identified in the field.'
+        Genus: 'The genus taxon for the species.',
+        'Genus Authority': 'The authority responsible for the classification of the genus.',
+        Family: 'The family taxon for the species.',
+        Attributes: 'Additional attribute codes associated with the measurement.',
+        'User Defined Fields': 'Custom fields defined by the user for this measurement.'
       }[header] || `Combined view field: ${header.toLowerCase()}.`,
     category: 'required'
   }))

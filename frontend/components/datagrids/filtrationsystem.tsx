@@ -15,6 +15,32 @@ export const getApplyQuickFilterFnSameYear: GetApplyQuickFilterFn<any, unknown> 
   };
 };
 
+// Custom quick filter for quadrat names
+// If the input is a 4-digit string (e.g., "0000", "0101"), do exact match
+// Otherwise, do a contains match for partial searches
+export const getApplyQuickFilterFnQuadratName: GetApplyQuickFilterFn<any, unknown> = value => {
+  if (!value) {
+    return null;
+  }
+
+  const searchValue = String(value).trim();
+
+  // If it's a 4-digit string, treat as exact quadrat name match
+  if (/^\d{4}$/.test(searchValue)) {
+    return cellValue => {
+      const cellString = String(cellValue ?? '');
+      return cellString === searchValue;
+    };
+  }
+
+  // Otherwise, do a contains match (case-insensitive)
+  const lowerSearchValue = searchValue.toLowerCase();
+  return cellValue => {
+    const cellString = String(cellValue ?? '').toLowerCase();
+    return cellString.includes(lowerSearchValue);
+  };
+};
+
 export function applyFilterToColumns(columns: GridColDef[]) {
   return columns.map(column => {
     if (column.field === 'dateCreated') {
@@ -27,6 +53,12 @@ export function applyFilterToColumns(columns: GridColDef[]) {
       return {
         ...column,
         getApplyQuickFilterFn: undefined
+      };
+    }
+    if (column.field === 'quadratName') {
+      return {
+        ...column,
+        getApplyQuickFilterFn: getApplyQuickFilterFnQuadratName
       };
     }
     return column;

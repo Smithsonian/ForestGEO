@@ -4,6 +4,8 @@ import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult, FailedMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 export interface TemporaryMeasurement {
   id: number;
@@ -71,8 +73,70 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     }
 
     // Clean up measurements - set 0 values to null
-    await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`);
-    await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`);
+    await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`));
+    await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`));
+
+    // Remove duplicates based on StemGUID and MeasurementDate
+    const removeStemDateDuplicates = `
+      DELETE cm1
+      FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.coremeasurements cm2
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND cm1.StemGUID = cm2.StemGUID
+        AND cm1.MeasurementDate = cm2.MeasurementDate
+        AND cm1.CensusID = ?
+    `;
+    await connectionManager.executeQuery(removeStemDateDuplicates, [censusID]);
+
+    // Remove duplicates based on TreeTag/StemTag combinations within the same census
+    const removeTreeStemTagDuplicates = `
+      DELETE cm1
+      FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.stems s1 ON cm1.StemGUID = s1.StemGUID
+      INNER JOIN ${schema}.trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
+      INNER JOIN ${schema}.coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
+      INNER JOIN ${schema}.stems s2 ON cm2.StemGUID = s2.StemGUID
+      INNER JOIN ${schema}.trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND t1.TreeTag = t2.TreeTag
+        AND s1.StemTag = s2.StemTag
+        AND cm1.CensusID = ?
+        AND t1.CensusID = ?
+        AND s1.CensusID = ?
+    `;
+    await connectionManager.executeQuery(removeTreeStemTagDuplicates, [censusID, censusID, censusID]);
+
+    // Clear duplicate validation errors after deduplication (ValidationID 5 is the duplicate tree/stem tag validation)
+    // FIXED: Now checks for actual duplicate coremeasurements, not duplicate stems/trees entries
+    const clearDuplicateValidationErrors = `
+      DELETE e
+      FROM ${schema}.cmverrors e
+      INNER JOIN ${schema}.coremeasurements cm ON e.CoreMeasurementID = cm.CoreMeasurementID
+      LEFT JOIN (
+        SELECT cm2.CoreMeasurementID
+        FROM ${schema}.coremeasurements cm2
+        JOIN ${schema}.census c ON cm2.CensusID = c.CensusID AND c.IsActive = true
+        JOIN ${schema}.stems s ON cm2.StemGUID = s.StemGUID AND c.CensusID = s.CensusID AND s.IsActive = true
+        JOIN ${schema}.trees t ON s.TreeID = t.TreeID AND c.CensusID = t.CensusID AND t.IsActive = true
+        JOIN (
+          -- Find duplicate TreeTag+StemTag combinations in COREMEASUREMENTS
+          SELECT cm3.CensusID, t2.TreeTag, s2.StemTag
+          FROM ${schema}.coremeasurements cm3
+          JOIN ${schema}.stems s2 ON cm3.StemGUID = s2.StemGUID AND cm3.CensusID = s2.CensusID
+          JOIN ${schema}.trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+          WHERE cm3.IsActive = true AND s2.IsActive = true AND t2.IsActive = true
+          GROUP BY cm3.CensusID, t2.TreeTag, s2.StemTag
+          HAVING count(distinct cm3.CoreMeasurementID) > 1
+        ) AS duplicates ON cm2.CensusID = duplicates.CensusID
+                       AND t.TreeTag = duplicates.TreeTag
+                       AND s.StemTag = duplicates.StemTag
+        WHERE cm2.CensusID = ?
+      ) AS still_duplicates ON e.CoreMeasurementID = still_duplicates.CoreMeasurementID
+      WHERE e.ValidationErrorID = 5
+        AND cm.CensusID = ?
+        AND still_duplicates.CoreMeasurementID IS NULL
+    `;
+    await connectionManager.executeQuery(clearDuplicateValidationErrors, [censusID, censusID]);
   } catch (error: any) {
     throw createError(`Bulk ingestion collapser failed: ${error.message}`, error);
   }
@@ -91,11 +155,14 @@ export async function processBulkIngestionProcessor(
 ): Promise<void> {
   try {
     if (temporaryMeasurements.length === 0) {
-      console.log('No temporary measurements provided for processing');
+      ailogger.info('No temporary measurements provided for processing', { context: 'processBulkIngestion' });
       return;
     }
 
-    const currentCensusID = temporaryMeasurements[0].CensusID;
+    const currentCensusID = temporaryMeasurements[0]?.CensusID;
+    if (!currentCensusID) {
+      throw new Error('CensusID missing from first measurement');
+    }
 
     // Step 1: Initial duplicate filter - remove exact duplicates
     const uniqueMeasurements = temporaryMeasurements.filter(
@@ -151,11 +218,11 @@ export async function processBulkIngestionProcessor(
       }
 
       // CORRECTED validation logic from stored procedure:
-      // Valid = false ONLY if ((DBH=0 OR HOM=0) AND no codes)
+      // Valid = false ONLY if (both DBH AND HOM are 0) AND no codes
       const dbh = measurement.DBH || 0;
       const hom = measurement.HOM || 0;
       const codes = measurement.Codes?.trim() || '';
-      const isValid = !((dbh === 0 || hom === 0) && codes === '');
+      const isValid = !(dbh === 0 && hom === 0 && codes === '');
 
       const filteredMeasurement: FilteredMeasurement = {
         ...measurement,
@@ -267,26 +334,25 @@ export async function processBulkIngestion(props: Readonly<SpecialBulkProcessing
 
 async function validateQuadrat(connectionManager: ConnectionManager, schema: string, quadratName: string): Promise<boolean> {
   const result = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.quadrats WHERE QuadratName = ?`, [quadratName]);
-  return result[0].count > 0;
+  return result?.[0]?.count > 0;
 }
 
 async function validateSpecies(connectionManager: ConnectionManager, schema: string, speciesCode: string): Promise<boolean> {
   const result = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.species WHERE SpeciesCode = ?`, [speciesCode]);
-  return result[0].count > 0;
+  return result?.[0]?.count > 0;
 }
 
 async function validateAttributeCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<number> {
   if (codes.length === 0) return 0;
 
-  const placeholders = codes.map(() => '?').join(',');
   const result = await connectionManager.executeQuery(
-    `SELECT COUNT(*) as invalid FROM (${codes.map(() => 'SELECT ? as code').join(' UNION ')}) temp 
+    `SELECT COUNT(*) as invalid FROM (${codes.map(() => 'SELECT ? as code').join(' UNION ')}) temp
      LEFT JOIN ${schema}.attributes a ON a.Code = temp.code
      WHERE a.Code IS NULL`,
     codes
   );
 
-  return result[0].invalid || 0;
+  return result?.[0]?.invalid || 0;
 }
 
 async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: FailedMeasurementsResult[]): Promise<void> {
@@ -417,8 +483,8 @@ async function processStemInsertions(
     CensusID: currentCensusID,
     StemCrossID: -1,
     StemTag: ts.StemTag || '',
-    LocalX: ts.LocalX || -1,
-    LocalY: ts.LocalY || -1,
+    LocalX: ts.LocalX ?? -1,
+    LocalY: ts.LocalY ?? -1,
     Moved: false,
     StemDescription: '',
     IsActive: true // ADDED: Missing IsActive field
@@ -497,6 +563,9 @@ async function processCoreMeasurementInsertions(
 
 async function processCMAttributeInsertions(connectionManager: ConnectionManager, schema: string, treeStates: TreeStemState[]): Promise<void> {
   // Get core measurement IDs
+  // Check if treeStates is not empty before accessing
+  if (treeStates.length === 0) return;
+
   const cmQuery = `
     SELECT cm.CoreMeasurementID, s.StemTag, t.TreeTag, q.QuadratName, cm.MeasurementDate, cm.MeasuredDBH, cm.MeasuredHOM
     FROM ${schema}.coremeasurements cm

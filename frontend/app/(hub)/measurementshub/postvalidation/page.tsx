@@ -1,8 +1,8 @@
 // postvalidation/page.tsx
 'use client';
 
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useEffect, useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -48,7 +48,7 @@ export default function PostValidationPage() {
     }
   }
 
-  async function loadPostValidations() {
+  const loadPostValidations = useCallback(async () => {
     try {
       const response = await fetch(
         `/api/fetchall/postvalidationqueries/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`,
@@ -59,7 +59,7 @@ export default function PostValidationPage() {
     } catch (error: any) {
       ailogger.error('Error loading queries:', error);
     }
-  }
+  }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
   function saveResultsToFile() {
     if (selectedResults.length === 0) {
@@ -94,9 +94,14 @@ export default function PostValidationPage() {
   useEffect(() => {
     setLoading(true);
     loadPostValidations()
-      .catch(ailogger.error)
-      .then(() => setLoading(false));
-  }, []);
+      .catch(error => {
+        ailogger.error(error);
+        // Still set loading to false on error
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [setLoading, loadPostValidations]);
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -114,7 +119,7 @@ export default function PostValidationPage() {
     if (postValidations.length > 0) {
       fetchSchema().then((r: any) => ailogger.warn(r));
     }
-  }, [postValidations]);
+  }, [postValidations, currentSite?.schemaName]);
 
   const handleExpandClick = (queryID: number) => {
     setExpandedQuery(expandedQuery === queryID ? null : queryID);

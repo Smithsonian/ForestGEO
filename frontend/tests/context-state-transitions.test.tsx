@@ -25,9 +25,7 @@ describe('Context State Transition Integration Tests', () => {
       clearPlotList();
 
       // Rendering should be safe
-      const safePlotRender = Array.isArray(plotListState)
-        ? plotListState.map(p => p.plotName)
-        : [];
+      const safePlotRender = Array.isArray(plotListState) ? plotListState.map(p => p.plotName) : [];
 
       expect(safePlotRender).toEqual([]);
     });
@@ -84,9 +82,7 @@ describe('Context State Transition Integration Tests', () => {
 
       // Rendering should be safe
       const safeCensusRender = Array.isArray(censusListState)
-        ? censusListState
-            .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
-            .map(c => c.plotCensusNumber)
+        ? censusListState.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map(c => c.plotCensusNumber)
         : [];
 
       expect(safeCensusRender).toEqual([]);
@@ -147,9 +143,7 @@ describe('Context State Transition Integration Tests', () => {
       quadratListState = undefined as any;
 
       // Rendering should be safe
-      const safeQuadratRender = Array.isArray(quadratListState)
-        ? quadratListState.map(q => q.quadratName)
-        : [];
+      const safeQuadratRender = Array.isArray(quadratListState) ? quadratListState.map(q => q.quadratName) : [];
 
       expect(safeQuadratRender).toEqual([]);
     });
@@ -201,9 +195,7 @@ describe('Context State Transition Integration Tests', () => {
       ];
 
       states.forEach((state, index) => {
-        const safeRender = Array.isArray(state.plotList)
-          ? state.plotList.map(p => p.plotName)
-          : [];
+        const safeRender = Array.isArray(state.plotList) ? state.plotList.map(p => p.plotName) : [];
 
         expect(() => safeRender).not.toThrow();
 
@@ -217,15 +209,7 @@ describe('Context State Transition Integration Tests', () => {
     });
 
     it('should handle transitions between null, undefined, and empty array', () => {
-      const states = [
-        null,
-        undefined,
-        [],
-        [{ plotID: 1, plotName: 'Plot 1' }],
-        null,
-        undefined,
-        []
-      ];
+      const states = [null, undefined, [], [{ plotID: 1, plotName: 'Plot 1' }], null, undefined, []];
 
       states.forEach(plotList => {
         const safeRender = Array.isArray(plotList) ? plotList.map((p: any) => p.plotName) : [];
@@ -258,9 +242,7 @@ describe('Context State Transition Integration Tests', () => {
       ];
 
       states.forEach(census => {
-        const safeDateRangeRender = Array.isArray(census.dateRanges)
-          ? census.dateRanges.map(dr => dr.startDate)
-          : [];
+        const safeDateRangeRender = Array.isArray(census.dateRanges) ? census.dateRanges.map(dr => dr.startDate) : [];
 
         expect(() => safeDateRangeRender).not.toThrow();
         expect(Array.isArray(safeDateRangeRender)).toBe(true);
@@ -287,15 +269,11 @@ describe('Context State Transition Integration Tests', () => {
 
       siteListStates.forEach(siteListContext => {
         const allowedSites = Array.isArray(siteListContext)
-          ? siteListContext.filter(site =>
-              mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-            )
+          ? siteListContext.filter(site => mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID))
           : [];
 
         const otherSites = Array.isArray(siteListContext)
-          ? siteListContext.filter(
-              site => !mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-            )
+          ? siteListContext.filter(site => !mockSession.user.sites.some(allowedSite => allowedSite.siteID === site.siteID))
           : [];
 
         expect(() => {
@@ -308,23 +286,11 @@ describe('Context State Transition Integration Tests', () => {
 
   describe('State Transition with Reduce Operations', () => {
     it('should handle reduce operations during transitions', () => {
-      const censusStates = [
-        [
-          { plotCensusNumber: 1 },
-          { plotCensusNumber: 2 },
-          { plotCensusNumber: 3 }
-        ],
-        undefined as any,
-        [],
-        [{ plotCensusNumber: 4 }]
-      ];
+      const censusStates = [[{ plotCensusNumber: 1 }, { plotCensusNumber: 2 }, { plotCensusNumber: 3 }], undefined as any, [], [{ plotCensusNumber: 4 }]];
 
       censusStates.forEach(censusListContext => {
         const maxCensusNumber = Array.isArray(censusListContext)
-          ? censusListContext.reduce(
-              (currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0),
-              0
-            )
+          ? censusListContext.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)
           : 0;
 
         expect(typeof maxCensusNumber).toBe('number');
@@ -333,22 +299,11 @@ describe('Context State Transition Integration Tests', () => {
     });
 
     it('should handle sort operations during transitions', () => {
-      const censusStates = [
-        [
-          { plotCensusNumber: 3 },
-          { plotCensusNumber: 1 },
-          { plotCensusNumber: 2 }
-        ],
-        undefined as any,
-        [],
-        null as any
-      ];
+      const censusStates = [[{ plotCensusNumber: 3 }, { plotCensusNumber: 1 }, { plotCensusNumber: 2 }], undefined as any, [], null as any];
 
       censusStates.forEach(censusListContext => {
         const sortedCensuses = Array.isArray(censusListContext)
-          ? censusListContext
-              .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
-              .map(c => c.plotCensusNumber)
+          ? censusListContext.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map(c => c.plotCensusNumber)
           : [];
 
         expect(() => sortedCensuses).not.toThrow();
@@ -390,17 +345,7 @@ describe('Context State Transition Integration Tests', () => {
         return [];
       };
 
-      const problematicValues = [
-        undefined,
-        null,
-        'string',
-        42,
-        { map: 'not a function' },
-        { length: 0 },
-        NaN,
-        true,
-        false
-      ];
+      const problematicValues = [undefined, null, 'string', 42, { map: 'not a function' }, { length: 0 }, NaN, true, false];
 
       problematicValues.forEach(value => {
         expect(() => safeMappingOperation(value)).not.toThrow();
@@ -410,11 +355,7 @@ describe('Context State Transition Integration Tests', () => {
 
     it('should prevent errors from chained array operations', () => {
       const safeChainedOperation = (context: any, session: any) => {
-        const filtered = Array.isArray(context)
-          ? context.filter((item: any) =>
-              session.user.sites.some((s: any) => s.siteID === item.siteID)
-            )
-          : [];
+        const filtered = Array.isArray(context) ? context.filter((item: any) => session.user.sites.some((s: any) => s.siteID === item.siteID)) : [];
 
         const sorted = filtered.sort((a: any, b: any) => {
           const nameA = a.siteName?.toLowerCase() ?? '';
@@ -537,9 +478,7 @@ describe('Context State Transition Integration Tests', () => {
       workflow.forEach(step => {
         const siteRender = Array.isArray(step.siteList) ? step.siteList.map((s: any) => s.siteID) : [];
         const plotRender = Array.isArray(step.plotList) ? step.plotList.map((p: any) => p.plotID) : [];
-        const censusRender = Array.isArray(step.censusList)
-          ? step.censusList.map((c: any) => c.plotCensusNumber)
-          : [];
+        const censusRender = Array.isArray(step.censusList) ? step.censusList.map((c: any) => c.plotCensusNumber) : [];
 
         expect(() => {
           siteRender;

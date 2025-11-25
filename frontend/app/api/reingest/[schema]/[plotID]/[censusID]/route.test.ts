@@ -1,7 +1,6 @@
 // app/api/reingest/[schema]/[plotID]/[censusID]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
-import ailogger from '@/ailogger';
 import ConnectionManager from '@/config/connectionmanager';
 
 // Mock ConnectionManager
@@ -42,7 +41,7 @@ vi.mock('@/lib/contextvalidation', () => ({
 }));
 
 function makeRequest(method = 'GET') {
-  return new Request(`http://localhost/api/reingest/testschema/1/1`, {
+  return new Request(`http://localhost/api/reingest/forestgeo_testing/1/1`, {
     method,
     headers: { 'content-type': 'application/json' }
   }) as any;
@@ -51,7 +50,7 @@ function makeRequest(method = 'GET') {
 function makeParams() {
   return {
     params: Promise.resolve({
-      schema: 'testschema',
+      schema: 'forestgeo_testing',
       plotID: '1',
       censusID: '1'
     })
@@ -79,7 +78,7 @@ describe('reingest API routes', () => {
     mockValidateContextualValues.mockResolvedValue({
       success: true,
       values: {
-        schema: 'testschema',
+        schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 1
       }
@@ -242,6 +241,76 @@ describe('reingest API routes', () => {
       const res = await POST(req, invalidParams);
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('Attribute persistence regression tests', () => {
+    it('should preserve Codes field when moving to temporarymeasurements', async () => {
+      // Mock count query
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ total: 1 }]) // Count query
+        .mockResolvedValueOnce(undefined) // DELETE temporarymeasurements
+        .mockResolvedValueOnce({ insertId: 1, affectedRows: 1 }) // INSERT INTO temporarymeasurements
+        .mockResolvedValueOnce(undefined); // DELETE failedmeasurements
+
+      const req = makeRequest('POST');
+      const res = await POST(req, makeParams());
+
+      expect(res.status).toBe(200);
+
+      // Verify the INSERT query includes the Codes field
+      const insertCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any) => call[0]?.includes('INSERT IGNORE INTO') && call[0]?.includes('temporarymeasurements')
+      );
+
+      expect(insertCall).toBeDefined();
+      expect(insertCall[0]).toContain('Codes');
+      expect(insertCall[0]).toContain('fm.Codes'); // Maps from failedmeasurements
+    });
+
+    it('should call reviewfailed after successful GET reingestion', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ total: 5 }])
+        .mockResolvedValueOnce(undefined) // DELETE temporarymeasurements
+        .mockResolvedValueOnce(undefined) // INSERT INTO temporarymeasurements
+        .mockResolvedValueOnce(undefined) // DELETE failedmeasurements
+        .mockResolvedValueOnce(undefined) // CALL bulkingestionprocess
+        .mockResolvedValueOnce([{ remaining: 0 }]) // Count remaining
+        .mockResolvedValueOnce(undefined); // CALL reviewfailed
+
+      const req = makeRequest('GET');
+      const res = await GET(req, makeParams());
+
+      expect(res.status).toBe(200);
+
+      // Verify reviewfailed was called to update failure reasons
+      const reviewFailedCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => call[0]?.includes('reviewfailed'));
+
+      expect(reviewFailedCall).toBeDefined();
+    });
+
+    it('should handle rows with codes correctly in bulk ingestion', async () => {
+      // This test verifies the complete flow:
+      // failedmeasurements (with Codes) → temporarymeasurements → bulkingestionprocess → cmattributes
+
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ total: 1 }]) // Count
+        .mockResolvedValueOnce(undefined) // DELETE temp
+        .mockResolvedValueOnce(undefined) // INSERT temp
+        .mockResolvedValueOnce(undefined) // DELETE failed
+        .mockResolvedValueOnce(undefined) // bulkingestionprocess
+        .mockResolvedValueOnce([{ remaining: 0 }]) // Count remaining - all succeeded
+        .mockResolvedValueOnce(undefined); // reviewfailed
+
+      const req = makeRequest('GET');
+      const res = await GET(req, makeParams());
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      // All rows should be successfully reingested (no failures)
+      expect(body.successfulReingestions).toBe(1);
+      expect(body.remainingFailures).toBe(0);
     });
   });
 });

@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
@@ -14,9 +13,12 @@ import {
   usePlotContext,
   usePlotDispatch,
   useSiteContext,
-  useSiteDispatch
-} from '@/app/contexts/userselectionprovider';
-import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
+  useSiteDispatch,
+  useOrgCensusListDispatch,
+  usePlotListDispatch,
+  useQuadratListDispatch,
+  useSiteListDispatch
+} from '@/app/contexts/compat-hooks';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -25,9 +27,9 @@ import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeepin
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
-
-const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
-const Header = dynamic(() => import('@/components/header'), { ssr: false });
+// Eager load for maximum speed (bundle size not a concern)
+import Sidebar from '@/components/sidebar';
+import Header from '@/components/header';
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
@@ -80,12 +82,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
 
-  const lastExecutedRef = useRef<number | null>(null);
-  // Refs for debouncing
-
-  // Debounce delay
-  const debounceDelay = 300;
-
   // Create stable async operations that won't cause cascade effects
   const { execute: executeFetchSiteList } = useAsyncOperation(
     async () => {
@@ -98,6 +94,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         } else {
           if (siteListDispatch) await siteListDispatch({ siteList: sites });
         }
+        setSiteListLoaded(true);
       }
     },
     {
@@ -130,11 +127,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     async () => {
       if (currentSite && currentPlot && !censusListLoaded) {
         const response = await fetch(
-          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot?.plotID ?? 0}`
         );
         const censusRDSLoad = await response.json();
         if (!censusRDSLoad) throw new Error('Failed to load census data');
-        const censusList = await createAndUpdateCensusList(censusRDSLoad);
+        const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
+        const censusList = await createAndUpdateCensusList(censusArray);
         if (censusListDispatch) await censusListDispatch({ censusList });
         setCensusListLoaded(true);
       }
@@ -163,62 +161,33 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   );
 
-  const fetchSiteList = useCallback(async () => {
-    const now = Date.now();
-    if (lastExecutedRef.current && now - lastExecutedRef.current < debounceDelay + 200) {
-      return;
-    }
-
-    // Update last executed timestamp
-    lastExecutedRef.current = now;
-
-    try {
-      setLoading(true, 'Loading Sites...');
-      if (session && !siteListLoaded && !currentSite) {
-        const sites = session?.user?.allsites ?? [];
-        if (sites.length === 0) {
-          throw new Error('Session sites undefined');
-        } else {
-          if (siteListDispatch) await siteListDispatch({ siteList: sites });
-        }
-      }
-    } catch (e: any) {
-      const allsites = await (
-        await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json();
-      if (siteListDispatch) await siteListDispatch({ siteList: allsites });
-    } finally {
-      setLoading(false, 'Loading Sites...');
-    }
-  }, [session, siteListLoaded, siteListDispatch, setLoading]);
-
   // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
     if (session && !siteListLoaded) {
       executeFetchSiteList();
     }
-  }, [session, siteListLoaded]); // Removed function dependency to prevent cascade
+  }, [session, siteListLoaded, executeFetchSiteList]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
       executeLoadPlotData();
     }
-  }, [currentSite, plotListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, plotListLoaded, executeLoadPlotData]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
       executeLoadCensusData();
     }
-  }, [currentSite, currentPlot, censusListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, censusListLoaded, executeLoadCensusData]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
       executeLoadQuadratData();
     }
-  }, [currentSite, currentPlot, currentCensus, quadratListLoaded]); // Removed function dependency to prevent cascade
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, executeLoadQuadratData]);
 
   // Handle manual reset logic
   useEffect(() => {
@@ -254,7 +223,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           setManualReset(false);
         });
     }
-  }, [manualReset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualReset, currentSite, currentPlot, currentCensus]);
 
   // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {
@@ -327,6 +297,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   const theme = useTheme();
 
+  // Detect if on admin page
+  const isAdminPage = pathname?.includes('/admin') ?? false;
+
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
       import('@axe-core/react').then(axe => {
@@ -375,7 +348,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       >
         <Sidebar setCensusListLoaded={setCensusListLoaded} siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
       </Box>
-      <Box component="header" role="banner" aria-label="Application header">
+      <Box component="header" aria-label="Application header">
         <Header />
       </Box>
       <Box
@@ -404,9 +377,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           sx={{
             display: 'flex',
             alignItems: 'left',
-            paddingTop: '25px',
+            paddingTop: '20px',
             paddingLeft: '5px',
-            paddingBottom: '20px',
+            paddingBottom: '15px',
             flexDirection: 'column'
           }}
           className={isPulsing ? 'animate-fade-blur-in' : ''}
@@ -422,7 +395,11 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             flexShrink: 1,
             alignItems: 'flex-start',
             flexDirection: 'column',
-            paddingLeft: 2
+            paddingLeft: isAdminPage ? 0 : 1,
+            paddingRight: isAdminPage ? 0 : 1,
+            paddingTop: isAdminPage ? 1 : 0,
+            width: '100%',
+            boxSizing: 'border-box'
           }}
         >
           {session && <>{children}</>}

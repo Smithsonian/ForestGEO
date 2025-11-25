@@ -3,10 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
-import { Box, Button, Typography } from '@mui/material';
-import { Stack } from '@mui/joy';
+import { Box, Button, Typography, Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
@@ -16,8 +15,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   user,
   setUploadError,
   setErrorComponent,
-  setReviewState,
-  allRowToCMID
+  setReviewState
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -42,8 +40,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           // const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
           // formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
+        const censusID = currentCensus?.dateRanges?.[0]?.censusID;
         const response = await fetch(
-          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
+          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${censusID ? censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
           {
             method: 'POST',
             body: formData
@@ -57,7 +56,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         setReviewState(ReviewStates.ERRORS);
       }
     },
-    [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, allRowToCMID]
+    [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user]
   );
 
   useEffect(() => {
@@ -93,7 +92,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           setReviewState(ReviewStates.COMPLETE);
         });
     }
-  }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceptedFiles, uploadToStorage, uploadForm]);
 
   return (
     <>
@@ -106,10 +106,20 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             alignItems: 'center',
             mt: 4
           }}
+          role="status"
+          aria-live="polite"
         >
-          <Stack direction={'column'}>
-            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+          <Stack direction={'column'} sx={{ width: '100%' }}>
+            <Typography level="title-lg" id="upload-operations-label">
+              {`Total Operations: ${totalOperations}`}
+            </Typography>
+            <LinearProgressWithLabel
+              variant={'determinate'}
+              value={(completedOperations / totalOperations) * 100}
+              currentlyrunningmsg={currentlyRunning}
+              aria-label="File upload progress"
+              aria-describedby="upload-operations-label"
+            />
           </Stack>
         </Box>
       ) : refreshError ? (
@@ -123,12 +133,10 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography variant="h5" gutterBottom>
-              Some errors occurred during refresh:
-            </Typography>
-            <Typography color="error">{refreshError}</Typography>
+            <Typography level="h4">Some errors occurred during refresh:</Typography>
+            <Typography color="danger">{refreshError}</Typography>
             <Button
-              variant="contained"
+              variant="solid"
               onClick={() => {
                 setRefreshError(null); // Clear the error
                 setContinueDisabled(true); // Enable the continuation
@@ -151,9 +159,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography variant="h5" gutterBottom>
-              Upload Complete
-            </Typography>
+            <Typography level="h4">Upload Complete</Typography>
             {results.map(result => (
               <Typography key={result}>{result}</Typography>
             ))}

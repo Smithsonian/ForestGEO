@@ -108,24 +108,6 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(2);
   });
 
-  it('personnel: 200 when table has rows; 428 when empty; closes connection', async () => {
-    const cm = (ConnectionManager as any).getInstance();
-    const exec = vi.spyOn(cm, 'executeQuery');
-    const close = vi.spyOn(cm, 'closeConnection');
-
-    exec.mockResolvedValueOnce([{ _1: 1 }]);
-    let res = await GET(noopRequest(), makeProps('personnel', ['org', '3', '1']));
-    expect(res.status).toBe(HTTPResponses.OK);
-    const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/^SELECT 1 FROM org\.personnel p/i);
-
-    exec.mockResolvedValueOnce([]);
-    res = await GET(noopRequest(), makeProps('personnel', ['org', '3', '1']));
-    expect(res.status).toBe(HTTPResponses.PRECONDITION_VALIDATION_FAILURE);
-
-    expect(close).toHaveBeenCalledTimes(2);
-  });
-
   it('quadrats: uses PlotID in WHERE; 200 when rows; 428 when none', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');

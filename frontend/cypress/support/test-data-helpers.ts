@@ -154,6 +154,50 @@ export class TestDataHelper {
       });
     }).as('getCensus');
 
+    // Dashboard metrics aggregated endpoint
+    cy.intercept('GET', '/api/dashboardmetrics/all/**', {
+      statusCode: 200,
+      body: {
+        countTrees: 1234,
+        countStems: 2468,
+        activeUsers: 5,
+        stemTypes: {
+          CountOldStems: 1000,
+          CountMultiStems: 500,
+          CountNewRecruits: 968
+        },
+        progressTacho: {
+          TotalQuadrats: 100,
+          PopulatedQuadrats: 95,
+          PopulatedPercent: 95,
+          UnpopulatedQuadrats: ['Q001', 'Q002', 'Q003', 'Q004', 'Q005']
+        }
+      }
+    }).as('getDashboardMetrics');
+
+    // Changelog endpoint for recent activity
+    cy.intercept('GET', '/api/changelog/overview/unifiedchangelog/**', {
+      statusCode: 200,
+      body: [
+        {
+          changeID: 1,
+          tableName: 'measurements',
+          operation: 'UPDATE',
+          oldRowState: { dbh: 10.5, hom: 1.3 },
+          newRowState: { dbh: 11.2, hom: 1.3 },
+          changeTimestamp: new Date().toISOString()
+        },
+        {
+          changeID: 2,
+          tableName: 'trees',
+          operation: 'INSERT',
+          oldRowState: {},
+          newRowState: { treeTag: 'T001', speciesID: 1 },
+          changeTimestamp: new Date(Date.now() - 3600000).toISOString()
+        }
+      ]
+    }).as('getChangelog');
+
     return {
       userSession: this.getUserSession(userType),
       availableSites: this.getUserSites(userType),
@@ -237,7 +281,6 @@ Cypress.Commands.add('setupForestGEOUser', (userType: UserProfile = 'standardUse
   // Clear any existing state
   cy.clearCookies();
   cy.clearLocalStorage();
-  cy.clearSessionStorage();
 
   // Set up test environment
   const { userSession, availableSites } = TestDataHelper.setupTestEnvironment(userType);

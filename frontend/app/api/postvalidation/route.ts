@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -8,7 +9,11 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema variable provided!');
+  if (!schema) {
+    return new NextResponse(JSON.stringify({ error: 'no schema variable provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
 
   const connectionManager = ConnectionManager.getInstance();
   try {
@@ -28,7 +33,10 @@ export async function GET(request: NextRequest) {
       status: HTTPResponses.OK
     });
   } catch (e: any) {
-    throw e;
+    ailogger.error('Error in postvalidation GET:', e);
+    return new NextResponse(JSON.stringify({ error: e.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     await connectionManager.closeConnection();
   }

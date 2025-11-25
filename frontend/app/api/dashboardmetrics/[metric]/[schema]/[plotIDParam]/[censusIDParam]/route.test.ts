@@ -5,19 +5,19 @@ import { GET } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
-const { listBlobsIterable, getContainerClientMock, loggerInfo, loggerError } = vi.hoisted(() => {
+const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError } = vi.hoisted(() => {
   // helper to build an async iterable for listBlobsFlat
   function* _syncGen<T>(items: T[]) {
     for (const i of items) yield i as any;
   }
-  const listBlobsIterable = (items: any[]) => ({
+  const _listBlobsIterable = (items: any[]) => ({
     async *[Symbol.asyncIterator]() {
       yield* _syncGen(items);
     }
   });
 
   return {
-    listBlobsIterable,
+    _listBlobsIterable,
     getContainerClientMock: vi.fn(),
     loggerInfo: vi.fn(),
     loggerError: vi.fn()
@@ -64,7 +64,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // ===== helpers =====
-function makeProps(metric?: string, schema?: string, plotIDParam?: string, censusIDParam?: string, plot?: string) {
+function _makeProps(metric?: string, schema?: string, plotIDParam?: string, censusIDParam?: string, plot?: string) {
   return {
     params: Promise.resolve({
       metric: metric as any,

@@ -1,7 +1,7 @@
 // alltaxonomiesview datagrid
 'use client';
 import { GridRenderEditCellParams } from '@mui/x-data-grid';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Button } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
@@ -13,7 +13,7 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
@@ -54,43 +54,46 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     }
 
     if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(ailogger.error);
-  }, [refresh]);
+  }, [refresh, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName, allSpeciesLimits.length]);
 
-  const handleOpenSpeciesLimitsModal = (speciesRow: SpeciesRDS) => {
+  const handleOpenSpeciesLimitsModal = useCallback((speciesRow: SpeciesRDS) => {
     setSelectedSpeciesRow(speciesRow);
     setIsSpeciesLimitsDialogOpen(true);
-  };
+  }, []);
 
   const handleCloseSpeciesLimitsModal = () => {
     setIsSpeciesLimitsDialogOpen(false);
     setSelectedSpeciesRow(null);
   };
 
-  const renderSpeciesLimitsCell = (params: GridRenderEditCellParams) => {
-    const speciesLimits = allSpeciesLimits.find(limit => limit.speciesID === params.row.speciesID);
-    const hasLimits = speciesLimits !== undefined && speciesLimits.upperBound !== undefined && speciesLimits.lowerBound !== undefined;
-    return (
-      <Box sx={{ height: '100%', width: '100%' }}>
-        <Button
-          variant={'plain'}
-          startDecorator={hasLimits ? <CheckCircleOutlineIcon color="success" /> : <HighlightOffIcon color="warning" />}
-          onClick={() => handleOpenSpeciesLimitsModal(params.row as SpeciesRDS)}
-          sx={{
-            display: 'flex',
-            justifyContent: 'flex-start',
-            gap: 1,
-            padding: '0.5em 1em',
-            textTransform: 'none',
-            width: '100%'
-          }}
-        >
-          <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
-            {hasLimits ? formatHeader('Modify', 'Species Limits') : formatHeader('Add', 'Species Limits')}
-          </Box>
-        </Button>
-      </Box>
-    );
-  };
+  const renderSpeciesLimitsCell = useCallback(
+    (params: GridRenderEditCellParams) => {
+      const speciesLimits = allSpeciesLimits.find(limit => limit.speciesID === params.row.speciesID);
+      const hasLimits = speciesLimits !== undefined && speciesLimits.upperBound !== undefined && speciesLimits.lowerBound !== undefined;
+      return (
+        <Box sx={{ height: '100%', width: '100%' }}>
+          <Button
+            variant={'plain'}
+            startDecorator={hasLimits ? <CheckCircleOutlineIcon color="success" /> : <HighlightOffIcon color="warning" />}
+            onClick={() => handleOpenSpeciesLimitsModal(params.row as SpeciesRDS)}
+            sx={{
+              display: 'flex',
+              justifyContent: 'flex-start',
+              gap: 1,
+              padding: '0.5em 1em',
+              textTransform: 'none',
+              width: '100%'
+            }}
+          >
+            <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
+              {hasLimits ? formatHeader('Modify', 'Species Limits') : formatHeader('Add', 'Species Limits')}
+            </Box>
+          </Button>
+        </Box>
+      );
+    },
+    [allSpeciesLimits, handleOpenSpeciesLimitsModal]
+  );
 
   const columns = useMemo(() => {
     return [
@@ -106,7 +109,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         filterable: false
       }
     ];
-  }, [AllTaxonomiesViewGridColumns]);
+  }, [renderSpeciesLimitsCell]);
 
   return (
     <>

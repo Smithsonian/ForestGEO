@@ -1,14 +1,20 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, LinearProgress, Typography } from '@mui/material';
-import CircularProgress from '@mui/joy/CircularProgress';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Box, LinearProgress, Typography, CircularProgress } from '@mui/joy';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
+export type ValidationResult = {
+  success: boolean;
+  hasFailedMeasurements: boolean;
+  failedCount: number;
+  errors: string[];
+};
+
 type VCProps = {
-  onValidationComplete?: () => void;
+  onValidationComplete?: (result: ValidationResult) => void;
 };
 
 export default function ValidationCore({ onValidationComplete }: VCProps) {
@@ -26,6 +32,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMounted = useRef<boolean>(true);
+  const hasCalledCompletionRef = useRef<boolean>(false);
 
   useEffect(() => {
     abortControllerRef.current = new AbortController();
@@ -41,7 +48,18 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     })
       .then(r => r.json())
       .then(data => {
-        if (data.coreValidations.length === 0) onValidationComplete ? onValidationComplete() : undefined;
+        // If no validations are defined, immediately call completion with success
+        if (data.coreValidations.length === 0) {
+          if (onValidationComplete && !hasCalledCompletionRef.current) {
+            hasCalledCompletionRef.current = true;
+            onValidationComplete({
+              success: true,
+              hasFailedMeasurements: false,
+              failedCount: 0,
+              errors: []
+            });
+          }
+        }
         setValidationMessages(data.coreValidations);
         setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
       })
@@ -50,22 +68,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           ailogger.error('Error fetching validation list:', err);
         }
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite?.schemaName]);
 
-  useEffect(() => {
-    if (Object.keys(validationMessages).length > 0) {
-      performValidations().catch(ailogger.error);
-    }
-  }, [validationMessages]);
-
-  // Only call onValidationComplete when validation is truly complete and not updating rows
-  useEffect(() => {
-    if (isValidationComplete && !isUpdatingRows && onValidationComplete) {
-      onValidationComplete();
-    }
-  }, [isValidationComplete, isUpdatingRows, onValidationComplete]);
-
-  const performValidations = async () => {
+  const performValidations = useCallback(async () => {
     try {
       const validationProcedureNames = Object.keys(validationMessages);
 
@@ -82,11 +88,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               validationProcedureID,
               cursorQuery,
               p_CensusID: currentCensus?.dateRanges[0].censusID,
-              p_PlotID: plotID,
-              minDBH: null,
-              maxDBH: null,
-              minHOM: null,
-              maxHOM: null
+              p_PlotID: plotID
             })
           });
 
@@ -142,7 +144,96 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       setIsUpdatingRows(false);
       setIsValidationComplete(true);
     }
-  };
+  }, [validationMessages, currentSite, currentCensus, plotID]);
+
+  // Check for failed measurements after validation
+  const checkForFailedMeasurements = useCallback(async (): Promise<{ hasFailures: boolean; count: number }> => {
+    if (!currentSite?.schemaName || !plotID || !currentCensus?.dateRanges[0]?.censusID) {
+      ailogger.warn('Missing required context for checking failed measurements');
+      return { hasFailures: false, count: 0 };
+    }
+
+    try {
+      ailogger.info('Checking for failed measurements after validation...');
+      const response = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${plotID}/${currentCensus.dateRanges[0].censusID}`, {
+        method: 'GET'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const count = data.recordCount || 0;
+        ailogger.info(`Validation check: ${count} failed measurements found`);
+        return { hasFailures: count > 0, count };
+      } else {
+        ailogger.error(`Failed to check for failed measurements: ${response.status}`);
+        return { hasFailures: false, count: 0 };
+      }
+    } catch (error: any) {
+      ailogger.error('Error checking for failed measurements:', error);
+      return { hasFailures: false, count: 0 };
+    }
+  }, [currentSite?.schemaName, plotID, currentCensus?.dateRanges]);
+
+  // Reset completion guard when new validation messages arrive (new validation cycle)
+  useEffect(() => {
+    if (Object.keys(validationMessages).length > 0) {
+      hasCalledCompletionRef.current = false;
+    }
+  }, [validationMessages]);
+
+  // Start validation when validation messages are loaded
+  useEffect(() => {
+    if (Object.keys(validationMessages).length > 0) {
+      performValidations().catch(ailogger.error);
+    }
+  }, [validationMessages, performValidations]);
+
+  // Check for failures and notify parent when validation is complete
+  useEffect(() => {
+    if (isValidationComplete && !isUpdatingRows && !hasCalledCompletionRef.current) {
+      // Check for failed measurements before calling completion callback
+      checkForFailedMeasurements()
+        .then(failureCheck => {
+          // Guard against duplicate callback execution
+          if (hasCalledCompletionRef.current) return;
+          hasCalledCompletionRef.current = true;
+
+          const result: ValidationResult = {
+            success: apiErrors.length === 0,
+            hasFailedMeasurements: failureCheck.hasFailures,
+            failedCount: failureCheck.count,
+            errors: apiErrors
+          };
+
+          if (failureCheck.hasFailures) {
+            ailogger.warn(`Validation completed with ${failureCheck.count} failed measurements. User should review failed measurements.`);
+          } else {
+            ailogger.info('Validation completed successfully with no failures.');
+          }
+
+          // Call parent callback with validation results
+          if (onValidationComplete) {
+            onValidationComplete(result);
+          }
+        })
+        .catch(error => {
+          // Guard against duplicate callback execution
+          if (hasCalledCompletionRef.current) return;
+          hasCalledCompletionRef.current = true;
+
+          ailogger.error('Error during validation completion check:', error);
+          // Still call completion callback even if check fails
+          if (onValidationComplete) {
+            onValidationComplete({
+              success: apiErrors.length === 0,
+              hasFailedMeasurements: false,
+              failedCount: 0,
+              errors: [...apiErrors, 'Failed to check for validation failures']
+            });
+          }
+        });
+    }
+  }, [isValidationComplete, isUpdatingRows, onValidationComplete, checkForFailedMeasurements, apiErrors]);
 
   const renderProgressBars = () => {
     return Object.keys(validationMessages).map(validationProcedureName => {
@@ -152,14 +243,14 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
       return (
         <Box key={validationProcedureName} sx={{ mb: 2 }} role="group" aria-labelledby={progressId}>
-          <Typography variant="subtitle1" id={progressId}>
+          <Typography level="body-md" id={progressId}>
             {validationProcedureName}
           </Typography>
-          <Typography variant="subtitle1" id={descId}>
+          <Typography level="body-md" id={descId}>
             {validationMessages[validationProcedureName]?.description}
           </Typography>
           <LinearProgress
-            variant="determinate"
+            determinate
             value={progress}
             aria-labelledby={progressId}
             aria-describedby={descId}
@@ -201,7 +292,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6" component="h2" id="validation-status">
+              <Typography level="title-lg" component="h2" id="validation-status">
                 Validating data...
               </Typography>
               <div role="progressbar" aria-describedby="validation-status">
@@ -218,7 +309,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               }}
             >
               <CircularProgress aria-label="Updating validated rows" />
-              <Typography variant="h6" component="h2">
+              <Typography level="title-lg" component="h2">
                 Updating validated rows...
               </Typography>
             </Box>
@@ -231,18 +322,18 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6" component="h2">
+              <Typography level="title-lg" component="h2">
                 Validation Results
               </Typography>
               {apiErrors.length > 0 && (
                 <Box sx={{ mb: 2 }} role="alert" aria-live="assertive">
-                  <Typography color="error" component="h3">
+                  <Typography color="danger" component="h3">
                     Some validations could not be performed:
                   </Typography>
                   <ul>
-                    {apiErrors.map((error, index) => (
+                    {apiErrors.map(error => (
                       <li key={error}>
-                        <Typography color="error">{error}</Typography>
+                        <Typography color="danger">{error}</Typography>
                       </li>
                     ))}
                   </ul>

@@ -734,9 +734,10 @@ create table if not exists cmattributes
     Code              varchar(10) null,
     constraint unique_cm_attribute
         unique (CoreMeasurementID, Code),
-    constraint CMAttributes_Attributes_Code_fk
-        foreign key (Code) references attributes (Code)
-            on delete cascade,
+    -- FK constraint removed to allow invalid attribute codes to be displayed for correction
+    -- constraint CMAttributes_Attributes_Code_fk
+    --     foreign key (Code) references attributes (Code)
+    --         on delete cascade,
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
             on delete cascade

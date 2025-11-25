@@ -3,48 +3,13 @@ import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { getGridID } from '@/config/servergridhelpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
 export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
-
-function getGridID(gridType: string): string {
-  switch (gridType.trim()) {
-    case 'coremeasurements':
-    case 'measurementssummaryview':
-    case 'viewfulltableview':
-    case 'measurementssummary': // materialized view --> should not be modified
-    case 'viewfulltable': // materialized view --> should not be modified
-      return 'coreMeasurementID';
-    case 'attributes':
-      return 'code';
-    case 'census':
-      return 'censusID';
-    case 'personnel':
-      return 'personnelID';
-    case 'quadrats':
-      return 'quadratID';
-    case 'quadratpersonnel':
-      return 'quadratPersonnelID';
-    case 'roles':
-      return 'roleID';
-    case 'subquadrats':
-      return 'subquadratID';
-    case 'alltaxonomiesview':
-    case 'species':
-      return 'speciesID';
-    case 'specieslimits':
-      return 'speciesLimitID';
-    case 'sitespecificvalidations':
-      return 'validationID';
-    case 'failedmeasurements':
-      return 'failedMeasurementID';
-    default:
-      return 'breakage';
-  }
-}
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(

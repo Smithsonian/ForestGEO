@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     ailogger.error('Error in validation error display:', error.message, { endpoint: request.nextUrl.pathname });
     await conn.rollbackTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ error: error.message }), {
-      status: 500
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   } finally {
     await conn.closeConnection();

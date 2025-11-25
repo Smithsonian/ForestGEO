@@ -58,10 +58,15 @@ export async function validateContextualValues(
       }
     }
 
-    // Get plotID from cookies
-    const plotIDCookie = await getCookie('plotID');
-    if (plotIDCookie && plotIDCookie !== '0' && plotIDCookie !== 'undefined') {
-      values.plotID = parseInt(plotIDCookie);
+    // Get plotID from query params or cookies
+    const plotIDParam = request.nextUrl.searchParams.get('plotID');
+    if (plotIDParam && plotIDParam !== '0' && plotIDParam !== 'undefined') {
+      values.plotID = parseInt(plotIDParam);
+    } else {
+      const plotIDCookie = await getCookie('plotID');
+      if (plotIDCookie && plotIDCookie !== '0' && plotIDCookie !== 'undefined') {
+        values.plotID = parseInt(plotIDCookie);
+      }
     }
 
     // Get censusID from cookies

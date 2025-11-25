@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
@@ -9,7 +9,7 @@ import ailogger from '@/ailogger';
 
 interface VOMProps {
   isValidationOverrideModalOpen: boolean;
-  handleValidationOverrideModalClose: () => Promise<void>;
+  handleValidationOverrideModalClose: (overridePerformed: boolean) => Promise<void>;
 }
 
 export default function ValidationOverrideModal(props: VOMProps) {
@@ -22,7 +22,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  async function triggerOverride() {
+  const triggerOverride = useCallback(async () => {
     const clearCMVQuery = `DELETE cmv
       FROM ${currentSite?.schemaName}.cmverrors AS cmv
       JOIN ${currentSite?.schemaName}.coremeasurements AS cm
@@ -32,7 +32,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
       WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
         AND c.PlotID = ${currentPlot?.plotID}
         AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm 
+    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
       JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
       SET cm.IsValidated = TRUE
       WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber}) AND c.PlotID = ${currentPlot?.plotID} AND cm.IsValidated = FALSE OR cm.IsValidated IS NULL`;
@@ -50,7 +50,10 @@ export default function ValidationOverrideModal(props: VOMProps) {
     });
     const resultPacket = await response.json();
     if (resultPacket.affectedRows === 0) throw new Error('validation override failed');
-  }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+
+  // CRITICAL FIX: Store interval ref for cleanup to prevent memory leak
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (startOverride) {
@@ -63,20 +66,32 @@ export default function ValidationOverrideModal(props: VOMProps) {
             setOverrideProgress(progress);
             if (progress >= 100) {
               clearInterval(interval);
+              progressIntervalRef.current = null;
               setTimeout(() => {
                 setStartOverride(false);
-                handleValidationOverrideModalClose().then(() => {});
+                handleValidationOverrideModalClose(true).then(() => {});
               }, 1000); // Wait 1 second before closing
             }
             progress += 20;
           }, 200); // Increment progress every 200ms
+
+          // Store interval ref for cleanup
+          progressIntervalRef.current = interval;
         })
         .catch((error: any) => {
           ailogger.error('Override operation failed:', error);
           setStartOverride(false);
         });
     }
-  }, [startOverride]);
+
+    // Cleanup interval on unmount
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+  }, [startOverride, handleValidationOverrideModalClose, triggerOverride]);
 
   useEffect(() => {
     if (isOverrideConfirmed) setStartOverride(true); // need to add toggle otherwise system will never get going
@@ -85,7 +100,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
   return (
     <Modal
       open={isValidationOverrideModalOpen}
-      onClose={handleValidationOverrideModalClose}
+      onClose={() => handleValidationOverrideModalClose(false)}
       sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}
     >
       <ModalDialog role={'alertdialog'}>
@@ -95,7 +110,10 @@ export default function ValidationOverrideModal(props: VOMProps) {
           {openConfirmOverrideModal && !isOverrideConfirmed && (
             <ConfirmationDialog
               open={openConfirmOverrideModal}
-              onClose={() => setOpenConfirmOverrideModal(false)}
+              onClose={() => {
+                setOpenConfirmOverrideModal(false);
+                handleValidationOverrideModalClose(false);
+              }}
               onConfirm={() => {
                 setOpenConfirmOverrideModal(false);
                 setIsOverrideConfirmed(true);

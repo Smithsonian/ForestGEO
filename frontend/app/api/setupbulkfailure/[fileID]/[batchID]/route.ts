@@ -24,8 +24,10 @@ export async function GET(
   try {
     transactionID = await connectionManager.beginTransaction();
     let query = `
-    insert into ${schema}.failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments)
-    select distinct PlotID,
+    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments)
+    select distinct FileID,
+                    BatchID,
+                    PlotID,
                     CensusID,
                     nullif(TreeTag, '')                   as Tag,
                     nullif(StemTag, '')                   as StemTag,
@@ -43,8 +45,13 @@ export async function GET(
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
     query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
+
+    // Populate failure reasons for the newly inserted failed measurements
+    query = `CALL ${schema}.reviewfailed()`;
+    await connectionManager.executeQuery(query, [], transactionID);
+
     await connectionManager.commitTransaction(transactionID);
-  } catch (e) {
+  } catch {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     throw new Error('failure transfer to failedmeasurements --> error detected.');
   }

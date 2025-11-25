@@ -1,0 +1,81 @@
+/* ForestGEO Documentation Custom Styles */
+
+:root {
+  /* Primary brand colors - adjust as needed */
+  --sl-color-accent-low: #1a472a;
+  --sl-color-accent: #2d6a4f;
+  --sl-color-accent-high: #52b788;
+
+  /* Text colors */
+  --sl-color-white: #fff;
+  --sl-color-gray-1: #f5f6f8;
+  --sl-color-gray-2: #e0e2e4;
+  --sl-color-gray-3: #b4bbc3;
+  --sl-color-gray-4: #7c8694;
+  --sl-color-gray-5: #545d68;
+  --sl-color-gray-6: #353b42;
+  --sl-color-black: #17191c;
+}
+
+/* Dark mode accent adjustments */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #1a472a;
+  --sl-color-accent: #40916c;
+  --sl-color-accent-high: #95d5b2;
+}
+
+/* Custom admonition/callout styles to match Writerside */
+.starlight-aside--note {
+  border-color: var(--sl-color-accent);
+}
+
+.starlight-aside--tip {
+  border-color: #2d6a4f;
+}
+
+.starlight-aside--caution {
+  border-color: #f59e0b;
+}
+
+.starlight-aside--danger {
+  border-color: #ef4444;
+}
+
+/* Image styling */
+img {
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Inline images (similar to Writerside's style="inline") */
+p > img {
+  display: inline-block;
+  vertical-align: middle;
+  max-height: 2em;
+  margin: 0 0.25em;
+  box-shadow: none;
+}
+
+/* Block images */
+p > img:only-child {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  margin: 1em auto;
+}
+
+/* Table styling improvements */
+table {
+  width: 100%;
+}
+
+th {
+  background-color: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+}
+
+:root[data-theme='light'] th {
+  background-color: var(--sl-color-gray-2);
+  color: var(--sl-color-black);
+}

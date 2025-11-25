@@ -2,11 +2,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
 import dynamic from 'next/dynamic';
-import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Box, Button } from '@mui/material';
+import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Box, Button, Alert, CircularProgress, Typography } from '@mui/material';
 import { Add } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
@@ -23,21 +23,24 @@ export default function ValidationsPage() {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
 
-  const { data: globalValidations, mutate: updateValidations } = useSWR<ValidationProceduresRDS[]>(
-    `/api/validations/crud?schema=${currentSite?.schemaName}`,
-    fetcher
-  );
+  const {
+    data: globalValidations,
+    mutate: updateValidations,
+    error: validationsError,
+    isLoading: validationsLoading
+  } = useSWR<ValidationProceduresRDS[]>(currentSite?.schemaName ? `/api/validations/crud?schema=${currentSite.schemaName}` : null, fetcher);
 
-  const { data: schemaData } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(
-    currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null,
-    fetcher
-  );
+  const {
+    data: schemaData,
+    error: schemaError,
+    isLoading: schemaLoading
+  } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null, fetcher);
 
   const replacements = useMemo(
     () => ({
       schema: currentSite?.schemaName,
       currentPlotID: currentPlot?.plotID,
-      currentCensusID: currentCensus?.dateRanges[0].censusID
+      currentCensusID: currentCensus?.dateRanges?.[0]?.censusID
     }),
     [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
   );
@@ -68,10 +71,13 @@ export default function ValidationsPage() {
       if (response.ok) {
         await updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
       } else {
-        ailogger.error('Failed to update validation');
+        const errorText = await response.text();
+        ailogger.error('Failed to update validation', undefined, { errorText, status: response.status, statusText: response.statusText });
+        throw new Error(`Failed to update validation: ${response.status} ${response.statusText}`);
       }
     } catch (error: any) {
       ailogger.error('Error updating validation:', error);
+      throw error; // Re-throw to allow child components to handle error display
     }
   };
 
@@ -102,10 +108,13 @@ export default function ValidationsPage() {
         });
         setIsCreatingNew(false);
       } else {
-        ailogger.error('Failed to create validation');
+        const errorText = await response.text();
+        ailogger.error('Failed to create validation', undefined, { errorText, status: response.status, statusText: response.statusText });
+        throw new Error(`Failed to create validation: ${response.status} ${response.statusText}`);
       }
     } catch (error: any) {
       ailogger.error('Error creating validation:', error);
+      throw error; // Re-throw to allow child components to handle error display
     }
   };
 
@@ -124,10 +133,38 @@ export default function ValidationsPage() {
     setNewValidation(prev => ({ ...prev, [field]: value }));
   };
 
+  // Show error if no site is selected
+  if (!currentSite) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning">Please select a site to view and manage validations.</Alert>
+      </Box>
+    );
+  }
+
+  // Show loading state
+  if (validationsLoading || schemaLoading) {
+    return (
+      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+        <CircularProgress />
+        <Typography>Loading validations...</Typography>
+      </Box>
+    );
+  }
+
+  // Show error state
+  if (validationsError || schemaError) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">Failed to load validations: {validationsError?.message || schemaError?.message || 'Unknown error'}</Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Button variant="contained" startIcon={<Add />} onClick={() => setIsCreatingNew(true)} disabled={isCreatingNew}>
+        <Button variant="contained" startIcon={<Add />} onClick={() => setIsCreatingNew(true)} disabled={isCreatingNew || !currentSite}>
           Add New Validation
         </Button>
       </Box>

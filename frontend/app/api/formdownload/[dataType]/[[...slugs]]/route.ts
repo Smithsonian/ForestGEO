@@ -13,9 +13,17 @@ export const runtime = 'nodejs';
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   const { dataType, slugs } = params;
-  if (!dataType || !slugs) throw new Error('data type or slugs not provided');
+  if (!dataType || !slugs) {
+    return new NextResponse(JSON.stringify({ error: 'data type or slugs not provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
   const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
-  if (!schema) throw new Error('no schema provided');
+  if (!schema) {
+    return new NextResponse(JSON.stringify({ error: 'no schema provided' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
@@ -39,8 +47,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
     columns = results.map((row: any) => row.COLUMN_NAME);
   } catch (e: any) {
-    ailogger.error('error: ', e);
-    throw new Error(e);
+    ailogger.error('Error fetching columns in formdownload:', e);
+    return new NextResponse(JSON.stringify({ error: e.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   }
   if (filterModel !== undefined && filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
   if (filterModel !== undefined && filterModel.items) filterStub = buildFilterModelStub(filterModel);
@@ -72,10 +82,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
-          firstname: row.FirstName,
-          lastname: row.LastName,
-          role: row.RoleName,
-          roledescription: row.RoleDescription
+          firstname: row.firstname,
+          lastname: row.lastname,
+          role: row.role,
+          roledescription: row.roledescription
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'species':
@@ -96,18 +106,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query);
         formMappedResults = results.map((row: any) => ({
-          spcode: row.SpeciesCode,
-          family: row.Family,
-          genus: row.Genus,
-          species: row.SpeciesName,
-          subspecies: row.SubspeciesName,
-          idlevel: row.IDLevel,
-          authority: row.SpeciesAuthority,
-          subspeciesauthority: row.SubspeciesAuthority
+          spcode: row.spcode,
+          family: row.family,
+          genus: row.genus,
+          species: row.species,
+          subspecies: row.subspecies,
+          idlevel: row.idlevel,
+          authority: row.authority,
+          subspeciesauthority: row.subspeciesauthority
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'quadrats':
-        query = `SELECT 
+        query = `SELECT
           q.QuadratName  AS quadrat,
           q.StartX       AS startx,
           q.StartY       AS starty,
@@ -116,17 +126,17 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           q.Area         AS area,
           q.QuadratShape AS quadratshape
         FROM ${schema}.quadrats q
-        JOIN ${schema}.census c ON cq.CensusID = c.CensusID and c.IsActive IS TRUE
-        ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query);
+        WHERE q.PlotID = ? AND q.IsActive IS TRUE
+        ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        results = await connectionManager.executeQuery(query, [plotID]);
         formMappedResults = results.map((row: any) => ({
-          quadrat: row.QuadratName,
-          startx: row.StartX,
-          starty: row.StartY,
-          dimx: row.DimensionX,
-          dimy: row.DimensionY,
-          area: row.Area,
-          quadratshape: row.QuadratShape
+          quadrat: row.quadrat,
+          startx: row.startx,
+          starty: row.starty,
+          dimx: row.dimx,
+          dimy: row.dimy,
+          area: row.area,
+          quadratshape: row.quadratshape
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
@@ -159,35 +169,32 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
               JOIN ${schema}.quadrats q on q.QuadratID = st.QuadratID and q.IsActive is true
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
               JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
-              WHERE p.PlotID = ? AND cm.CensusID = ? ${
-                filterModel.visible.length > 0
-                  ? ` AND (${filterModel.visible
-                      .map((v: string) => {
-                        switch (v) {
-                          case 'valid':
-                            return `cm.IsValidated = TRUE`;
-                          case 'errors':
-                            return `cm.IsValidated = FALSE`;
-                          case 'pending':
-                            return `cm.IsValidated IS NULL`;
-                          default:
-                            return null;
-                        }
-                      })
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ''
-              } 
-              ${
-                filterModel.tss.length > 0
-                  ? ` AND (${filterModel.tss
-                      .map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ``
-              } 
+              WHERE p.PlotID = ? AND cm.CensusID = ? ${(() => {
+                const visibleConditions = filterModel.visible
+                  .map((v: string) => {
+                    switch (v) {
+                      case 'valid':
+                        return `cm.IsValidated = TRUE`;
+                      case 'errors':
+                        return `cm.IsValidated = FALSE`;
+                      case 'pending':
+                        return `cm.IsValidated IS NULL`;
+                      default:
+                        return null;
+                    }
+                  })
+                  .filter(Boolean);
+                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
+              })()} 
+              ${(() => {
+                // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
+                const validTss = filterModel.tss.filter((tss: any) => ['multi stem', 'old tree', 'new recruit'].includes(tss));
+                return validTss.length > 0
+                  ? ` AND (${validTss.map((tss: any) => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
+                  : ``;
+              })()} 
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-        results = await connectionManager.executeQuery(query, [censusID, plotID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           stemID: row.StemGUID,
           treeID: row.TreeID,
@@ -205,10 +212,15 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:
-        throw new Error('incorrect data type passed in');
+        return new NextResponse(JSON.stringify({ error: 'incorrect data type passed in' }), {
+          status: HTTPResponses.INVALID_REQUEST
+        });
     }
   } catch (e: any) {
-    throw new Error(e);
+    ailogger.error('Error in formdownload GET:', e);
+    return new NextResponse(JSON.stringify({ error: e.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     await connectionManager.closeConnection();
   }

@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
   } catch (error: any) {
     ailogger.error('Error in GET request:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
-      status: 500
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   }
 }

@@ -28,8 +28,8 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
-import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
@@ -72,7 +72,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     dynamicButtons = [],
     defaultHideEmpty = false,
     apiRef = undefined,
-    adminEmail = undefined
+    adminEmail = undefined,
+    onDataUpdate
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -85,12 +86,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
   });
   const [loading, setLoading] = useState(false);
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
-  const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [newLastPage, setNewLastPage] = useState<number | null>(null);
+  const [_shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
-  const [usingQuery, setUsingQuery] = useState('');
+  const [_usingQuery, setUsingQuery] = useState('');
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -116,42 +117,117 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
   useSession();
 
-  const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
+  // Always call hooks unconditionally - hooks cannot be called conditionally
+  const internalApiRef = useGridApiRef();
+  const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
-  useEffect(() => {
-    if (rowCount < paginationModel.pageSize) setHidingEmpty(false);
-  }, [rowCount]);
+  const fetchPaginatedData = useCallback(
+    async (pageToFetch: number) => {
+      setLoading(true);
+      let paginatedQuery =
+        (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+          ? createQFFetchQuery(
+              currentSite?.schemaName ?? '',
+              gridType,
+              pageToFetch,
+              paginationModel.pageSize,
+              currentPlot?.plotID,
+              currentCensus?.plotCensusNumber,
+              currentQuadrat?.quadratID
+            )
+          : createFetchQuery(
+              currentSite?.schemaName ?? '',
+              gridType,
+              pageToFetch,
+              paginationModel.pageSize,
+              currentPlot?.plotID,
+              currentCensus?.plotCensusNumber,
+              currentQuadrat?.quadratID
+            );
+      if (adminEmail) paginatedQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
+      try {
+        const response = await fetch(paginatedQuery, {
+          method:
+            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0) ? 'POST' : 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          body:
+            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+              ? JSON.stringify({ filterModel })
+              : undefined
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Error fetching data');
+        setRows(data.output);
+        setRowCount(data.totalCount);
+        setUsingQuery(data.finishedQuery);
+
+        // Note: handleAddNewRow will be triggered via processRowUpdate
+        // Removed direct call to avoid circular dependency
+      } catch (error: any) {
+        ailogger.error('Error fetching data:', error);
+        setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      filterModel,
+      currentSite?.schemaName,
+      gridType,
+      paginationModel.pageSize,
+      currentPlot?.plotID,
+      currentCensus?.plotCensusNumber,
+      currentQuadrat?.quadratID,
+      adminEmail,
+      setSnackbar,
+      setLoading
+    ]
+  );
+
+  const handleRefresh = useCallback(async () => {
+    await fetchPaginatedData(paginationModel.page);
+  }, [paginationModel.page, fetchPaginatedData]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
       fetchPaginatedData(paginationModel.page).catch(ailogger.error);
     }
-  }, [currentPlot, currentCensus, paginationModel.page, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel.page, filterModel, fetchPaginatedData, isNewRowAdded]);
 
+  // Handle refresh signal from parent - use ref to track previous state
+  const previousRefresh = useRef(refresh);
   useEffect(() => {
-    if (refresh && currentSite) {
-      handleRefresh().then(() => {
-        if (refresh) {
-          setRefresh(false);
+    // Only refresh when transitioning from false to true
+    if (refresh && !previousRefresh.current && currentSite) {
+      handleRefresh()
+        .then(() => setRefresh(false))
+        .catch(ailogger.error);
+    }
+    previousRefresh.current = refresh;
+  }, [refresh, currentSite, handleRefresh, setRefresh]);
+
+  // Synchronize rowModesModel with current rows - uses functional update to avoid
+  // having rowModesModel in dependencies (which would cause potential infinite loops)
+  useEffect(() => {
+    setRowModesModel(prevRowModesModel => {
+      // Build new model based on current rows, preserving existing modes
+      const updatedRowModesModel = rows.reduce((acc, row) => {
+        if (row.id) {
+          acc[row.id] = prevRowModesModel[row.id] || { mode: GridRowModes.View };
         }
-      });
-    }
-  }, [refresh, currentSite]);
+        return acc;
+      }, {} as GridRowModesModel);
 
-  useEffect(() => {
-    const updatedRowModesModel = rows.reduce((acc, row) => {
-      if (row.id) {
-        acc[row.id] = rowModesModel[row.id] || { mode: GridRowModes.View };
+      // Remove any entries with key '0' (invalid row IDs)
+      const cleanedRowModesModel = Object.fromEntries(Object.entries(updatedRowModesModel).filter(([key]) => key !== '0'));
+
+      // Only update if there's an actual change (prevents unnecessary re-renders)
+      if (JSON.stringify(cleanedRowModesModel) !== JSON.stringify(prevRowModesModel)) {
+        return cleanedRowModesModel;
       }
-      return acc;
-    }, {} as GridRowModesModel);
-
-    const cleanedRowModesModel = Object.fromEntries(Object.entries(updatedRowModesModel).filter(([key]) => key !== '0'));
-
-    if (JSON.stringify(cleanedRowModesModel) !== JSON.stringify(rowModesModel)) {
-      setRowModesModel(cleanedRowModesModel);
-    }
-  }, [rows]);
+      return prevRowModesModel;
+    });
+  }, [rows]); // Only depend on rows - rowModesModel accessed via functional update
 
   const fetchFullData = useCallback(async () => {
     setLoading(true);
@@ -198,7 +274,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     } finally {
       setLoading(false);
     }
-  }, [usingQuery, filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
+  }, [filterModel, currentPlot, currentCensus, currentSite, gridType, paginationModel.page, paginationModel.pageSize]);
 
   const exportAllCSV = useCallback(async () => {
     setLoading(true);
@@ -389,7 +465,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         break;
     }
     setLoading(false);
-  }, [currentPlot, currentCensus, currentSite, gridType]);
+  }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData]);
 
   const openConfirmationDialog = useCallback(
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
@@ -407,38 +483,69 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     [rows]
   );
 
-  const handleConfirmAction = useCallback(
-    async (confirmedRow?: GridRowModel) => {
-      setIsDialogOpen(false);
-      setIsDeleteDialogOpen(false);
-
-      if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
-        await performDeleteAction(pendingAction.actionId);
-      } else if (promiseArguments) {
-        try {
-          const resolvedRow = confirmedRow || promiseArguments.newRow;
-          await performSaveAction(promiseArguments.newRow.id, resolvedRow);
-          setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
-        } catch (error: any) {
-          setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+  const updateRow = useCallback(
+    async (
+      gridType: string,
+      schemaName: string | undefined,
+      newRow: GridRowModel,
+      oldRow: GridRowModel,
+      setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
+      setIsNewRowAdded: (value: boolean) => void,
+      setShouldAddRowAfterFetch: (value: boolean) => void,
+      fetchPaginatedData: (page: number) => Promise<void>,
+      paginationModel: { page: number }
+    ): Promise<GridRowModel> => {
+      const gridID = getGridID(gridType);
+      if ('date' in newRow && newRow.date) {
+        const parsedDate = moment(newRow.date, 'YYYY-MM-DD', true);
+        if (parsedDate.isValid()) {
+          newRow.date = parsedDate.format('YYYY-MM-DD');
         }
       }
+      let fetchProcessQuery =
+        gridType !== 'quadrats'
+          ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
+          : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
+      if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
+      try {
+        setLoading(true);
+        const response = await fetch(fetchProcessQuery, {
+          method: oldRow.isNew ? 'POST' : 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+        });
+        let responseJSON;
+        try {
+          responseJSON = await response.json();
+        } catch (e: any) {
+          ailogger.error(e);
+        }
 
-      setPendingAction({ actionType: '', actionId: null });
-      setPromiseArguments(null);
+        if (!response.ok) {
+          throw new Error(responseJSON.message || 'An unknown error occurred');
+        }
+
+        setSnackbar({
+          children: oldRow.isNew ? 'New row added!' : 'Row updated!',
+          severity: 'success'
+        });
+
+        if (oldRow.isNew) {
+          setIsNewRowAdded(false);
+          setShouldAddRowAfterFetch(false);
+          await fetchPaginatedData(paginationModel.page);
+        }
+
+        return newRow;
+      } catch (error: any) {
+        setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+        return Promise.reject(newRow);
+      } finally {
+        setLoading(false);
+      }
     },
-    [pendingAction, promiseArguments]
+    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
   );
-
-  const handleCancelAction = useCallback(() => {
-    setIsDialogOpen(false);
-    setIsDeleteDialogOpen(false);
-    if (promiseArguments) {
-      promiseArguments.reject(new Error('Action cancelled by user'));
-    }
-    setPendingAction({ actionType: '', actionId: null });
-    setPromiseArguments(null);
-  }, [promiseArguments]);
 
   const performSaveAction = useCallback(
     async (id: GridRowId, confirmedRow: GridRowModel) => {
@@ -465,11 +572,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
         promiseArguments.resolve(updatedRow);
 
-        if (props.onDataUpdate) {
-          await props.onDataUpdate({
-            ...Object.fromEntries(Object.entries(promiseArguments.oldRow).filter(([, val]) => val !== undefined)),
-            ...Object.fromEntries(Object.entries(updatedRow).filter(([, val]) => val !== undefined))
-          });
+        if (onDataUpdate) {
+          await onDataUpdate(updatedRow, promiseArguments.oldRow);
         }
       } catch (error) {
         promiseArguments.reject(error);
@@ -477,7 +581,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         setLoading(false);
       }
 
-      triggerRefresh();
+      triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       setLoading(false);
       await fetchPaginatedData(paginationModel.page);
     },
@@ -490,9 +594,11 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       setIsNewRowAdded,
       setShouldAddRowAfterFetch,
       paginationModel,
-      rows,
       triggerRefresh,
-      setLoading
+      setLoading,
+      fetchPaginatedData,
+      updateRow,
+      onDataUpdate
     ]
   );
 
@@ -548,8 +654,41 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         setLoading(false);
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading]
+    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, fetchPaginatedData]
   );
+
+  const handleConfirmAction = useCallback(
+    async (confirmedRow?: GridRowModel) => {
+      setIsDialogOpen(false);
+      setIsDeleteDialogOpen(false);
+
+      if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
+        await performDeleteAction(pendingAction.actionId);
+      } else if (promiseArguments) {
+        try {
+          const resolvedRow = confirmedRow || promiseArguments.newRow;
+          await performSaveAction(promiseArguments.newRow.id, resolvedRow);
+          setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
+        } catch (error: any) {
+          setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+        }
+      }
+
+      setPendingAction({ actionType: '', actionId: null });
+      setPromiseArguments(null);
+    },
+    [pendingAction, promiseArguments, performDeleteAction, performSaveAction, setSnackbar]
+  );
+
+  const handleCancelAction = useCallback(() => {
+    setIsDialogOpen(false);
+    setIsDeleteDialogOpen(false);
+    if (promiseArguments) {
+      promiseArguments.reject(new Error('Action cancelled by user'));
+    }
+    setPendingAction({ actionType: '', actionId: null });
+    setPromiseArguments(null);
+  }, [promiseArguments]);
 
   const handleSaveClick = useCallback(
     (id: GridRowId) => () => {
@@ -624,116 +763,6 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     setIsNewRowAdded(true);
   }, [locked, isNewRowAdded, rowCount, paginationModel, initialRow, setRows, setRowModesModel, fieldToFocus]);
 
-  const handleRefresh = useCallback(async () => {
-    await fetchPaginatedData(paginationModel.page);
-  }, [paginationModel.page]);
-
-  const fetchPaginatedData = async (pageToFetch: number) => {
-    setLoading(true);
-    let paginatedQuery =
-      (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
-        ? createQFFetchQuery(
-            currentSite?.schemaName ?? '',
-            gridType,
-            pageToFetch,
-            paginationModel.pageSize,
-            currentPlot?.plotID,
-            currentCensus?.plotCensusNumber,
-            currentQuadrat?.quadratID
-          )
-        : createFetchQuery(
-            currentSite?.schemaName ?? '',
-            gridType,
-            pageToFetch,
-            paginationModel.pageSize,
-            currentPlot?.plotID,
-            currentCensus?.plotCensusNumber,
-            currentQuadrat?.quadratID
-          );
-    if (adminEmail) paginatedQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
-    try {
-      const response = await fetch(paginatedQuery, {
-        method:
-          (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0) ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        body:
-          (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
-            ? JSON.stringify({ filterModel })
-            : undefined
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Error fetching data');
-      setRows(data.output);
-      setRowCount(data.totalCount);
-      setUsingQuery(data.finishedQuery);
-
-      if (isNewRowAdded && pageToFetch === newLastPage) {
-        await handleAddNewRow();
-      }
-    } catch (error: any) {
-      ailogger.error('Error fetching data:', error);
-      setSnackbar({ children: 'Error fetching data', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateRow = async (
-    gridType: string,
-    schemaName: string | undefined,
-    newRow: GridRowModel,
-    oldRow: GridRowModel,
-    setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
-    setIsNewRowAdded: (value: boolean) => void,
-    setShouldAddRowAfterFetch: (value: boolean) => void,
-    fetchPaginatedData: (page: number) => Promise<void>,
-    paginationModel: { page: number }
-  ): Promise<GridRowModel> => {
-    const gridID = getGridID(gridType);
-    if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
-    let fetchProcessQuery =
-      gridType !== 'quadrats'
-        ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
-        : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
-    if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
-    try {
-      setLoading(true);
-      const response = await fetch(fetchProcessQuery, {
-        method: oldRow.isNew ? 'POST' : 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-      });
-      let responseJSON;
-      try {
-        responseJSON = await response.json();
-      } catch (e: any) {
-        ailogger.error(e);
-      }
-
-      if (!response.ok) {
-        throw new Error(responseJSON.message || 'An unknown error occurred');
-      }
-
-      setSnackbar({
-        children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-        severity: 'success'
-      });
-
-      if (oldRow.isNew) {
-        setIsNewRowAdded(false);
-        setShouldAddRowAfterFetch(false);
-        await fetchPaginatedData(paginationModel.page);
-      }
-
-      return newRow;
-    } catch (error: any) {
-      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
-      return Promise.reject(newRow);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useImperativeHandle(ref, () => ({
     updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
       return await updateRow(
@@ -777,12 +806,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
                 fetchPaginatedData,
                 paginationModel
               );
-              setLoading(false);
               return updatedRow;
             } catch (error: any) {
-              setLoading(false);
               setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
               return Promise.reject(error);
+            } finally {
+              setLoading(false);
             }
           },
           reject: reason => {
@@ -809,15 +838,25 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           fetchPaginatedData,
           paginationModel
         );
-        setLoading(false);
         return updatedRow;
       } catch (error: any) {
-        setLoading(false);
         setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
         return Promise.reject(error);
+      } finally {
+        setLoading(false);
       }
     },
-    [gridType, currentSite?.schemaName, setSnackbar, setIsNewRowAdded, setShouldAddRowAfterFetch, fetchPaginatedData, paginationModel]
+    [
+      gridType,
+      currentSite?.schemaName,
+      setSnackbar,
+      setIsNewRowAdded,
+      setShouldAddRowAfterFetch,
+      fetchPaginatedData,
+      paginationModel,
+      openConfirmationDialog,
+      updateRow
+    ]
   );
 
   const handleRowModesModelChange = useCallback((newRowModesModel: GridRowModesModel) => {
@@ -854,13 +893,13 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         [id]: { mode: GridRowModes.Edit }
       }));
       setTimeout(() => {
-        const firstEditableColumn = filteredColumns.find(col => col.editable);
+        const firstEditableColumn = gridColumns.find(col => col.editable);
         if (firstEditableColumn) {
           localApiRef.current?.setCellFocus(id, firstEditableColumn.field);
         }
       });
     },
-    [locked, localApiRef]
+    [locked, localApiRef, gridColumns]
   );
 
   const handleCancelClick = useCallback(
@@ -890,15 +929,26 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     [locked, rows]
   );
 
-  function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => {
-      return {
-        ...prevFilterModel,
-        items: [...(incomingValues.items || [])],
-        quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      };
-    });
-  }
+  // Debounced filter change to prevent excessive re-renders and API calls
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => {
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Set new timer to update filter after 500ms of inactivity
+    debounceTimerRef.current = setTimeout(() => {
+      setFilterModel(prevFilterModel => {
+        return {
+          ...prevFilterModel,
+          items: [...(incomingValues.items || [])],
+          quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+        };
+      });
+    }, 500);
+  }, []);
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: any, onClick: any) => (
@@ -947,12 +997,12 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
       }
     }),
-    [rowModesModel, locked]
+    [rowModesModel, locked, getEnhancedCellAction, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]
   );
 
   const columns = useMemo(() => {
     return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
-  }, [gridColumns, rowModesModel, getGridActionsColumn]);
+  }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
@@ -976,7 +1026,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     }
   };
 
-  if (!currentSite || !currentPlot || !currentCensus) {
+  // Skip redirect for admin/catalog pages (when adminEmail is provided)
+  // Only require site/plot/census context for site-specific data grids
+  if (!adminEmail && (!currentSite || !currentPlot || !currentCensus)) {
     redirect('/dashboard');
   } else {
     return (

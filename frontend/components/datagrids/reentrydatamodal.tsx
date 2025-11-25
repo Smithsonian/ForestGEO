@@ -20,7 +20,7 @@ import {
 } from '@mui/joy';
 import { DatePicker } from '@mui/x-date-pickers';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 
 interface ReEnterDataModalProps {
   gridType: string;
@@ -69,7 +69,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       });
       setLocalData({ ...initialData });
     }
-  }, [row, reEnterData, columns]);
+  }, [row, reEnterData, columns, localData]);
 
   const normalizeRowData = (row: GridRowModel): GridRowModel => {
     return Object.keys(row).reduce((acc, key) => {

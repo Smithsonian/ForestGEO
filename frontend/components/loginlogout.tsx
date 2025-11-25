@@ -84,11 +84,10 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton
-          // disabled={!['global', 'db admin'].includes(session?.user.userStatus ?? '')}
-          disabled
+          disabled={!['global', 'db admin'].includes(session?.user?.userStatus ?? '')}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
-          aria-label="Settings menu - Currently unavailable. Feature coming soon."
-          title="Settings menu - Currently unavailable. Feature coming soon."
+          aria-label="Settings menu"
+          title="Settings menu"
           size="sm"
         >
           <Skeleton loading={status == 'loading'}>
@@ -96,7 +95,7 @@ export const LoginLogout = () => {
           </Skeleton>
         </IconButton>
         <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({ redirectTo: '/login' })} aria-label={'Logout button'}>
-          {status == 'loading' ? <CircularProgress size={'lg'} /> : <LogoutRoundedIcon />}
+          {status == 'loading' ? <CircularProgress size={'lg'} aria-label="Loading user session" /> : <LogoutRoundedIcon />}
         </IconButton>
         <Menu
           anchorEl={anchorSettings}

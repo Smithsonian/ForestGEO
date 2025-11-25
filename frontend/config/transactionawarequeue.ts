@@ -38,6 +38,7 @@ class TransactionAwarePQueue extends PQueue {
   private lockTimeout = 60000; // 1 minute timeout for locks
   private readonly DEADLOCK_RETRY_BASE_DELAY = 100; // Base delay for deadlock retries
   private readonly MAX_DEADLOCK_RETRIES = 5;
+  private cleanupIntervalId: NodeJS.Timeout | null = null;
 
   constructor(options: { concurrency?: number } = {}) {
     // Limit concurrency to prevent overwhelming MySQL connection pool
@@ -51,8 +52,8 @@ class TransactionAwarePQueue extends PQueue {
 
     this.connectionManager = ConnectionManager.getInstance();
 
-    // Clean up expired locks periodically
-    setInterval(() => this.cleanupExpiredLocks(), 30000);
+    // Clean up expired locks periodically - store interval ID for cleanup
+    this.cleanupIntervalId = setInterval(() => this.cleanupExpiredLocks(), 30000);
 
     ailogger.info(`TransactionAwarePQueue initialized with concurrency: ${safeConcurrency}`);
   }
@@ -87,9 +88,14 @@ class TransactionAwarePQueue extends PQueue {
           // Execute task with deadlock retry logic
           return await this.executeWithDeadlockRetry(task, maxRetries, retryDelayMs);
         } finally {
-          // Release all acquired locks
+          // Release all acquired locks - wrap each in try-catch to ensure all locks released even if one fails
           for (const lockId of acquiredLocks) {
-            await this.releaseResourceLock(lockId);
+            try {
+              await this.releaseResourceLock(lockId);
+            } catch (error: any) {
+              ailogger.error(`Failed to release lock ${lockId}:`, error);
+              // Continue releasing other locks even if this one fails
+            }
           }
         }
       },
@@ -103,7 +109,7 @@ class TransactionAwarePQueue extends PQueue {
    * Create a batch-aware task that processes files sequentially but batches within files concurrently
    */
   async addBatchTask<T>(fileId: string, batchTasks: (() => Promise<T>)[], options: TaskOptions = {}): Promise<T[]> {
-    const batchId = uuidv4();
+    const _batchId = uuidv4();
     const resourceLocks = [
       `file:${fileId}`, // File-level lock
       'temporarymeasurements', // Table-level lock for uploads
@@ -116,7 +122,7 @@ class TransactionAwarePQueue extends PQueue {
 
         // Process all batch tasks concurrently within the file lock
         const results = await Promise.all(
-          batchTasks.map((batchTask, index) =>
+          batchTasks.map(batchTask =>
             this.executeWithDeadlockRetry(batchTask, options.maxRetries || this.MAX_DEADLOCK_RETRIES, options.retryDelayMs || this.DEADLOCK_RETRY_BASE_DELAY)
           )
         );
@@ -258,12 +264,55 @@ class TransactionAwarePQueue extends PQueue {
 
   /**
    * Wait for task dependencies to complete
+   * CRITICAL FIX: Added timeout protection to prevent infinite loops
    */
   private async waitForDependencies(dependencies: string[]): Promise<void> {
+    const maxWaitTime = this.lockTimeout; // 1 minute timeout
+    const startTime = Date.now();
+
     for (const dependency of dependencies) {
+      // Reset timer for each dependency
+      const depStartTime = Date.now();
+
       while (this.taskDependencies.has(dependency)) {
+        // Check global timeout
+        if (Date.now() - startTime > maxWaitTime) {
+          throw new Error(`Dependency wait timeout: waited ${maxWaitTime}ms for all dependencies`);
+        }
+
+        // Check per-dependency timeout
+        if (Date.now() - depStartTime > maxWaitTime) {
+          throw new Error(`Dependency wait timeout: dependency '${dependency}' not resolved within ${maxWaitTime}ms`);
+        }
+
         await new Promise(resolve => setTimeout(resolve, 100));
       }
+    }
+  }
+
+  /**
+   * Shutdown the queue and cleanup resources
+   * CRITICAL: Call this when shutting down the application to prevent memory leaks
+   */
+  async shutdown(): Promise<void> {
+    try {
+      // Clear the cleanup interval to prevent memory leak
+      if (this.cleanupIntervalId) {
+        clearInterval(this.cleanupIntervalId);
+        this.cleanupIntervalId = null;
+      }
+
+      // Wait for pending tasks to complete
+      await this.onIdle();
+
+      // Clear all remaining locks
+      this.resourceLocks.clear();
+      this.taskDependencies.clear();
+
+      ailogger.info('TransactionAwarePQueue shutdown complete');
+    } catch (error: any) {
+      ailogger.error('Error during TransactionAwarePQueue shutdown:', error);
+      throw error;
     }
   }
 

@@ -17,4 +17,23 @@
         <toc-element topic="Understanding-SAPD-Datagrids.md"/>
     </toc-element>
     <toc-element topic="Validations-Statistics.md"/>
+
+    <toc-element toc-title="Error Guide &amp; Troubleshooting">
+        <toc-element topic="Error-Guide-Overview.md"/>
+        <toc-element topic="Upload-Errors.md"/>
+        <toc-element topic="Validation-Errors.md"/>
+        <toc-element topic="Failed-Measurements-Guide.md"/>
+        <toc-element topic="Authentication-Errors.md"/>
+        <toc-element topic="System-Errors.md"/>
+        <toc-element topic="Error-FAQ.md"/>
+    </toc-element>
+
+    <toc-element toc-title="Documentation Framework (Outlines)">
+        <toc-element topic="Documentation-Framework-Overview.md"/>
+        <toc-element topic="Documentation-TOC-Outline.md"/>
+        <toc-element topic="Glossary-of-Terms.md"/>
+        <toc-element topic="Process-Flows-Reference.md"/>
+        <toc-element topic="Non-Technical-User-Guide-Outline.md"/>
+        <toc-element topic="Core-Systems-Reference.md"/>
+    </toc-element>
 </instance-profile>

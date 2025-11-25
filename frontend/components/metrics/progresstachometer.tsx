@@ -13,20 +13,29 @@ export interface ProgressTachoType {
 }
 
 export default function ProgressTachometer(props: ProgressTachoType) {
-  const { TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats } = props;
+  const { TotalQuadrats: _TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats: _UnpopulatedQuadrats } = props;
   const [displayValue, setDisplayValue] = useState(0);
   const animationRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let frame: number;
     let cancelled = false;
+    const timeouts: NodeJS.Timeout[] = [];
 
     const animateTo = (start: number, end: number, duration: number): Promise<void> => {
-      return new Promise(resolve => {
+      return new Promise((resolve, reject) => {
+        if (cancelled) {
+          reject(new Error('Animation cancelled'));
+          return;
+        }
+
         const startTime = performance.now();
 
         const step = (currentTime: number) => {
-          if (cancelled) return;
+          if (cancelled) {
+            reject(new Error('Animation cancelled'));
+            return;
+          }
 
           const elapsed = currentTime - startTime;
           const progress = Math.min(elapsed / duration, 1);
@@ -47,21 +56,46 @@ export default function ProgressTachometer(props: ProgressTachoType) {
       });
     };
 
-    const runAnimation = async () => {
-      await animateTo(displayValue, 100, 600); // accelerate
-      await new Promise(res => setTimeout(res, 250)); // brief pause
-      await animateTo(100, 0, 500); // decelerate
-      await new Promise(res => setTimeout(res, 250)); // brief pause
-      await animateTo(0, PopulatedPercent ?? 0, 800); // move to actual
+    const sleep = (ms: number): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        if (cancelled) {
+          reject(new Error('Animation cancelled'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          if (cancelled) {
+            reject(new Error('Animation cancelled'));
+          } else {
+            resolve();
+          }
+        }, ms);
+        timeouts.push(timeout);
+      });
     };
 
-    runAnimation().catch(ailogger.error);
+    const runAnimation = async () => {
+      try {
+        await animateTo(displayValue, 100, 600); // accelerate
+        await sleep(250); // brief pause
+        await animateTo(100, 0, 500); // decelerate
+        await sleep(250); // brief pause
+        await animateTo(0, PopulatedPercent ?? 0, 800); // move to actual
+      } catch (error) {
+        // Silently catch cancellation errors - they're expected during unmount
+        if (error instanceof Error && error.message !== 'Animation cancelled') {
+          ailogger.error('ProgressTachometer animation error:', error);
+        }
+      }
+    };
+
+    runAnimation();
 
     return () => {
       cancelled = true;
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      timeouts.forEach(timeout => clearTimeout(timeout));
     };
-  }, [PopulatedPercent]);
+  }, [PopulatedPercent, displayValue]);
 
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%' }}>

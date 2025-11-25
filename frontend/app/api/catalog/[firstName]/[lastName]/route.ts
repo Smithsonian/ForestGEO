@@ -15,12 +15,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ firs
 
   try {
     if (!firstName || !lastName) {
-      throw new Error('no first or last name provided!');
+      return new NextResponse(JSON.stringify({ error: 'First name and last name are required' }), {
+        status: HTTPResponses.BAD_REQUEST
+      });
     }
     const query = `SELECT UserID FROM catalog.users WHERE FirstName = ? AND LastName = ?;`;
     const results = await connectionManager.executeQuery(query, [firstName, lastName]);
     if (results.length === 0) {
-      throw new Error('User not found');
+      // User not found is a 404, not a 500 - it's not a server error
+      ailogger.info(`User not found: ${firstName} ${lastName}`);
+      return new NextResponse(JSON.stringify({ error: 'User not found', firstName, lastName }), {
+        status: HTTPResponses.NOT_FOUND
+      });
     }
     return new NextResponse(JSON.stringify(results[0].UserID), { status: HTTPResponses.OK });
   } catch (e: any) {

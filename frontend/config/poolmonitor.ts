@@ -7,8 +7,10 @@ export class PoolMonitor {
   public pool: Pool;
   private readonly config: PoolOptions;
   private inactivityTimer: NodeJS.Timeout | null = null;
+  private healthMonitorIntervalId: NodeJS.Timeout | null = null;
   private poolClosed = false;
-  private reinitializing = false;
+  private reinitializePromise: Promise<void> | null = null;
+  private closePromise: Promise<void> | null = null;
 
   constructor(config: PoolOptions) {
     this.config = config;
@@ -34,17 +36,34 @@ export class PoolMonitor {
   }
 
   public async getConnection(): Promise<PoolConnection> {
+    let connection: PoolConnection | null = null;
+    let connectionAcquired = false;
+
     try {
       if (this.poolClosed) {
         await this.reinitializePool();
       }
 
-      const connection = await this.pool.getConnection();
+      connection = await this.pool.getConnection();
+      connectionAcquired = true;
+
       connection.on('query', () => this.resetInactivityTimer());
       connection.on('release', () => this.resetInactivityTimer());
+
+      connectionAcquired = false; // Successfully returning, caller now responsible
       return connection;
     } catch (error: any) {
       ailogger.error(chalk.red('Error acquiring connection:', error));
+
+      // Release connection if we acquired it but failed to configure it
+      if (connectionAcquired && connection) {
+        try {
+          connection.release();
+        } catch (releaseError) {
+          ailogger.error(chalk.red('Error releasing failed connection:', releaseError));
+        }
+      }
+
       ailogger.warn(chalk.yellow('Reinitializing pool due to connection error.'));
       await this.reinitializePool();
       throw error;
@@ -52,11 +71,42 @@ export class PoolMonitor {
   }
 
   public async closeAllConnections(): Promise<void> {
+    // Race condition fix: if close is already in progress, wait for it
+    if (this.closePromise) {
+      await this.closePromise;
+      return;
+    }
+
+    // Atomic check-and-set for poolClosed flag
+    if (this.poolClosed) {
+      ailogger.info(chalk.yellow('Pool already closed.'));
+      return;
+    }
+
+    // Store the close promise so concurrent calls wait
+    this.closePromise = this._doCloseAllConnections();
+
     try {
-      if (this.poolClosed) {
-        ailogger.info(chalk.yellow('Pool already closed.'));
-        return;
+      await this.closePromise;
+    } finally {
+      this.closePromise = null;
+    }
+  }
+
+  private async _doCloseAllConnections(): Promise<void> {
+    try {
+      // Clear health monitor interval to prevent memory leak
+      if (this.healthMonitorIntervalId) {
+        clearInterval(this.healthMonitorIntervalId);
+        this.healthMonitorIntervalId = null;
       }
+
+      // Clear inactivity timer
+      if (this.inactivityTimer) {
+        clearTimeout(this.inactivityTimer);
+        this.inactivityTimer = null;
+      }
+
       ailogger.info(chalk.yellow('Ending pool connections...'));
       await this.pool.end();
       this.poolClosed = true;
@@ -76,9 +126,23 @@ export class PoolMonitor {
   }
 
   private async reinitializePool(): Promise<void> {
-    if (this.reinitializing) return; // Prevent concurrent reinitialization
-    this.reinitializing = true;
+    // Race condition fix: if reinitialize is already in progress, wait for it
+    if (this.reinitializePromise) {
+      await this.reinitializePromise;
+      return;
+    }
 
+    // Store the reinitialize promise so concurrent calls wait
+    this.reinitializePromise = this._doReinitializePool();
+
+    try {
+      await this.reinitializePromise;
+    } finally {
+      this.reinitializePromise = null;
+    }
+  }
+
+  private async _doReinitializePool(): Promise<void> {
     try {
       ailogger.info(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
@@ -91,15 +155,14 @@ export class PoolMonitor {
       ailogger.info(chalk.cyan('Connection pool reinitialized.'));
     } catch (error: any) {
       ailogger.error(chalk.red('Error during reinitialization:', error));
-    } finally {
-      this.reinitializing = false;
     }
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
     const bufferTime = 120; // 2 minutes - reasonable time after transaction completion
     try {
-      if (!this.isPoolClosed() && process.env.AZURE_SQL_SERVER !== '127.0.0.1') { // resolving econnrefused error
+      if (!this.isPoolClosed() && process.env.AZURE_SQL_SERVER !== '127.0.0.1') {
+        // resolving econnrefused error
         // only log if pool is not closed
         const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE INFO IS NULL AND USER <> 'event_scheduler';`);
         if (rows.length > 0) {
@@ -155,7 +218,13 @@ export class PoolMonitor {
   }
 
   private monitorPoolHealth(): void {
-    setInterval(async () => {
+    // Clear any existing health monitor interval before creating a new one
+    if (this.healthMonitorIntervalId) {
+      clearInterval(this.healthMonitorIntervalId);
+    }
+
+    // Store interval ID for cleanup
+    this.healthMonitorIntervalId = setInterval(async () => {
       try {
         const { sleeping } = await this.logAndReturnConnections();
         if (sleeping.length > 0) {

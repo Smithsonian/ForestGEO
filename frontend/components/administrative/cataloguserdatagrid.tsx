@@ -27,8 +27,8 @@ const columns: GridColDef[] = standardizeGridColumns([
     editable: true
   },
   {
-    field: 'isAdmin',
-    headerName: 'Email Notifications?',
+    field: 'notifications',
+    headerName: 'Deployment Email Notifications',
     flex: 0.25,
     editable: true
   },
@@ -50,7 +50,7 @@ export default function CatalogUserDatagrid() {
         lastName: '',
         firstName: '',
         email: '',
-        isAdmin: false,
+        notifications: false,
         userStatus: 'field crew'
       }}
       fieldToFocus={'firstName'}

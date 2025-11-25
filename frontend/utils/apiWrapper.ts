@@ -1,11 +1,15 @@
 'use client';
 
+import { useLoading } from '@/app/contexts/loadingprovider';
+
 interface ApiWrapperOptions {
   loadingMessage?: string;
   category?: 'api' | 'upload' | 'processing' | 'general';
   showErrorAlert?: boolean;
   retryAttempts?: number;
   retryDelay?: number;
+  timeout?: number; // Timeout in milliseconds (default: 60000ms = 1 minute)
+  acceptedStatuses?: number[]; // Additional status codes to treat as success (e.g., [412] for validation endpoints)
 }
 
 /**
@@ -21,10 +25,18 @@ export class ApiWrapper {
   }
 
   /**
-   * Wrapped fetch with automatic loading states
+   * Wrapped fetch with automatic loading states and timeout protection
    */
   static async fetch(url: string, init: RequestInit = {}, options: ApiWrapperOptions = {}): Promise<Response> {
-    const { loadingMessage = 'Loading...', category = 'api', showErrorAlert = true, retryAttempts = 1, retryDelay = 1000 } = options;
+    const {
+      loadingMessage = 'Loading...',
+      category = 'api',
+      showErrorAlert = true,
+      retryAttempts = 1,
+      retryDelay = 1000,
+      timeout = 60000, // Default 60 second timeout
+      acceptedStatuses = [] // Additional status codes to treat as success
+    } = options;
 
     if (!ApiWrapper.loadingContext) {
       console.warn('ApiWrapper not initialized with loading context. Loading states will not work.');
@@ -37,17 +49,34 @@ export class ApiWrapper {
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < retryAttempts; attempt++) {
-      try {
-        const response = await fetch(url, init);
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-        if (!response.ok) {
+      try {
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        // Check if response is ok OR if status is in acceptedStatuses
+        const isAccepted = response.ok || acceptedStatuses.includes(response.status);
+        if (!isAccepted) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         endOperation(operationId);
         return response;
       } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+        clearTimeout(timeoutId);
+
+        if (error instanceof Error && error.name === 'AbortError') {
+          lastError = new Error(`Request timeout after ${timeout}ms`);
+        } else {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
 
         // If this is the last attempt or not a network error, break
         if (attempt === retryAttempts - 1 || !ApiWrapper.isRetryableError(lastError)) {
@@ -181,71 +210,74 @@ export class ApiWrapper {
     const { startOperation, endOperation } = ApiWrapper.loadingContext;
     const operationId = startOperation(apiOptions.loadingMessage || 'Uploading file...', 'upload');
 
-    try {
-      return new Promise<Response>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
+    // FIXED: Handle async completion properly - endOperation must be called inside Promise handlers
+    return new Promise<Response>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
 
-        if (onProgress) {
-          xhr.upload.addEventListener('progress', e => {
-            if (e.lengthComputable) {
-              const progress = Math.round((e.loaded / e.total) * 100);
-              onProgress(progress);
-            }
-          });
-        }
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            // Create a Response-like object
-            const response = new Response(xhr.responseText, {
-              status: xhr.status,
-              statusText: xhr.statusText
-            });
-            resolve(response);
-          } else {
-            reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', e => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 100);
+            onProgress(progress);
           }
         });
-
-        xhr.addEventListener('error', () => {
-          reject(new Error('Upload failed due to network error'));
-        });
-
-        xhr.addEventListener('timeout', () => {
-          reject(new Error('Upload timed out'));
-        });
-
-        xhr.open('POST', url);
-
-        // Set headers (don't set Content-Type for FormData, browser will set it with boundary)
-        Object.entries(headers).forEach(([key, value]) => {
-          xhr.setRequestHeader(key, value);
-        });
-
-        // Send file or FormData
-        const body =
-          file instanceof File
-            ? (() => {
-                const formData = new FormData();
-                formData.append('file', file);
-                return formData;
-              })()
-            : file;
-
-        xhr.send(body);
-      });
-    } catch (error) {
-      endOperation(operationId);
-
-      if (apiOptions.showErrorAlert !== false) {
-        const errorMsg = error instanceof Error ? error.message : 'Upload failed';
-        alert(`Upload failed: ${errorMsg}`);
       }
 
-      throw error;
-    } finally {
-      endOperation(operationId);
-    }
+      xhr.addEventListener('load', () => {
+        endOperation(operationId); // End operation on completion
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Create a Response-like object
+          const response = new Response(xhr.responseText, {
+            status: xhr.status,
+            statusText: xhr.statusText
+          });
+          resolve(response);
+        } else {
+          const error = new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`);
+          if (apiOptions.showErrorAlert !== false) {
+            alert(`Upload failed: ${error.message}`);
+          }
+          reject(error);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        endOperation(operationId); // End operation on error
+        const error = new Error('Upload failed due to network error');
+        if (apiOptions.showErrorAlert !== false) {
+          alert(`Upload failed: ${error.message}`);
+        }
+        reject(error);
+      });
+
+      xhr.addEventListener('timeout', () => {
+        endOperation(operationId); // End operation on timeout
+        const error = new Error('Upload timed out');
+        if (apiOptions.showErrorAlert !== false) {
+          alert(`Upload failed: ${error.message}`);
+        }
+        reject(error);
+      });
+
+      xhr.open('POST', url);
+
+      // Set headers (don't set Content-Type for FormData, browser will set it with boundary)
+      Object.entries(headers).forEach(([key, value]) => {
+        xhr.setRequestHeader(key, value);
+      });
+
+      // Send file or FormData
+      const body =
+        file instanceof File
+          ? (() => {
+              const formData = new FormData();
+              formData.append('file', file);
+              return formData;
+            })()
+          : file;
+
+      xhr.send(body);
+    });
   }
 
   /**
@@ -264,21 +296,11 @@ export class ApiWrapper {
  * Call this in your root component or high-level components
  */
 export function useApiWrapper() {
-  if (typeof window !== 'undefined') {
-    try {
-      // Dynamic import to avoid issues during SSR
-      const { useLoading } = require('@/app/contexts/loadingprovider');
-      const loadingContext = useLoading();
+  // Use static import - tree-shakeable and optimizable by bundler
+  const loadingContext = useLoading();
 
-      // Initialize the wrapper
-      ApiWrapper.initialize(loadingContext);
-
-      return ApiWrapper;
-    } catch (error) {
-      console.warn('Failed to initialize API wrapper:', error);
-      return ApiWrapper;
-    }
-  }
+  // Initialize the wrapper
+  ApiWrapper.initialize(loadingContext);
 
   return ApiWrapper;
 }

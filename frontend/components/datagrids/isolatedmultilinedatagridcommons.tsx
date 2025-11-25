@@ -11,7 +11,7 @@ import { darken } from '@mui/system';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { Add } from '@mui/icons-material';
 import { getColumnVisibilityModel } from '@/config/datagridhelpers';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
@@ -27,7 +27,7 @@ export interface IsolatedDataGridCommonProps {
 }
 
 export default function IsolatedMultilineDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, initialRow, setChangesSubmitted } = props;
+  const { gridColumns, gridType, refresh: _refresh, setRefresh: _setRefresh, initialRow, setChangesSubmitted } = props;
   const apiRef = useGridApiRef();
 
   const [rows, setRows] = useState<GridRowsProp>([]);
@@ -89,7 +89,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     ];
 
     return baseColumns;
-  }, [gridColumns, gridType, unsavedChangesRef, apiRef, setHasUnsavedRows]);
+  }, [gridColumns, apiRef]);
 
   const processRowUpdate = useCallback<NonNullable<DataGridProps['processRowUpdate']>>((newRow, oldRow) => {
     const rowId = newRow.id;
@@ -139,10 +139,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
 
       setHasUnsavedRows(false);
       setIsSaving(false);
-    } catch (error) {
+    } catch {
       setIsSaving(false);
     }
-  }, [apiRef, setRows]);
+  }, []);
 
   const getRowClassName = useCallback<NonNullable<DataGridProps['getRowClassName']>>(({ id, row }) => {
     const unsavedRow = unsavedChangesRef.current.unsavedRows[id];
@@ -172,11 +172,8 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     });
   }, [initialRow]);
 
-  useEffect(() => {
-    if (refresh) {
-      setRefresh(false);
-    }
-  }, [refresh, setRefresh]);
+  // Removed problematic refresh effect that caused infinite rerender
+  // The refresh pattern should be handled by parent component if needed
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -243,7 +240,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     }
 
     const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const response = await fetch(`/api/bulkcrud`, {
+    const _response = await fetch(`/api/bulkcrud`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

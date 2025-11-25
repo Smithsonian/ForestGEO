@@ -58,7 +58,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
     };
 
     analyzeFile();
-  }, [file.name, file.size, file.lastModified]); // Only depend on file identity, not the entire file object
+  }, [file, expectedHeaders, initialDelimiter, onDelimiterChange]);
 
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
@@ -80,7 +80,7 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
     };
 
     validateCurrentDelimiter();
-  }, [selectedDelimiter]); // Only depend on selectedDelimiter
+  }, [selectedDelimiter, file, expectedHeaders, isAnalyzing, onDelimiterChange]);
 
   const handleDelimiterChange = useCallback((newDelimiter: string | null) => {
     if (newDelimiter) {
@@ -120,7 +120,6 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
         File Format Preview: {file.name}
       </Typography>
 
-      {/* Auto-detection results */}
       {detectionResult && (
         <Alert variant="soft" color={detectionResult.confidence > 70 ? 'success' : detectionResult.confidence > 30 ? 'warning' : 'danger'} sx={{ mb: 2 }}>
           <Typography level="body-sm">
@@ -130,7 +129,6 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
         </Alert>
       )}
 
-      {/* Delimiter selection */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
         <Typography level="body-md">Delimiter:</Typography>
         <Select value={selectedDelimiter} onChange={(_, value) => handleDelimiterChange(value)} sx={{ minWidth: 200 }}>
@@ -142,7 +140,6 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
         </Select>
       </Box>
 
-      {/* Validation results */}
       {validationResult && (
         <>
           {validationResult.issues.length > 0 && (
@@ -164,7 +161,6 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
         </>
       )}
 
-      {/* Preview table */}
       {previewData.length > 0 && (
         <Box sx={{ mt: 2 }}>
           <Typography level="title-sm" sx={{ mb: 1 }}>
@@ -235,7 +231,6 @@ export default function FilePreview({ file, expectedHeaders, onDelimiterChange, 
         </Box>
       )}
 
-      {/* Column count information */}
       {previewData.length > 0 && (
         <Box sx={{ mt: 2, p: 2, bgcolor: 'neutral.50', borderRadius: 'sm' }}>
           <Typography level="body-sm">

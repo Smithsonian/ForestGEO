@@ -5,7 +5,7 @@ import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
-import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
+import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -27,11 +27,22 @@ export async function POST(
     return SINGLEPOST(request, props);
   } else {
     const filterModel: ExtendedGridFilterModel = body.filterModel;
-    if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
+    if (!params.slugs || params.slugs.length < 5) {
+      return new NextResponse(JSON.stringify({ error: 'slugs not received' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
     const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam] = params.slugs;
-    if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
-      throw new Error('core slugs schema/page/pageSize not correctly received');
-    if (!filterModel || (!filterModel.items && !filterModel.quickFilterValues)) throw new Error('filterModel is empty. filter API should not have triggered.');
+    if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined') {
+      return new NextResponse(JSON.stringify({ error: 'core slugs schema/page/pageSize not correctly received' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+    if (!filterModel || (!filterModel.items && !filterModel.quickFilterValues)) {
+      return new NextResponse(JSON.stringify({ error: 'filterModel is empty - filter API should not have triggered' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
     const page = parseInt(pageParam);
     const pageSize = parseInt(pageSizeParam);
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
@@ -52,8 +63,10 @@ export async function POST(
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
         columns = results.map((row: any) => row.COLUMN_NAME);
       } catch (e: any) {
-        ailogger.error('error: ', e);
-        throw new Error(e);
+        ailogger.error('Error fetching columns in fixeddatafilter:', e);
+        return new NextResponse(JSON.stringify({ error: e.message }), {
+          status: HTTPResponses.INTERNAL_SERVER_ERROR
+        });
       }
       let searchStub = '';
       let filterStub = '';
@@ -151,33 +164,30 @@ export async function POST(
             WHERE vft.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-              ${
-                filterModel.visible.length > 0
-                  ? ` AND (${filterModel.visible
-                      .map(v => {
-                        switch (v) {
-                          case 'valid':
-                            return `vft.IsValidated = TRUE`;
-                          case 'errors':
-                            return `vft.IsValidated = FALSE`;
-                          case 'pending':
-                            return `vft.IsValidated IS NULL`;
-                          default:
-                            return null;
-                        }
-                      })
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ''
-              }
-              ${
-                filterModel.tss.length > 0
-                  ? ` AND (${filterModel.tss
-                      .map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
-                      .filter(Boolean)
-                      .join(' OR ')})`
-                  : ``
-              }
+              ${(() => {
+                const visibleConditions = filterModel.visible
+                  .map(v => {
+                    switch (v) {
+                      case 'valid':
+                        return `vft.IsValidated = TRUE`;
+                      case 'errors':
+                        return `vft.IsValidated = FALSE`;
+                      case 'pending':
+                        return `vft.IsValidated IS NULL`;
+                      default:
+                        return null;
+                    }
+                  })
+                  .filter(Boolean);
+                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
+              })()}
+              ${(() => {
+                // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
+                const validTss = filterModel.tss.filter(tss => ['multi stem', 'old tree', 'new recruit'].includes(tss));
+                return validTss.length > 0
+                  ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
+                  : ``;
+              })()}
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
             ORDER BY vft.MeasurementDate ASC`;
           queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
@@ -231,14 +241,19 @@ export async function POST(
             break;
           }
         default:
-          throw new Error(`Unknown dataType: ${params.dataType}`);
+          return new NextResponse(JSON.stringify({ error: `Unknown dataType: ${params.dataType}` }), {
+            status: HTTPResponses.INVALID_REQUEST
+          });
       }
       paginatedQuery += ` LIMIT ?, ?;`;
 
       if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-        throw new Error(
+        ailogger.error(
           `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
         );
+        return new NextResponse(JSON.stringify({ error: 'Query parameter mismatch - please contact support' }), {
+          status: HTTPResponses.INTERNAL_SERVER_ERROR
+        });
       }
       transactionID = await connectionManager.beginTransaction();
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
@@ -280,8 +295,13 @@ export async function POST(
         );
       }
     } catch (error: any) {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
-      throw new Error(error);
+      if (transactionID) {
+        await connectionManager.rollbackTransaction(transactionID);
+      }
+      ailogger.error('Error in fixeddatafilter POST:', error);
+      return new NextResponse(JSON.stringify({ error: error.message }), {
+        status: HTTPResponses.INTERNAL_SERVER_ERROR
+      });
     } finally {
       await connectionManager.closeConnection();
     }

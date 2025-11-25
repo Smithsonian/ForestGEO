@@ -3,7 +3,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { useSession } from 'next-auth/react';
 import React, { useEffect, useState } from 'react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
 import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
@@ -19,13 +19,13 @@ export default function IsolatedQuadratPersonnelDataGrid() {
     censusID: 0
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
-  const router = useRouter();
+  const { data: _session } = useSession();
+  const _router = useRouter();
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
+  const [_isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [_isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();

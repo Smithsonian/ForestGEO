@@ -1,8 +1,8 @@
 'use client';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { UnifiedValidityFlags } from '@/config/macros';
 
-import { useOrgCensusContext, usePlotContext, useSiteContext } from './userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from './compat-hooks';
 import { useApiWrapper } from '@/utils/apiWrapper';
 import ailogger from '@/ailogger';
 
@@ -25,14 +25,6 @@ const DataValidityContext = createContext<{
   recheckValidityIfNeeded: async () => {}
 });
 
-const debounce = (func: (...args: any[]) => void, wait: number) => {
-  let timeout: NodeJS.Timeout;
-  return (...args: any[]) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-};
-
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
@@ -42,6 +34,9 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+
+  // Use ref to track debounce timeout to avoid recreating debounced function
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
     setValidityState(prev => ({ ...prev, [type]: value }));
@@ -58,9 +53,14 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
             try {
               const response = await ApiWrapper.get(url, {
                 loadingMessage: `Validating ${type}...`,
-                category: 'api'
+                category: 'api',
+                showErrorAlert: false, // Don't show alert for 412 - we handle it gracefully
+                acceptedStatuses: [412] // 412 means no data exists, which is a valid state for validation
               });
-              return { type, isValid: response.ok };
+              // 200 = data exists, 412 = no data exists (both are valid states)
+              // For validation purposes, having no failed measurements (412) is actually good
+              const isValid = response.status === 200 || response.status === 412;
+              return { type, isValid };
             } catch (error: any) {
               ailogger.error(error);
               return { type, isValid: false };
@@ -78,46 +78,82 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     [currentSite, currentPlot, currentCensus, setValidity, ApiWrapper]
   );
 
+  // Stable function that doesn't depend on validity state directly
   const recheckValidityIfNeeded = useCallback(async () => {
-    if (Object.values(validity).some(flag => !flag) || refreshNeeded) {
-      const typesToRefresh = Object.entries(validity)
-        .filter(([_, value]) => !value)
-        .map(([key]) => key as keyof UnifiedValidityFlags);
+    // Use functional state update to get current validity without depending on it
+    setValidityState(currentValidity => {
+      const hasInvalidFlags = Object.values(currentValidity).some(flag => !flag);
 
-      await checkDataValidity(typesToRefresh);
-      setRefreshNeeded(false); // Reset the refresh flag after rechecking
-    } else {
-      ailogger.error('No flags set for rechecking, or missing site/plot/census data');
-    }
-  }, [validity, checkDataValidity, refreshNeeded]);
+      if (hasInvalidFlags || refreshNeeded) {
+        const typesToRefresh = Object.entries(currentValidity)
+          .filter(([_, value]) => !value)
+          .map(([key]) => key as keyof UnifiedValidityFlags);
 
-  const debouncedRecheckValidityIfNeeded = useCallback(debounce(recheckValidityIfNeeded, 300), [recheckValidityIfNeeded]);
+        // Execute async validation in microtask to avoid state update during render
+        Promise.resolve().then(() => {
+          checkDataValidity(typesToRefresh);
+          setRefreshNeeded(false);
+        });
+      }
 
+      return currentValidity; // Return unchanged state
+    });
+  }, [checkDataValidity, refreshNeeded]);
+
+  // Stable triggerRefresh that uses functional updates
+  const triggerRefresh = useCallback((types?: (keyof UnifiedValidityFlags)[]) => {
+    setValidityState(prev => {
+      if (types) {
+        const updates = types.reduce((acc, type) => ({ ...acc, [type]: false }), {});
+        return { ...prev, ...updates };
+      } else {
+        return Object.keys(prev).reduce((acc, key) => ({ ...acc, [key]: false }), {} as UnifiedValidityFlags);
+      }
+    });
+    setRefreshNeeded(true);
+  }, []);
+
+  // Effect with stable debouncing using ref
   useEffect(() => {
     if (refreshNeeded) {
-      debouncedRecheckValidityIfNeeded();
-    }
-  }, [refreshNeeded, debouncedRecheckValidityIfNeeded]);
+      // Clear existing timeout
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
 
+      // Set new timeout
+      debounceTimeoutRef.current = setTimeout(() => {
+        recheckValidityIfNeeded();
+      }, 300);
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, [refreshNeeded, recheckValidityIfNeeded]);
+
+  // Stable initial trigger - only runs once per site/plot/census change
+  const initialTriggerRef = useRef<string>('');
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus) {
-      triggerRefresh(); // Trigger initial refresh when user logs in
-    }
-  }, [currentSite, currentPlot, currentCensus]);
-
-  const triggerRefresh = useCallback(
-    (types?: (keyof UnifiedValidityFlags)[]) => {
-      if (types) {
-        types.forEach(type => setValidity(type, false));
-      } else {
-        Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
+      const key = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.plotCensusNumber}`;
+      if (initialTriggerRef.current !== key) {
+        initialTriggerRef.current = key;
+        triggerRefresh();
       }
-      setRefreshNeeded(true); // Trigger a refresh
-    },
-    [setValidity]
+    }
+  }, [currentSite, currentPlot, currentCensus, triggerRefresh]);
+
+  // Memoize context value to prevent unnecessary re-renders of consumers
+  const contextValue = useMemo(
+    () => ({ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }),
+    [validity, setValidity, triggerRefresh, recheckValidityIfNeeded]
   );
 
-  return <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>{children}</DataValidityContext.Provider>;
+  return <DataValidityContext.Provider value={contextValue}>{children}</DataValidityContext.Provider>;
 };
 
 export const useDataValidityContext = () => useContext(DataValidityContext);

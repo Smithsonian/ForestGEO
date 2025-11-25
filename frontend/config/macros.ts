@@ -21,15 +21,17 @@ export enum HTTPResponses {
   OK = 200,
   CREATED = 201,
   BAD_REQUEST = 400,
+  UNAUTHORIZED = 401,
+  NOT_FOUND = 404,
+  METHOD_NOT_ALLOWED = 405,
+  SQL_CONNECTION_FAILURE = 408, // Custom code for DB connection issues
   CONFLICT = 409,
+  PRECONDITION_VALIDATION_FAILURE = 412,
+  PAYLOAD_TOO_LARGE = 413,
   INTERNAL_SERVER_ERROR = 500,
   SERVICE_UNAVAILABLE = 503,
-  SQL_CONNECTION_FAILURE = 408, // Custom code, example
-  INVALID_REQUEST = 400,
-  PRECONDITION_VALIDATION_FAILURE = 412,
-  FOREIGN_KEY_CONFLICT = 555,
-  METHOD_NOT_ALLOWED = 405,
-  NOT_FOUND = 404 // Custom code, example
+  FOREIGN_KEY_CONFLICT = 555, // Custom code for FK constraint violations
+  INVALID_REQUEST = 400 // Alias for BAD_REQUEST
 }
 
 export enum ErrorMessages {
@@ -89,18 +91,9 @@ export interface DropzoneProps {
   onChange(acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]): void;
 }
 
-export function bitToBoolean(bitField: any): boolean {
-  if (Buffer.isBuffer(bitField)) {
-    // Ensure non-zero bytes are considered `true`
-    return bitField[0] !== 0;
-  } else if (bitField instanceof Uint8Array) {
-    return bitField[0] !== 0;
-  } else {
-    return Boolean(bitField);
-  }
-}
-
-export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
+// Re-export bit conversion functions for backwards compatibility
+// These are in a separate file to avoid importing heavy dependencies in middleware
+export { bitToBoolean, booleanToBit } from './macros/bitconversion';
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];

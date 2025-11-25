@@ -15,7 +15,6 @@ import {
   Typography
 } from '@mui/joy';
 import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
-import { Button } from '@mui/material';
 // Using Box layout instead of Grid for better compatibility
 import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompact';
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
@@ -53,12 +52,15 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     }
   };
 
-  const handleDelimiterChange = useCallback((fileName: string, delimiter: string) => {
-    setSelectedDelimiters(prev => ({
-      ...prev,
-      [fileName]: delimiter
-    }));
-  }, []);
+  const handleDelimiterChange = useCallback(
+    (fileName: string, delimiter: string) => {
+      setSelectedDelimiters(prev => ({
+        ...prev,
+        [fileName]: delimiter
+      }));
+    },
+    [setSelectedDelimiters]
+  );
 
   const expectedHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
@@ -123,17 +125,17 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               <DropzoneCompact onChange={handleFileChange} hasFiles={acceptedFiles.length > 0} />
               {acceptedFiles.length > 0 && (
                 <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                  <Button
-                    variant="contained"
+                  <JoyButton
+                    variant="solid"
                     color="primary"
-                    size="large"
+                    size="lg"
                     disabled={acceptedFiles.length === 0}
                     onClick={handleInitialSubmit}
-                    startIcon={<CheckCircleIcon />}
+                    startDecorator={<CheckCircleIcon />}
                     sx={{ flex: 1, maxWidth: 250 }}
                   >
                     Continue Upload ({acceptedFiles.length} {acceptedFiles.length === 1 ? 'file' : 'files'})
-                  </Button>
+                  </JoyButton>
                 </Box>
               )}
 
@@ -180,8 +182,12 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           <DialogTitle>Confirm File Replace</DialogTitle>
           <DialogContent>A file with the same name already exists. Do you want to replace it?</DialogContent>
           <DialogActions>
-            <Button onClick={() => setFileToReplace(null)}>Cancel</Button>
-            <Button
+            <JoyButton variant="plain" color="neutral" onClick={() => setFileToReplace(null)}>
+              Cancel
+            </JoyButton>
+            <JoyButton
+              variant="solid"
+              color="primary"
               onClick={async () => {
                 if (fileToReplace) {
                   const index = acceptedFiles.findIndex(f => f.name === fileToReplace.name);
@@ -191,7 +197,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               }}
             >
               Replace
-            </Button>
+            </JoyButton>
           </DialogActions>
         </ModalDialog>
       </Modal>

@@ -38,13 +38,6 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           });
         break;
       case 'personnel':
-        const pQuery = `SELECT 1 FROM ${schema}.personnel p`; // Check if the
-        // table has any row
-        const pResults = await connection.executeQuery(pQuery);
-        if (pResults.length === 0)
-          return new NextResponse(null, {
-            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
-          });
         break;
       case 'quadrats':
         const query = `SELECT 1 FROM ${schema}.quadrats q 
@@ -62,6 +55,16 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         WHERE p.PlotID = ${plotID} AND c.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
         const pvResults = await connection.executeQuery(pvQuery);
         if (pvResults.length === 0)
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        break;
+      case 'failedmeasurements':
+        const fmQuery = `SELECT 1 FROM ${schema}.failedmeasurements fm
+        JOIN ${schema}.census c ON c.CensusID = fm.CensusID
+        WHERE fm.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} AND c.IsActive IS TRUE LIMIT 1`;
+        const fmResults = await connection.executeQuery(fmQuery);
+        if (fmResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });

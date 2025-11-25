@@ -1,10 +1,9 @@
 'use client';
 
-// isolated failedmeasurements datagrid
 import React, { RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 import { FailedMeasurementsGridColumns, preprocessor } from '@/components/client/datagridcolumns';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
@@ -17,7 +16,11 @@ import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
 
-export default function IsolatedFailedMeasurementsDataGrid() {
+interface IsolatedFailedMeasurementsDataGridProps {
+  onRowReingested?: () => void;
+}
+
+export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: IsolatedFailedMeasurementsDataGridProps = {}) {
   const [refresh, setRefresh] = useState(false);
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
     tag: [],
@@ -65,95 +68,157 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     return m;
   }, []);
 
-  function countInvalidCodes(codes?: string): number {
-    if (!codes?.trim()) return 0;
-    return codes
-      .trim()
-      .split(/\s*;\s*/)
-      .filter(Boolean)
-      .reduce((cnt, code) => (selectableOpts.codes.includes(code) ? cnt : cnt + 1), 0);
-  }
-
-  function computeFailureReasons(row: FailedMeasurementsRDS): string {
-    const reasons: string[] = [];
-
-    if (!row.spCode?.trim()) {
-      reasons.push('SpCode missing');
-    } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
-      reasons.push('SpCode invalid');
-    }
-
-    if (!row.quadrat?.trim()) {
-      reasons.push('Quadrat missing');
-    } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
-      reasons.push('Quadrat invalid');
-    }
-
-    if (row.x == null || row.x === 0 || row.x === -1) reasons.push('Missing X');
-    if (row.y == null || row.y === 0 || row.y === -1) reasons.push('Missing Y');
-
-    const hasCodes = !!row.codes?.trim();
-    if (!hasCodes && (row.dbh == null || row.dbh === 0 || row.dbh === -1)) {
-      reasons.push('Missing Codes and DBH');
-    }
-    if (!hasCodes && (row.hom == null || row.hom === 0 || row.hom === -1)) {
-      reasons.push('Missing Codes and HOM');
-    }
-
-    const sentinel = new Date('1900-01-01');
-    const actualDate = row.date instanceof Date ? row.date : new Date(row.date as any);
-
-    if (!actualDate || actualDate.getTime() === sentinel.getTime()) {
-      reasons.push('Missing Date');
-    }
-
-    if (countInvalidCodes(row.codes) > 0) {
-      reasons.push('Invalid Codes');
-    }
-
-    return reasons.join('|');
-  }
-
-  const onRowSave = useCallback(
-    async (updatedRow: GridRowModel) => {
-      // amended implementation to get full row out from function
-      const reasons = computeFailureReasons(updatedRow);
-      updatedRow = { ...updatedRow, failureReasons: reasons };
-      if (reasons.length === 0) {
-        // no reasons detected, so we can save the row
-        await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${updatedRow.failedMeasurementID}`);
-      } else {
-        // need to updated in-DB row with new reasons now that they've been found!
-        await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`) });
-      }
-      setRefresh(true);
+  const countInvalidCodes = useCallback(
+    (codes?: string): number => {
+      if (!codes?.trim()) return 0;
+      return codes
+        .trim()
+        .split(/\s*;\s*/)
+        .filter(Boolean)
+        .reduce((cnt, code) => (selectableOpts.codes.includes(code) ? cnt : cnt + 1), 0);
     },
-    [apiRef, currentSite, currentPlot, currentCensus, computeFailureReasons]
+    [selectableOpts.codes]
   );
 
-  function displayFailureReason(params: any, column: GridColDef) {
-    const failureReasonsFromRow = (params.row.failureReasons ?? '')
-      .split('|')
-      .map((reason: string) => reason.trim())
-      .filter((reason: string) => reason !== '');
-    const visibleReasons = failureReasonsFromRow.filter((reason: string) => fieldToReasons[column.field]?.includes(reason));
-    if (visibleReasons && visibleReasons.length > 0) {
-      return (
-        <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
-          {visibleReasons.map((reason: string, index: number) => (
+  const computeFailureReasons = useCallback(
+    (row: FailedMeasurementsRDS): string => {
+      const reasons: string[] = [];
+
+      if (!row.spCode?.trim()) {
+        reasons.push('SpCode missing');
+      } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
+        reasons.push('SpCode invalid');
+      }
+
+      if (!row.quadrat?.trim()) {
+        reasons.push('Quadrat missing');
+      } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
+        reasons.push('Quadrat invalid');
+      }
+
+      // Note: x === 0 and y === 0 are valid coordinates (origin point)
+      // Only flag as missing if null or -1 (sentinel value for missing data)
+      if (row.x == null || row.x === -1) reasons.push('Missing X');
+      if (row.y == null || row.y === -1) reasons.push('Missing Y');
+
+      const hasCodes = !!row.codes?.trim();
+      // Note: DBH/HOM of 0 may be valid in some contexts
+      // Only flag as missing if null or -1 (sentinel value)
+      if (!hasCodes && (row.dbh == null || row.dbh === -1)) {
+        reasons.push('Missing Codes and DBH');
+      }
+      if (!hasCodes && (row.hom == null || row.hom === -1)) {
+        reasons.push('Missing Codes and HOM');
+      }
+
+      const sentinel = new Date('1900-01-01');
+      const actualDate = row.date instanceof Date ? row.date : new Date(row.date as any);
+
+      if (!actualDate || actualDate.getTime() === sentinel.getTime()) {
+        reasons.push('Missing Date');
+      }
+
+      if (countInvalidCodes(row.codes) > 0) {
+        reasons.push('Invalid Codes');
+      }
+
+      return reasons.join('|');
+    },
+    [selectableOpts, countInvalidCodes]
+  );
+
+  const onRowSave = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
+      const reasons = computeFailureReasons(newRow);
+      const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons };
+      const failedMeasurementID = newRow.failedMeasurementID ?? oldRow.failedMeasurementID;
+
+      try {
+        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newRow: updatedRow, oldRow: oldRow })
+        });
+
+        if (!updateResponse.ok) {
+          const errorData = await updateResponse.json().catch(() => ({ message: `HTTP ${updateResponse.status}` }));
+          throw new Error(errorData.message || `Failed to save row edits: ${updateResponse.status}`);
+        }
+
+        if (reasons.length === 0) {
+          const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`);
+          if (!reingestResponse.ok) {
+            const errorData = await reingestResponse.json().catch(() => ({ message: `HTTP ${reingestResponse.status}` }));
+            throw new Error(errorData.message || `Failed to reingest row: ${reingestResponse.status}`);
+          }
+
+          await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
+
+          // Notify parent that a row was successfully reingested
+          if (onRowReingested) {
+            onRowReingested();
+          }
+        } else {
+          const reviewResponse = await fetch(`/api/query`, {
+            method: 'POST',
+            body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`)
+          });
+          if (!reviewResponse.ok) {
+            const errorData = await reviewResponse.json().catch(() => ({ message: `HTTP ${reviewResponse.status}` }));
+            throw new Error(errorData.message || `Failed to update validation reasons: ${reviewResponse.status}`);
+          }
+        }
+
+        // Trigger refresh immediately - no arbitrary delay needed
+        // The database operations are already complete at this point
+        setRefresh(true);
+      } catch (error: any) {
+        ailogger.error('Failed to save row:', error);
+        throw error;
+      }
+    },
+    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested]
+  );
+
+  const displayFailureReason = useCallback(
+    (params: any, column: GridColDef) => {
+      const failureReasonsFromRow = (params.row.failureReasons ?? '')
+        .split('|')
+        .map((reason: string) => reason.trim())
+        .filter((reason: string) => reason !== '');
+      const visibleReasons = failureReasonsFromRow
+        .filter((reason: string) => fieldToReasons[column.field]?.includes(reason))
+        .filter((reason: string, index: number, array: string[]) => array.indexOf(reason) === index);
+
+      const displayReason = visibleReasons.length > 0 ? visibleReasons[0] : null;
+
+      if (displayReason) {
+        return (
+          <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
             <Chip
-              key={index}
               variant={'soft'}
               color={'danger'}
-              sx={{ marginY: 0.5, display: 'flex', flex: 1, width: '100%', justifyContent: 'center', alignSelf: 'center' }}
+              sx={{
+                marginY: 0.5,
+                display: 'flex',
+                flex: 1,
+                width: '100%',
+                justifyContent: 'center',
+                alignSelf: 'center',
+                fontSize: '0.75rem',
+                whiteSpace: 'normal',
+                minHeight: '24px',
+                height: 'auto'
+              }}
             >
-              {reason}
+              {displayReason}
             </Chip>
-          ))}
-        </Stack>
-      );
-    } else return null;
-  }
+          </Stack>
+        );
+      } else return null;
+    },
+    [fieldToReasons]
+  );
 
   const columns: GridColDef[] = useMemo(() => {
     return [
@@ -245,7 +310,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
         };
       })
     ];
-  }, [selectableOpts, refresh]);
+  }, [selectableOpts, displayFailureReason]);
 
   return Object.keys(selectableOpts)
     .filter(i => !['tag', 'stemTag'].includes(i))
@@ -258,7 +323,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
       initialRow={initialFailedMeasurementsRow}
       fieldToFocus={'tag'}
       dynamicButtons={[]}
-      defaultHideEmpty={false} // override default true to false -- user should see any missing fields that need correcting
+      defaultHideEmpty={false}
       apiRef={apiRef as RefObject<GridApiCommunity>}
       onDataUpdate={onRowSave}
     />

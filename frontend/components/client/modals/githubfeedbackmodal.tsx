@@ -29,8 +29,7 @@ import {
 import { ChangeEvent, useState } from 'react';
 import { AccessibilityNew, BugReport, Build, Error as ErrorIcon, Event, GitHub, Info, Person } from '@mui/icons-material';
 import { useFormSubmission } from '@/hooks/useAsyncOperation';
-import { useApiWrapper } from '@/utils/apiWrapper';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';

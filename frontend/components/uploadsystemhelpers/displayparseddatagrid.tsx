@@ -1,13 +1,13 @@
 'use client';
 
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Sheet, Typography } from '@mui/joy';
 import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import '@/styles/validationtable.css';
 import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { usePlotContext } from '@/app/contexts/userselectionprovider';
+import { usePlotContext } from '@/app/contexts/compat-hooks';
 import { Checkbox, Divider } from '@mui/joy';
 import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/taxonomies';
 import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/zones';
@@ -47,11 +47,11 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
   const { parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType } = props;
   const [autoCorrectedParsedData, setAutoCorrectedParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
   const [tempParsedData, setTempParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
-  const singleFileData = tempParsedData[fileName] || {};
+  const singleFileData = useMemo(() => tempParsedData[fileName] || {}, [tempParsedData, fileName]);
 
   const currentPlot = usePlotContext();
 
-  const tableHeaders = getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [];
+  const tableHeaders = useMemo(() => getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [], [formType, currentPlot?.usesSubquadrats]);
   const [validRows, setValidRows] = useState<GridRowsProp>([]);
   const [correctedValidRows, setCorrectedValidRows] = useState<GridRowsProp>([]);
   const [invalidRows, setInvalidRows] = useState<GridRowsProp>([]);
@@ -107,7 +107,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                         {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
                       </Typography>
                       <Divider orientation="horizontal" sx={{ marginY: 0.5 }} />
-                      <Typography variant={'caption'} className="auto-fill-correction">
+                      <Typography level="body-xs" className="auto-fill-correction">
                         {cellError}
                       </Typography>
                     </>
@@ -133,7 +133,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         },
         editable: false
       })),
-    [tableHeaders, errors, fileName]
+    [tableHeaders, errors, fileName, saveCorrections]
   );
 
   useEffect(() => {
@@ -193,12 +193,12 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
       [fileName]: tempErrors
     }));
     setAutoCorrectedParsedData(correctedDataCopy);
-  }, [singleFileData, fileName, formType, setErrors]);
+  }, [singleFileData, fileName, formType, setErrors, tempParsedData]);
 
   useEffect(() => {
     if (saveCorrections) setParsedData(autoCorrectedParsedData);
     else setParsedData(tempParsedData);
-  }, [saveCorrections]);
+  }, [saveCorrections, autoCorrectedParsedData, setParsedData, tempParsedData]);
 
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
@@ -234,11 +234,11 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
 
       return updatedRow;
     },
-    [setErrorRows, setTempParsedData, fileName, formType, validateRowByFormType]
+    [setErrorRows, setTempParsedData, fileName, formType, errorRows]
   );
 
   return (
-    <Paper style={{ height: '100%', width: '100%' }}>
+    <Sheet sx={{ height: '100%', width: '100%', p: 2 }}>
       {!saveCorrections ? (
         <>
           {validRows.length > 0 && (
@@ -260,7 +260,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
           )}
           {invalidRows.length > 0 && (
             <Box sx={{ mt: 2 }}>
-              <Typography color="gold">
+              <Typography color="warning">
                 The following rows have been autocorrected to fit the schema. Please review the corrected rows and make sure they are correct.
                 <br />
                 <span style={{ color: 'red' }}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
@@ -314,6 +314,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         onChange={event => setSaveCorrections(event.target.checked)}
         label={!saveCorrections ? 'Save Autocorrected Values to Data' : 'Autocorrected Data Saved!'}
       />
-    </Paper>
+    </Sheet>
   );
 };

@@ -1,9 +1,9 @@
 'use client';
-import React, { useEffect, useState } from 'react';
-import { FileWithStream, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import React, { useEffect, useRef, useState } from 'react';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
 import { Box, Typography } from '@mui/joy';
 import ContextValidationGuard from '@/components/shared/ContextValidationGuard';
@@ -11,12 +11,17 @@ import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefile
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
+import UploadValidationErrors from '@/components/uploadsystem/segments/uploadvalidationerrors';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
 import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
+import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
+import { useFileManagement } from '@/app/hooks/useFileManagement';
+import { useUploadState } from '@/app/hooks/useUploadState';
+import { useErrorHandling } from '@/app/hooks/useErrorHandling';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -32,51 +37,41 @@ export interface DetailedCMIDRow extends CMIDRow {
 }
 
 interface UploadParentProps {
-  onReset: () => void; // closes the modal
+  onReset: () => void;
   overrideUploadForm?: FormType;
-  skipToProcessing?: boolean; // Skip file upload and go directly to batch processing
+  skipToProcessing?: boolean;
+  onUploadComplete?: () => void;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, skipToProcessing } = props;
-  /**
-   * this will be the new parent upload function that will then pass data to child components being called within
-   */
-  // select schema table that file should be uploaded to --> state
-  const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
-  const [personnelRecording, setPersonnelRecording] = useState('');
+  const { onReset, overrideUploadForm, skipToProcessing, onUploadComplete } = props;
 
-  // core enum to handle state progression
-  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
-  // dropped file storage
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithStream[]>([]);
-  // pagination counter to manage validation table view/allow scroll through files in REVIEW
-  const [dataViewActive, setDataViewActive] = useState(1);
-  // for REVIEW --> storage of parsed data for display
+  // Custom hooks for state management
+  const fileManagement = useFileManagement();
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing);
+  const errorHandling = useErrorHandling();
+
+  // Remaining local state (not managed by custom hooks)
   const [parsedData, setParsedData] = useState<FileCollectionRowSet>({});
-  const [errors, setErrors] = useState<FileCollectionRowSet>({});
-  // Confirmation menu states:
-  const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
-  const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
-  const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
-  const [allFileHeaders, setAllFileHeaders] = useState<Record<string, string[]>>({});
-  const [isDataUnsaved, setIsDataUnsaved] = useState(false);
-  const [uploadError, setUploadError] = useState<any>();
-  const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
+  const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
+  const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
+  const [isReingestionMode, setIsReingestionMode] = useState(false);
+
+  // Track if we've already initialized reingestion to prevent re-triggering
+  const reingestionInitializedRef = useRef(false);
+
+  // Context and session
+  const _currentPlot = usePlotContext();
+  const _currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { data: session } = useSession();
-  const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (isDataUnsaved) {
-        event.preventDefault(); // Required to standardize behavior across browsers
-        event.returnValue = ''; // In modern browsers, the message is not customizable but setting returnValue is necessary
+      if (uploadState.state.isDataUnsaved) {
+        event.preventDefault();
+        event.returnValue = '';
       }
     };
 
@@ -85,14 +80,25 @@ export default function UploadParent(props: UploadParentProps) {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
+  }, [uploadState.state.isDataUnsaved]);
 
-  function areHeadersValid(actualHeaders: string[]): {
+  useEffect(() => {
+    if (uploadState.state.reviewState === ReviewStates.COMPLETE) {
+      // Reset reingestion flag when upload completes
+      setIsReingestionMode(false);
+
+      if (onUploadComplete) {
+        onUploadComplete();
+      }
+    }
+  }, [uploadState.state.reviewState, onUploadComplete]);
+
+  function _areHeadersValid(actualHeaders: string[]): {
     isValid: boolean;
     missingHeaders: string[];
   } {
-    if (!uploadForm) throw new Error('No upload form set!');
-    const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+    if (!uploadState.state.uploadForm) throw new Error('No upload form set!');
+    const requiredHeaders = RequiredTableHeadersByFormType[uploadState.state.uploadForm];
     const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
 
@@ -105,96 +111,79 @@ export default function UploadParent(props: UploadParentProps) {
   }
 
   async function handleReturnToStart() {
-    setDataViewActive(1);
-    setAcceptedFiles([]);
+    uploadState.resetToStart();
+    fileManagement.clearFiles();
     setParsedData({});
-    setErrors({});
-    setUploadForm(undefined);
-    setPersonnelRecording('');
-    setReviewState(ReviewStates.START);
+    setIsReingestionMode(false);
   }
 
   async function resetError() {
-    setUploadError(null);
-    setErrorComponent('');
+    errorHandling.clearError();
   }
 
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
-    // setAcceptedFiles(prevFiles => [...prevFiles, parseStreamCheck(newFile, setAllFileHeaders)]);
-    setAcceptedFiles(prevFiles => [...prevFiles, new FileWithStream(newFile, true, newFile.path)]);
+    fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
-    const fileToRemove = acceptedFiles[fileIndex];
-    setAcceptedFiles(prevFiles => prevFiles.filter((_, index) => index !== fileIndex));
-
-    // Remove the headers of the deleted file
-    setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
-      delete updatedHeaders[fileToRemove.name];
-      return updatedHeaders;
-    });
+    fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
-    const fileToReplace = acceptedFiles[fileIndex];
-    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
-
-    // Update headers after replacement
-    setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
-      delete updatedHeaders[fileToReplace.name];
-      return updatedHeaders;
-    });
+    fileManagement.replaceFile(fileIndex, newFile);
   };
 
   async function handleInitialSubmit() {
-    // setReviewState(ReviewStates.REVIEW);
-    setReviewState(ReviewStates.UPLOAD_SQL);
+    uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
   }
 
   useEffect(() => {
-    if (acceptedFiles.length > 0 && dataViewActive <= acceptedFiles.length) {
-      const currentFile = acceptedFiles[dataViewActive - 1];
-      if (currentFile && allFileHeaders[currentFile.name]) {
-        setCurrentFileHeaders(allFileHeaders[currentFile.name]);
+    // If the user removes all files, move back to file drop phase
+    if (fileManagement.fileCount === 0 && uploadState.state.reviewState === ReviewStates.REVIEW) {
+      uploadState.setReviewState(ReviewStates.UPLOAD_FILES);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState.setReviewState]);
+
+  // Check if we should start with reingestion processing (only once on mount)
+  useEffect(() => {
+    if (skipToProcessing && uploadState.state.uploadForm === FormType.measurements) {
+      if (!reingestionInitializedRef.current) {
+        ailogger.info('[REINGESTION INIT] Starting reingestion process - setting reviewState to UPLOAD_SQL and reingestion mode');
+        reingestionInitializedRef.current = true;
+        setIsReingestionMode(true);
+        uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
       } else {
-        setCurrentFileHeaders([]);
+        ailogger.info('[REINGESTION GUARD] Reingestion already initialized - ref guard preventing re-initialization');
       }
     }
-    if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
-  }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
-
-  // Check if we should start with reingestion processing
-  useEffect(() => {
-    if (skipToProcessing && uploadForm === FormType.measurements) {
-      ailogger.info('Skipping to reingestion processing stage');
-      setReviewState(ReviewStates.UPLOAD_SQL);
-    }
-  }, [skipToProcessing, uploadForm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipToProcessing, uploadState.state.uploadForm, uploadState.setReviewState]);
 
   const renderStateContent = () => {
-    if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(ailogger.error);
-    switch (reviewState) {
+    if (!uploadState.state.uploadForm && uploadState.state.reviewState !== ReviewStates.START) {
+      handleReturnToStart().catch(ailogger.error);
+    }
+    switch (uploadState.state.reviewState) {
       case ReviewStates.START:
         return (
           <UploadStart
-            uploadForm={uploadForm}
-            setUploadForm={setUploadForm}
-            setExpectedHeaders={setExpectedHeaders}
-            setReviewState={setReviewState}
-            personnelRecording={personnelRecording}
-            setPersonnelRecording={setPersonnelRecording}
+            uploadForm={uploadState.state.uploadForm}
+            setUploadForm={uploadState.setUploadForm}
+            setExpectedHeaders={() => {}} // Deprecated - no longer needed
+            setReviewState={uploadState.setReviewState}
+            personnelRecording={uploadState.state.personnelRecording}
+            setPersonnelRecording={uploadState.setPersonnelRecording}
           />
         );
       case ReviewStates.UPLOAD_FILES:
         return (
           <UploadParseFiles
-            uploadForm={uploadForm}
-            acceptedFiles={acceptedFiles}
-            dataViewActive={dataViewActive}
-            setDataViewActive={setDataViewActive}
+            uploadForm={uploadState.state.uploadForm}
+            acceptedFiles={fileManagement.files}
+            dataViewActive={uploadState.state.dataViewActive}
+            setDataViewActive={uploadState.setDataViewActive}
             handleInitialSubmit={handleInitialSubmit}
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}
@@ -204,54 +193,66 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.UPLOAD_SQL:
-        // If skipToProcessing is true and there are no files, use reingestion component
-        if (skipToProcessing && acceptedFiles.length === 0) {
-          return <UploadReingestion schema={currentSite?.schemaName || ''} setReviewState={setReviewState} setIsDataUnsaved={setIsDataUnsaved} />;
+        // If in reingestion mode, use reingestion component
+        if (isReingestionMode) {
+          return (
+            <UploadReingestion
+              schema={currentSite?.schemaName || ''}
+              setReviewState={uploadState.setReviewState}
+              setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            />
+          );
         }
         return (
           <UploadFireSQL
-            personnelRecording={personnelRecording}
-            acceptedFiles={acceptedFiles}
-            uploadForm={uploadForm}
+            personnelRecording={uploadState.state.personnelRecording}
+            acceptedFiles={fileManagement.files}
+            uploadForm={uploadState.state.uploadForm}
             parsedData={parsedData}
-            setReviewState={setReviewState}
-            setIsDataUnsaved={setIsDataUnsaved}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
-            uploadCompleteMessage={uploadCompleteMessage}
-            setUploadCompleteMessage={setUploadCompleteMessage}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
+            uploadCompleteMessage={uploadState.state.uploadCompleteMessage}
+            setUploadCompleteMessage={uploadState.setUploadCompleteMessage}
+            setUploadError={(error: any) => errorHandling.setError(error)}
+            setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
           />
         );
       case ReviewStates.VALIDATE:
-        return <UploadValidation setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
+        return <UploadValidation setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} isReingestion={isReingestionMode} />;
+      case ReviewStates.VALIDATE_ERRORS_FOUND:
+        return <UploadValidationErrors setReviewState={uploadState.setReviewState} isReingestion={isReingestionMode} />;
       case ReviewStates.UPDATE:
-        return <UploadUpdateValidations setReviewState={setReviewState} schema={currentSite?.schemaName || ''} />;
+        return <UploadUpdateValidations setReviewState={uploadState.setReviewState} schema={currentSite?.schemaName || ''} />;
       case ReviewStates.UPLOAD_AZURE:
         return (
           <UploadFireAzure
-            acceptedFiles={acceptedFiles}
-            uploadForm={uploadForm}
-            setReviewState={setReviewState}
-            setIsDataUnsaved={setIsDataUnsaved}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
+            acceptedFiles={fileManagement.files}
+            uploadForm={uploadState.state.uploadForm}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            setUploadError={(error: any) => errorHandling.setError(error)}
+            setErrorComponent={errorHandling.setErrorComponent}
             user={session?.user?.name ? session?.user?.name : ''}
             allRowToCMID={allRowToCMID}
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadState.state.uploadForm} />;
       default:
         return (
           <UploadError
-            error={uploadError}
-            component={errorComponent}
-            acceptedFiles={acceptedFiles}
-            setAcceptedFiles={setAcceptedFiles}
-            setReviewState={setReviewState}
+            error={errorHandling.error}
+            component={errorHandling.errorComponent}
+            acceptedFiles={fileManagement.files}
+            setAcceptedFiles={value => {
+              const files = typeof value === 'function' ? value(fileManagement.files) : value;
+              fileManagement.clearFiles();
+              files.forEach((file: any) => fileManagement.addFile(file));
+            }}
+            setReviewState={uploadState.setReviewState}
             handleReturnToStart={handleReturnToStart}
             resetError={resetError}
           />
@@ -265,21 +266,50 @@ export default function UploadParent(props: UploadParentProps) {
       requireCensus={true}
       customMessage="Upload functionality requires site, plot, and census selections to be active."
     >
-      <Box
-        sx={{
-          display: 'flex',
-          width: '100%',
-          flexDirection: 'column',
-          marginBottom: 2
-        }}
-      >
-        <Typography level={'title-lg'} color={'primary'}>
-          Drag and drop files into the box to upload them to storage
-        </Typography>
-        <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
-          <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
+      <>
+        <FailedMeasurementsModal
+          open={showFailedMeasurementsModal}
+          setReingested={reingested => {
+            if (reingested) {
+              ailogger.info('Failed measurements were reingested successfully');
+              // Close modal and return to start for reingestion processing
+              setShowFailedMeasurementsModal(false);
+            }
+          }}
+          handleCloseModal={async () => {
+            ailogger.info('Closing failed measurements modal');
+            setShowFailedMeasurementsModal(false);
+          }}
+          onTriggerReingestion={() => {
+            ailogger.info('Triggering reingestion from failed measurements modal');
+            setShowFailedMeasurementsModal(false);
+
+            // Clear files from original upload so UploadReingestion component renders
+            fileManagement.clearFiles();
+            setParsedData({});
+
+            // Set reingestion mode and start upload cycle
+            setIsReingestionMode(true);
+            uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+            ailogger.info('Starting upload cycle to process temporarymeasurements after bulk reingestion');
+          }}
+        />
+        <Box
+          sx={{
+            display: 'flex',
+            width: '100%',
+            flexDirection: 'column',
+            marginBottom: 2
+          }}
+        >
+          <Typography level={'title-lg'} color={'primary'}>
+            Drag and drop files into the box to upload them to storage
+          </Typography>
+          <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
+            <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
+          </Box>
         </Box>
-      </Box>
+      </>
     </ContextValidationGuard>
   );
 }
