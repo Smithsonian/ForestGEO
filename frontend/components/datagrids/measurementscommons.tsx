@@ -203,7 +203,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [nrCount, setNRCount] = useState<number>(0);
   const [failedCount, setFailedCount] = useState<number>(0);
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
-  const [attributesMap, setAttributesMap] = useState<Map<string, AttributesResult>>(new Map());
+  const [attributesMap, setAttributesMap] = useState<Map<string, AttributesRDS>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
     tag: [],
     stemTag: [],
@@ -740,7 +740,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
         setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
         // Create a map for quick lookup of attribute details by code
-        const attrMap = new Map<string, AttributesResult>();
+        const attrMap = new Map<string, AttributesRDS>();
         data.forEach(attr => {
           if (attr.code) attrMap.set(attr.code, attr);
         });
