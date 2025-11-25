@@ -139,24 +139,31 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
   }
 
   try {
+    // getContainerClient now throws with detailed error messages on failure
     const containerClient = await getContainerClient(`${plotSanitized}-${censusSanitized}`);
-    if (!containerClient) {
-      throw new Error('Failed to get container client');
-    }
 
+    // uploadValidFileAsBuffer now always returns a response or throws
     const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user, formType, fileRowErrors);
-    if (uploadResponse && (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300)) {
-      throw new Error('Upload failed: Response status not between 200 & 299');
+
+    // Verify the response status
+    if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
+      throw new Error(`Upload failed: Azure returned status ${uploadResponse._response.status}`);
     }
 
     ailogger.info(`File uploaded successfully: ${sanitizedFileName} by ${session.user.email}`);
     return new NextResponse(JSON.stringify({ message: 'File uploaded successfully' }), { status: HTTPResponses.OK });
   } catch (error: any) {
-    ailogger.error('File upload error:', error);
+    // Log the full error for debugging but don't expose details to client
+    ailogger.error(`File upload error for ${sanitizedFileName} (${plotSanitized}/${censusSanitized}): ${error.message}`);
     return new NextResponse(
       JSON.stringify({
-        error: 'Failed to upload file'
-        // Do not expose internal error details to client
+        error: 'Failed to upload file',
+        // Include a sanitized hint for common issues
+        hint: error.message?.includes('AZURE_STORAGE')
+          ? 'Azure Storage configuration issue'
+          : error.message?.includes('container')
+            ? 'Storage container access issue'
+            : 'Upload processing failed'
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );

@@ -476,7 +476,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       if (!expectedHeaders || !requiredHeaders) {
         ailogger.error(`No headers defined for form type: ${uploadForm}`);
-        setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+        if (isMountedRef.current) {
+          setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+        }
         return;
       }
 
@@ -1036,8 +1038,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         cancelSession().catch(cancelErr => {
           ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
         });
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
+
+        // CRITICAL: Only update state if component is still mounted
+        // Updating state after unmount can cause React error #310
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setReviewState(ReviewStates.ERRORS);
+        } else {
+          ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
+        }
       });
     }
     return () => {
@@ -1354,13 +1363,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                 if (discrepancy !== 0) {
                   dataIntegrityIssuesFound = true;
-                  ailogger.error(
-                    `DATA INTEGRITY MISMATCH for ${fileID}: Expected ${expectedForFile} rows from file, but only ${actualTotal} accounted for (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). MISSING: ${discrepancy} row(s)!`
-                  );
+                  if (discrepancy > 0) {
+                    // Fewer rows in DB than expected - potential data loss
+                    ailogger.error(
+                      `DATA INTEGRITY MISMATCH for ${fileID}: Expected ${expectedForFile} rows from file, but only ${actualTotal} accounted for (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). MISSING: ${discrepancy} row(s)!`
+                    );
+                  } else {
+                    // More rows in DB than expected - likely includes data from previous uploads
+                    ailogger.warn(
+                      `DATA COUNT MISMATCH for ${fileID}: Expected ${expectedForFile} rows from current upload, but found ${actualTotal} total rows (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). ` +
+                        `${Math.abs(discrepancy)} extra row(s) found - this may include data from previous uploads with the same filename.`
+                    );
+                  }
                 }
 
                 ailogger.info(
-                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - DISCREPANCY: ${discrepancy} rows` : ''}`
+                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - ${discrepancy > 0 ? 'MISSING' : 'EXTRA'}: ${Math.abs(discrepancy)} rows` : ''}`
                 );
               } else {
                 ailogger.warn(`Session verification failed for file ${fileID}`);
@@ -1374,12 +1392,26 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
 
           if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-            setVerificationStatus(
-              `⚠️ DATA INTEGRITY WARNING: Expected ${totalExpectedRows} rows, but only ${totalSessionAccounted} accounted (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). MISSING: ${totalDiscrepancy} row(s)!`
-            );
-            ailogger.error(
-              `CRITICAL DATA INTEGRITY ISSUE: Expected ${totalExpectedRows} rows from input files, only ${totalSessionAccounted} rows accounted for in database. ${totalDiscrepancy} row(s) were lost during processing!`
-            );
+            if (totalDiscrepancy > 0) {
+              // Fewer rows than expected - potential data loss
+              setVerificationStatus(
+                `⚠️ DATA INTEGRITY WARNING: Expected ${totalExpectedRows} rows, but only ${totalSessionAccounted} accounted (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). MISSING: ${totalDiscrepancy} row(s)!`
+              );
+              ailogger.error(
+                `CRITICAL DATA INTEGRITY ISSUE: Expected ${totalExpectedRows} rows from input files, only ${totalSessionAccounted} rows accounted for in database. ${totalDiscrepancy} row(s) were lost during processing!`
+              );
+            } else {
+              // More rows than expected - likely previous upload data
+              setVerificationStatus(
+                `ℹ️ VERIFICATION NOTE: Expected ${totalExpectedRows} rows from current upload, found ${totalSessionAccounted} total (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). ` +
+                  `${Math.abs(totalDiscrepancy)} additional row(s) may be from previous uploads with the same filename.`
+              );
+              ailogger.warn(
+                `Data count note: Expected ${totalExpectedRows} rows from current upload, found ${totalSessionAccounted} in database. ` +
+                  `The ${Math.abs(totalDiscrepancy)} extra row(s) likely include data from previous uploads with the same filename. ` +
+                  `This is not data loss but cumulative data in the census.`
+              );
+            }
           } else {
             setVerificationStatus(
               `✓ Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows - matches expected ${totalExpectedRows})`
@@ -1481,8 +1513,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
         });
 
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
+        // CRITICAL: Only update state if component is still mounted
+        // Updating state after unmount can cause React error #310
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setReviewState(ReviewStates.ERRORS);
+        } else {
+          ailogger.warn('Component unmounted during batch processing error handling - skipping state updates to prevent React error #310');
+        }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- acceptedFiles, cancelSession, updateState intentionally excluded to prevent re-renders; batchProcessingStartedRef guards execution
