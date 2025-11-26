@@ -15,6 +15,10 @@ const { auth: nextAuthMiddleware } = NextAuth(authConfig);
 
 export default auth(async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Health check endpoint must be publicly accessible for deployment verification
+  if (pathname === '/api/health') return NextResponse.next();
+
   if (pathname.includes('/api/customsignin')) return NextResponse.next();
 
   // E2E TESTING BYPASS
@@ -52,5 +56,5 @@ export default auth(async function middleware(request: NextRequest) {
 });
 
 export const config = {
-  matcher: ['/', '/admin/:path*', '/dashboard/:path*', '/measurementshub/:path*', '/fixeddatainput/:path*']
+  matcher: ['/', '/admin/:path*', '/dashboard/:path*', '/measurementshub/:path*', '/fixeddatainput/:path*', '/api/health']
 };
