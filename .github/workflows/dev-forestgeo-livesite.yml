@@ -82,6 +82,52 @@ jobs:
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
 
+      - name: Verify build integrity
+        id: verify-build
+        run: |
+          cd frontend/build/standalone
+
+          # Check BUILD_ID exists
+          if [ ! -f "build/BUILD_ID" ]; then
+            echo "::error::BUILD_ID file not found"
+            exit 1
+          fi
+          BUILD_ID=$(cat build/BUILD_ID)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "✅ Build ID: $BUILD_ID"
+
+          # Check build manifest exists
+          if [ ! -f "build/build-manifest.json" ]; then
+            echo "::error::build-manifest.json not found"
+            exit 1
+          fi
+          echo "✅ Build manifest present"
+
+          # Check server chunks exist and count them
+          CHUNK_COUNT=$(ls build/server/chunks/*.js 2>/dev/null | wc -l | tr -d '[:space:]')
+          if [ "$CHUNK_COUNT" -lt 10 ]; then
+            echo "::error::Insufficient server chunks found: $CHUNK_COUNT (expected 10+)"
+            exit 1
+          fi
+          echo "chunk_count=$CHUNK_COUNT" >> $GITHUB_OUTPUT
+          echo "✅ Server chunks: $CHUNK_COUNT files"
+
+          # Check static directory exists
+          if [ ! -d "build/static" ]; then
+            echo "::error::Static assets directory not found"
+            exit 1
+          fi
+          echo "✅ Static assets present"
+
+          # Check server.js exists
+          if [ ! -f "server.js" ]; then
+            echo "::error::server.js not found"
+            exit 1
+          fi
+          echo "✅ server.js present"
+
+          echo "✅ Build integrity verification passed"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +155,80 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: frontend/build/standalone
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting 30 seconds for Azure to restart the app..."
+          sleep 30
+
+      - name: Verify deployment health
+        id: health-check
+        run: |
+          MAX_RETRIES=5
+          RETRY_DELAY=15
+          HEALTH_URL="https://forestgeo-development.azurewebsites.net/api/health"
+
+          echo "🏥 Starting deployment health verification..."
+          echo "Health endpoint: $HEALTH_URL"
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo ""
+            echo "Attempt $i of $MAX_RETRIES..."
+
+            # Make request and capture both status code and body
+            HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "$HEALTH_URL" --max-time 30 || printf "\n000")
+            HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+            HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1 | tr -d '[:space:]')
+
+            echo "HTTP Status: $HTTP_STATUS"
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✅ Health check passed!"
+              echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
+
+              # Extract and verify build info
+              DEPLOYED_BUILD_ID=$(echo "$HTTP_BODY" | jq -r '.build.id // empty' 2>/dev/null)
+              HEALTH_STATUS=$(echo "$HTTP_BODY" | jq -r '.status // empty' 2>/dev/null)
+              CHUNK_COUNT=$(echo "$HTTP_BODY" | jq -r '.build.chunkCount // 0' 2>/dev/null)
+
+              echo ""
+              echo "📊 Deployment Summary:"
+              echo "   Build ID: $DEPLOYED_BUILD_ID"
+              echo "   Health Status: $HEALTH_STATUS"
+              echo "   Server Chunks: $CHUNK_COUNT"
+
+              if [ "$HEALTH_STATUS" = "healthy" ]; then
+                echo ""
+                echo "✅ Deployment verified successfully!"
+                echo "health_status=healthy" >> $GITHUB_OUTPUT
+                exit 0
+              elif [ "$HEALTH_STATUS" = "degraded" ]; then
+                echo "⚠️ Deployment is degraded but functional"
+                echo "health_status=degraded" >> $GITHUB_OUTPUT
+                exit 0
+              else
+                echo "❌ Health status is unhealthy: $HEALTH_STATUS"
+              fi
+            elif [ "$HTTP_STATUS" = "503" ]; then
+              echo "⚠️ Service unavailable (503) - deployment may still be starting..."
+              echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
+            elif [ "$HTTP_STATUS" = "000" ]; then
+              echo "⚠️ Connection failed - server may still be restarting..."
+            else
+              echo "⚠️ Unexpected status code: $HTTP_STATUS"
+              echo "$HTTP_BODY"
+            fi
+
+            if [ $i -lt $MAX_RETRIES ]; then
+              echo "Waiting ${RETRY_DELAY}s before retry..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+          echo ""
+          echo "❌ Health check failed after $MAX_RETRIES attempts"
+          echo "health_status=failed" >> $GITHUB_OUTPUT
+          exit 1
 
       - name: Setup Node.js for validation deployment
         uses: actions/setup-node@v4.0.4
@@ -210,9 +330,90 @@ jobs:
             Cheers,
             GitHub Actions
 
+  # Rollback job - attempts to restore previous deployment on health check failure
+  # Only runs if deploy job failed (not if build failed)
+  # Requires AZURE_CREDENTIALS secret to be configured for az CLI commands
+  rollback-on-failure:
+    if: failure() && needs.deploy-app-development.result == 'failure'
+    needs: [build-app-development, deploy-app-development]
+    runs-on: ubuntu-latest
+    environment: development_temp
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        continue-on-error: true  # Gracefully handle missing credentials
+
+      - name: Attempt rollback to previous deployment
+        id: rollback
+        run: |
+          echo "🔄 Attempting to rollback to previous deployment..."
+
+          # Try to restart the app to recover from bad state
+          az webapp restart --name forestgeo-development --resource-group ForestGEO-ResourceGroup || true
+
+          echo "⏳ Waiting 60 seconds for app to restart..."
+          sleep 60
+
+          # Check if restart helped
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://forestgeo-development.azurewebsites.net/api/health" --max-time 30 || echo "000")
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ App recovered after restart"
+            echo "rollback_status=recovered" >> $GITHUB_OUTPUT
+          else
+            echo "❌ App still unhealthy after restart (status: $HTTP_STATUS)"
+            echo "rollback_status=failed" >> $GITHUB_OUTPUT
+            echo "::warning::Manual intervention may be required!"
+          fi
+        continue-on-error: true
+
+      - name: Create rollback issue
+        if: steps.rollback.outputs.rollback_status == 'failed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 URGENT: Deployment Health Check Failed - Manual Intervention Required',
+              body: `## Deployment Failure Alert
+
+              **Time**: ${new Date().toISOString()}
+              **Branch**: ${{ github.ref_name }}
+              **Commit**: ${{ github.sha }}
+              **Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+              ### What Happened
+              The deployment health check failed and automatic recovery was unsuccessful.
+
+              ### Recommended Actions
+              1. Check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              2. Review the health endpoint: https://forestgeo-development.azurewebsites.net/api/health
+              3. Check Azure Portal for the app service status
+              4. Consider rolling back manually via Azure Portal (Deployment Center → Deployment Logs)
+
+              ### Manual Rollback Steps
+              \`\`\`bash
+              # Using Azure CLI
+              az webapp deployment slot swap -g ForestGEO-ResourceGroup -n forestgeo-development --slot staging --target-slot production
+              # Or restart the app
+              az webapp restart -g ForestGEO-ResourceGroup -n forestgeo-development
+              \`\`\`
+
+              /cc @${{ github.actor }}`,
+              labels: ['urgent', 'deployment-failure', 'automated']
+            });
+        continue-on-error: true
+
+  # Notification job - sends email when build or deploy fails
+  # Waits for rollback attempt to complete (if any) before sending notification
+  # The 'always()' ensures this runs even when rollback-on-failure is skipped
   notify-failure:
     if: always() && (needs.build-app-development.result == 'failure' || needs.deploy-app-development.result == 'failure')
-    needs: [build-app-development, deploy-app-development]
+    needs: [build-app-development, deploy-app-development, rollback-on-failure]
     runs-on: ubuntu-latest
     environment: development_temp
 
@@ -229,14 +430,15 @@ jobs:
           echo "branch_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           echo "build_status=${{ needs.build-app-development.result }}" >> $GITHUB_OUTPUT
           echo "deploy_status=${{ needs.deploy-app-development.result }}" >> $GITHUB_OUTPUT
-          
+          echo "rollback_status=${{ needs.rollback-on-failure.result }}" >> $GITHUB_OUTPUT
+
           # Determine which job failed
           if [[ "${{ needs.build-app-development.result }}" == "failure" ]]; then
             echo "failed_job=build-app-development" >> $GITHUB_OUTPUT
             echo "failure_stage=Build" >> $GITHUB_OUTPUT
           elif [[ "${{ needs.deploy-app-development.result }}" == "failure" ]]; then
-            echo "failed_job=deploy-app-development" >> $GITHUB_OUTPUT  
-            echo "failure_stage=Deployment" >> $GITHUB_OUTPUT
+            echo "failed_job=deploy-app-development" >> $GITHUB_OUTPUT
+            echo "failure_stage=Deployment/Health Check" >> $GITHUB_OUTPUT
           else
             echo "failed_job=unknown" >> $GITHUB_OUTPUT
             echo "failure_stage=Unknown" >> $GITHUB_OUTPUT
@@ -274,10 +476,15 @@ jobs:
             • **Commit SHA**: ${{ steps.failure_info.outputs.commit_sha }}
             • **Build Status**: ${{ steps.failure_info.outputs.build_status }}
             • **Deploy Status**: ${{ steps.failure_info.outputs.deploy_status }}
+            • **Rollback Attempted**: ${{ steps.failure_info.outputs.rollback_status }}
 
             ## Commit Information
             • **Message**: ${{ steps.commit_info.outputs.commit_message }}
             • **Author**: ${{ steps.commit_info.outputs.commit_author }}
+
+            ## Health Check Status
+            Check the deployment health endpoint directly:
+            https://forestgeo-development.azurewebsites.net/api/health
 
             ## Debugging Information
             • **Workflow Run**: ${{ steps.failure_info.outputs.workflow_url }}
@@ -285,11 +492,17 @@ jobs:
 
             ## Next Steps
             1. Check the workflow logs at the URL above
-            2. Review the failed job details in the GitHub Actions tab
+            2. Review the health check output for specific failure reasons
             3. Look for error messages in the specific step that failed
             4. Common failure points:
-               - Build failures: Check for dependency issues, TypeScript errors, or test failures
-               - Deploy failures: Check Azure credentials, app service configuration, or artifact upload issues
+               - Build integrity: Missing webpack chunks or manifest files
+               - Health check: Server failed to start or missing environment variables
+               - Deploy failures: Azure credentials, app service configuration issues
+
+            ## Manual Recovery Options
+            - Restart app: az webapp restart -g ForestGEO-ResourceGroup -n forestgeo-development
+            - View Azure logs: Azure Portal → App Services → forestgeo-development → Log stream
+            - Re-run workflow: ${{ steps.failure_info.outputs.workflow_url }}
 
             ## Quick Actions
             - View logs: ${{ steps.failure_info.outputs.workflow_url }}
