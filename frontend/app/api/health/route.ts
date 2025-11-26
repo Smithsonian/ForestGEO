@@ -190,8 +190,14 @@ export async function GET(request: Request) {
     overallStatus = 'unhealthy';
   }
 
-  // Check 5: Required environment variables (non-sensitive check)
-  const requiredEnvVars = ['AUTH_SECRET', 'AZURE_SQL_SERVER', 'AZURE_SQL_DATABASE'];
+  // Check 5: Required environment variables (matches GitHub workflow env vars)
+  // These are the critical env vars set in .github/workflows/dev-forestgeo-livesite.yml
+  const requiredEnvVars = [
+    'AUTH_SECRET', // Authentication
+    'AZURE_SQL_SERVER', // Database connection
+    'AZURE_SQL_USER', // Database auth
+    'AZURE_SQL_PASSWORD' // Database auth
+  ];
   const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
   if (missingEnvVars.length === 0) {
     checks.push({
@@ -208,12 +214,15 @@ export async function GET(request: Request) {
     if (overallStatus === 'healthy') overallStatus = 'degraded';
   }
 
-  // Check 6: Deep check - Database connectivity (optional)
+  // Check 6: Deep check - Database and storage configuration (optional)
   if (deepCheck) {
     try {
-      // Simple database connectivity test would go here
-      // For now, just check if connection params exist
-      const hasDbConfig = !!(process.env.AZURE_SQL_SERVER && process.env.AZURE_SQL_USER && process.env.AZURE_SQL_PASSWORD && process.env.AZURE_SQL_DATABASE);
+      // Check database configuration
+      const hasDbConfig = !!(
+        process.env.AZURE_SQL_SERVER &&
+        process.env.AZURE_SQL_USER &&
+        process.env.AZURE_SQL_PASSWORD
+      );
 
       if (hasDbConfig) {
         checks.push({
@@ -229,11 +238,32 @@ export async function GET(request: Request) {
         });
         overallStatus = 'unhealthy';
       }
+
+      // Check storage configuration
+      const hasStorageConfig = !!(
+        process.env.AZURE_STORAGE_CONNECTION_STRING ||
+        process.env.AZURE_STORAGE_SAS_CONNECTION_STRING
+      );
+
+      if (hasStorageConfig) {
+        checks.push({
+          name: 'storage_config',
+          status: 'pass',
+          message: 'Storage configuration present'
+        });
+      } else {
+        checks.push({
+          name: 'storage_config',
+          status: 'warn',
+          message: 'Storage configuration not found'
+        });
+        if (overallStatus === 'healthy') overallStatus = 'degraded';
+      }
     } catch (error) {
       checks.push({
-        name: 'database_config',
+        name: 'deep_check',
         status: 'fail',
-        message: `Database check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+        message: `Deep check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       });
       overallStatus = 'unhealthy';
     }
