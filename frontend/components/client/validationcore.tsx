@@ -1,10 +1,31 @@
 'use client';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Box, LinearProgress, Typography, CircularProgress } from '@mui/joy';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Box, LinearProgress, Typography, CircularProgress, Stack, Chip } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
+
+/**
+ * Converts camelCase or PascalCase validation names to human-readable format
+ * e.g., "ValidateScreenMeasuredDiameter" -> "Validate Screen Measured Diameter"
+ * e.g., "DBHGrowthExceedsMax" -> "DBH Growth Exceeds Max"
+ */
+function formatValidationName(name: string): string {
+  // Handle common abbreviations that should stay together
+  const preserveAbbreviations = ['DBH', 'HOM', 'ID', 'SQL', 'API'];
+
+  // First, insert spaces before capital letters (but not at the start)
+  let formatted = name.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+  // Also handle sequences of capitals followed by lowercase (e.g., "DBHGrowth" -> "DBH Growth")
+  formatted = formatted.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+
+  // Capitalize first letter
+  formatted = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+
+  return formatted;
+}
 
 export type ValidationResult = {
   success: boolean;
@@ -261,37 +282,23 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     }
   }, [isValidationComplete, isUpdatingRows, onValidationComplete, checkForFailedMeasurements, apiErrors]);
 
-  const renderProgressBars = () => {
-    return Object.keys(validationMessages).map(validationProcedureName => {
-      const progress = validationProgress[validationProcedureName] || 0;
-      const progressId = `progress-${validationProcedureName.replace(/\s+/g, '-').toLowerCase()}`;
-      const descId = `desc-${validationProcedureName.replace(/\s+/g, '-').toLowerCase()}`;
+  // Calculate overall progress
+  const overallProgress = useMemo(() => {
+    const progressValues = Object.values(validationProgress);
+    if (progressValues.length === 0) return 0;
+    const sum = progressValues.reduce((acc, val) => acc + (val >= 0 ? val : 0), 0);
+    return sum / progressValues.length;
+  }, [validationProgress]);
 
-      return (
-        <Box key={validationProcedureName} sx={{ mb: 2 }} role="group" aria-labelledby={progressId}>
-          <Typography level="body-md" id={progressId}>
-            {validationProcedureName}
-          </Typography>
-          <Typography level="body-md" id={descId}>
-            {validationMessages[validationProcedureName]?.description}
-          </Typography>
-          <LinearProgress
-            determinate
-            value={progress}
-            aria-labelledby={progressId}
-            aria-describedby={descId}
-            aria-valuenow={progress}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuetext={`${Math.round(progress)}% complete`}
-          />
-          <div className="sr-only">
-            {validationProcedureName}: {Math.round(progress)}% complete
-          </div>
-        </Box>
-      );
-    });
-  };
+  // Count completed and failed validations
+  const { completedCount, failedCount, totalCount } = useMemo(() => {
+    const progressValues = Object.values(validationProgress);
+    return {
+      completedCount: progressValues.filter(v => v === 100).length,
+      failedCount: progressValues.filter(v => v === -1).length,
+      totalCount: progressValues.length
+    };
+  }, [validationProgress]);
 
   return (
     <>
@@ -300,72 +307,114 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           component="section"
           sx={{
             width: '100%',
-            p: 2,
+            p: 3,
             display: 'flex',
             flex: 1,
-            flexDirection: 'column'
+            flexDirection: 'column',
+            alignItems: 'center'
           }}
           role="status"
           aria-live="polite"
           aria-label="Data validation progress"
         >
           {!isValidationComplete ? (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Typography level="title-lg" component="h2" id="validation-status">
-                Validating data...
+            <Stack spacing={4} sx={{ width: '100%', alignItems: 'center' }}>
+              {/* Header */}
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography level="h3" sx={{ mb: 1 }}>
+                  Validating data...
+                </Typography>
+                <Typography level="body-lg" color="primary" sx={{ fontWeight: 600 }}>
+                  {overallProgress.toFixed(0)}% Complete
+                </Typography>
+              </Box>
+
+              {/* Main Progress Bar */}
+              <Box sx={{ width: '100%' }}>
+                <LinearProgress
+                  determinate
+                  size="lg"
+                  variant="soft"
+                  color="primary"
+                  value={overallProgress}
+                  sx={{
+                    width: '100%',
+                    height: 12,
+                    borderRadius: 'md'
+                  }}
+                  aria-label="Overall validation progress"
+                  aria-valuenow={overallProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                />
+              </Box>
+
+              {/* Status Summary */}
+              <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', justifyContent: 'center' }}>
+                <Chip variant="soft" color="success" size="sm">
+                  {completedCount} of {totalCount} checks complete
+                </Chip>
+                {failedCount > 0 && (
+                  <Chip variant="soft" color="danger" size="sm">
+                    {failedCount} failed
+                  </Chip>
+                )}
+              </Stack>
+
+              {/* Current validation being run - just show the name cleanly */}
+              {Object.entries(validationProgress).find(([_, v]) => v > 0 && v < 100) && (
+                <Typography level="body-sm" color="neutral" sx={{ textAlign: 'center' }}>
+                  Running: {formatValidationName(Object.entries(validationProgress).find(([_, v]) => v > 0 && v < 100)?.[0] || '')}
+                </Typography>
+              )}
+
+              <Typography level="body-sm" color="neutral">
+                Please do not close this window
               </Typography>
-              <div role="progressbar" aria-describedby="validation-status">
-                {renderProgressBars()}
-              </div>
-            </Box>
+            </Stack>
           ) : isUpdatingRows ? (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <CircularProgress aria-label="Updating validated rows" />
-              <Typography level="title-lg" component="h2">
-                Updating validated rows...
+            <Stack spacing={3} sx={{ alignItems: 'center' }}>
+              <CircularProgress size="lg" aria-label="Updating validated rows" />
+              <Typography level="h4">Finalizing validation results...</Typography>
+              <Typography level="body-sm" color="neutral">
+                Please wait while we update the database
               </Typography>
-            </Box>
+            </Stack>
           ) : (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Typography level="title-lg" component="h2">
-                Validation Results
+            <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center' }}>
+              <Typography level="h3" color={apiErrors.length > 0 ? 'warning' : 'success'}>
+                {apiErrors.length > 0 ? 'Validation Completed with Issues' : 'Validation Complete'}
               </Typography>
+
+              <Stack direction="row" spacing={2}>
+                <Chip variant="soft" color="success" size="md">
+                  {completedCount} checks passed
+                </Chip>
+                {failedCount > 0 && (
+                  <Chip variant="soft" color="danger" size="md">
+                    {failedCount} checks failed
+                  </Chip>
+                )}
+              </Stack>
+
               {apiErrors.length > 0 && (
-                <Box sx={{ mb: 2 }} role="alert" aria-live="assertive">
-                  <Typography color="danger" component="h3">
-                    Some validations could not be performed:
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'danger.softBg', borderRadius: 'md', maxWidth: '500px' }} role="alert">
+                  <Typography level="body-sm" color="danger" sx={{ mb: 1, fontWeight: 600 }}>
+                    Issues encountered:
                   </Typography>
-                  <ul>
-                    {apiErrors.map(error => (
-                      <li key={error}>
-                        <Typography color="danger">{error}</Typography>
-                      </li>
-                    ))}
-                  </ul>
+                  {apiErrors.slice(0, 3).map((error, idx) => (
+                    <Typography key={idx} level="body-xs" color="danger">
+                      {error}
+                    </Typography>
+                  ))}
+                  {apiErrors.length > 3 && (
+                    <Typography level="body-xs" color="danger" sx={{ mt: 1 }}>
+                      ...and {apiErrors.length - 3} more
+                    </Typography>
+                  )}
                 </Box>
               )}
-            </Box>
+            </Stack>
           )}
         </Box>
       )}

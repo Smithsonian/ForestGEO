@@ -2,31 +2,18 @@
  * Census Selector Component
  *
  * Handles census selection in the sidebar
- * Includes functionality to create new censuses
  * Uses Zustand store for state management
  */
 
 'use client';
 
-import { Select, Option, Typography, Stack, SelectOption, Box, IconButton, ListItem, Divider } from '@mui/joy';
+import { Select, Option, Typography, Stack, SelectOption, Box } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
-import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { useState } from 'react';
-import AddIcon from '@mui/icons-material/Add';
-import ailogger from '@/ailogger';
 
-interface CensusSelectorProps {
-  onCensusListChanged?: () => void;
-}
-
-export default function CensusSelector({ onCensusListChanged }: CensusSelectorProps) {
+export default function CensusSelector() {
   const currentCensus = useAppStore(state => state.currentCensus);
   const censusList = useAppStore(state => state.censusList);
   const setCensus = useAppStore(state => state.setCensus);
-  const currentSite = useAppStore(state => state.currentSite);
-  const currentPlot = useAppStore(state => state.currentPlot);
-
-  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
 
   const renderCensusValue = (option: SelectOption<string> | null) => {
     if (!option) {
@@ -77,7 +64,7 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
     );
   };
 
-  const handleCensusChange = async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+  const handleCensusChange = (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
     if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) {
       setCensus(undefined);
     } else {
@@ -86,82 +73,6 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
       setCensus(selectedCensus);
     }
   };
-
-  const handleCreateNewCensus = async () => {
-    if (isCreatingCensus) return; // Prevent multiple clicks
-
-    // Validation checks
-    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
-      alert('Cannot create a new census: Current census has no measurements.');
-      return;
-    }
-
-    // Check if any existing census has no measurements
-    const censusWithoutMeasurements = censusList?.find(census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate);
-
-    if (censusWithoutMeasurements) {
-      alert(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
-      return;
-    }
-
-    setIsCreatingCensus(true);
-
-    try {
-      // Calculate next census number
-      const highestPlotCensusNumber =
-        censusList && censusList.length > 0
-          ? censusList.reduce(
-              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-              censusList[0]?.plotCensusNumber ?? 0
-            )
-          : 0;
-
-      const mapper = new OrgCensusToCensusResultMapper();
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-
-      if (!newCensusID) {
-        alert('Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.');
-        return;
-      }
-
-      // Rollover data from current census to new census (only if we have a valid source census)
-      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-      if (sourceCensusID !== undefined && sourceCensusID !== null) {
-        await Promise.all(
-          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ incoming: {} })
-            });
-          })
-        );
-      } else {
-        ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
-      }
-
-      // Notify parent that census list needs refresh
-      if (onCensusListChanged) {
-        onCensusListChanged();
-      }
-
-      ailogger.info(`New census created successfully: Census ${highestPlotCensusNumber + 1}`);
-    } catch (error) {
-      ailogger.error('Error creating census:', error as Error);
-      alert('Failed to create census. Please try again.');
-    } finally {
-      // Debounce: prevent rapid successive clicks
-      setTimeout(() => setIsCreatingCensus(false), 1000);
-    }
-  };
-
-  // Check if "Add New Census" button should be disabled
-  const isAddCensusDisabled =
-    isCreatingCensus ||
-    // Prevent creation if current census has no measurements
-    (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) ||
-    // Prevent creation if any census in the list has no measurements
-    censusList?.some(census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate);
 
   return (
     <Select
@@ -177,41 +88,6 @@ export default function CensusSelector({ onCensusListChanged }: CensusSelectorPr
       data-testid="census-select-component"
       aria-label="Select a Census. Required field for accessing measurement tools"
     >
-      <ListItem>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            padding: '8px 12px'
-          }}
-        >
-          <Typography level="body-sm" color="primary">
-            Add New Census
-          </Typography>
-          <IconButton
-            aria-label="add new census icon button"
-            size="sm"
-            color="primary"
-            data-testid="add-new-census-button"
-            tabIndex={0}
-            disabled={isAddCensusDisabled}
-            onKeyDown={event => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                event.stopPropagation();
-                handleCreateNewCensus();
-              }
-            }}
-            onClick={handleCreateNewCensus}
-          >
-            <AddIcon />
-          </IconButton>
-        </Box>
-      </ListItem>
-      <Divider orientation="horizontal" sx={{ my: 1 }} />
-
       {Array.isArray(censusList) &&
         censusList
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))

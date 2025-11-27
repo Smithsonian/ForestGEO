@@ -3,14 +3,16 @@
  *
  * Handles plot selection in the sidebar
  * Uses Zustand store for state management
+ *
+ * Simplified version - editing functionality moved to dashboard cards
  */
 
 'use client';
 
-import { Select, Option, Typography, Stack, SelectOption, Box, List, ListItem, ListDivider } from '@mui/joy';
+import { Select, Option, Typography, Stack, SelectOption, Box, ListItem, ListDivider } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import { CheckCircle, Cancel } from '@mui/icons-material';
 
 export default function PlotSelector() {
@@ -18,6 +20,9 @@ export default function PlotSelector() {
   const plotList = useAppStore(state => state.plotList);
   const setPlot = useAppStore(state => state.setPlot);
   const setCensus = useAppStore(state => state.setCensus);
+
+  // Control dropdown open state to prevent scroll reset
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const renderPlotValue = useCallback(
     (option: SelectOption<number> | null) => {
@@ -89,86 +94,93 @@ export default function PlotSelector() {
     return { plotsWithQuadrats: withQuadrats, plotsWithoutQuadrats: withoutQuadrats };
   }, [plotList]);
 
-  // Helper to render a plot option
-  const renderPlotOption = useCallback(
-    (plot: Plot) => (
-      <Option aria-label={`plot name option: ${plot?.plotName}`} data-testid="plot-selection-option" key={plot?.plotID} value={plot?.plotID}>
-        <Stack direction="column" alignItems="start" className="sidebar-item">
-          <Typography level="body-md" data-testid="plot-selection-option-name">
-            {plot?.plotName}
-          </Typography>
-          <Typography level="body-sm" color={plot?.numQuadrats && plot.numQuadrats > 0 ? 'success' : 'neutral'}>
-            &mdash; {plot?.numQuadrats && plot.numQuadrats > 0 ? `Quadrats: ${plot.numQuadrats}` : 'No Quadrats'}
-          </Typography>
-        </Stack>
-      </Option>
-    ),
-    []
-  );
-
-  // Build grouped options using List and ListItem with sticky headers (Joy UI pattern)
+  // Build plot options with grouping headers
   const plotOptions = useMemo(() => {
-    const groups: React.ReactNode[] = [];
+    const options: React.ReactNode[] = [];
 
-    // Add plots with quadrats first (if any exist)
+    // Add "With Quadrats" section header and plots
     if (plotsWithQuadrats.length > 0) {
-      groups.push(
-        <React.Fragment key="with-quadrats-group">
-          <List aria-labelledby="select-group-with-quadrats" sx={{ '--ListItemDecorator-size': '28px' }}>
-            <ListItem
-              id="select-group-with-quadrats"
-              sticky
-              sx={{
-                bgcolor: 'success.softBg',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1
-              }}
-            >
-              <CheckCircle sx={{ fontSize: 16, color: 'success.600' }} />
-              <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.700', fontWeight: 'lg' }}>
-                With Quadrats ({plotsWithQuadrats.length})
-              </Typography>
-            </ListItem>
-            {plotsWithQuadrats.map(plot => renderPlotOption(plot))}
-          </List>
-        </React.Fragment>
+      options.push(
+        <ListItem
+          key="header-with-quadrats"
+          sticky
+          sx={{
+            bgcolor: 'success.softBg',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            py: 0.5,
+            px: 1.5
+          }}
+        >
+          <CheckCircle sx={{ fontSize: 16, color: 'success.600' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.700', fontWeight: 'lg' }}>
+            With Quadrats ({plotsWithQuadrats.length})
+          </Typography>
+        </ListItem>
       );
+
+      plotsWithQuadrats.forEach(plot => {
+        options.push(
+          <Option key={plot?.plotID} value={plot?.plotID} aria-label={`plot name option: ${plot?.plotName}`} data-testid="plot-selection-option">
+            <Stack direction="column" alignItems="start" className="sidebar-item">
+              <Typography level="body-md" data-testid="plot-selection-option-name">
+                {plot?.plotName}
+              </Typography>
+              <Typography level="body-sm" color="success">
+                &mdash; Quadrats: {plot?.numQuadrats}
+              </Typography>
+            </Stack>
+          </Option>
+        );
+      });
     }
 
     // Add divider between sections if both exist
     if (plotsWithQuadrats.length > 0 && plotsWithoutQuadrats.length > 0) {
-      groups.push(<ListDivider key="section-divider" role="none" />);
+      options.push(<ListDivider key="section-divider" role="none" />);
     }
 
-    // Add plots without quadrats (if any exist)
+    // Add "Without Quadrats" section header and plots
     if (plotsWithoutQuadrats.length > 0) {
-      groups.push(
-        <React.Fragment key="without-quadrats-group">
-          <List aria-labelledby="select-group-without-quadrats" sx={{ '--ListItemDecorator-size': '28px' }}>
-            <ListItem
-              id="select-group-without-quadrats"
-              sticky
-              sx={{
-                bgcolor: 'neutral.softBg',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1
-              }}
-            >
-              <Cancel sx={{ fontSize: 16, color: 'neutral.500' }} />
-              <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.600', fontWeight: 'lg' }}>
-                Without Quadrats ({plotsWithoutQuadrats.length})
-              </Typography>
-            </ListItem>
-            {plotsWithoutQuadrats.map(plot => renderPlotOption(plot))}
-          </List>
-        </React.Fragment>
+      options.push(
+        <ListItem
+          key="header-without-quadrats"
+          sticky
+          sx={{
+            bgcolor: 'neutral.softBg',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            py: 0.5,
+            px: 1.5
+          }}
+        >
+          <Cancel sx={{ fontSize: 16, color: 'neutral.500' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.600', fontWeight: 'lg' }}>
+            Without Quadrats ({plotsWithoutQuadrats.length})
+          </Typography>
+        </ListItem>
       );
+
+      plotsWithoutQuadrats.forEach(plot => {
+        options.push(
+          <Option key={plot?.plotID} value={plot?.plotID} aria-label={`plot name option: ${plot?.plotName}`} data-testid="plot-selection-option">
+            <Stack direction="column" alignItems="start" className="sidebar-item">
+              <Typography level="body-md" data-testid="plot-selection-option-name">
+                {plot?.plotName}
+              </Typography>
+              <Typography level="body-sm" color="neutral">
+                &mdash; No Quadrats
+              </Typography>
+            </Stack>
+          </Option>
+        );
+      });
     }
 
-    return groups;
-  }, [plotsWithQuadrats, plotsWithoutQuadrats, renderPlotOption]);
+    return options;
+  }, [plotsWithQuadrats, plotsWithoutQuadrats]);
 
   return (
     <Select<number>
@@ -180,17 +192,19 @@ export default function PlotSelector() {
       size="md"
       renderValue={renderPlotValue}
       value={currentPlot?.plotID ?? null}
+      listboxOpen={isDropdownOpen}
+      onListboxOpenChange={open => {
+        setIsDropdownOpen(open);
+      }}
+      onClose={() => setIsDropdownOpen(false)}
       onChange={handlePlotChange}
       data-testid="plot-select-component"
       aria-label="Select a Plot. Required field for accessing measurement tools"
       slotProps={{
         listbox: {
-          component: 'div',
           sx: {
             maxHeight: 300,
-            overflow: 'auto',
-            '--List-padding': '0px',
-            '--ListItem-radius': '0px'
+            overflow: 'auto'
           }
         }
       }}

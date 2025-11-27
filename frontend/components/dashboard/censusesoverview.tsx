@@ -361,13 +361,12 @@ function CensusCard({ census, index, onDelete }: CensusCardProps) {
             <LinearProgress
               determinate
               value={progressPercent}
+              color={progressPercent >= 90 ? 'success' : 'primary'}
               sx={{
                 bgcolor: 'rgba(0,0,0,0.2)',
-                '--LinearProgress-progressThickness': '4px',
+                '--LinearProgress-thickness': '4px',
                 '--LinearProgress-radius': '2px',
-                '& .MuiLinearProgress-bar': {
-                  bgcolor: progressPercent >= 90 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(255,255,255,0.8)'
-                }
+                '--LinearProgress-progressColor': progressPercent >= 90 ? 'rgba(34, 197, 94, 0.9)' : 'rgba(255,255,255,0.8)'
               }}
               aria-label={`Quadrat coverage: ${progressPercent}%`}
             />
