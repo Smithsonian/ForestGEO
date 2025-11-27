@@ -18,17 +18,39 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef<boolean>(true);
 
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error('Site must be selected!');
 
-  // Function to refresh data with proper error handling
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Abort any pending fetch on unmount
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Function to refresh data with proper error handling and cancellation
   const refreshData = useCallback(
     (searchValue: string) => {
+      // Don't fetch if site is not selected
+      if (!currentSite?.schemaName) {
+        return;
+      }
+
+      // Abort previous request if still pending
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+
       setLoading(true);
       setError(null); // Clear previous errors
 
-      fetch(`/api/formsearch/${dataType}?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(searchValue)}`)
+      fetch(`/api/formsearch/${dataType}?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(searchValue)}`, {
+        signal: abortControllerRef.current.signal
+      })
         .then(response => {
           if (!response.ok) {
             throw new Error(`Failed to fetch: ${response.statusText}`);
@@ -36,26 +58,46 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
           return response.json();
         })
         .then(data => {
-          setOptions(data);
-          setError(null); // Clear error on success
+          // Only update state if component is still mounted
+          if (isMountedRef.current) {
+            setOptions(data);
+            setError(null); // Clear error on success
+          }
         })
         .catch(err => {
-          const errorMessage = `Failed to load ${dataType} options. Please try again.`;
-          setError(errorMessage);
-          ailogger.error('Error fetching data:', err);
+          // Ignore abort errors - they're expected when cancelling
+          if (err.name === 'AbortError') {
+            return;
+          }
+          if (isMountedRef.current) {
+            const errorMessage = `Failed to load ${dataType} options. Please try again.`;
+            setError(errorMessage);
+            ailogger.error('Error fetching data:', err);
+          }
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (isMountedRef.current) {
+            setLoading(false);
+          }
+        });
     },
-    [dataType, currentSite.schemaName]
+    [dataType, currentSite?.schemaName]
   );
 
-  // Initial fetch on mount
+  // Initial fetch on mount (only if site is selected)
   useEffect(() => {
-    refreshData('');
-  }, [refreshData]);
+    if (currentSite?.schemaName) {
+      refreshData('');
+    }
+  }, [refreshData, currentSite?.schemaName]);
 
   // Debounced fetch on input change - single consolidated effect
   useEffect(() => {
+    // Don't set up debounce if site is not selected
+    if (!currentSite?.schemaName) {
+      return;
+    }
+
     // Clear any pending timer
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -72,7 +114,16 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [inputValue, refreshData]);
+  }, [inputValue, refreshData, currentSite?.schemaName]);
+
+  // Show a message if site is not selected
+  if (!currentSite) {
+    return (
+      <Box>
+        <TextField fullWidth label={dataType} disabled placeholder="Please select a site first" aria-label={`${dataType} - site selection required`} />
+      </Box>
+    );
+  }
 
   return (
     <Box>
