@@ -30,13 +30,6 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
   const percentValue = typeof populatedPercent === 'string' ? parseFloat(populatedPercent) : populatedPercent;
   const unpopulatedCount = unpopulatedQuadrats.filter(q => q.trim().length > 0).length;
 
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (onViewUnpopulated && (event.key === 'Enter' || event.key === ' ')) {
-      event.preventDefault();
-      onViewUnpopulated();
-    }
-  };
-
   return (
     <Card
       variant="outlined"
@@ -157,32 +150,52 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
 
         {unpopulatedCount > 0 && (
           <Tooltip title="Quadrats without measurements" arrow>
-            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-            <Chip
-              variant="soft"
-              color="warning"
-              size="lg"
-              component={onViewUnpopulated ? 'button' : 'div'}
-              startDecorator={<PendingIcon />}
-              onClick={onViewUnpopulated}
-              onKeyDown={handleKeyDown}
-              sx={{
-                px: 2,
-                py: 1,
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                cursor: onViewUnpopulated ? 'pointer' : 'default',
-                transition: 'all 0.2s ease',
-                '&:hover': onViewUnpopulated
-                  ? {
+            {onViewUnpopulated ? (
+              <button
+                type="button"
+                onClick={onViewUnpopulated}
+                aria-label={`View ${unpopulatedCount} unpopulated quadrats`}
+                style={{
+                  all: 'unset',
+                  cursor: 'pointer'
+                }}
+              >
+                <Chip
+                  variant="soft"
+                  color="warning"
+                  size="lg"
+                  startDecorator={<PendingIcon />}
+                  sx={{
+                    px: 2,
+                    py: 1,
+                    fontWeight: 600,
+                    fontSize: '0.875rem',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
                       transform: 'translateY(-2px)',
                       boxShadow: designTokens.shadows.sm
                     }
-                  : {}
-              }}
-            >
-              {unpopulatedCount} Pending
-            </Chip>
+                  }}
+                >
+                  {unpopulatedCount} Pending
+                </Chip>
+              </button>
+            ) : (
+              <Chip
+                variant="soft"
+                color="warning"
+                size="lg"
+                startDecorator={<PendingIcon />}
+                sx={{
+                  px: 2,
+                  py: 1,
+                  fontWeight: 600,
+                  fontSize: '0.875rem'
+                }}
+              >
+                {unpopulatedCount} Pending
+              </Chip>
+            )}
           </Tooltip>
         )}
       </Stack>

@@ -20,16 +20,9 @@ import CensusSelector from './censusselector';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { PlotLogo, CensusLogo } from '@/components/icons';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { useState } from 'react';
 
 interface NewSidebarProps {
-  /**
-   * Callback when plot edit is requested
-   * Can be used to open plot edit modal
-   */
-  onPlotEdit?: (plot: Plot) => void;
-
   /**
    * Callback when census list changes (new census created)
    * Can be used to refresh census list data
@@ -37,7 +30,7 @@ interface NewSidebarProps {
   onCensusListChanged?: () => void;
 }
 
-export default function NewSidebar({ onPlotEdit, onCensusListChanged }: NewSidebarProps) {
+export default function NewSidebar({ onCensusListChanged }: NewSidebarProps) {
   const currentSite = useAppStore(state => state.currentSite);
   const currentPlot = useAppStore(state => state.currentPlot);
   const currentCensus = useAppStore(state => state.currentCensus);
@@ -91,7 +84,7 @@ export default function NewSidebar({ onPlotEdit, onCensusListChanged }: NewSideb
                 <PlotLogo />
               </Avatar>
               <Box sx={{ flexGrow: 1, marginLeft: '0.5em' }}>
-                <PlotSelector onPlotEdit={onPlotEdit} />
+                <PlotSelector />
               </Box>
             </Box>
           )}
