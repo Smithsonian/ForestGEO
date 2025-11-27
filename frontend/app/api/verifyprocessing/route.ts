@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
   const schema = searchParams.get('schema');
   const plotID = searchParams.get('plotID');
   const censusID = searchParams.get('censusID');
+  // Optional fileId parameter to filter by current upload session
+  const fileId = searchParams.get('fileId');
 
   if (!schema || !plotID || !censusID) {
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters: schema, plotID, censusID' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -20,17 +22,31 @@ export async function GET(request: NextRequest) {
 
   // Validate schema to prevent SQL injection
   let tempSQL: string, processedSQL: string, failedSQL: string;
+  let tempParams: (string | number)[];
+  let failedParams: (string | number)[];
+
   try {
-    tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
-    // safeFormatQuery now handles multiple ?? placeholders automatically
-    // IMPORTANT: This counts ALL rows for the plot/census combination, not just from the current upload
-    // This is necessary because MeasurementDate is the field measurement date, not the upload date
-    // For historical data uploads (e.g., measurements from 2020), date filters would exclude valid data
+    // If fileId is provided, filter temporarymeasurements and failedmeasurements by it
+    // This allows tracking current upload progress vs cumulative totals
+    if (fileId) {
+      tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
+      tempParams = [plotID, censusID, fileId];
+      // failedmeasurements also has FileID column for tracking
+      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
+      failedParams = [plotID, censusID, fileId];
+    } else {
+      tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
+      tempParams = [plotID, censusID];
+      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+      failedParams = [plotID, censusID];
+    }
+
+    // coremeasurements doesn't have FileID, so we always get cumulative count
+    // This is acceptable since processed rows are the "successful" count
     processedSQL = safeFormatQuery(
       schema,
       'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ?'
     );
-    failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifyprocessing: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -40,24 +56,27 @@ export async function GET(request: NextRequest) {
 
   try {
     // Check how many rows remain in temporary measurements (should be 0 or very few after processing)
-    const tempResult = await connectionManager.executeQuery(tempSQL, [plotID, censusID]);
+    const tempResult = await connectionManager.executeQuery(tempSQL, tempParams);
 
     // Check how many rows were processed into the main measurements table
     const processedResult = await connectionManager.executeQuery(processedSQL, [plotID, censusID]);
 
     // Check how many rows failed during ingestion and were moved to failedmeasurements
-    const failedResult = await connectionManager.executeQuery(failedSQL, [plotID, censusID]);
+    const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
 
     const remainingCount = tempResult[0]?.count || 0;
     const processedCount = processedResult[0]?.count || 0;
     const failedCount = failedResult[0]?.count || 0;
 
     // Total accounted for = processed + failed (remaining in temp should be 0)
-    // NOTE: These are cumulative counts for this plot/census, not just from the current upload
     const totalAccounted = processedCount + failedCount;
+    const filteringByFile = !!fileId;
 
     ailogger.info(
-      `Processing verification for Plot ${plotID}, Census ${censusID}: ${processedCount} total rows in coremeasurements, ${failedCount} total rows in failedmeasurements, ${remainingCount} remaining in temporarymeasurements. Cumulative total: ${totalAccounted}`
+      `Processing verification for Plot ${plotID}, Census ${censusID}${fileId ? ` (FileID: ${fileId})` : ''}: ` +
+        `${processedCount} total rows in coremeasurements, ${failedCount} rows in failedmeasurements${filteringByFile ? ' (filtered)' : ''}, ` +
+        `${remainingCount} remaining in temporarymeasurements${filteringByFile ? ' (filtered)' : ''}. ` +
+        `Total: ${totalAccounted}`
     );
 
     return new NextResponse(
@@ -69,6 +88,8 @@ export async function GET(request: NextRequest) {
         plotID,
         censusID,
         schema,
+        fileId: fileId || null,
+        filteredByUpload: filteringByFile,
         processingComplete: remainingCount === 0
       }),
       { status: HTTPResponses.OK }

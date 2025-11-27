@@ -218,11 +218,7 @@ export async function GET(request: Request) {
   if (deepCheck) {
     try {
       // Check database configuration
-      const hasDbConfig = !!(
-        process.env.AZURE_SQL_SERVER &&
-        process.env.AZURE_SQL_USER &&
-        process.env.AZURE_SQL_PASSWORD
-      );
+      const hasDbConfig = !!(process.env.AZURE_SQL_SERVER && process.env.AZURE_SQL_USER && process.env.AZURE_SQL_PASSWORD);
 
       if (hasDbConfig) {
         checks.push({
@@ -240,10 +236,7 @@ export async function GET(request: Request) {
       }
 
       // Check storage configuration
-      const hasStorageConfig = !!(
-        process.env.AZURE_STORAGE_CONNECTION_STRING ||
-        process.env.AZURE_STORAGE_SAS_CONNECTION_STRING
-      );
+      const hasStorageConfig = !!(process.env.AZURE_STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_SAS_CONNECTION_STRING);
 
       if (hasStorageConfig) {
         checks.push({

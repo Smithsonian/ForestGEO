@@ -3,8 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FailedMeasurementsModal from './failedmeasurementsmodal';
 
-// Mock dependencies
-vi.mock('@/app/contexts/userselectionprovider', () => ({
+// Mock dependencies - must match actual import path in component
+vi.mock('@/app/contexts/compat-hooks', () => ({
   usePlotContext: () => ({ plotID: 1, plotName: 'Test Plot' }),
   useOrgCensusContext: () => ({ dateRanges: [{ censusID: 1, startDate: '2024-01-01', endDate: '2024-12-31' }], plotCensusNumber: 1 }),
   useSiteContext: () => ({ schemaName: 'testschema', siteName: 'Test Site' })
@@ -38,9 +38,27 @@ describe('FailedMeasurementsModal', () => {
   describe('Bug Fix: Modal close should NOT trigger view reset', () => {
     it('should call handleCloseModal without reingestion when Close button is clicked', async () => {
       const user = userEvent.setup();
+
+      // Mock fetch to return non-zero counts to prevent auto-close
+      (global.fetch as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 5 })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 0 })
+        });
+
       render(<FailedMeasurementsModal {...defaultProps} />);
 
-      const closeButton = screen.getByRole('button', { name: /close/i });
+      // Wait for counts to load (prevents auto-close race condition)
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Clear Failed/i })).toHaveTextContent('5');
+      });
+
+      // Use exact text match for the Close button (not the ModalClose X icon button)
+      const closeButton = screen.getByRole('button', { name: 'Close' });
       await user.click(closeButton);
 
       await waitFor(() => {

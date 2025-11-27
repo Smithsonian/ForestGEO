@@ -5,6 +5,7 @@ import { FileRejection, FileWithPath, useDropzone } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
 import { FileUploadIcon } from '@/components/icons';
 import { useToast } from '@/components/toastnotification';
+import { MAX_FILE_SIZE_BYTES, MAX_FILE_SIZE_MB, formatFileSize } from '@/config/macros/uploadsystemmacros';
 
 import '@/styles/dropzone.css';
 import { subtitle } from '@/config/primitives';
@@ -133,8 +134,10 @@ export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive 
             </span>
           )}
         </div>
+        <div style={{ fontSize: '0.85rem', color: 'rgba(148, 163, 184, 0.8)', marginTop: '0.5rem' }}>Max file size: {MAX_FILE_SIZE_MB}MB per file</div>
         <div className="sr-only">
-          Supported file formats: CSV (.csv), Excel (.xlsx), and Text (.txt) files. Use Tab to navigate, Enter or Space to activate file selection.
+          Supported file formats: CSV (.csv), Excel (.xlsx), and Text (.txt) files. Maximum file size is {MAX_FILE_SIZE_MB} megabytes. Use Tab to navigate,
+          Enter or Space to activate file selection.
         </div>
       </div>
     </>
@@ -188,6 +191,17 @@ export function DropzoneLogic({ onChange }: DropzoneProps) {
       'text/csv': ['.csv'],
       'text/xlsx': ['.xlsx'],
       'text/text': ['.txt']
+    },
+    maxSize: MAX_FILE_SIZE_BYTES,
+    validator: file => {
+      // Custom validator for more detailed error messages
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        return {
+          code: 'file-too-large',
+          message: `File is too large (${formatFileSize(file.size)}). Maximum allowed size is ${MAX_FILE_SIZE_MB}MB.`
+        };
+      }
+      return null;
     }
   });
 

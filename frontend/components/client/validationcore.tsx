@@ -75,7 +75,9 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     try {
       const validationProcedureNames = Object.keys(validationMessages);
 
-      for (const procedureName of validationProcedureNames) {
+      // Run validations in parallel for better performance
+      // Use Promise.allSettled to handle individual failures without stopping other validations
+      const validationPromises = validationProcedureNames.map(async procedureName => {
         const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
 
         try {
@@ -95,15 +97,21 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           if (!response.ok) {
             throw new Error(`Error executing ${procedureName}`);
           }
-          setValidationProgress(prevProgress => ({
-            ...prevProgress,
-            [procedureName]: 100
-          }));
+
+          if (isMounted.current) {
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [procedureName]: 100
+            }));
+          }
+
+          return { procedureName, success: true };
         } catch (error: any) {
           if (error.name === 'AbortError') {
             ailogger.info(`Fetch aborted for ${procedureName}`);
-            return; // Exit early if the request was aborted.
+            throw error; // Re-throw abort errors
           }
+
           ailogger.error(`Error performing validation for ${procedureName}:`, error);
           if (isMounted.current) {
             setApiErrors(prev => [...prev, `Failed to execute ${procedureName}: ${error.message}`]);
@@ -112,8 +120,26 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               [procedureName]: -1
             }));
           }
+
+          return { procedureName, success: false, error: error.message };
         }
+      });
+
+      // Wait for all validations to complete (or fail)
+      const results = await Promise.allSettled(validationPromises);
+
+      // Check if any validation was aborted (indicating request cancellation)
+      const wasAborted = results.some(result => result.status === 'rejected' && result.reason?.name === 'AbortError');
+
+      if (wasAborted) {
+        ailogger.info('Validation process was aborted');
+        return;
       }
+
+      // Log validation summary
+      const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+      const failCount = results.filter(r => r.status === 'fulfilled' && !r.value?.success).length;
+      ailogger.info(`Parallel validation complete: ${successCount} succeeded, ${failCount} failed`);
 
       try {
         if (isMounted.current) {

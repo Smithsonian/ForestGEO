@@ -3,6 +3,19 @@ import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
 
+// File upload constraints
+export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
+export const MAX_FILE_SIZE_MB = 500;
+export const MAX_TOTAL_UPLOAD_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB total per upload session
+
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export interface UploadStartProps {
   // state vars
   uploadForm: FormType | undefined;

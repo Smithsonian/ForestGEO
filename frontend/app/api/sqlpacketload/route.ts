@@ -29,6 +29,10 @@ function generateIdempotencyKey(fileName: string, plotId: number, censusId: numb
  * Generate a hash of the chunk content for idempotency checking
  * CRITICAL: Hashes ALL rows in the chunk to uniquely identify this specific chunk
  * This prevents false duplicate detection when different chunks have the same row count
+ *
+ * Uses full SHA-256 hash (64 chars) instead of truncated MD5 for:
+ * - Stronger collision resistance
+ * - Better uniqueness guarantees for large datasets
  */
 function hashChunkContent(fileRowSet: FileRowSet): string {
   const rows = Object.values(fileRowSet);
@@ -36,7 +40,8 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   // Sort rows by a consistent key to ensure same data produces same hash regardless of order
   const sortedRows = rows.map(row => JSON.stringify(row)).sort();
   const data = sortedRows.join('|');
-  return crypto.createHash('md5').update(data).digest('hex').substring(0, 12);
+  // Use full SHA-256 hash for better collision resistance
+  return crypto.createHash('sha256').update(data).digest('hex');
 }
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -103,17 +108,17 @@ export async function POST(request: NextRequest) {
     const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, contentHash);
 
     // DUPLICATE DETECTION: Check for exact content match using sample data from the chunk
-    // CRITICAL FIX: Previous logic only compared row counts, causing data loss when
-    // different chunks happened to have the same number of rows. Now we check actual content.
+    // Checks first, middle, and last rows to increase detection accuracy while minimizing DB queries
+    // This prevents false negatives where first/last match but middle differs (different chunks)
     try {
-      // Get sample rows from the current chunk to verify against database
       const chunkRows = Object.values(fileRowSet);
       if (chunkRows.length > 0) {
-        // Check if the first and last rows of this chunk already exist
+        // Select sample rows: first, middle, and last for comprehensive coverage
         const firstRow = chunkRows[0];
         const lastRow = chunkRows[chunkRows.length - 1];
+        const middleRow = chunkRows.length >= 3 ? chunkRows[Math.floor(chunkRows.length / 2)] : null;
 
-        // Build a query to check for these specific rows (not just any rows with same count)
+        // Build a query to check for these specific rows
         const duplicateCheckSQL = format(
           `SELECT COUNT(*) as matchCount FROM ??.temporarymeasurements
            WHERE FileID = ? AND PlotID = ? AND CensusID = ?
@@ -122,42 +127,42 @@ export async function POST(request: NextRequest) {
           [schema]
         );
 
-        const formattedFirstDate = firstRow.date ? moment(firstRow.date).format('YYYY-MM-DD') : null;
-        const firstRowCheck = await connectionManager.executeQuery(duplicateCheckSQL, [
-          fileName,
-          plot?.plotID ?? -1,
-          censusCookie,
-          firstRow.tag,
-          firstRow.stemtag || null,
-          firstRow.spcode,
-          firstRow.quadrat,
-          firstRow.lx || null,
-          firstRow.ly || null,
-          firstRow.dbh || null,
-          formattedFirstDate
-        ]);
+        // Helper function to check a single row
+        const checkRowExists = async (row: FileRow): Promise<boolean> => {
+          const formattedDate = row.date ? moment(row.date).format('YYYY-MM-DD') : null;
+          const result = await connectionManager.executeQuery(duplicateCheckSQL, [
+            fileName,
+            plot?.plotID ?? -1,
+            censusCookie,
+            row.tag,
+            row.stemtag || null,
+            row.spcode,
+            row.quadrat,
+            row.lx || null,
+            row.ly || null,
+            row.dbh || null,
+            formattedDate
+          ]);
+          return result[0]?.matchCount > 0;
+        };
 
-        // Also check last row to reduce false positives
-        const formattedLastDate = lastRow.date ? moment(lastRow.date).format('YYYY-MM-DD') : null;
-        const lastRowCheck = await connectionManager.executeQuery(duplicateCheckSQL, [
-          fileName,
-          plot?.plotID ?? -1,
-          censusCookie,
-          lastRow.tag,
-          lastRow.stemtag || null,
-          lastRow.spcode,
-          lastRow.quadrat,
-          lastRow.lx || null,
-          lastRow.ly || null,
-          lastRow.dbh || null,
-          formattedLastDate
-        ]);
+        // Check all sample rows in parallel for efficiency
+        const checksToPerform = [checkRowExists(firstRow), checkRowExists(lastRow)];
+        if (middleRow) {
+          checksToPerform.push(checkRowExists(middleRow));
+        }
 
-        // Only flag as duplicate if BOTH first and last rows already exist
-        if (firstRowCheck[0]?.matchCount > 0 && lastRowCheck[0]?.matchCount > 0) {
+        const [firstExists, lastExists, middleExists] = await Promise.all(checksToPerform);
+
+        // Require ALL checked rows to exist for duplicate detection
+        // This reduces false positives while catching true duplicates
+        const allCheckedRowsExist = middleRow ? firstExists && lastExists && middleExists : firstExists && lastExists;
+
+        if (allCheckedRowsExist) {
+          const rowsChecked = middleRow ? 'first, middle, and last' : 'first and last';
           ailogger.info(
-            `Duplicate chunk detected for ${fileName} - first and last rows already exist in database. ` +
-              `Idempotency key: ${idempotencyKey}. Skipping to prevent data duplication.`
+            `Duplicate chunk detected for ${fileName} - ${rowsChecked} rows already exist in database. ` +
+              `Content hash: ${contentHash}. Idempotency key: ${idempotencyKey}. Skipping to prevent data duplication.`
           );
           return new NextResponse(
             JSON.stringify({
@@ -167,7 +172,8 @@ export async function POST(request: NextRequest) {
               transactionCompleted: true,
               batchID: 'duplicate-skipped',
               isDuplicate: true,
-              idempotencyKey
+              idempotencyKey,
+              contentHash
             }),
             { status: HTTPResponses.OK }
           );
@@ -243,10 +249,50 @@ export async function POST(request: NextRequest) {
             ]);
 
             if (checkResult[0]?.cnt === 0) {
-              // This row was dropped - add to failing rows with reason
+              // This row was dropped - try to identify the specific reason
+              let failureReason = 'Row dropped by INSERT IGNORE';
+
+              // Check if there's a duplicate row with same key fields in this file (different batch)
+              const duplicateCheckSQL = format(
+                `SELECT BatchID, TreeTag, StemTag, QuadratName FROM ??.temporarymeasurements
+                 WHERE FileID = ? AND PlotID = ? AND CensusID = ?
+                 AND TreeTag = ? AND StemTag <=> ? AND QuadratName = ?
+                 LIMIT 1`,
+                [schema]
+              );
+              const dupResult = await connectionManager.executeQuery(duplicateCheckSQL, [
+                fileName,
+                plot?.plotID ?? -1,
+                censusCookie,
+                row.tag,
+                row.stemtag || null,
+                row.quadrat
+              ]);
+
+              if (dupResult.length > 0) {
+                const existingBatch = dupResult[0].BatchID;
+                failureReason = `Duplicate row: TreeTag=${row.tag}, StemTag=${row.stemtag || 'null'}, Quadrat=${row.quadrat} already exists in batch ${existingBatch}`;
+              } else {
+                // Check for data validation issues
+                const issues: string[] = [];
+                if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
+                if (!row.spcode || row.spcode.trim() === '') issues.push('empty SpeciesCode');
+                if (!row.quadrat || row.quadrat.trim() === '') issues.push('empty QuadratName');
+                if (row.dbh !== undefined && row.dbh !== null && (isNaN(Number(row.dbh)) || Number(row.dbh) < 0)) issues.push(`invalid DBH value: ${row.dbh}`);
+                if (row.hom !== undefined && row.hom !== null && (isNaN(Number(row.hom)) || Number(row.hom) < 0)) issues.push(`invalid HOM value: ${row.hom}`);
+                if (row.lx !== undefined && row.lx !== null && isNaN(Number(row.lx))) issues.push(`invalid LocalX value: ${row.lx}`);
+                if (row.ly !== undefined && row.ly !== null && isNaN(Number(row.ly))) issues.push(`invalid LocalY value: ${row.ly}`);
+
+                if (issues.length > 0) {
+                  failureReason = `Data validation failed: ${issues.join('; ')}`;
+                } else {
+                  failureReason = `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${formattedDate})`;
+                }
+              }
+
               droppedRows.push({
                 ...row,
-                failureReason: 'Row was silently dropped by INSERT IGNORE - likely duplicate or constraint violation'
+                failureReason
               });
             }
           }
@@ -274,7 +320,7 @@ export async function POST(request: NextRequest) {
               row.hom || null,
               row.date ? moment(row.date).format('YYYY-MM-DD') : null,
               row.codes || null,
-              'Row silently dropped by INSERT IGNORE - likely duplicate or constraint violation'
+              row.failureReason || 'Unknown error during insert'
             ]);
 
             try {

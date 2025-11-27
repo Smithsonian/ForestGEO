@@ -1,5 +1,8 @@
 /**
  * Utility functions for detecting and validating file delimiters
+ *
+ * Caching is now session-scoped with time-based expiration to prevent
+ * cross-user cache collisions and memory buildup.
  */
 
 import { parseLineWithDelimiter } from './csvparserutils';
@@ -18,19 +21,91 @@ export interface DelimiterValidationResult {
   preview: string[][];
 }
 
+// Cache entry with timestamp for expiration
+interface CacheEntry<T> {
+  result: T;
+  timestamp: number;
+  sessionId?: string;
+}
+
+// Cache configuration
+const CACHE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_CACHE_SIZE = 100;
+
+// Session-scoped caches with timestamps
+const delimiterCache = new Map<string, CacheEntry<DelimiterDetectionResult>>();
+
+/**
+ * Generate a session-aware cache key
+ */
+function getCacheKey(file: File, sessionId?: string, ...extras: string[]): string {
+  const fileKey = `${file.name}-${file.size}-${file.lastModified}`;
+  const sessionPart = sessionId ? `-session:${sessionId}` : '';
+  const extraPart = extras.length > 0 ? `-${extras.join('-')}` : '';
+  return `${fileKey}${sessionPart}${extraPart}`;
+}
+
+/**
+ * Check if cache entry is expired
+ */
+function isCacheExpired<T>(entry: CacheEntry<T>): boolean {
+  return Date.now() - entry.timestamp > CACHE_EXPIRY_MS;
+}
+
+/**
+ * Clean expired entries from a cache
+ */
+function cleanExpiredEntries<T>(cache: Map<string, CacheEntry<T>>): void {
+  const now = Date.now();
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.timestamp > CACHE_EXPIRY_MS) {
+      cache.delete(key);
+    }
+  }
+}
+
+/**
+ * Clear all cache entries for a specific session
+ */
+export function clearSessionCache(sessionId: string): void {
+  for (const [key] of delimiterCache.entries()) {
+    if (key.includes(`-session:${sessionId}`)) {
+      delimiterCache.delete(key);
+    }
+  }
+  for (const [key] of validationCache.entries()) {
+    if (key.includes(`-session:${sessionId}`)) {
+      validationCache.delete(key);
+    }
+  }
+}
+
+/**
+ * Clear all caches (useful for testing or memory pressure)
+ */
+export function clearAllCaches(): void {
+  delimiterCache.clear();
+  validationCache.clear();
+}
+
 /**
  * Analyzes file content to detect the most likely delimiter
+ * @param file - The file to analyze
+ * @param sessionId - Optional session ID for scoped caching
  */
-// Cache to prevent excessive file reads
-const delimiterCache = new Map<string, DelimiterDetectionResult>();
+export async function detectDelimiter(file: File, sessionId?: string): Promise<DelimiterDetectionResult> {
+  // Clean expired entries periodically
+  if (delimiterCache.size > MAX_CACHE_SIZE / 2) {
+    cleanExpiredEntries(delimiterCache);
+  }
 
-export async function detectDelimiter(file: File): Promise<DelimiterDetectionResult> {
-  // Create cache key based on file characteristics
-  const cacheKey = `${file.name}-${file.size}-${file.lastModified}`;
+  // Create session-aware cache key
+  const cacheKey = getCacheKey(file, sessionId);
 
-  // Return cached result if available
-  if (delimiterCache.has(cacheKey)) {
-    return delimiterCache.get(cacheKey)!;
+  // Return cached result if available and not expired
+  const cached = delimiterCache.get(cacheKey);
+  if (cached && !isCacheExpired(cached)) {
+    return cached.result;
   }
 
   return new Promise((resolve, reject) => {
@@ -41,14 +116,19 @@ export async function detectDelimiter(file: File): Promise<DelimiterDetectionRes
         const content = e.target?.result as string;
         const result = analyzeDelimiters(content);
 
-        // Cache the result
-        delimiterCache.set(cacheKey, result);
+        // Cache the result with timestamp
+        delimiterCache.set(cacheKey, {
+          result,
+          timestamp: Date.now(),
+          sessionId
+        });
 
         // Limit cache size to prevent memory issues
-        if (delimiterCache.size > 50) {
-          const firstKey = delimiterCache.keys().next().value;
-          if (firstKey !== undefined) {
-            delimiterCache.delete(firstKey);
+        if (delimiterCache.size > MAX_CACHE_SIZE) {
+          // Remove oldest entries first
+          const entries = Array.from(delimiterCache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
+          for (let i = 0; i < entries.length - MAX_CACHE_SIZE; i++) {
+            delimiterCache.delete(entries[i][0]);
           }
         }
 
@@ -149,17 +229,30 @@ function calculateVariance(numbers: number[]): number {
 /**
  * Validates a delimiter by parsing a preview of the file
  */
-// Cache for validation results
-const validationCache = new Map<string, DelimiterValidationResult>();
+// Session-scoped cache for validation results
+const validationCache = new Map<string, CacheEntry<DelimiterValidationResult>>();
 
-export async function validateDelimiter(file: File, delimiter: string, expectedHeaders?: string[]): Promise<DelimiterValidationResult> {
-  // Create cache key
+/**
+ * Validates a delimiter by parsing a preview of the file
+ * @param file - The file to validate
+ * @param delimiter - The delimiter to test
+ * @param expectedHeaders - Optional list of expected header names
+ * @param sessionId - Optional session ID for scoped caching
+ */
+export async function validateDelimiter(file: File, delimiter: string, expectedHeaders?: string[], sessionId?: string): Promise<DelimiterValidationResult> {
+  // Clean expired entries periodically
+  if (validationCache.size > MAX_CACHE_SIZE / 2) {
+    cleanExpiredEntries(validationCache);
+  }
+
+  // Create session-aware cache key
   const expectedHeadersStr = expectedHeaders ? expectedHeaders.sort().join(',') : '';
-  const cacheKey = `${file.name}-${file.size}-${file.lastModified}-${delimiter}-${expectedHeadersStr}`;
+  const cacheKey = getCacheKey(file, sessionId, delimiter, expectedHeadersStr);
 
-  // Return cached result if available
-  if (validationCache.has(cacheKey)) {
-    return validationCache.get(cacheKey)!;
+  // Return cached result if available and not expired
+  const cached = validationCache.get(cacheKey);
+  if (cached && !isCacheExpired(cached)) {
+    return cached.result;
   }
 
   return new Promise((resolve, reject) => {
@@ -170,14 +263,19 @@ export async function validateDelimiter(file: File, delimiter: string, expectedH
         const content = e.target?.result as string;
         const result = validateDelimiterContent(content, delimiter, expectedHeaders);
 
-        // Cache the result
-        validationCache.set(cacheKey, result);
+        // Cache the result with timestamp
+        validationCache.set(cacheKey, {
+          result,
+          timestamp: Date.now(),
+          sessionId
+        });
 
-        // Limit cache size
-        if (validationCache.size > 100) {
-          const firstKey = validationCache.keys().next().value;
-          if (firstKey !== undefined) {
-            validationCache.delete(firstKey);
+        // Limit cache size to prevent memory issues
+        if (validationCache.size > MAX_CACHE_SIZE) {
+          // Remove oldest entries first
+          const entries = Array.from(validationCache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
+          for (let i = 0; i < entries.length - MAX_CACHE_SIZE; i++) {
+            validationCache.delete(entries[i][0]);
           }
         }
 
