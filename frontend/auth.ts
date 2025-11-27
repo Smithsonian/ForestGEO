@@ -34,19 +34,8 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
             method: 'GET'
           });
           if (!response.ok) {
-            // Log the error but don't throw - allow session to continue with defaults
-            // This handles guest users who may not be in the authorization database yet
-            console.error(`Auth API returned ${response.status} for ${token.email} - user may be a guest or not yet registered`);
-            const errorText = await response.text().catch(() => 'Unable to read error response');
-            console.error('Auth API error details:', errorText);
-
-            // Set default values so the session can continue
-            // User will have limited access until properly registered
-            session.user.userStatus = 'pending';
-            session.user.sites = [];
-            session.user.allsites = [];
-            await submitCookie('user', token.email ?? '');
-            return session;
+            console.error('auth response not okay');
+            throw new Error('API call FAILURE!');
           }
 
           const data = await response.json();
@@ -55,13 +44,8 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
           session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
         } catch (error) {
-          // Network errors or other failures - don't block the session
-          // Allow user to authenticate with limited access
-          console.error('Error fetching user data (allowing session with defaults):', error);
-          session.user.userStatus = 'pending';
-          session.user.sites = [];
-          session.user.allsites = [];
-          await submitCookie('user', token.email ?? '').catch(() => {});
+          console.error('Error fetching user data:', error);
+          throw error;
         }
       }
       return session;
