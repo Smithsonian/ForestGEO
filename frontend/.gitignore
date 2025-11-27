@@ -64,3 +64,6 @@ yarn-error.log*
 /playwright/.cache/
 /.jscpd/
 **/.logs/*
+
+# Documentation (auto-generated)
+/docs/upload-system-robustness-improvements.md

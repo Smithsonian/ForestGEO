@@ -110,7 +110,8 @@ export interface GridSelections {
   value: number;
 }
 
-export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew';
+// 'pending' status is used for users who authenticated via Azure AD but are not yet registered in the database
+export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew' | 'pending';
 
 export interface SpecialProcessingProps {
   connectionManager: ConnectionManager;

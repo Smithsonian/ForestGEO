@@ -76,32 +76,35 @@ export async function GET(
         async (transactionID: string) => {
           ailogger.info(`Transaction ${transactionID} started for ${fileID}-${batchID} (attempt ${attempt})`);
 
-          // Acquire application-level lock for this file to prevent concurrent processing
-          // Lock timeout should match transaction timeout to avoid premature failures when other batches are processing
-          const lockTimeoutMs = 5 * 60 * 1000; // 5 minutes - allow time for other batches to complete
-          const lockAcquired = await connectionManager.acquireApplicationLock(`file:${fileID}`, transactionID, lockTimeoutMs);
-          if (!lockAcquired) {
-            throw new Error(`Failed to acquire application lock for file ${fileID} after ${lockTimeoutMs / 1000}s`);
-          }
+          // Lock timeout - allow time for large batches to complete
+          const lockTimeoutMs = 5 * 60 * 1000; // 5 minutes
 
-          // Get plotID and censusID for plot+census-level locking
+          // Get plotID and censusID first for compound lock
           const plotCensusQuery = safeFormatQuery(
             schema,
             'SELECT DISTINCT PlotID, CensusID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? LIMIT 1'
           );
           const plotCensusResult = await connectionManager.executeQuery(plotCensusQuery, [fileID, batchID], transactionID);
 
+          let lockKey: string;
           if (plotCensusResult && plotCensusResult.length > 0) {
             const { PlotID, CensusID } = plotCensusResult[0];
-
-            // Acquire plot+census-level lock to prevent concurrent uploads to same plot/census
-            // Use same timeout as file lock for consistency
-            const plotCensusLockAcquired = await connectionManager.acquireApplicationLock(`plot:${PlotID}:census:${CensusID}`, transactionID, lockTimeoutMs);
-            if (!plotCensusLockAcquired) {
-              throw new Error(`Another upload is in progress for Plot ${PlotID}, Census ${CensusID}. Please wait for it to complete.`);
-            }
-            ailogger.info(`Acquired plot+census lock for Plot ${PlotID}, Census ${CensusID}`);
+            // Use single compound lock that includes file, plot, and census
+            // This prevents concurrent processing of the same data while avoiding lock ordering issues
+            lockKey = `upload:file:${fileID}:plot:${PlotID}:census:${CensusID}`;
+            ailogger.info(`Using compound lock: ${lockKey}`);
+          } else {
+            // Fallback to file-only lock if plot/census not found
+            lockKey = `upload:file:${fileID}`;
+            ailogger.warn(`No plot/census found for ${fileID}-${batchID}, using file-only lock`);
           }
+
+          // Acquire single compound lock
+          const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, transactionID, lockTimeoutMs);
+          if (!lockAcquired) {
+            throw new Error(`Failed to acquire upload lock (${lockKey}) after ${lockTimeoutMs / 1000}s. Another upload may be in progress.`);
+          }
+          ailogger.info(`Acquired upload lock: ${lockKey}`);
 
           const queryStart = Date.now();
           // Use pre-validated and formatted SQL to prevent injection
