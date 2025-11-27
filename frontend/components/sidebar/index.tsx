@@ -20,23 +20,13 @@ import CensusSelector from './censusselector';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { PlotLogo, CensusLogo } from '@/components/icons';
-import { useState } from 'react';
-
-interface NewSidebarProps {
-  /**
-   * Callback when census list changes (new census created)
-   * Can be used to refresh census list data
-   */
-  onCensusListChanged?: () => void;
-}
-
-export default function NewSidebar({ onCensusListChanged }: NewSidebarProps) {
+export default function NewSidebar() {
   const currentSite = useAppStore(state => state.currentSite);
   const currentPlot = useAppStore(state => state.currentPlot);
   const currentCensus = useAppStore(state => state.currentCensus);
 
-  // Track sidebar width for GlobalStyles
-  const [sidebarWidth] = useState(designTokens.sizes.sidebarMin);
+  // Use constant sidebar width from design tokens
+  const sidebarWidth = designTokens.sizes.sidebarMin;
 
   return (
     <SidebarContainer>
@@ -97,7 +87,7 @@ export default function NewSidebar({ onCensusListChanged }: NewSidebarProps) {
                   <CensusLogo />
                 </Avatar>
                 <Box sx={{ flexGrow: 1, marginLeft: '0.5em' }}>
-                  <CensusSelector onCensusListChanged={onCensusListChanged} />
+                  <CensusSelector />
                 </Box>
               </Box>
               <Divider orientation="horizontal" sx={{ marginTop: 2, width: '100%' }} />

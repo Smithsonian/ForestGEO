@@ -25,35 +25,28 @@ import {
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckIcon from '@mui/icons-material/Check';
-import NatureIcon from '@mui/icons-material/Nature';
-import ParkIcon from '@mui/icons-material/Park';
-import PeopleIcon from '@mui/icons-material/People';
-import CategoryIcon from '@mui/icons-material/Category';
 import PublicIcon from '@mui/icons-material/Public';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useOrgCensusListContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
+import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
-// Eager load for maximum speed (bundle size not a concern)
-import ProgressTachometer from '@/components/metrics/progresstachometer';
-import ProgressPieChart from '@/components/metrics/progresspiechart';
 
 // Enhanced Visual Components
-import MetricCard from '@/components/dashboard/metriccard';
-import ProgressCard from '@/components/dashboard/progresscard';
 import EmptyState from '@/components/emptystate';
 import SitesOverview from '@/components/dashboard/sitesoverview';
 import PlotsOverview from '@/components/dashboard/plotsoverview';
 import CensusesOverview from '@/components/dashboard/censusesoverview';
+import CensusStatsView from '@/components/dashboard/censusstatsview';
+import DataQualityCard from '@/components/dashboard/dataqualitycard';
 import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
 import DatasetIcon from '@mui/icons-material/Dataset';
@@ -86,6 +79,7 @@ export default function DashboardPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const censusListContext = useOrgCensusListContext();
   const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
@@ -113,7 +107,6 @@ export default function DashboardPage() {
     CountMultiStems: 0,
     CountNewRecruits: 0
   });
-  const [toggleSwitch, setToggleSwitch] = useState(true);
 
   // Plot edit modal state
   const [plotToEdit, setPlotToEdit] = useState<Plot | null>(null);
@@ -124,6 +117,9 @@ export default function DashboardPage() {
   const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);
   const [openDeleteCensusModal, setOpenDeleteCensusModal] = useState(false);
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
+
+  // Census creation state
+  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
 
   // Track loading state and last loaded key to prevent duplicate requests
   const loadingRef = useRef<boolean>(false);
@@ -205,17 +201,6 @@ export default function DashboardPage() {
   }, [currentSite, currentPlot, currentCensus]);
 
   // Memoized event handlers to prevent unnecessary re-renders
-  const handleChartToggle = useCallback(() => {
-    setToggleSwitch(prev => !prev);
-  }, []);
-
-  const handleChartToggleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      setToggleSwitch(prev => !prev);
-    }
-  }, []);
-
   const handleFeedbackKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -274,11 +259,70 @@ export default function DashboardPage() {
     }
   }, [censusToDelete, currentSite?.schemaName]);
 
-  const handleAddCensus = useCallback(() => {
-    // Navigate to the census creation workflow or trigger census creation
-    // For now, navigate to the census selector area in the sidebar
-    router.push('/fixeddatainput/census');
-  }, [router]);
+  const handleAddCensus = useCallback(async () => {
+    if (isCreatingCensus) return; // Prevent multiple clicks
+
+    // Check if current census has measurements
+    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
+      setError('Cannot create a new census: Current census has no measurements.');
+      return;
+    }
+
+    // Check if any existing census has no measurements
+    const censusWithoutMeasurements = censusListContext?.find(
+      census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate
+    );
+
+    if (censusWithoutMeasurements) {
+      setError(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
+      return;
+    }
+
+    setIsCreatingCensus(true);
+    setError(null);
+
+    try {
+      const highestPlotCensusNumber =
+        censusListContext && censusListContext.length > 0
+          ? censusListContext.reduce(
+              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
+              censusListContext[0]?.plotCensusNumber ?? 0
+            )
+          : 0;
+
+      const mapper = new OrgCensusToCensusResultMapper();
+      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+      if (!newCensusID) {
+        setError('Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.');
+        return;
+      }
+
+      // Rollover data from current census to new census (only if we have a valid source census)
+      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+      if (sourceCensusID !== undefined && sourceCensusID !== null) {
+        await Promise.all(
+          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ incoming: {} })
+            });
+          })
+        );
+      } else {
+        ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
+      }
+
+      // Trigger a manual reset to reload the census list
+      setManualReset(true);
+    } catch (error) {
+      ailogger.error('Error creating census:', error instanceof Error ? error : undefined);
+      setError('Failed to create census. Please try again.');
+    } finally {
+      // Debounce: prevent rapid successive clicks
+      setTimeout(() => setIsCreatingCensus(false), 1000);
+    }
+  }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot]);
 
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
@@ -489,254 +533,41 @@ export default function DashboardPage() {
         />
       ) : (
         <>
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: {
-                xs: '1fr',
-                sm: 'repeat(2, 1fr)',
-                md: 'repeat(2, 1fr)',
-                lg: 'repeat(4, 1fr)'
-              },
-              gap: 3
-            }}
-          >
-            <MetricCard
-              title="Total Trees"
-              value={countTrees}
-              icon={<ParkIcon sx={{ fontSize: 32 }} />}
-              gradient="primary"
-              isLoading={isLoading}
-              trend={{
-                value: hasData ? 'Current census' : 'No data',
-                direction: 'neutral'
-              }}
-            />
+          {/* New Enhanced Census Statistics View */}
+          <CensusStatsView
+            countTrees={countTrees}
+            countStems={countStems}
+            stemTypes={stemTypes}
+            progressTacho={progressTacho}
+            activeUsers={activeUsers}
+            isLoading={isLoading}
+          />
 
-            <MetricCard
-              title="Total Stems"
-              value={countStems}
-              icon={<NatureIcon sx={{ fontSize: 32 }} />}
-              gradient="success"
+          {/* Data Quality Section - Post-Census Validation Statistics */}
+          <Box>
+            <Typography level="title-lg" sx={{ fontWeight: 600, mb: 2 }}>
+              Data Quality
+            </Typography>
+            <DataQualityCard
+              schema={currentSite?.schemaName}
+              plotID={currentPlot?.plotID}
+              censusID={currentCensus?.dateRanges[0].censusID}
               isLoading={isLoading}
-              trend={{
-                value: hasData ? `${(countStems / Math.max(countTrees, 1)).toFixed(1)} per tree` : 'No data',
-                direction: 'neutral'
-              }}
-            />
-
-            <MetricCard
-              title="Active Personnel"
-              value={activeUsers}
-              icon={<PeopleIcon sx={{ fontSize: 32 }} />}
-              gradient="info"
-              isLoading={isLoading}
-              trend={{
-                value: activeUsers > 0 ? 'Currently active' : 'No activity',
-                direction: activeUsers > 0 ? 'up' : 'neutral'
-              }}
-            />
-
-            <MetricCard
-              title="New Recruits"
-              value={stemTypes.CountNewRecruits}
-              icon={<CategoryIcon sx={{ fontSize: 32 }} />}
-              gradient="warning"
-              isLoading={isLoading}
-              trend={{
-                value: hasData ? 'This census' : 'No data',
-                direction: 'neutral'
-              }}
-            />
-          </Box>
-
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: {
-                xs: '1fr',
-                lg: '1fr 2fr'
-              },
-              gap: 3
-            }}
-          >
-            <ProgressCard
-              totalQuadrats={progressTacho.TotalQuadrats}
-              populatedQuadrats={progressTacho.PopulatedQuadrats}
-              populatedPercent={progressTacho.PopulatedPercent}
-              unpopulatedQuadrats={progressTacho.UnpopulatedQuadrats}
-              isLoading={isLoading}
-            />
-
-            {/* Census Statistics - Interactive Charts */}
-            <Card
-              variant="outlined"
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: designTokens.shadows.md,
-                  borderColor: 'primary.outlinedBorder'
+              onRefresh={async () => {
+                // Trigger measurements summary refresh with post-validation execution
+                if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges[0].censusID) {
+                  await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      plotID: currentPlot.plotID,
+                      censusID: currentCensus.dateRanges[0].censusID,
+                      runPostValidation: true
+                    })
+                  });
                 }
               }}
-              aria-labelledby="census-statistics-heading"
-            >
-              <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography id="census-statistics-heading" level="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-                    Census Visualization
-                  </Typography>
-                  <Typography level="body-sm" color="neutral">
-                    {toggleSwitch ? 'Tachometer View' : 'Pie Chart View'} - Click to toggle
-                  </Typography>
-                </Box>
-
-                {/* Only show chart if there are measurements */}
-                {hasData ? (
-                  <Box
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={toggleSwitch}
-                    aria-label={toggleSwitch ? 'Switch to pie chart view' : 'Switch to tachometer view'}
-                    sx={{
-                      height: '400px',
-                      width: '100%',
-                      cursor: 'pointer',
-                      transition: 'transform 0.2s ease',
-                      '&:hover': {
-                        transform: 'scale(1.02)'
-                      }
-                    }}
-                    onClick={handleChartToggle}
-                    onKeyDown={handleChartToggleKeyDown}
-                  >
-                    {toggleSwitch ? (
-                      <ProgressTachometer {...progressTacho} aria-label="Quadrat population tachometer chart" />
-                    ) : (
-                      <ProgressPieChart {...progressTacho} stemTypes={stemTypes} aria-label="Stem types pie chart" />
-                    )}
-                  </Box>
-                ) : (
-                  <Box sx={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Typography level="body-lg" color="neutral" textAlign="center">
-                      No measurements recorded for this census yet.
-                    </Typography>
-                  </Box>
-                )}
-
-                <Divider orientation="horizontal" />
-
-                {/* Detailed Statistics Grid */}
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, 1fr)',
-                    gap: 2,
-                    mt: 1
-                  }}
-                >
-                  <Box
-                    sx={{
-                      p: 2,
-                      borderRadius: 'sm',
-                      bgcolor: 'background.level1',
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        bgcolor: 'background.level2'
-                      }
-                    }}
-                  >
-                    <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
-                      Stem Type Breakdown
-                    </Typography>
-                    <Stack spacing={1}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">Old Stems:</Typography>
-                        <Chip size="sm" variant="soft" color="neutral">
-                          {stemTypes.CountOldStems.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">Multi Stems:</Typography>
-                        <Chip size="sm" variant="soft" color="primary">
-                          {stemTypes.CountMultiStems.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">New Recruits:</Typography>
-                        <Chip size="sm" variant="soft" color="success">
-                          {stemTypes.CountNewRecruits.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                    </Stack>
-                  </Box>
-
-                  <Box
-                    sx={{
-                      p: 2,
-                      borderRadius: 'sm',
-                      bgcolor: 'background.level1',
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        bgcolor: 'background.level2'
-                      }
-                    }}
-                  >
-                    <Typography level="body-xs" color="neutral" sx={{ mb: 0.5 }}>
-                      Quadrat Coverage
-                    </Typography>
-                    <Stack spacing={1}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">With Data:</Typography>
-                        <Chip size="sm" variant="soft" color="success">
-                          {progressTacho.PopulatedQuadrats.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">Without Data:</Typography>
-                        <Chip size="sm" variant="soft" color="warning">
-                          {progressTacho.UnpopulatedQuadrats.length.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography level="body-sm">Total Quadrats:</Typography>
-                        <Chip size="sm" variant="soft" color="neutral">
-                          {progressTacho.TotalQuadrats.toLocaleString()}
-                        </Chip>
-                      </Stack>
-                    </Stack>
-                  </Box>
-                </Box>
-
-                <Divider orientation="horizontal" />
-
-                <Tooltip title={isPulsing ? undefined : 'This form creates and submits a Github issue!'}>
-                  <Chip
-                    component="div"
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Open feedback form"
-                    variant="soft"
-                    color="primary"
-                    size="lg"
-                    startDecorator={<HelpOutlineOutlinedIcon fontSize="medium" />}
-                    onClick={triggerPulse}
-                    onKeyDown={handleFeedbackKeyDown}
-                    sx={{
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        transform: 'translateY(-2px)',
-                        boxShadow: designTokens.shadows.sm
-                      }
-                    }}
-                  >
-                    <Typography level="body-md">Have feedback? Click here!</Typography>
-                  </Chip>
-                </Tooltip>
-              </CardContent>
-            </Card>
+            />
           </Box>
 
           {/* User Info and Recent Activity Section */}

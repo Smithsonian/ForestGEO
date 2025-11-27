@@ -135,11 +135,21 @@ export interface UseUploadStateReturn {
  * }
  */
 export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?: boolean): UseUploadStateReturn {
+  // Determine initial review state:
+  // 1. If skipToProcessing is true, go directly to UPLOAD_SQL (reingestion mode)
+  // 2. If form type is pre-determined (overrideUploadForm), skip START and go to UPLOAD_FILES
+  // 3. Otherwise, start at START state
+  const getInitialReviewState = (): ReviewStates => {
+    if (skipToProcessing) return ReviewStates.UPLOAD_SQL;
+    if (overrideUploadForm) return ReviewStates.UPLOAD_FILES;
+    return ReviewStates.START;
+  };
+
   // Use reducer for complex state management
   const [state, dispatch] = useReducer(uploadStateReducer, {
     ...initialState,
     uploadForm: overrideUploadForm,
-    reviewState: skipToProcessing ? ReviewStates.UPLOAD_SQL : ReviewStates.START
+    reviewState: getInitialReviewState()
   });
 
   // Convenience setters - support both values and updater functions

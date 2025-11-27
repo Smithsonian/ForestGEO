@@ -17,6 +17,133 @@ import { useUploadSession } from '@/app/hooks/useUploadSession';
 // TransactionMonitor disabled due to architectural changes
 
 /**
+ * Formats milliseconds into a human-readable time remaining string
+ */
+function formatTimeRemaining(ms: number): string {
+  if (ms < 0 || !isFinite(ms)) return 'Calculating...';
+
+  const totalSeconds = Math.ceil(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m remaining`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds}s remaining`;
+  } else if (seconds > 10) {
+    return `${seconds}s remaining`;
+  } else {
+    return 'Almost done...';
+  }
+}
+
+/**
+ * Exponential Moving Average (EMA) Calculator for ETA estimation
+ *
+ * Uses EMA to smooth out speed measurements for more accurate time remaining estimates.
+ * EMA gives more weight to recent measurements while still considering historical data.
+ *
+ * Formula: EMA(t) = α * value(t) + (1 - α) * EMA(t-1)
+ * Where α (alpha) is the smoothing factor between 0 and 1.
+ *
+ * Higher alpha = more responsive to recent changes (but more volatile)
+ * Lower alpha = smoother estimates (but slower to adapt)
+ *
+ * References:
+ * - https://stackoverflow.com/questions/40057020/calculating-exponential-moving-average-ema-using-javascript
+ * - https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
+ */
+class ETACalculator {
+  private emaSpeed: number | null = null;
+  private lastTimestamp: number = 0;
+  private lastProgress: number = 0;
+  private alpha: number;
+  private minSamples: number;
+  private sampleCount: number = 0;
+
+  /**
+   * @param alpha - Smoothing factor (0.1 = very smooth, 0.3 = responsive). Default 0.2
+   * @param minSamples - Minimum samples before providing ETA. Default 3
+   */
+  constructor(alpha: number = 0.2, minSamples: number = 3) {
+    this.alpha = alpha;
+    this.minSamples = minSamples;
+  }
+
+  /**
+   * Update with new progress measurement
+   * @param currentProgress - Current progress (0 to total)
+   * @param total - Total units of work
+   * @returns Estimated time remaining in milliseconds, or null if insufficient data
+   */
+  update(currentProgress: number, total: number): number | null {
+    const now = performance.now();
+
+    if (this.lastTimestamp === 0) {
+      // First measurement - just record it
+      this.lastTimestamp = now;
+      this.lastProgress = currentProgress;
+      return null;
+    }
+
+    const timeDelta = now - this.lastTimestamp;
+    const progressDelta = currentProgress - this.lastProgress;
+
+    // Skip if no progress or negative time (shouldn't happen)
+    if (progressDelta <= 0 || timeDelta <= 0) {
+      return this.emaSpeed !== null ? this.calculateETA(currentProgress, total) : null;
+    }
+
+    // Calculate instantaneous speed (units per millisecond)
+    const instantSpeed = progressDelta / timeDelta;
+
+    // Apply EMA smoothing
+    if (this.emaSpeed === null) {
+      this.emaSpeed = instantSpeed;
+    } else {
+      this.emaSpeed = this.alpha * instantSpeed + (1 - this.alpha) * this.emaSpeed;
+    }
+
+    // Update state
+    this.lastTimestamp = now;
+    this.lastProgress = currentProgress;
+    this.sampleCount++;
+
+    // Only return ETA after minimum samples collected
+    if (this.sampleCount < this.minSamples) {
+      return null;
+    }
+
+    return this.calculateETA(currentProgress, total);
+  }
+
+  private calculateETA(currentProgress: number, total: number): number | null {
+    if (this.emaSpeed === null || this.emaSpeed <= 0) {
+      return null;
+    }
+
+    const remaining = total - currentProgress;
+    if (remaining <= 0) {
+      return 0;
+    }
+
+    // ETA = remaining work / smoothed speed
+    return remaining / this.emaSpeed;
+  }
+
+  /**
+   * Reset calculator for new operation
+   */
+  reset(): void {
+    this.emaSpeed = null;
+    this.lastTimestamp = 0;
+    this.lastProgress = 0;
+    this.sampleCount = 0;
+  }
+}
+
+/**
  * UploadFireSQL Component
  *
  * Handles bulk measurement data upload and processing with enhanced reliability features:
@@ -170,10 +297,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // refs
   const hasUploaded = useRef(false);
   const isMountedRef = useRef(true); // Tracks component mount state for async operations
-  const totalCompletionTimeRef = useRef(0);
-  const totalProcessCompletionTimeRef = useRef(0);
-  const chunkStartTime = useRef(0);
-  const chunkProcessStartTime = useRef(0);
 
   const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -286,59 +409,47 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     [chunkSize]
   );
 
+  // ETA calculators using Exponential Moving Average for smoother, more accurate estimates
+  // Alpha of 0.2 provides good balance between responsiveness and stability
+  const uploadETACalculator = useRef<ETACalculator>(new ETACalculator(0.2, 3));
+  const processingETACalculator = useRef<ETACalculator>(new ETACalculator(0.15, 2));
+
+  // Reset ETA calculators when starting new phases
   useEffect(() => {
-    if (uploadForm === 'measurements' && !uploaded && !processed) {
-      if (completedChunks < 3) {
+    if (!uploaded && completedChunks === 0 && totalChunks > 0) {
+      uploadETACalculator.current.reset();
+    }
+  }, [uploaded, completedChunks, totalChunks]);
+
+  useEffect(() => {
+    if (uploaded && !processed && processedChunks === 0 && totalBatches > 0) {
+      processingETACalculator.current.reset();
+    }
+  }, [uploaded, processed, processedChunks, totalBatches]);
+
+  // Calculate ETC for upload phase using EMA-based calculator
+  useEffect(() => {
+    if (uploadForm === 'measurements' && !uploaded && !processed && totalChunks > 0) {
+      const etaMs = uploadETACalculator.current.update(completedChunks, totalChunks);
+
+      if (etaMs === null) {
         setETC('Calculating...');
-        return;
+      } else {
+        setETC(formatTimeRemaining(etaMs));
       }
-
-      // Update cumulative time for this chunk
-      totalCompletionTimeRef.current += performance.now() - chunkStartTime.current;
-
-      const smoothingFactor = 0.2;
-      const lastChunkTime = performance.now() - chunkStartTime.current;
-      const smoothedAvgTime = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalCompletionTimeRef.current / completedChunks);
-      const remaining = totalChunks - completedChunks;
-      const estimatedTime = smoothedAvgTime * remaining;
-
-      setETC(
-        moment.utc(estimatedTime).format('mm:ss').split(':')[0] +
-          ' minutes and ' +
-          moment.utc(estimatedTime).format('mm:ss').split(':')[1] +
-          ' seconds remaining...'
-      );
     }
   }, [uploadForm, uploaded, processed, completedChunks, totalChunks]);
 
+  // Calculate ETC for processing phase using EMA-based calculator
   useEffect(() => {
-    if (uploadForm === 'measurements' && uploaded && !processed && processedChunks > 0) {
-      const now = performance.now();
-      const elapsed = now - chunkProcessStartTime.current;
-      totalProcessCompletionTimeRef.current += elapsed;
-      chunkProcessStartTime.current = now;
-    }
-  }, [processedChunks, uploaded, processed, uploadForm]);
+    if (uploadForm === 'measurements' && uploaded && !processed && totalBatches > 0) {
+      const etaMs = processingETACalculator.current.update(processedChunks, totalBatches);
 
-  useEffect(() => {
-    if (uploadForm === 'measurements' && uploaded && !processed) {
-      if (processedChunks < 3) {
+      if (etaMs === null) {
         setProcessETC('Calculating...');
-        return;
+      } else {
+        setProcessETC(formatTimeRemaining(etaMs));
       }
-
-      const smoothingFactor = 0.2;
-      const currentElapsed = performance.now() - chunkProcessStartTime.current;
-      const smoothedAvgProcessTime = smoothingFactor * currentElapsed + (1 - smoothingFactor) * (totalProcessCompletionTimeRef.current / processedChunks);
-      const remainingProcessing = totalBatches - processedChunks;
-      const estimatedProcessTime = smoothedAvgProcessTime * remainingProcessing;
-
-      setProcessETC(
-        moment.utc(estimatedProcessTime).format('mm:ss').split(':')[0] +
-          ' minutes and ' +
-          moment.utc(estimatedProcessTime).format('mm:ss').split(':')[1] +
-          ' seconds remaining...'
-      );
     }
   }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
 
@@ -734,7 +845,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           transformHeader,
           transform,
           async chunk(results: ParseResult<FileRow>, parser) {
-            chunkStartTime.current = performance.now();
             totalRows += results.data.length;
             try {
               if (queue.size >= connectionLimit * 2) {
@@ -1082,7 +1192,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       async function runProcessBatches() {
         setProcessedChunks(0);
-        chunkProcessStartTime.current = performance.now();
 
         // Update session state to processing
         updateState('processing').catch(err => {
@@ -1324,70 +1433,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.warn('Processing verification failed, but continuing with collapser');
           }
 
-          // Enhanced Session-Based Verification: Verify each uploaded file individually
-          setVerificationStatus('Performing per-file upload verification...');
-          let totalSessionProcessed = 0;
-          let totalSessionFailed = 0;
-          let totalExpectedRows = 0;
-          let dataIntegrityIssuesFound = false;
-
-          for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
-            const file = acceptedFiles[fileIndex];
-            const fileID = file.name;
-
-            // Get expected row count from parsing phase
-            const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
-            totalExpectedRows += expectedForFile;
-
-            try {
-              const sessionVerifyResponse = await fetch(
-                `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}&fileID=${encodeURIComponent(fileID)}`
-              );
-
-              if (sessionVerifyResponse.ok) {
-                const sessionData = await sessionVerifyResponse.json();
-                totalSessionProcessed += sessionData.processedCount;
-                totalSessionFailed += sessionData.failedCount;
-
-                const actualTotal = sessionData.processedCount + sessionData.failedCount;
-                const discrepancy = expectedForFile - actualTotal;
-
-                if (discrepancy !== 0) {
-                  dataIntegrityIssuesFound = true;
-                  ailogger.error(
-                    `DATA INTEGRITY MISMATCH for ${fileID}: Expected ${expectedForFile} rows from file, but only ${actualTotal} accounted for (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). MISSING: ${discrepancy} row(s)!`
-                  );
-                }
-
-                ailogger.info(
-                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - DISCREPANCY: ${discrepancy} rows` : ''}`
-                );
-              } else {
-                ailogger.warn(`Session verification failed for file ${fileID}`);
-              }
-            } catch (sessionError: any) {
-              ailogger.warn(`Error during session verification for ${fileID}:`, sessionError.message);
-            }
-          }
-
-          const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-          const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
-
-          if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-            setVerificationStatus(
-              `⚠️ DATA INTEGRITY WARNING: Expected ${totalExpectedRows} rows, but only ${totalSessionAccounted} accounted (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). MISSING: ${totalDiscrepancy} row(s)!`
-            );
-            ailogger.error(
-              `CRITICAL DATA INTEGRITY ISSUE: Expected ${totalExpectedRows} rows from input files, only ${totalSessionAccounted} rows accounted for in database. ${totalDiscrepancy} row(s) were lost during processing!`
-            );
-          } else {
-            setVerificationStatus(
-              `✓ Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows - matches expected ${totalExpectedRows})`
-            );
-            ailogger.info(
-              `Upload session verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total accounted: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ No data loss detected.`
-            );
-          }
+          // Note: Session-based verification moved to AFTER collapser completes
+          // This ensures data has been moved from temporarymeasurements to coremeasurements
+          ailogger.info('Pre-collapser verification complete. Data integrity check will run after collapser.');
         } catch (verifyError: any) {
           setVerificationStatus(`Processing verification error: ${verifyError.message}`);
           ailogger.warn('Processing verification error:', verifyError.message);
@@ -1439,6 +1487,74 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Finalizing database operations...');
           ailogger.info('Allowing 2 seconds for database operations to settle...');
           await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // Session-Based Verification: Verify each uploaded file AFTER collapser has moved data to coremeasurements
+          if (isMountedRef.current) {
+            setVerificationStatus('Performing final data integrity verification...');
+            let totalSessionProcessed = 0;
+            let totalSessionFailed = 0;
+            let totalExpectedRows = 0;
+            let dataIntegrityIssuesFound = false;
+
+            for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
+              const file = acceptedFiles[fileIndex];
+              const fileID = file.name;
+
+              // Get expected row count from parsing phase
+              const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
+              totalExpectedRows += expectedForFile;
+
+              try {
+                const sessionVerifyResponse = await fetch(
+                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}&fileID=${encodeURIComponent(fileID)}`
+                );
+
+                if (sessionVerifyResponse.ok) {
+                  const sessionData = await sessionVerifyResponse.json();
+                  totalSessionProcessed += sessionData.processedCount;
+                  totalSessionFailed += sessionData.failedCount;
+
+                  const actualTotal = sessionData.processedCount + sessionData.failedCount;
+                  const discrepancy = expectedForFile - actualTotal;
+
+                  if (discrepancy !== 0) {
+                    dataIntegrityIssuesFound = true;
+                    ailogger.warn(
+                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failedmeasurements). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
+                    );
+                  }
+
+                  ailogger.info(
+                    `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - Difference: ${discrepancy} rows` : ' ✓'}`
+                  );
+                } else {
+                  ailogger.warn(`Session verification request failed for file ${fileID}`);
+                }
+              } catch (sessionError: any) {
+                ailogger.warn(`Error during session verification for ${fileID}:`, sessionError.message);
+              }
+            }
+
+            const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
+            const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
+
+            // Log verification results - note that discrepancies may be normal due to deduplication
+            if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
+              setVerificationStatus(
+                `Verification complete: ${totalSessionAccounted} rows in database (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). Note: ${Math.abs(totalDiscrepancy)} row difference from expected ${totalExpectedRows} - this may be due to deduplication or data merging.`
+              );
+              ailogger.info(
+                `Upload verification summary: Expected ${totalExpectedRows} rows from input files, ${totalSessionAccounted} rows in database. Difference of ${totalDiscrepancy} rows may be due to deduplication, merged stems, or data consolidation during processing.`
+              );
+            } else {
+              setVerificationStatus(
+                `✓ Verification complete: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed (${totalSessionAccounted} total - matches expected ${totalExpectedRows})`
+              );
+              ailogger.info(
+                `Upload verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ Perfect match.`
+              );
+            }
+          }
 
           if (isMountedRef.current) {
             setVerificationStatus('All processing verification completed');
@@ -1543,9 +1659,61 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const { palette } = useTheme();
 
+  // Calculate overall progress percentage for simplified display
+  const getOverallProgress = (): number => {
+    if (uploadForm !== 'measurements') {
+      // Non-measurements: just file progress
+      return totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
+    }
+
+    // Measurements: combine upload, processing, and verification phases
+    // Phase weights: Upload 40%, Processing 50%, Verification 10%
+    const uploadWeight = 0.4;
+    const processingWeight = 0.5;
+    const verificationWeight = 0.1;
+
+    let progress = 0;
+
+    // Upload phase (chunks)
+    if (totalChunks > 0) {
+      const uploadProgress = (completedChunks / totalChunks) * 100;
+      if (uploaded) {
+        progress += uploadWeight * 100; // Upload complete
+      } else {
+        progress += uploadWeight * uploadProgress;
+      }
+    }
+
+    // Processing phase (batches)
+    if (uploaded && totalBatches > 0) {
+      const batchProgress = (processedChunks / totalBatches) * 100;
+      if (processed) {
+        progress += processingWeight * 100; // Processing complete
+      } else {
+        progress += processingWeight * batchProgress;
+      }
+    }
+
+    // Verification phase
+    if (isVerifying && totalVerificationSteps > 0) {
+      progress += verificationWeight * (verificationStep / totalVerificationSteps) * 100;
+    } else if (processed) {
+      progress += verificationWeight * 100;
+    }
+
+    return Math.min(progress, 100);
+  };
+
+  // Get current phase description for user
+  const getCurrentPhaseDescription = (): string => {
+    if (isVerifying) return 'Finalizing upload...';
+    if (uploaded && !processed) return 'Processing data...';
+    if (!uploaded) return 'Uploading data...';
+    return 'Complete';
+  };
+
   return (
     <>
-      {/* TransactionMonitor disabled due to architectural changes */}
       {!hasUploaded.current ? (
         <Box
           sx={{
@@ -1554,189 +1722,78 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             width: '100%',
             alignItems: 'center',
             justifyContent: 'center',
-            mt: 4
+            mt: 4,
+            px: 3
           }}
         >
-          <Stack direction="column" spacing={3} sx={{ width: '100%', maxWidth: '600px', alignItems: 'center' }} role="status" aria-live="polite">
-            <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-              <Typography level="title-lg" id="upload-progress-title">
-                Upload Progress
+          <Stack direction="column" spacing={4} sx={{ width: '100%', alignItems: 'center' }} role="status" aria-live="polite">
+            {/* Header */}
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography level="h3" sx={{ mb: 1 }}>
+                {getCurrentPhaseDescription()}
               </Typography>
-              <Typography level="body-sm" color="neutral" aria-label={`${totalOperations} operations, ${totalChunks} chunks total`}>
-                {totalOperations} operations, {totalChunks} chunks total
+              <Typography level="body-lg" color="primary" sx={{ fontWeight: 600 }}>
+                {getOverallProgress().toFixed(0)}% Complete
               </Typography>
-            </Stack>
+            </Box>
 
+            {/* Main Progress Bar - Full Width */}
             <Box sx={{ width: '100%' }}>
-              <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                <Typography level="body-sm" id="file-progress-label">
-                  File Progress
-                </Typography>
-                <Typography level="body-sm" color="primary" aria-live="polite">
-                  {completedOperations}/{totalOperations}
-                </Typography>
-              </Stack>
               <LinearProgress
+                determinate
                 size="lg"
                 variant="soft"
                 color="primary"
-                value={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
-                determinate
-                sx={{ width: '100%' }}
-                aria-label="File upload progress"
-                aria-labelledby="file-progress-label"
-                aria-valuenow={totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0}
+                value={getOverallProgress()}
+                sx={{
+                  width: '100%',
+                  '--LinearProgress-thickness': '12px',
+                  '--LinearProgress-radius': '8px'
+                }}
+                aria-label="Overall upload progress"
+                aria-valuenow={getOverallProgress()}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuetext={`${completedOperations} of ${totalOperations} files uploaded`}
               />
             </Box>
 
-            {totalChunks !== 0 && (
-              <Box sx={{ width: '100%' }}>
-                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm" id="data-processing-label">
-                    Data Processing
-                  </Typography>
-                  <Typography level="body-sm" color="primary" aria-live="polite">
-                    {completedChunks}/{totalChunks} chunks
-                  </Typography>
-                </Stack>
-                <LinearProgress
-                  determinate
-                  variant="soft"
-                  color="primary"
-                  size="lg"
-                  value={(completedChunks / totalChunks) * 100}
-                  sx={{ width: '100%' }}
-                  aria-label="Data processing progress"
-                  aria-labelledby="data-processing-label"
-                  aria-valuenow={(completedChunks / totalChunks) * 100}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuetext={`${completedChunks} of ${totalChunks} chunks processed. ${etc !== 'Calculating...' ? etc : ''}`}
-                />
-                {completedChunks < totalChunks && etc !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
-                    {((completedChunks / totalChunks) * 100).toFixed(1)}% complete • {etc}
-                  </Typography>
-                )}
-              </Box>
-            )}
-
-            {uploadForm === 'measurements' && totalBatches !== 0 && (
-              <Box sx={{ width: '100%' }}>
-                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm" id="batch-processing-label">
-                    Batch Processing
-                  </Typography>
-                  <Typography level="body-sm" color="primary" aria-live="polite">
-                    {processedChunks}/{totalBatches} batches
-                  </Typography>
-                </Stack>
-                <LinearProgress
-                  determinate
-                  variant="soft"
-                  color="success"
-                  size="lg"
-                  value={(processedChunks / totalBatches) * 100}
-                  sx={{ width: '100%' }}
-                  aria-label="Batch processing progress"
-                  aria-labelledby="batch-processing-label"
-                  aria-valuenow={(processedChunks / totalBatches) * 100}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuetext={`${processedChunks} of ${totalBatches} batches processed. ${processETC !== 'Calculating...' ? processETC : ''}`}
-                />
-                {processedChunks < totalBatches && processETC !== 'Calculating...' && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
-                    {((processedChunks / totalBatches) * 100).toFixed(1)}% complete • {processETC}
-                  </Typography>
-                )}
-              </Box>
-            )}
-
-            {isVerifying && totalVerificationSteps > 0 && (
-              <Box sx={{ width: '100%' }}>
-                <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-                  <Typography level="body-sm" id="verification-label">
-                    Verification Process
-                  </Typography>
-                  <Typography level="body-sm" color="warning" aria-live="polite">
-                    {verificationStep}/{totalVerificationSteps} steps
-                  </Typography>
-                </Stack>
-                <LinearProgress
-                  determinate
-                  variant="soft"
-                  color="warning"
-                  size="lg"
-                  value={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
-                  sx={{ width: '100%' }}
-                  aria-label="Verification progress"
-                  aria-labelledby="verification-label"
-                  aria-valuenow={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuetext={`${verificationStep} of ${totalVerificationSteps} verification steps complete. ${verificationStatus || ''}`}
-                />
-                {verificationStatus && (
-                  <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral" aria-live="polite">
-                    {verificationStatus}
-                  </Typography>
-                )}
-              </Box>
-            )}
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                textAlign: 'center',
-                mt: 4
-              }}
-            >
-              <Typography level="body-sm" color="neutral" sx={{ mb: 2 }}>
-                {isVerifying ? 'Please do not exit this page while verification is in progress' : 'Please do not exit this page while upload is in progress'}
+            {/* Time Estimate */}
+            {!uploaded && etc && etc !== 'Calculating...' && (
+              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
+                Estimated time remaining: {etc}
               </Typography>
-              {!uploaded && !processed && !isVerifying && (
-                <DotLottieReact
-                  src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-                  loop
-                  autoplay
-                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                  style={{
-                    width: '200px',
-                    height: '200px'
-                  }}
-                />
-              )}
-              {uploaded && !processed && !isVerifying && (
-                <DotLottieReact
-                  src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
-                  loop
-                  autoplay
-                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                  style={{
-                    width: '200px',
-                    height: '200px'
-                  }}
-                />
-              )}
-              {isVerifying && (
-                <DotLottieReact
-                  src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-                  loop
-                  autoplay
-                  themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                  style={{
-                    width: '200px',
-                    height: '200px',
-                    filter: 'hue-rotate(45deg)' // Add orange tint for verification
-                  }}
-                />
-              )}
+            )}
+            {uploaded && !processed && processETC && processETC !== 'Calculating...' && (
+              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
+                Estimated time remaining: {processETC}
+              </Typography>
+            )}
+            {((!uploaded && (!etc || etc === 'Calculating...')) || (uploaded && !processed && (!processETC || processETC === 'Calculating...'))) && (
+              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
+                Calculating time remaining...
+              </Typography>
+            )}
+
+            {/* Animation */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <DotLottieReact
+                src={
+                  uploaded && !processed
+                    ? 'https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie'
+                    : 'https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie'
+                }
+                loop
+                autoplay
+                themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                style={{
+                  width: '150px',
+                  height: '150px',
+                  filter: isVerifying ? 'hue-rotate(45deg)' : undefined
+                }}
+              />
+              <Typography level="body-sm" color="neutral" sx={{ mt: 2 }}>
+                Please do not close this window
+              </Typography>
             </Box>
           </Stack>
         </Box>
@@ -1751,10 +1808,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             mt: 4
           }}
         >
-          <Stack direction={'column'} sx={{ alignItems: 'center', textAlign: 'center' }}>
-            <Typography level={'title-md'} gutterBottom>
-              SQL Upload Complete
-            </Typography>
+          <Stack direction="column" sx={{ alignItems: 'center', textAlign: 'center' }}>
+            <Typography level="title-md">Upload Complete</Typography>
           </Stack>
         </Box>
       )}

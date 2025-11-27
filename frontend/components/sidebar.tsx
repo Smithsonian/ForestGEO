@@ -22,8 +22,6 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
-  Menu,
-  MenuItem,
   Modal,
   ModalClose,
   ModalDialog,
@@ -31,7 +29,6 @@ import {
   Stack,
   Tooltip
 } from '@mui/joy';
-import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
@@ -45,9 +42,8 @@ import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, MoreHoriz } from '@mui/icons-material';
-import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { DeleteForever, CheckCircle, Cancel } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
@@ -165,14 +161,10 @@ export default function Sidebar(props: SidebarProps) {
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
-  const [anchorPlotEdit, setAnchorPlotEdit] = useState<HTMLElement | null>(null);
-  const [selectedPlot, setSelectedPlot] = useState<Plot>(undefined);
-  const [openPlotCardModal, setOpenPlotCardModal] = useState(false);
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
-  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
   const [adminResetDone, setAdminResetDone] = useState(false);
 
   // Clear selections when entering admin pages
@@ -189,45 +181,6 @@ export default function Sidebar(props: SidebarProps) {
       setAdminResetDone(false);
     }
   }, [isAdminPage, adminResetDone, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch]);
-
-  const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorPlotEdit(event.currentTarget);
-  };
-
-  const handleClose = useCallback(
-    (event?: MouseEvent) => {
-      const target = event?.target as HTMLElement;
-      const selectElement = sidebarRef.current?.querySelector('.plot-selection');
-      const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
-      if (menuElement?.contains(target)) {
-        return;
-      }
-      if (selectElement?.contains(target)) {
-        if (anchorPlotEdit) {
-          setAnchorPlotEdit(null);
-        }
-        return;
-      }
-      setAnchorPlotEdit(null);
-    },
-    [anchorPlotEdit]
-  );
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      handleClose(event);
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [handleClose]);
-
-  const handleOptionClick = () => {
-    setOpenPlotCardModal(true);
-    setTimeout(() => handleClose(), 0); // Delay to ensure modal state updates first
-  };
 
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout | null = null;
@@ -288,68 +241,6 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
-    }
-  };
-
-  const handleCreateNewCensus = async () => {
-    if (isCreatingCensus) return; // Prevent multiple clicks
-
-    // Check if current census has measurements
-    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
-      alert('Cannot create a new census: Current census has no measurements.');
-      return;
-    }
-
-    // Check if any existing census has no measurements
-    const censusWithoutMeasurements = censusListContext?.find(
-      census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate
-    );
-
-    if (censusWithoutMeasurements) {
-      alert(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
-      return;
-    }
-
-    setIsCreatingCensus(true);
-
-    try {
-      const highestPlotCensusNumber =
-        censusListContext && censusListContext.length > 0
-          ? censusListContext.reduce(
-              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-              censusListContext[0]?.plotCensusNumber ?? 0
-            )
-          : 0;
-
-      const mapper = new OrgCensusToCensusResultMapper();
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) {
-        alert('Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.');
-        return;
-      }
-
-      // Rollover data from current census to new census (only if we have a valid source census)
-      const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-      if (sourceCensusID !== undefined && sourceCensusID !== null) {
-        await Promise.all(
-          ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ incoming: {} })
-            });
-          })
-        );
-      } else {
-        console.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
-      }
-      setCensusListLoaded(false);
-    } catch (error) {
-      console.error('Error creating census:', error);
-      alert('Failed to create census. Please try again.');
-    } finally {
-      // Debounce: prevent rapid successive clicks
-      setTimeout(() => setIsCreatingCensus(false), 1000);
     }
   };
 
@@ -494,46 +385,6 @@ export default function Sidebar(props: SidebarProps) {
         }
       }}
     >
-      <ListItem>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            padding: '8px 12px'
-          }}
-        >
-          <Typography level="body-sm" color="primary">
-            Add New Census
-          </Typography>
-          <IconButton
-            aria-label={'add new census icon button'}
-            size="sm"
-            color="primary"
-            data-testid={'add-new-census-button'}
-            tabIndex={0}
-            disabled={
-              isCreatingCensus ||
-              // Prevent creation if current census has no measurements
-              (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) ||
-              // Prevent creation if any census in the list has no measurements
-              censusListContext?.some(census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate)
-            }
-            onKeyDown={event => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                event.stopPropagation();
-                handleCreateNewCensus();
-              }
-            }}
-            onClick={handleCreateNewCensus}
-          >
-            <AddIcon />
-          </IconButton>
-        </Box>
-      </ListItem>
-      <Divider orientation={'horizontal'} sx={{ my: 1 }} />
       {Array.isArray(censusListContext) &&
         censusListContext
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
@@ -600,103 +451,143 @@ export default function Sidebar(props: SidebarProps) {
     </Select>
   );
 
-  const renderPlotOptions = () => (
-    <Select<number>
-      placeholder="Select a Plot"
-      className="plot-selection"
-      name="None"
-      required
-      size={'md'}
-      data-testid={'plot-select-component'}
-      aria-label="Select a Plot"
-      renderValue={renderPlotValue}
-      value={currentPlot?.plotID ?? null}
-      listboxOpen={isPlotDropdownOpen}
-      onListboxOpenChange={open => {
-        if (open && !isPlotDropdownOpen) {
-          setSiteDropdownOpen(false);
-          setPlotDropdownOpen(true);
-          setCensusDropdownOpen(false);
-        }
-      }}
-      onClose={() => setPlotDropdownOpen(false)}
-      onFocus={event => event.preventDefault()}
-      onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
-        event?.preventDefault();
-        const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
-        await handlePlotSelection(selectedPlot);
-      }}
-      slotProps={{
-        listbox: {
-          sx: {
-            maxHeight: 300,
-            overflow: 'auto'
-          }
-        }
-      }}
-    >
-      {Array.isArray(plotListContext) &&
-        plotListContext.map(item => (
-          <Option aria-label={`plot name option: ${item?.plotName}`} value={item?.plotID} key={item?.plotID} data-testid={'plot-selection-option'}>
-            <Box
-              sx={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                width: '100%'
-              }}
-              className="sidebar-item"
-            >
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
-                <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
-                  <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
-                    {item?.plotName}
-                  </Typography>
-                  <IconButton
-                    variant={'soft'}
-                    sx={{
-                      justifyContent: 'center',
-                      alignSelf: 'center'
-                    }}
-                    aria-label={`Plot options for ${item?.plotName}`}
-                    onMouseDown={event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onClick={async event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      // First select the plot, close dropdown, then open the menu
-                      await handlePlotSelection(item);
-                      setPlotDropdownOpen(false);
-                      setSelectedPlot(item);
-                      handleOpen(event);
-                    }}
-                    onKeyDown={async event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        await handlePlotSelection(item);
-                        setPlotDropdownOpen(false);
-                        setSelectedPlot(item);
-                        setAnchorPlotEdit(event.currentTarget);
-                      }
-                    }}
-                    // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
-                    disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
-                  >
-                    <MoreHoriz />
-                  </IconButton>
-                </Stack>
-                <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
-                  {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
-                </Typography>
-              </Box>
-            </Box>
+  // Separate plots with and without quadrats for grouped display
+  const plotsWithQuadrats = React.useMemo(() => {
+    if (!Array.isArray(plotListContext)) return [];
+    return plotListContext
+      .filter(plot => plot?.numQuadrats !== undefined && plot.numQuadrats > 0)
+      .sort((a, b) => (a?.plotName ?? '').localeCompare(b?.plotName ?? ''));
+  }, [plotListContext]);
+
+  const plotsWithoutQuadrats = React.useMemo(() => {
+    if (!Array.isArray(plotListContext)) return [];
+    return plotListContext
+      .filter(plot => plot?.numQuadrats === undefined || plot.numQuadrats === 0)
+      .sort((a, b) => (a?.plotName ?? '').localeCompare(b?.plotName ?? ''));
+  }, [plotListContext]);
+
+  const renderPlotOptions = () => {
+    const plotOptions: React.ReactNode[] = [];
+
+    // Add "With Quadrats" section header and plots
+    if (plotsWithQuadrats.length > 0) {
+      plotOptions.push(
+        <ListItem
+          key="header-with-quadrats"
+          sticky
+          sx={{
+            bgcolor: 'success.softBg',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            py: 0.5,
+            px: 1.5
+          }}
+        >
+          <CheckCircle sx={{ fontSize: 16, color: 'success.600' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.700', fontWeight: 'lg' }}>
+            With Quadrats ({plotsWithQuadrats.length})
+          </Typography>
+        </ListItem>
+      );
+
+      plotsWithQuadrats.forEach(item => {
+        plotOptions.push(
+          <Option key={item?.plotID} value={item?.plotID} aria-label={`plot name option: ${item?.plotName}`} data-testid="plot-selection-option">
+            <Stack direction="column" alignItems="start" className="sidebar-item">
+              <Typography level="body-md" data-testid="plot-selection-option-plotname">
+                {item?.plotName}
+              </Typography>
+              <Typography level="body-sm" color="success">
+                &mdash; Quadrats: {item?.numQuadrats}
+              </Typography>
+            </Stack>
           </Option>
-        ))}
-    </Select>
-  );
+        );
+      });
+    }
+
+    // Add divider between sections if both exist
+    if (plotsWithQuadrats.length > 0 && plotsWithoutQuadrats.length > 0) {
+      plotOptions.push(<ListDivider key="section-divider" role="none" />);
+    }
+
+    // Add "Without Quadrats" section header and plots
+    if (plotsWithoutQuadrats.length > 0) {
+      plotOptions.push(
+        <ListItem
+          key="header-without-quadrats"
+          sticky
+          sx={{
+            bgcolor: 'neutral.softBg',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            py: 0.5,
+            px: 1.5
+          }}
+        >
+          <Cancel sx={{ fontSize: 16, color: 'neutral.500' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.600', fontWeight: 'lg' }}>
+            Without Quadrats ({plotsWithoutQuadrats.length})
+          </Typography>
+        </ListItem>
+      );
+
+      plotsWithoutQuadrats.forEach(item => {
+        plotOptions.push(
+          <Option key={item?.plotID} value={item?.plotID} aria-label={`plot name option: ${item?.plotName}`} data-testid="plot-selection-option">
+            <Stack direction="column" alignItems="start" className="sidebar-item">
+              <Typography level="body-md" data-testid="plot-selection-option-plotname">
+                {item?.plotName}
+              </Typography>
+              <Typography level="body-sm" color="neutral">
+                &mdash; No Quadrats
+              </Typography>
+            </Stack>
+          </Option>
+        );
+      });
+    }
+
+    return (
+      <Select<number>
+        placeholder="Select a Plot"
+        className="plot-selection"
+        name="None"
+        required
+        size="md"
+        data-testid="plot-select-component"
+        aria-label="Select a Plot"
+        renderValue={renderPlotValue}
+        value={currentPlot?.plotID ?? null}
+        listboxOpen={isPlotDropdownOpen}
+        onListboxOpenChange={open => {
+          setPlotDropdownOpen(open);
+          if (open) {
+            setSiteDropdownOpen(false);
+            setCensusDropdownOpen(false);
+          }
+        }}
+        onClose={() => setPlotDropdownOpen(false)}
+        onChange={async (event: React.SyntheticEvent | null, newValue: number | null) => {
+          event?.preventDefault();
+          const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
+          await handlePlotSelection(selectedPlot);
+        }}
+        slotProps={{
+          listbox: {
+            sx: {
+              maxHeight: 300,
+              overflow: 'auto'
+            }
+          }
+        }}
+      >
+        {plotOptions}
+      </Select>
+    );
+  };
   const renderSiteOptions = () => {
     const allowedSites = Array.isArray(siteListContext)
       ? siteListContext
@@ -961,16 +852,12 @@ export default function Sidebar(props: SidebarProps) {
                   overflow: 'hidden auto',
                   flexGrow: 1,
                   display: 'flex',
-                  flexDirection: 'column',
-                  [`& .${listItemButtonClasses.root}`]: {
-                    // gap: 1.5,
-                  }
+                  flexDirection: 'column'
                 }}
               >
                 <List
                   size="lg"
                   sx={{
-                    // gap: 1,
                     '--List-nestedInsetStart': '30px',
                     '--ListItem-radius': theme => theme.vars.radius.sm
                   }}
@@ -1015,12 +902,7 @@ export default function Sidebar(props: SidebarProps) {
                       const isDataIncomplete = shouldApplyTooltip(item);
 
                       return (
-                        <TransitionComponent
-                          key={item.href}
-                          in={currentSite !== undefined && currentPlot !== undefined}
-                          // style={{ transitionDelay: `${delay}ms` }}
-                          direction="down"
-                        >
+                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
                           <ListItem data-testid={`navigate-list-item-nonexpanding-${item.label}`}>
                             {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
@@ -1098,12 +980,7 @@ export default function Sidebar(props: SidebarProps) {
                       });
 
                       return (
-                        <TransitionComponent
-                          key={item.href}
-                          in={currentSite !== undefined && currentPlot !== undefined}
-                          // style={{ transitionDelay: `${delay}ms` }}
-                          direction="down"
-                        >
+                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
                           <ListItem nested data-testid={`navigate-list-item-expanding-${item.label}`}>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle(
@@ -1118,7 +995,6 @@ export default function Sidebar(props: SidebarProps) {
                                 setToggle
                               )}
                               isOpen={!!toggle}
-                              // isOpen
                             >
                               <List size={'md'}>
                                 {item.expanded.map((link, _subIndex) => {
@@ -1127,13 +1003,7 @@ export default function Sidebar(props: SidebarProps) {
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
                                   return (
-                                    <TransitionComponent
-                                      key={link.href}
-                                      in={!!toggle}
-                                      // in
-                                      // style={{ transitionDelay: `${delay}ms` }}
-                                      direction="down"
-                                    >
+                                    <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
                                         {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
@@ -1251,38 +1121,6 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-        <Menu
-          anchorEl={anchorPlotEdit}
-          open={Boolean(anchorPlotEdit)}
-          onClose={handleClose}
-          placement={'bottom-end'}
-          sx={{
-            pointerEvents: 'auto'
-          }}
-        >
-          <MenuItem
-            onClick={() => {
-              handleOptionClick();
-            }}
-            onKeyDown={event => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                handleOptionClick();
-              }
-            }}
-            aria-label={`View and edit ${selectedPlot?.plotName} plot details`}
-          >
-            View/Edit this Plot
-          </MenuItem>
-        </Menu>
-        {selectedPlot && (
-          <PlotCardModal
-            openPlotCardModal={openPlotCardModal}
-            plot={selectedPlot}
-            setOpenPlotCardModal={setOpenPlotCardModal}
-            setManualReset={setManualReset}
-          />
-        )}
         <Modal open={isClearDropdownOpen} onClose={() => setIsClearDropdownOpen(!isClearDropdownOpen)}>
           <ModalDialog role={'alertdialog'}>
             <ModalClose />

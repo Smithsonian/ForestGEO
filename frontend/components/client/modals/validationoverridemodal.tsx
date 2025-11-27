@@ -124,27 +124,7 @@ export default function ValidationOverrideModal(props: VOMProps) {
           )}
           {startOverride && overrideProgress !== null && <CircularProgress determinate value={overrideProgress} />}
         </DialogContent>
-        {/*<DialogContent>{overrideProgress === null ? <CircularProgress /> : <CircularProgress determinate />}</DialogContent>*/}
       </ModalDialog>
     </Modal>
   );
-
-  /*return (
-    <>
-
-      {isOverrideConfirmed && (
-        <Modal
-          open={isValidationOverrideModalOpen}
-          onClose={handleValidationOverrideModalClose}
-          sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-        >
-          <ModalDialog role={'alertdialog'}>
-            <ModalClose />
-            <DialogTitle>Overriding...</DialogTitle>
-            <DialogContent>{overrideProgress === null ? <CircularProgress /> : <CircularProgress determinate />}</DialogContent>
-          </ModalDialog>
-        </Modal>
-      )}
-    </>
-  );*/
 }

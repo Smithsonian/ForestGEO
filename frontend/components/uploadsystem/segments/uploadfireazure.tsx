@@ -3,8 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
-import { Box, Button, Typography, Stack } from '@mui/joy';
-import { LinearProgressWithLabel } from '@/components/client/clientmacros';
+import { Box, Button, Typography, Stack, LinearProgress } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
@@ -95,6 +94,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acceptedFiles, uploadToStorage, uploadForm]);
 
+  const progressPercent = totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
+
   return (
     <>
       {loading ? (
@@ -104,22 +105,54 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             flex: 1,
             width: '100%',
             alignItems: 'center',
-            mt: 4
+            justifyContent: 'center',
+            mt: 4,
+            px: 3
           }}
           role="status"
           aria-live="polite"
         >
-          <Stack direction={'column'} sx={{ width: '100%' }}>
-            <Typography level="title-lg" id="upload-operations-label">
-              {`Total Operations: ${totalOperations}`}
+          <Stack direction="column" spacing={4} sx={{ width: '100%', alignItems: 'center' }}>
+            {/* Header */}
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography level="h3" sx={{ mb: 1 }}>
+                Saving to cloud storage...
+              </Typography>
+              <Typography level="body-lg" color="primary" sx={{ fontWeight: 600 }}>
+                {progressPercent.toFixed(0)}% Complete
+              </Typography>
+            </Box>
+
+            {/* Progress Bar - Full Width */}
+            <Box sx={{ width: '100%' }}>
+              <LinearProgress
+                determinate
+                size="lg"
+                variant="soft"
+                color="primary"
+                value={progressPercent}
+                sx={{
+                  width: '100%',
+                  '--LinearProgress-thickness': '12px',
+                  '--LinearProgress-radius': '8px'
+                }}
+                aria-label="File upload progress"
+                aria-valuenow={progressPercent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
+            </Box>
+
+            {/* Current file being uploaded */}
+            {currentlyRunning && (
+              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
+                {currentlyRunning}
+              </Typography>
+            )}
+
+            <Typography level="body-sm" color="neutral">
+              Please do not close this window
             </Typography>
-            <LinearProgressWithLabel
-              variant={'determinate'}
-              value={(completedOperations / totalOperations) * 100}
-              currentlyrunningmsg={currentlyRunning}
-              aria-label="File upload progress"
-              aria-describedby="upload-operations-label"
-            />
           </Stack>
         </Box>
       ) : refreshError ? (
@@ -129,22 +162,24 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             flex: 1,
             width: '100%',
             alignItems: 'center',
-            mt: 4
+            justifyContent: 'center',
+            mt: 4,
+            px: 3
           }}
         >
-          <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography level="h4">Some errors occurred during refresh:</Typography>
+          <Stack direction="column" spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
+            <Typography level="h4">Some errors occurred during upload</Typography>
             <Typography color="danger">{refreshError}</Typography>
             <Button
               variant="solid"
               onClick={() => {
-                setRefreshError(null); // Clear the error
-                setContinueDisabled(true); // Enable the continuation
-                setReviewState(ReviewStates.COMPLETE); // Finalize the process
+                setRefreshError(null);
+                setContinueDisabled(true);
+                setReviewState(ReviewStates.COMPLETE);
               }}
               disabled={continueDisabled}
             >
-              Continue
+              Continue Anyway
             </Button>
           </Stack>
         </Box>
@@ -155,15 +190,21 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             flex: 1,
             width: '100%',
             alignItems: 'center',
-            mt: 4
+            justifyContent: 'center',
+            mt: 4,
+            px: 3
           }}
         >
-          <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography level="h4">Upload Complete</Typography>
-            {results.map(result => (
-              <Typography key={result}>{result}</Typography>
-            ))}
-            <Typography>Azure upload complete! Finalizing changes...</Typography>
+          <Stack direction="column" spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
+            <Typography level="h3" color="success">
+              Cloud Storage Upload Complete
+            </Typography>
+            <Typography level="body-md" color="neutral">
+              {acceptedFiles.length} {acceptedFiles.length === 1 ? 'file' : 'files'} saved successfully
+            </Typography>
+            <Typography level="body-sm" color="neutral">
+              Finalizing changes...
+            </Typography>
           </Stack>
         </Box>
       )}
