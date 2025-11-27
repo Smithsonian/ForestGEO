@@ -41,63 +41,51 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
 
   const formattedValue = typeof value === 'number' ? value.toLocaleString() : value;
 
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (onClick && (event.key === 'Enter' || event.key === ' ')) {
-      event.preventDefault();
-      onClick();
+  const cardStyles = {
+    background: gradients[gradient],
+    color: 'white',
+    minHeight: '160px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    justifyContent: 'space-between',
+    position: 'relative' as const,
+    overflow: 'hidden' as const,
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    border: 'none',
+    p: 2,
+
+    // Hover effect
+    '&:hover': {
+      transform: onClick ? 'translateY(-4px)' : 'translateY(-2px)',
+      boxShadow: designTokens.shadows.xl,
+
+      '& .metric-icon': {
+        transform: 'scale(1.1) rotate(5deg)'
+      }
+    },
+
+    // Active state
+    '&:active': {
+      transform: 'translateY(-1px)',
+      boxShadow: designTokens.shadows.lg
+    },
+
+    // Subtle pattern overlay
+    '&::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+      pointerEvents: 'none'
     }
   };
 
-  return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <Card
-      variant="solid"
-      component={onClick ? 'button' : 'div'}
-      onClick={onClick}
-      onKeyDown={handleKeyDown}
-      sx={{
-        background: gradients[gradient],
-        color: 'white',
-        minHeight: '160px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        position: 'relative',
-        overflow: 'hidden',
-        cursor: onClick ? 'pointer' : 'default',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        border: 'none',
-        p: 2,
-
-        // Hover effect
-        '&:hover': {
-          transform: onClick ? 'translateY(-4px)' : 'translateY(-2px)',
-          boxShadow: designTokens.shadows.xl,
-
-          '& .metric-icon': {
-            transform: 'scale(1.1) rotate(5deg)'
-          }
-        },
-
-        // Active state
-        '&:active': {
-          transform: 'translateY(-1px)',
-          boxShadow: designTokens.shadows.lg
-        },
-
-        // Subtle pattern overlay
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%)',
-          pointerEvents: 'none'
-        }
-      }}
-    >
+  const cardContent = (
+    <>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
         <Box>
           <Typography
@@ -175,6 +163,34 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
           </Typography>
         </Box>
       )}
+    </>
+  );
+
+  // When interactive, wrap in a button for proper accessibility
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        aria-label={`${title}: ${formattedValue}`}
+        onClick={onClick}
+        style={{
+          all: 'unset',
+          display: 'block',
+          width: '100%',
+          cursor: 'pointer'
+        }}
+      >
+        <Card variant="solid" sx={cardStyles}>
+          {cardContent}
+        </Card>
+      </button>
+    );
+  }
+
+  // Non-interactive version
+  return (
+    <Card variant="solid" sx={cardStyles}>
+      {cardContent}
     </Card>
   );
 }

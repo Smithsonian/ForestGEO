@@ -612,10 +612,12 @@ export default function Sidebar(props: SidebarProps) {
       renderValue={renderPlotValue}
       value={currentPlot?.plotID ?? null}
       listboxOpen={isPlotDropdownOpen}
-      onListboxOpenChange={() => {
-        setSiteDropdownOpen(false);
-        setPlotDropdownOpen(true);
-        setCensusDropdownOpen(false);
+      onListboxOpenChange={open => {
+        if (open && !isPlotDropdownOpen) {
+          setSiteDropdownOpen(false);
+          setPlotDropdownOpen(true);
+          setCensusDropdownOpen(false);
+        }
       }}
       onClose={() => setPlotDropdownOpen(false)}
       onFocus={event => event.preventDefault()}
@@ -623,6 +625,14 @@ export default function Sidebar(props: SidebarProps) {
         event?.preventDefault();
         const selectedPlot = plotListContext?.find(plot => plot?.plotID === newValue) || undefined;
         await handlePlotSelection(selectedPlot);
+      }}
+      slotProps={{
+        listbox: {
+          sx: {
+            maxHeight: 300,
+            overflow: 'auto'
+          }
+        }
       }}
     >
       {Array.isArray(plotListContext) &&
@@ -649,15 +659,25 @@ export default function Sidebar(props: SidebarProps) {
                       alignSelf: 'center'
                     }}
                     aria-label={`Plot options for ${item?.plotName}`}
-                    onMouseDown={event => event.preventDefault()}
-                    onClick={event => {
+                    onMouseDown={event => {
                       event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={async event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      // First select the plot, close dropdown, then open the menu
+                      await handlePlotSelection(item);
+                      setPlotDropdownOpen(false);
                       setSelectedPlot(item);
                       handleOpen(event);
                     }}
-                    onKeyDown={event => {
+                    onKeyDown={async event => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
+                        event.stopPropagation();
+                        await handlePlotSelection(item);
+                        setPlotDropdownOpen(false);
                         setSelectedPlot(item);
                         setAnchorPlotEdit(event.currentTarget);
                       }

@@ -93,7 +93,47 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Error:', error);
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+
+    // Provide user-friendly error messages for common database errors
+    const errorMessage = error.message || 'An unexpected error occurred';
+
+    // Check for unknown database error (ER_BAD_DB_ERROR)
+    if (error.code === 'ER_BAD_DB_ERROR' || errorMessage.includes('Unknown database')) {
+      return new NextResponse(
+        JSON.stringify({
+          error: `The database for site '${schema}' does not exist or is not configured.`,
+          details: 'Please contact an administrator to set up this site or select a different site.',
+          code: 'DATABASE_NOT_FOUND'
+        }),
+        { status: HTTPResponses.BAD_REQUEST }
+      );
+    }
+
+    // Check for table not found error
+    if (error.code === 'ER_NO_SUCH_TABLE' || errorMessage.includes("doesn't exist")) {
+      return new NextResponse(
+        JSON.stringify({
+          error: `The requested data table '${dataType}' is not available for this site.`,
+          details: 'The site database may not be fully configured.',
+          code: 'TABLE_NOT_FOUND'
+        }),
+        { status: HTTPResponses.BAD_REQUEST }
+      );
+    }
+
+    // Check for connection errors
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || errorMessage.includes('connect')) {
+      return new NextResponse(
+        JSON.stringify({
+          error: 'Unable to connect to the database server.',
+          details: 'Please try again later or contact support if the issue persists.',
+          code: 'CONNECTION_ERROR'
+        }),
+        { status: HTTPResponses.SERVICE_UNAVAILABLE }
+      );
+    }
+
+    return new NextResponse(JSON.stringify({ error: errorMessage }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();
   }

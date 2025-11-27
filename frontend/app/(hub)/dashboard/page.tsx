@@ -7,10 +7,17 @@ import {
   AccordionSummary,
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
   Divider,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Stack,
   Tooltip,
   Typography
@@ -22,12 +29,17 @@ import NatureIcon from '@mui/icons-material/Nature';
 import ParkIcon from '@mui/icons-material/Park';
 import PeopleIcon from '@mui/icons-material/People';
 import CategoryIcon from '@mui/icons-material/Category';
+import PublicIcon from '@mui/icons-material/Public';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
+import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
@@ -39,11 +51,20 @@ import ProgressPieChart from '@/components/metrics/progresspiechart';
 import MetricCard from '@/components/dashboard/metriccard';
 import ProgressCard from '@/components/dashboard/progresscard';
 import EmptyState from '@/components/emptystate';
+import SitesOverview from '@/components/dashboard/sitesoverview';
+import PlotsOverview from '@/components/dashboard/plotsoverview';
+import CensusesOverview from '@/components/dashboard/censusesoverview';
 import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
 import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useRouter } from 'next/navigation';
+import { useAppStore } from '@/config/store/appstore';
+import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
+import { CensusWithStats } from '@/components/dashboard/censusesoverview';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -71,6 +92,10 @@ export default function DashboardPage() {
   const userRole = session?.user?.userStatus;
   const allowedSites = session?.user?.sites;
 
+  // Get plot and census lists from store
+  const plotList = useAppStore(state => state.plotList);
+  const censusList = useAppStore(state => state.censusList);
+
   const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +114,16 @@ export default function DashboardPage() {
     CountNewRecruits: 0
   });
   const [toggleSwitch, setToggleSwitch] = useState(true);
+
+  // Plot edit modal state
+  const [plotToEdit, setPlotToEdit] = useState<Plot | null>(null);
+  const [openPlotModal, setOpenPlotModal] = useState(false);
+  const [manualReset, setManualReset] = useState(false);
+
+  // Census delete confirmation modal state
+  const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);
+  const [openDeleteCensusModal, setOpenDeleteCensusModal] = useState(false);
+  const [isDeletingCensus, setIsDeletingCensus] = useState(false);
 
   // Track loading state and last loaded key to prevent duplicate requests
   const loadingRef = useRef<boolean>(false);
@@ -191,6 +226,60 @@ export default function DashboardPage() {
     [triggerPulse]
   );
 
+  // Plot edit handlers
+  const handlePlotEdit = useCallback((plot: PlotWithCensusCount) => {
+    setPlotToEdit(plot as Plot);
+    setOpenPlotModal(true);
+  }, []);
+
+  const handleAddPlot = useCallback(() => {
+    // Navigate to the plots data input page for adding new plots
+    router.push('/fixeddatainput/plots');
+  }, [router]);
+
+  // Census handlers
+  const handleCensusDelete = useCallback((census: CensusWithStats | OrgCensusRDS) => {
+    setCensusToDelete(census);
+    setOpenDeleteCensusModal(true);
+  }, []);
+
+  const handleConfirmDeleteCensus = useCallback(async () => {
+    if (!censusToDelete || !currentSite?.schemaName) return;
+
+    setIsDeletingCensus(true);
+    try {
+      // Get the census ID from the date ranges
+      const censusID = censusToDelete.dateRanges?.[0]?.censusID;
+      if (!censusID) {
+        throw new Error('Census ID not found');
+      }
+
+      const response = await fetch(`/api/fixeddata/census/${censusID}?schema=${currentSite.schemaName}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete census');
+      }
+
+      // Close modal and trigger refresh
+      setOpenDeleteCensusModal(false);
+      setCensusToDelete(null);
+      setManualReset(true);
+    } catch (error: any) {
+      ailogger.error('Failed to delete census', error);
+      setError('Failed to delete census. Please try again.');
+    } finally {
+      setIsDeletingCensus(false);
+    }
+  }, [censusToDelete, currentSite?.schemaName]);
+
+  const handleAddCensus = useCallback(() => {
+    // Navigate to the census creation workflow or trigger census creation
+    // For now, navigate to the census selector area in the sidebar
+    router.push('/fixeddatainput/census');
+  }, [router]);
+
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
     if (!currentSite || !currentPlot || !currentCensus) {
@@ -265,13 +354,110 @@ export default function DashboardPage() {
         </Typography>
       </Box>
 
-      {!currentSite || !currentPlot || !currentCensus ? (
-        <EmptyState
-          icon={<AssessmentIcon />}
-          title="No Census Selected"
-          description="Please select a site, plot, and census from the sidebar to view your dashboard metrics and data"
-          iconColor="primary"
-        />
+      {/* Dynamic Dashboard Views based on selection state */}
+      {!currentSite ? (
+        /* State 1: No site selected - Show Sites Overview */
+        <Box>
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+            <Avatar
+              alt="Site selection icon"
+              sx={{
+                bgcolor: 'primary.softBg',
+                color: 'primary.solidBg',
+                width: 48,
+                height: 48
+              }}
+            >
+              <PublicIcon />
+            </Avatar>
+            <Box>
+              <Typography level="h3" sx={{ fontWeight: 600 }}>
+                Available Sites
+              </Typography>
+              <Typography level="body-md" color="neutral">
+                Use the sidebar to select a site from the options below
+              </Typography>
+            </Box>
+          </Stack>
+          <SitesOverview
+            sites={
+              allowedSites?.map(site => ({
+                siteID: site.siteID,
+                siteName: site.siteName,
+                schemaName: site.schemaName,
+                subquadratDimX: site.subquadratDimX,
+                subquadratDimY: site.subquadratDimY,
+                doubleDataEntry: site.doubleDataEntry
+              })) || []
+            }
+            isLoading={false}
+          />
+        </Box>
+      ) : !currentPlot ? (
+        /* State 2: Site selected, no plot - Show Plots Overview */
+        <Box>
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+            <Avatar
+              alt="Plot selection icon"
+              sx={{
+                bgcolor: 'success.softBg',
+                color: 'success.solidBg',
+                width: 48,
+                height: 48
+              }}
+            >
+              <GridOnIcon />
+            </Avatar>
+            <Box>
+              <Typography level="h3" sx={{ fontWeight: 600 }}>
+                Available Plots
+              </Typography>
+              <Typography level="body-md" color="neutral">
+                Use the sidebar to select a plot from {currentSite.siteName}
+              </Typography>
+            </Box>
+          </Stack>
+          <PlotsOverview
+            plots={Array.isArray(plotList) ? plotList : []}
+            siteName={currentSite.siteName}
+            isLoading={false}
+            onPlotEdit={handlePlotEdit}
+            onAddPlot={handleAddPlot}
+          />
+        </Box>
+      ) : !currentCensus ? (
+        /* State 3: Site and Plot selected, no census - Show Censuses Overview */
+        <Box>
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+            <Avatar
+              alt="Census selection icon"
+              sx={{
+                bgcolor: 'warning.softBg',
+                color: 'warning.solidBg',
+                width: 48,
+                height: 48
+              }}
+            >
+              <CalendarMonthIcon />
+            </Avatar>
+            <Box>
+              <Typography level="h3" sx={{ fontWeight: 600 }}>
+                Available Censuses
+              </Typography>
+              <Typography level="body-md" color="neutral">
+                Use the sidebar to select a census from {currentPlot.plotName}
+              </Typography>
+            </Box>
+          </Stack>
+          <CensusesOverview
+            censuses={(Array.isArray(censusList) ? censusList : []).filter((c): c is OrgCensusRDS => c !== undefined)}
+            plotName={currentPlot.plotName}
+            siteName={currentSite.siteName}
+            isLoading={false}
+            onCensusDelete={handleCensusDelete}
+            onAddCensus={handleAddCensus}
+          />
+        </Box>
       ) : !hasData && !isLoading ? (
         /* Empty State: Context selected but no data */
         <EmptyState
@@ -779,6 +965,41 @@ export default function DashboardPage() {
           </Box>
         </>
       )}
+
+      {/* Plot Edit Modal */}
+      {plotToEdit && (
+        <PlotCardModal plot={plotToEdit} openPlotCardModal={openPlotModal} setOpenPlotCardModal={setOpenPlotModal} setManualReset={setManualReset} />
+      )}
+
+      {/* Census Delete Confirmation Modal */}
+      <Modal open={openDeleteCensusModal} onClose={() => setOpenDeleteCensusModal(false)}>
+        <ModalDialog variant="outlined" role="alertdialog">
+          <ModalClose />
+          <DialogTitle>
+            <DeleteForeverIcon sx={{ color: 'danger.500', mr: 1 }} />
+            Delete Census {censusToDelete?.plotCensusNumber}?
+          </DialogTitle>
+          <DialogContent>
+            <Typography level="body-md">
+              Are you sure you want to delete Census {censusToDelete?.plotCensusNumber}? This action cannot be undone and will remove all associated measurement
+              data.
+            </Typography>
+            <Alert color="danger" variant="soft" sx={{ mt: 2 }}>
+              <Typography level="body-sm">
+                <strong>Warning:</strong> This will permanently delete all trees, stems, and measurements associated with this census.
+              </Typography>
+            </Alert>
+          </DialogContent>
+          <DialogActions>
+            <Button variant="solid" color="danger" onClick={handleConfirmDeleteCensus} loading={isDeletingCensus}>
+              Delete Census
+            </Button>
+            <Button variant="plain" color="neutral" onClick={() => setOpenDeleteCensusModal(false)}>
+              Cancel
+            </Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
     </Box>
   );
 }
