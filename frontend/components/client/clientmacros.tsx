@@ -89,52 +89,80 @@ export function standardizeGridColumns(cols: GridColDef[]): GridColDef[] {
   return cols.map(col => applyStandardSettings(col));
 }
 
-export async function loadSelectableOptions(currentSite: Site, currentPlot: Plot, currentCensus: OrgCensus, setSelectableOpts: Dispatch<SetStateAction<any>>) {
-  const codeOpts = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes')
-    .mapData(
-      await (
-        await fetch(`/api/fetchall/attributes/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json()
-    )
-    .map(i => i.code)
-    .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-    .sort((a, b) => a.localeCompare(b));
-  const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
-    .mapData(
-      await (
-        await fetch(`/api/fetchall/trees/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json()
-    )
-    .map(i => i.treeTag)
-    .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-    .sort((a, b) => a.localeCompare(b));
-  const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
-    .mapData(
-      await (
-        await fetch(`/api/fetchall/stems/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json()
-    )
-    .map(i => i.stemTag)
-    .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-    .sort((a, b) => a.localeCompare(b));
-  const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
-    .mapData(
-      await (
-        await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json()
-    )
-    .map(i => i.quadratName)
-    .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-    .sort((a, b) => a.localeCompare(b));
-  const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
-    .mapData(
-      await (
-        await fetch(`/api/fetchall/species/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-      ).json()
-    )
-    .map(i => i.speciesCode)
-    .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-    .sort((a, b) => a.localeCompare(b));
+/**
+ * Helper function to safely fetch and map data for selectable options
+ * RDS = mapped type (what we work with in the app)
+ * Result = raw API response type
+ */
+async function fetchAndMapOptions<RDS, Result>(
+  endpoint: string,
+  mapperType: string,
+  extractField: (item: RDS) => string | null | undefined,
+  signal?: AbortSignal
+): Promise<string[]> {
+  try {
+    const response = await fetch(endpoint, { signal });
+    if (!response.ok) {
+      console.warn(`Failed to fetch ${mapperType}: ${response.statusText}`);
+      return [];
+    }
+    const data: Result[] = await response.json();
+    const mapper = MapperFactory.getMapper<RDS, Result>(mapperType as any);
+    const mappedData: RDS[] = mapper.mapData(data);
+    return mappedData
+      .map(extractField)
+      .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
+      .sort((a, b) => a.localeCompare(b));
+  } catch (error: any) {
+    // Ignore abort errors - they're expected during cleanup
+    if (error.name === 'AbortError') {
+      return [];
+    }
+    console.warn(`Error fetching ${mapperType}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Loads selectable options for autocomplete fields with proper error handling
+ * and optional AbortController support for cancellation
+ */
+export async function loadSelectableOptions(
+  currentSite: Site | undefined,
+  currentPlot: Plot | undefined,
+  currentCensus: OrgCensus | undefined,
+  setSelectableOpts: Dispatch<SetStateAction<any>>,
+  signal?: AbortSignal
+) {
+  // Validate required parameters
+  if (!currentSite?.schemaName) {
+    console.warn('loadSelectableOptions: Site not selected, skipping fetch');
+    return;
+  }
+
+  const plotID = currentPlot?.plotID ?? 0;
+  const censusNumber = currentCensus?.plotCensusNumber ?? 0;
+  const schema = currentSite.schemaName;
+
+  // Fetch all options in parallel with proper error handling
+  const [codeOpts, tagOpts, stemOpts, quadOpts, specOpts] = await Promise.all([
+    fetchAndMapOptions<AttributesRDS, AttributesResult>(
+      `/api/fetchall/attributes/${plotID}/${censusNumber}?schema=${schema}`,
+      'attributes',
+      i => i.code,
+      signal
+    ),
+    fetchAndMapOptions<TreeRDS, TreeResult>(`/api/fetchall/trees/${plotID}/${censusNumber}?schema=${schema}`, 'trees', i => i.treeTag, signal),
+    fetchAndMapOptions<StemRDS, StemResult>(`/api/fetchall/stems/${plotID}/${censusNumber}?schema=${schema}`, 'stems', i => i.stemTag, signal),
+    fetchAndMapOptions<QuadratRDS, QuadratResult>(`/api/fetchall/quadrats/${plotID}/${censusNumber}?schema=${schema}`, 'quadrats', i => i.quadratName, signal),
+    fetchAndMapOptions<SpeciesRDS, SpeciesResult>(`/api/fetchall/species/${plotID}/${censusNumber}?schema=${schema}`, 'species', i => i.speciesCode, signal)
+  ]);
+
+  // Check if request was aborted before updating state
+  if (signal?.aborted) {
+    return;
+  }
+
   setSelectableOpts((prev: any) => {
     return {
       ...prev,
