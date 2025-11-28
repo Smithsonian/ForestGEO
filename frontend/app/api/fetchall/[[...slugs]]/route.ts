@@ -36,7 +36,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   let storedPCN: number = parseInt(pcnParam);
 
   try {
-    storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
+    storedCensusList = JSON.parse((await getCookie('censusList')) || '[]');
     storedPCN =
       storedCensusList.find((oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(dr => dr.censusID === censusID))?.plotCensusNumber ??
       parseInt(pcnParam) ??

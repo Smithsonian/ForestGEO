@@ -195,8 +195,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalBatches, setTotalBatches] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [processedChunks, setProcessedChunks] = useState<number>(0);
-  const [etc, setETC] = useState('');
-  const [processETC, setProcessETC] = useState('');
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const [verificationStatus, setVerificationStatus] = useState<string>('');
@@ -409,49 +407,81 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     [chunkSize]
   );
 
-  // ETA calculators using Exponential Moving Average for smoother, more accurate estimates
-  // Alpha of 0.2 provides good balance between responsiveness and stability
-  const uploadETACalculator = useRef<ETACalculator>(new ETACalculator(0.2, 3));
-  const processingETACalculator = useRef<ETACalculator>(new ETACalculator(0.15, 2));
+  // Unified ETA calculator for overall progress (0-100%)
+  // Uses lower alpha for smoother estimates across all stages
+  const unifiedETACalculator = useRef<ETACalculator>(new ETACalculator(0.15, 2));
+  const [unifiedETA, setUnifiedETA] = useState<string>('Calculating...');
 
-  // Reset ETA calculators when starting new phases
+  // Calculate overall progress percentage (0-100) for unified progress bar and ETA calculation
+  const calculateOverallProgressValue = useCallback((): number => {
+    if (uploadForm !== 'measurements') {
+      return totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
+    }
+
+    const uploadWeight = 0.4;
+    const processingWeight = 0.5;
+    const verificationWeight = 0.1;
+    let progress = 0;
+
+    if (totalChunks > 0) {
+      const uploadProgress = (completedChunks / totalChunks) * 100;
+      progress += uploaded ? uploadWeight * 100 : uploadWeight * uploadProgress;
+    }
+
+    if (uploaded && totalBatches > 0) {
+      const batchProgress = (processedChunks / totalBatches) * 100;
+      progress += processed ? processingWeight * 100 : processingWeight * batchProgress;
+    }
+
+    if (isVerifying && totalVerificationSteps > 0) {
+      progress += verificationWeight * (verificationStep / totalVerificationSteps) * 100;
+    } else if (processed) {
+      progress += verificationWeight * 100;
+    }
+
+    return Math.min(progress, 100);
+  }, [
+    uploadForm,
+    totalOperations,
+    completedOperations,
+    totalChunks,
+    completedChunks,
+    uploaded,
+    totalBatches,
+    processedChunks,
+    processed,
+    isVerifying,
+    totalVerificationSteps,
+    verificationStep
+  ]);
+
+  // Reset unified ETA calculator when starting fresh
   useEffect(() => {
     if (!uploaded && completedChunks === 0 && totalChunks > 0) {
-      uploadETACalculator.current.reset();
+      unifiedETACalculator.current.reset();
+      setUnifiedETA('Calculating...');
     }
   }, [uploaded, completedChunks, totalChunks]);
 
+  // Calculate unified ETA based on overall progress
   useEffect(() => {
-    if (uploaded && !processed && processedChunks === 0 && totalBatches > 0) {
-      processingETACalculator.current.reset();
-    }
-  }, [uploaded, processed, processedChunks, totalBatches]);
+    if (uploadForm === 'measurements' && !processed) {
+      const currentProgress = calculateOverallProgressValue();
 
-  // Calculate ETC for upload phase using EMA-based calculator
-  useEffect(() => {
-    if (uploadForm === 'measurements' && !uploaded && !processed && totalChunks > 0) {
-      const etaMs = uploadETACalculator.current.update(completedChunks, totalChunks);
+      // Only calculate if we have some progress started
+      if (currentProgress > 0 && currentProgress < 100) {
+        const etaMs = unifiedETACalculator.current.update(currentProgress, 100);
 
-      if (etaMs === null) {
-        setETC('Calculating...');
-      } else {
-        setETC(formatTimeRemaining(etaMs));
+        if (etaMs === null) {
+          setUnifiedETA('Calculating...');
+        } else {
+          setUnifiedETA(formatTimeRemaining(etaMs));
+        }
+      } else if (currentProgress >= 100) {
+        setUnifiedETA('Complete');
       }
     }
-  }, [uploadForm, uploaded, processed, completedChunks, totalChunks]);
-
-  // Calculate ETC for processing phase using EMA-based calculator
-  useEffect(() => {
-    if (uploadForm === 'measurements' && uploaded && !processed && totalBatches > 0) {
-      const etaMs = processingETACalculator.current.update(processedChunks, totalBatches);
-
-      if (etaMs === null) {
-        setProcessETC('Calculating...');
-      } else {
-        setProcessETC(formatTimeRemaining(etaMs));
-      }
-    }
-  }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
+  }, [uploadForm, processed, calculateOverallProgressValue, completedChunks, processedChunks, verificationStep]);
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string, _retryCount = 0) => {
@@ -1659,57 +1689,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const { palette } = useTheme();
 
-  // Calculate overall progress percentage for simplified display
-  const getOverallProgress = (): number => {
-    if (uploadForm !== 'measurements') {
-      // Non-measurements: just file progress
-      return totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
-    }
-
-    // Measurements: combine upload, processing, and verification phases
-    // Phase weights: Upload 40%, Processing 50%, Verification 10%
-    const uploadWeight = 0.4;
-    const processingWeight = 0.5;
-    const verificationWeight = 0.1;
-
-    let progress = 0;
-
-    // Upload phase (chunks)
-    if (totalChunks > 0) {
-      const uploadProgress = (completedChunks / totalChunks) * 100;
-      if (uploaded) {
-        progress += uploadWeight * 100; // Upload complete
-      } else {
-        progress += uploadWeight * uploadProgress;
-      }
-    }
-
-    // Processing phase (batches)
-    if (uploaded && totalBatches > 0) {
-      const batchProgress = (processedChunks / totalBatches) * 100;
-      if (processed) {
-        progress += processingWeight * 100; // Processing complete
-      } else {
-        progress += processingWeight * batchProgress;
-      }
-    }
-
-    // Verification phase
-    if (isVerifying && totalVerificationSteps > 0) {
-      progress += verificationWeight * (verificationStep / totalVerificationSteps) * 100;
-    } else if (processed) {
-      progress += verificationWeight * 100;
-    }
-
-    return Math.min(progress, 100);
-  };
-
   // Get current phase description for user
   const getCurrentPhaseDescription = (): string => {
     if (isVerifying) return 'Finalizing upload...';
     if (uploaded && !processed) return 'Processing data...';
     if (!uploaded) return 'Uploading data...';
     return 'Complete';
+  };
+
+  // Determine which animation to show based on current stage
+  const getStageAnimation = (): string => {
+    if (!uploaded) return '/animations/growing-plant.lottie';
+    if (uploaded && !processed && !isVerifying) return '/animations/data-processing.lottie';
+    if (isVerifying) return '/animations/startup.lottie';
+    return '/animations/growing-plant.lottie'; // fallback
   };
 
   return (
@@ -1723,75 +1716,108 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             mt: 4,
-            px: 3
+            px: 3,
+            position: 'relative',
+            minHeight: { xs: '400px', sm: '500px', md: '600px' },
+            overflow: 'hidden'
           }}
         >
-          <Stack direction="column" spacing={4} sx={{ width: '100%', alignItems: 'center' }} role="status" aria-live="polite">
+          {/* Background Animation Layer - Behind Everything */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              bgcolor: '#000000',
+              opacity: 0.3,
+              zIndex: 0
+            }}
+          >
+            <DotLottieReact
+              key={getStageAnimation()} // Force re-render when animation changes
+              src={getStageAnimation()}
+              loop
+              autoplay
+              style={{
+                width: '100%',
+                height: '100%',
+                maxWidth: '800px',
+                maxHeight: '800px'
+              }}
+            />
+          </Box>
+
+          {/* Foreground Content - On Top of Animation */}
+          <Stack
+            direction="column"
+            spacing={4}
+            sx={{
+              width: '100%',
+              alignItems: 'center',
+              position: 'relative',
+              zIndex: 1
+            }}
+            role="status"
+            aria-live="polite"
+          >
             {/* Header */}
             <Box sx={{ textAlign: 'center' }}>
               <Typography level="h3" sx={{ mb: 1 }}>
                 {getCurrentPhaseDescription()}
               </Typography>
               <Typography level="body-lg" color="primary" sx={{ fontWeight: 600 }}>
-                {getOverallProgress().toFixed(0)}% Complete
+                {calculateOverallProgressValue().toFixed(0)}% Complete
               </Typography>
             </Box>
 
             {/* Main Progress Bar - Full Width */}
-            <Box sx={{ width: '100%' }}>
+            <Box sx={{ width: '100%', maxWidth: '600px' }}>
               <LinearProgress
                 determinate
                 size="lg"
                 variant="soft"
                 color="primary"
-                value={getOverallProgress()}
+                value={calculateOverallProgressValue()}
                 sx={{
                   width: '100%',
                   '--LinearProgress-thickness': '12px',
                   '--LinearProgress-radius': '8px'
                 }}
                 aria-label="Overall upload progress"
-                aria-valuenow={getOverallProgress()}
+                aria-valuenow={calculateOverallProgressValue()}
                 aria-valuemin={0}
                 aria-valuemax={100}
               />
             </Box>
 
-            {/* Time Estimate */}
-            {!uploaded && etc && etc !== 'Calculating...' && (
+            {/* Unified Time Estimate */}
+            {!processed && (
               <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
-                Estimated time remaining: {etc}
-              </Typography>
-            )}
-            {uploaded && !processed && processETC && processETC !== 'Calculating...' && (
-              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
-                Estimated time remaining: {processETC}
-              </Typography>
-            )}
-            {((!uploaded && (!etc || etc === 'Calculating...')) || (uploaded && !processed && (!processETC || processETC === 'Calculating...'))) && (
-              <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
-                Calculating time remaining...
+                {unifiedETA === 'Calculating...' || unifiedETA === 'Complete'
+                  ? unifiedETA === 'Complete'
+                    ? 'Finalizing...'
+                    : 'Calculating time remaining...'
+                  : `Estimated time remaining: ${unifiedETA}`}
               </Typography>
             )}
 
-            {/* Animation */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <DotLottieReact
-                src={
-                  uploaded && !processed
-                    ? 'https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie'
-                    : 'https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie'
-                }
-                loop
-                autoplay
-                themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                style={{
-                  width: '150px',
-                  height: '150px',
-                  filter: isVerifying ? 'hue-rotate(45deg)' : undefined
-                }}
-              />
-              <Typography level="body-sm" color="neutral" sx={{ mt: 2 }}>
+            {/* Status Description */}
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography level="body-sm" color="neutral">
+                {processed
+                  ? 'Processing complete!'
+                  : isVerifying
+                    ? 'Verifying data integrity...'
+                    : uploaded
+                      ? 'Processing data batches...'
+                      : 'Uploading to cloud storage...'}
+              </Typography>
+              <Typography level="body-xs" color="neutral" sx={{ mt: 1, opacity: 0.7 }}>
                 Please do not close this window
               </Typography>
             </Box>

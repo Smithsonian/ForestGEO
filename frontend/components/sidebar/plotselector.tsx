@@ -113,8 +113,8 @@ export default function PlotSelector() {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.600' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.700', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>
@@ -156,8 +156,8 @@ export default function PlotSelector() {
             px: 1.5
           }}
         >
-          <Cancel sx={{ fontSize: 16, color: 'neutral.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.600', fontWeight: 'lg' }}>
+          <Cancel sx={{ fontSize: 16, color: 'neutral.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.400', fontWeight: 'lg' }}>
             Without Quadrats ({plotsWithoutQuadrats.length})
           </Typography>
         </ListItem>

@@ -9,6 +9,7 @@ import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch }
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { FormType } from '@/config/macros/formdetails';
+import { useAppStore } from '@/config/store/appstore';
 import ailogger from '@/ailogger';
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
@@ -31,6 +32,10 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
 
+  // Zustand store setters to keep store in sync with context
+  const setCensusListStore = useAppStore(state => state.setCensusList);
+  const setCensusStore = useAppStore(state => state.setCensus);
+
   const loadCensusData = useCallback(async () => {
     if (!currentPlot || !censusDispatch) return;
 
@@ -42,15 +47,21 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
     setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
+
+    // Update both context provider AND Zustand store to keep them in sync
     if (censusListDispatch) {
       await censusListDispatch({ censusList });
     }
+    setCensusListStore(censusList); // Also update Zustand store
 
     const existingCensus = censusList.find(census => census.dateRanges[0].censusID === currentCensus?.dateRanges[0].censusID);
-    if (existingCensus) await censusDispatch({ census: existingCensus });
+    if (existingCensus) {
+      await censusDispatch({ census: existingCensus });
+      setCensusStore(existingCensus); // Also update Zustand store
+    }
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
-  }, [currentPlot, censusDispatch, currentCensus?.plotCensusNumber, currentCensus?.dateRanges, currentSite?.schemaName, censusListDispatch]);
+  }, [currentPlot, censusDispatch, currentCensus?.plotCensusNumber, currentCensus?.dateRanges, currentSite?.schemaName, censusListDispatch, setCensusListStore, setCensusStore]);
 
   const loadPlotsData = useCallback(async () => {
     if (!currentSite) return;
