@@ -512,6 +512,37 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
   const { palette } = useTheme();
 
+  // Determine which animation to show based on current stage
+  // Reingestion skips the upload stage, so we use processing and verification animations
+  const getStageAnimation = (): string => {
+    if (isVerifying) return '/animations/startup.lottie';
+    return '/animations/data-processing.lottie'; // Processing stage
+  };
+
+  // Calculate overall progress percentage
+  const calculateOverallProgress = (): number => {
+    if (processed) return 100;
+    if (totalBatches === 0) return 0;
+
+    const processingWeight = 0.7;
+    const verificationWeight = 0.3;
+
+    let progress = 0;
+
+    // Processing progress
+    progress += (processedChunks / totalBatches) * 100 * processingWeight;
+
+    // Verification progress (if in verification phase)
+    if (isVerifying && totalVerificationSteps > 0) {
+      progress += (verificationStep / totalVerificationSteps) * 100 * verificationWeight;
+    } else if (processedChunks >= totalBatches) {
+      // Processing complete, waiting for verification
+      progress = processingWeight * 100;
+    }
+
+    return Math.min(progress, 100);
+  };
+
   return (
     <Box
       sx={{
@@ -520,95 +551,108 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         width: '100%',
         alignItems: 'center',
         justifyContent: 'center',
-        mt: 4
+        mt: 4,
+        px: 3,
+        position: 'relative',
+        minHeight: { xs: '400px', sm: '500px', md: '600px' },
+        overflow: 'hidden'
       }}
     >
-      <Stack direction="column" spacing={3} sx={{ width: '100%', maxWidth: '600px', alignItems: 'center' }}>
-        <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <Typography level="title-lg">Reingestion Progress</Typography>
-          <Typography level="body-sm" color="neutral">
-            {totalBatches} batches total
-          </Typography>
-        </Stack>
-
-        {totalBatches !== 0 && (
-          <Box sx={{ width: '100%' }}>
-            <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-              <Typography level="body-sm">Batch Processing</Typography>
-              <Typography level="body-sm" color="primary">
-                {processedChunks}/{totalBatches} batches
-              </Typography>
-            </Stack>
-            <LinearProgress determinate variant="soft" color="success" size="lg" value={(processedChunks / totalBatches) * 100} sx={{ width: '100%' }} />
-            {processedChunks < totalBatches && processETC !== 'Calculating...' && (
-              <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
-                {((processedChunks / totalBatches) * 100).toFixed(1)}% complete • {processETC}
-              </Typography>
-            )}
-          </Box>
-        )}
-
-        {isVerifying && totalVerificationSteps > 0 && (
-          <Box sx={{ width: '100%' }}>
-            <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', mb: 1, width: '100%' }}>
-              <Typography level="body-sm">Verification Process</Typography>
-              <Typography level="body-sm" color="warning">
-                {verificationStep}/{totalVerificationSteps} steps
-              </Typography>
-            </Stack>
-            <LinearProgress
-              determinate
-              variant="soft"
-              color="warning"
-              size="lg"
-              value={totalVerificationSteps > 0 ? (verificationStep / totalVerificationSteps) * 100 : 0}
-              sx={{ width: '100%' }}
-            />
-            {verificationStatus && (
-              <Typography level="body-xs" sx={{ mt: 1, textAlign: 'center', width: '100%' }} color="neutral">
-                {verificationStatus}
-              </Typography>
-            )}
-          </Box>
-        )}
-
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textAlign: 'center',
-            mt: 4
+      {/* Background Animation Layer - Behind Everything */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          bgcolor: '#000000',
+          opacity: 0.3,
+          zIndex: 0
+        }}
+      >
+        <DotLottieReact
+          key={getStageAnimation()} // Force re-render when animation changes
+          src={getStageAnimation()}
+          loop
+          autoplay
+          style={{
+            width: '100%',
+            height: '100%',
+            maxWidth: '800px',
+            maxHeight: '800px'
           }}
-        >
-          <Typography level="body-sm" color="neutral" sx={{ mb: 2 }}>
-            {isVerifying ? 'Please do not exit this page while verification is in progress' : 'Please do not exit this page while reingestion is in progress'}
+        />
+      </Box>
+
+      {/* Foreground Content - On Top of Animation */}
+      <Stack
+        direction="column"
+        spacing={4}
+        sx={{
+          width: '100%',
+          maxWidth: '600px',
+          alignItems: 'center',
+          position: 'relative',
+          zIndex: 1
+        }}
+      >
+        {/* Header */}
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography level="h3" sx={{ mb: 1 }}>
+            {processed ? 'Reingestion Complete' : isVerifying ? 'Finalizing Reingestion...' : 'Processing Data...'}
           </Typography>
-          {!processed && !isVerifying && (
-            <DotLottieReact
-              src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
-              loop
-              autoplay
-              themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-              style={{
-                width: '200px',
-                height: '200px'
-              }}
-            />
-          )}
-          {isVerifying && (
-            <DotLottieReact
-              src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-              loop
-              autoplay
-              themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-              style={{
-                width: '200px',
-                height: '200px',
-                filter: 'hue-rotate(45deg)'
-              }}
-            />
-          )}
+          <Typography level="body-lg" color="primary" sx={{ fontWeight: 600 }}>
+            {calculateOverallProgress().toFixed(0)}% Complete
+          </Typography>
+        </Box>
+
+        {/* Main Progress Bar */}
+        <Box sx={{ width: '100%' }}>
+          <LinearProgress
+            determinate
+            size="lg"
+            variant="soft"
+            color="primary"
+            value={calculateOverallProgress()}
+            sx={{
+              width: '100%',
+              '--LinearProgress-thickness': '12px',
+              '--LinearProgress-radius': '8px'
+            }}
+            aria-label="Overall reingestion progress"
+            aria-valuenow={calculateOverallProgress()}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          />
+        </Box>
+
+        {/* Detailed Progress */}
+        {totalBatches !== 0 && (
+          <Typography level="body-md" color="neutral" sx={{ textAlign: 'center' }}>
+            {processedChunks}/{totalBatches} batches processed
+            {processedChunks < totalBatches && processETC !== 'Calculating...' && ` • ${processETC}`}
+          </Typography>
+        )}
+
+        {/* Verification Status */}
+        {isVerifying && verificationStatus && (
+          <Typography level="body-sm" color="neutral" sx={{ textAlign: 'center' }}>
+            {verificationStatus}
+          </Typography>
+        )}
+
+        {/* Status Description */}
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography level="body-sm" color="neutral">
+            {processed ? 'Reingestion complete!' : isVerifying ? 'Verifying data integrity...' : 'Processing data batches...'}
+          </Typography>
+          <Typography level="body-xs" color="neutral" sx={{ mt: 1, opacity: 0.7 }}>
+            Please do not exit this page
+          </Typography>
         </Box>
       </Stack>
     </Box>

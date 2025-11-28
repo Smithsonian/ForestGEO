@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Box, LinearProgress, Typography, CircularProgress, Stack, Chip } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
@@ -311,14 +312,56 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             display: 'flex',
             flex: 1,
             flexDirection: 'column',
-            alignItems: 'center'
+            alignItems: 'center',
+            position: 'relative',
+            minHeight: { xs: '400px', sm: '500px', md: '600px' },
+            overflow: 'hidden'
           }}
           role="status"
           aria-live="polite"
           aria-label="Data validation progress"
         >
+          {/* Background Animation Layer - Behind Everything */}
+          {!isValidationComplete && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                bgcolor: '#000000',
+                opacity: 0.3,
+                zIndex: 0
+              }}
+            >
+              <DotLottieReact
+                src="/animations/file-check.lottie"
+                loop
+                autoplay
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  maxWidth: '800px',
+                  maxHeight: '800px'
+                }}
+              />
+            </Box>
+          )}
+
           {!isValidationComplete ? (
-            <Stack spacing={4} sx={{ width: '100%', alignItems: 'center' }}>
+            <Stack
+              spacing={4}
+              sx={{
+                width: '100%',
+                alignItems: 'center',
+                position: 'relative',
+                zIndex: 1
+              }}
+            >
               {/* Header */}
               <Box sx={{ textAlign: 'center' }}>
                 <Typography level="h3" sx={{ mb: 1 }}>
@@ -330,7 +373,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               </Box>
 
               {/* Main Progress Bar */}
-              <Box sx={{ width: '100%' }}>
+              <Box sx={{ width: '100%', maxWidth: '600px' }}>
                 <LinearProgress
                   determinate
                   size="lg"

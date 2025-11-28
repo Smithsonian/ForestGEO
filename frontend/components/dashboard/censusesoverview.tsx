@@ -254,11 +254,11 @@ function CensusCard({ census, index, onDelete }: CensusCardProps) {
                 }}
                 aria-label={`Delete census ${census.plotCensusNumber}`}
                 sx={{
-                  bgcolor: 'rgba(239, 68, 68, 0.2)',
-                  color: 'rgba(255, 255, 255, 0.9)',
+                  bgcolor: 'rgba(239, 68, 68, 0.5)',
+                  color: 'rgba(255, 255, 255, 1)',
                   backdropFilter: 'blur(4px)',
                   '&:hover': {
-                    bgcolor: 'rgba(239, 68, 68, 0.4)'
+                    bgcolor: 'rgba(239, 68, 68, 0.7)'
                   }
                 }}
               >

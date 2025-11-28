@@ -5,6 +5,7 @@ import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystem
 import { FileWithPath } from 'react-dropzone';
 import { Box, Button, Typography, Stack, LinearProgress } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
@@ -107,12 +108,54 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             mt: 4,
-            px: 3
+            px: 3,
+            position: 'relative',
+            minHeight: { xs: '400px', sm: '500px', md: '600px' },
+            overflow: 'hidden'
           }}
           role="status"
           aria-live="polite"
         >
-          <Stack direction="column" spacing={4} sx={{ width: '100%', alignItems: 'center' }}>
+          {/* Background Animation Layer - Behind Everything */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              bgcolor: '#000000',
+              opacity: 0.3,
+              zIndex: 0
+            }}
+          >
+            <DotLottieReact
+              src="/animations/uploading.lottie"
+              loop
+              autoplay
+              style={{
+                width: '100%',
+                height: '100%',
+                maxWidth: '800px',
+                maxHeight: '800px'
+              }}
+            />
+          </Box>
+
+          {/* Foreground Content - On Top of Animation */}
+          <Stack
+            direction="column"
+            spacing={4}
+            sx={{
+              width: '100%',
+              alignItems: 'center',
+              position: 'relative',
+              zIndex: 1
+            }}
+          >
             {/* Header */}
             <Box sx={{ textAlign: 'center' }}>
               <Typography level="h3" sx={{ mb: 1 }}>
@@ -124,7 +167,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             </Box>
 
             {/* Progress Bar - Full Width */}
-            <Box sx={{ width: '100%' }}>
+            <Box sx={{ width: '100%', maxWidth: '600px' }}>
               <LinearProgress
                 determinate
                 size="lg"

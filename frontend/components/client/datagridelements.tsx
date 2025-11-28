@@ -262,20 +262,29 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             width: '100%',
             justifyContent: 'flex-start',
             alignItems: 'center',
-            gap: 0.5
+            gap: 0.5,
+            flexWrap: 'nowrap',
+            overflowX: 'auto',
+            '&::-webkit-scrollbar': {
+              height: 4
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(255,255,255,0.3)',
+              borderRadius: 2
+            }
           }}
         >
           {/* Left section - filters and controls */}
-          <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5 }}>
-            <Box display={'flex'} alignItems={'center'} sx={{ minWidth: 'fit-content' }}>
-              <ColumnsPanelTrigger style={{ display: 'flex', justifyContent: 'center' }} render={<ToolbarButton>Columns</ToolbarButton>} />
-              <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
-              <FilterPanelTrigger style={{ display: 'flex', justifyContent: 'center' }} render={<ToolbarButton>Filter</ToolbarButton>} />
-              <Divider orientation={'vertical'} sx={{ mx: 0.5 }} />
-              <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-                <QuickFilter style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5, flex: 1, minWidth: 'max-content' }}>
+            <Box display={'flex'} alignItems={'center'} sx={{ flex: 1, minWidth: 'max-content' }}>
+              <ColumnsPanelTrigger style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }} render={<ToolbarButton sx={{ px: 2 }}>Columns</ToolbarButton>} />
+              <Divider orientation={'vertical'} sx={{ mx: 0.5, flexShrink: 0 }} />
+              <FilterPanelTrigger style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }} render={<ToolbarButton sx={{ px: 2 }}>Filter</ToolbarButton>} />
+              <Divider orientation={'vertical'} sx={{ mx: 0.5, flexShrink: 0 }} />
+              <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow sx={{ flex: 1, minWidth: '150px', maxWidth: '400px' }}>
+                <QuickFilter style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                   <QuickFilterControl
-                    style={{ display: 'flex', justifyContent: 'center', minWidth: '150px' }}
+                    style={{ display: 'flex', flex: 1, minWidth: '100px' }}
                     placeholder={'Search All Fields...'}
                     value={inputValue}
                     onKeyDown={handleKeyDown}
@@ -292,7 +301,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     disabled={inputValue === ''}
                     onClick={handleClearInput}
                     size={'small'}
-                    style={{ marginLeft: 1 }}
+                    style={{ marginLeft: 4, flexShrink: 0 }}
                   >
                     <Tooltip title={'Clear filter'} placement={'bottom'}>
                       <ClearIcon fontSize={'small'} />
@@ -301,9 +310,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 </QuickFilter>
               </Tooltip>
             </Box>
-            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+            <Divider orientation={'vertical'} sx={{ mx: 1, flexShrink: 0 }} />
             <Button
-              style={{ display: 'flex', minWidth: 'fit-content' }}
+              style={{ display: 'flex', minWidth: 'fit-content', flexShrink: 0 }}
               color={'primary'}
               startDecorator={<RefreshIcon />}
               onClick={async () => await handleRefresh()}
@@ -312,7 +321,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               Refresh
             </Button>
             {gridType === 'measurements' && (
-              <Stack direction={'row'} spacing={0.5} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 'fit-content', ml: 1 }}>
+              <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
                 <Tooltip title={`Invalid: (${errorControls.count})`}>
                   <Badge badgeContent={errorControls.count} size={'sm'}>
                     <IconButton
@@ -421,11 +430,22 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </Stack>
             )}
           </Box>
-          <Divider orientation={'vertical'} sx={{ ml: 0.5, mr: 1 }} />
-          {/* Right section - action buttons equally spaced */}
-          <Stack direction="row" spacing={1.5} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, ml: 'auto' }}>
+          <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+          {/* Right section - action buttons */}
+          <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {/* Manual Entry Form - icon only with tooltip */}
             {dynamicButtons
-              .filter((button: any) => button.label === 'Manual Entry Form' || button.label === 'Upload')
+              .filter((button: any) => button.label === 'Manual Entry Form')
+              .map((button: any, index: number) => (
+                <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
+                  <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
+                    {button.icon}
+                  </IconButton>
+                </Tooltip>
+              ))}
+            {/* Upload - keep as button with text */}
+            {dynamicButtons
+              .filter((button: any) => button.label === 'Upload')
               .map((button: any, index: number) => (
                 <Tooltip key={index} title={button.tooltip} placement="top" arrow>
                   <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>

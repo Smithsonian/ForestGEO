@@ -14,21 +14,7 @@ import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
 import { usePathname, useRouter } from 'next/navigation';
-import {
-  Badge,
-  Button,
-  Chip,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  Modal,
-  ModalClose,
-  ModalDialog,
-  SelectOption,
-  Stack,
-  Tooltip
-} from '@mui/joy';
+import { Badge, Button, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/compat-hooks';
@@ -42,8 +28,9 @@ import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, CheckCircle, Cancel } from '@mui/icons-material';
+import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
+import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
+import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
@@ -165,6 +152,8 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
+  const [censusToDelete, setCensusToDelete] = useState<OrgCensusRDS | null>(null);
+  const [isDeletingCensus, setIsDeletingCensus] = useState(false);
   const [adminResetDone, setAdminResetDone] = useState(false);
 
   // Clear selections when entering admin pages
@@ -243,6 +232,37 @@ export default function Sidebar(props: SidebarProps) {
       await censusDispatch({ census: selectedCensus });
     }
   };
+
+  // Handler for census deletion from the shared modal
+  const handleCensusDelete = useCallback(
+    async (deleteType: 'msmts' | 'full') => {
+      const censusID = censusToDelete?.dateRanges?.[0]?.censusID;
+      if (!currentSite?.schemaName || !censusID) {
+        ailogger.error('Missing required context: schema or censusID', undefined, {
+          schema: currentSite?.schemaName || 'unknown',
+          censusID: censusID || 'unknown'
+        });
+        setIsClearDropdownOpen(false);
+        setCensusToDelete(null);
+        return;
+      }
+
+      setIsDeletingCensus(true);
+      const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
+      setLoading(true, loadingMessage);
+      setIsClearDropdownOpen(false);
+
+      try {
+        await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        setCensusToDelete(null);
+        setManualReset(true);
+      } finally {
+        setLoading(false);
+        setIsDeletingCensus(false);
+      }
+    },
+    [censusToDelete, currentSite?.schemaName, setLoading, setManualReset]
+  );
 
   const renderSiteValue = (option: SelectOption<number> | null) => {
     if (!option) {
@@ -431,9 +451,9 @@ export default function Sidebar(props: SidebarProps) {
                 <IconButton
                   variant={'soft'}
                   color={'danger'}
-                  onClick={async () => {
-                    // Select the census first before opening delete dialog
-                    await handleCensusSelection(item);
+                  onClick={e => {
+                    e.stopPropagation(); // Prevent dropdown selection
+                    if (item) setCensusToDelete(item);
                     setIsClearDropdownOpen(true);
                   }}
                   disabled={
@@ -484,8 +504,8 @@ export default function Sidebar(props: SidebarProps) {
             px: 1.5
           }}
         >
-          <CheckCircle sx={{ fontSize: 16, color: 'success.600' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.700', fontWeight: 'lg' }}>
+          <CheckCircle sx={{ fontSize: 16, color: 'success.500' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'success.500', fontWeight: 'lg' }}>
             With Quadrats ({plotsWithQuadrats.length})
           </Typography>
         </ListItem>
@@ -527,8 +547,8 @@ export default function Sidebar(props: SidebarProps) {
             px: 1.5
           }}
         >
-          <Cancel sx={{ fontSize: 16, color: 'neutral.500' }} />
-          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.600', fontWeight: 'lg' }}>
+          <Cancel sx={{ fontSize: 16, color: 'neutral.400' }} />
+          <Typography level="body-xs" sx={{ textTransform: 'uppercase', color: 'neutral.400', fontWeight: 'lg' }}>
             Without Quadrats ({plotsWithoutQuadrats.length})
           </Typography>
         </ListItem>
@@ -821,7 +841,27 @@ export default function Sidebar(props: SidebarProps) {
                     <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'plot options icon'}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderPlotOptions()}</Box>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentPlot ? '0.5em' : '1em' }}>{renderPlotOptions()}</Box>
+                    {currentPlot && (
+                      <Tooltip title="Clear plot selection" arrow>
+                        <IconButton
+                          size="sm"
+                          variant="plain"
+                          color="neutral"
+                          onClick={async () => {
+                            await handlePlotSelection(undefined);
+                          }}
+                          sx={{
+                            minWidth: 28,
+                            minHeight: 28,
+                            '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                          }}
+                          aria-label="Clear plot selection"
+                        >
+                          <Clear sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </Box>
                   {currentPlot !== undefined && (
                     <>
@@ -829,7 +869,27 @@ export default function Sidebar(props: SidebarProps) {
                         <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderCensusOptions()}</Box>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>{renderCensusOptions()}</Box>
+                        {currentCensus && (
+                          <Tooltip title="Clear census selection" arrow>
+                            <IconButton
+                              size="sm"
+                              variant="plain"
+                              color="neutral"
+                              onClick={async () => {
+                                await handleCensusSelection(undefined);
+                              }}
+                              sx={{
+                                minWidth: 28,
+                                minHeight: 28,
+                                '&:hover': { bgcolor: 'danger.softBg', color: 'danger.500' }
+                              }}
+                              aria-label="Clear census selection"
+                            >
+                              <Clear sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </Box>
                       <Divider orientation="horizontal" sx={{ marginTop: 2 }} />
                     </>
@@ -1121,76 +1181,16 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-        <Modal open={isClearDropdownOpen} onClose={() => setIsClearDropdownOpen(!isClearDropdownOpen)}>
-          <ModalDialog role={'alertdialog'}>
-            <ModalClose />
-            <DialogTitle>Delete this census?</DialogTitle>
-            <DialogContent>
-              Please choose from the following options:
-              <Stack direction={'row'}>
-                a<Chip>Partial Deletion</Chip>
-                <Typography>
-                  : Delete <strong>only measurements</strong>
-                </Typography>
-              </Stack>
-              <Stack direction={'row'}>
-                <Chip>Full Deletion</Chip>
-                <Typography>
-                  : Delete <strong>measurements and fixed data</strong>
-                </Typography>
-              </Stack>
-            </DialogContent>
-            <DialogActions>
-              <Button
-                onClick={async () => {
-                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
-                  if (!currentSite?.schemaName || !censusID) {
-                    ailogger.error('Missing required context: schema or censusID', undefined, {
-                      schema: currentSite?.schemaName || 'unknown',
-                      censusID: censusID || 'unknown'
-                    });
-                    setIsClearDropdownOpen(false);
-                    return;
-                  }
-                  setLoading(true, 'Deleting census measurements...');
-                  setIsClearDropdownOpen(!isClearDropdownOpen);
-                  try {
-                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=msmts`);
-                    setManualReset(true);
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-              >
-                Partial Deletion
-              </Button>
-              <Button
-                onClick={async () => {
-                  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
-                  if (!currentSite?.schemaName || !censusID) {
-                    ailogger.error('Missing required context: schema or censusID', undefined, {
-                      schema: currentSite?.schemaName || 'unknown',
-                      censusID: censusID || 'unknown'
-                    });
-                    setIsClearDropdownOpen(false);
-                    return;
-                  }
-                  setLoading(true, 'Deleting census measurements and fixed data...');
-                  setIsClearDropdownOpen(!isClearDropdownOpen);
-                  try {
-                    await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=full`);
-                    setManualReset(true);
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-              >
-                Full Deletion
-              </Button>
-              <Button onClick={() => setIsClearDropdownOpen(false)}>Cancel</Button>
-            </DialogActions>
-          </ModalDialog>
-        </Modal>
+        <CensusDeletionModal
+          open={isClearDropdownOpen}
+          onClose={() => {
+            setIsClearDropdownOpen(false);
+            setCensusToDelete(null);
+          }}
+          onDelete={handleCensusDelete}
+          census={censusToDelete}
+          isDeleting={isDeletingCensus}
+        />
       </Stack>
     </>
   );

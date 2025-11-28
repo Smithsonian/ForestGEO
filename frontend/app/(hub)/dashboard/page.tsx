@@ -29,8 +29,10 @@ import PublicIcon from '@mui/icons-material/Public';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, useOrgCensusListContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useOrgCensusListContext, useOrgCensusListDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
@@ -55,6 +57,7 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { PlotWithCensusCount } from '@/components/dashboard/plotsoverview';
 import { CensusWithStats } from '@/components/dashboard/censusesoverview';
@@ -75,11 +78,13 @@ interface StemTypesType {
 export default function DashboardPage() {
   const router = useRouter();
   const { triggerPulse, isPulsing } = useLockAnimation();
+  const { setLoading } = useLoading();
   const { data: session } = useSession();
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const censusListContext = useOrgCensusListContext();
+  const censusListDispatch = useOrgCensusListDispatch();
   const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
@@ -222,49 +227,98 @@ export default function DashboardPage() {
     router.push('/fixeddatainput/plots');
   }, [router]);
 
+  // Census list refresh function
+  const refreshCensusList = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID) {
+      console.warn('Cannot refresh census list: missing site or plot context');
+      return;
+    }
+
+    try {
+      console.log('Refreshing census list...');
+      const response = await fetch(
+        `/api/fetchall/census/${currentPlot.plotID}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
+      );
+      const censusRDSLoad = await response.json();
+      if (!censusRDSLoad) throw new Error('Failed to load census data');
+      const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
+      const updatedCensusList = await createAndUpdateCensusList(censusArray);
+      if (censusListDispatch) await censusListDispatch({ censusList: updatedCensusList });
+      console.log('Census list refreshed successfully');
+    } catch (error) {
+      console.error('Failed to refresh census list:', error);
+      ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, censusListDispatch]);
+
   // Census handlers
   const handleCensusDelete = useCallback((census: CensusWithStats | OrgCensusRDS) => {
     setCensusToDelete(census);
     setOpenDeleteCensusModal(true);
   }, []);
 
-  const handleConfirmDeleteCensus = useCallback(async () => {
-    if (!censusToDelete || !currentSite?.schemaName) return;
+  const handleConfirmDeleteCensus = useCallback(
+    async (deleteType: 'msmts' | 'full') => {
+      if (!censusToDelete || !currentSite?.schemaName) return;
 
-    setIsDeletingCensus(true);
-    try {
-      // Get the census ID from the date ranges
       const censusID = censusToDelete.dateRanges?.[0]?.censusID;
       if (!censusID) {
-        throw new Error('Census ID not found');
+        ailogger.error('Missing required context: censusID not found in census to delete');
+        setError('Census ID not found. Please try again.');
+        setOpenDeleteCensusModal(false);
+        return;
       }
 
-      const response = await fetch(`/api/fixeddata/census/${censusID}?schema=${currentSite.schemaName}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete census');
-      }
-
-      // Close modal and trigger refresh
+      // Clear any previous errors
+      setError(null);
+      setIsDeletingCensus(true);
       setOpenDeleteCensusModal(false);
-      setCensusToDelete(null);
-      setManualReset(true);
-    } catch (error: any) {
-      ailogger.error('Failed to delete census', error);
-      setError('Failed to delete census. Please try again.');
-    } finally {
-      setIsDeletingCensus(false);
-    }
-  }, [censusToDelete, currentSite?.schemaName]);
+
+      const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
+      setLoading(true, loadingMessage);
+      const startTime = Date.now();
+
+      try {
+        console.log(loadingMessage, { schema: currentSite.schemaName, censusID, type: deleteType });
+
+        // Match sidebar behavior - fire request and proceed (don't check response.ok)
+        await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+
+        // Refresh the census list to reflect the deletion
+        setCensusToDelete(null);
+        await refreshCensusList();
+        console.log('Census deletion completed, list refreshed');
+
+        // Ensure loading shows for at least 750ms for visual feedback
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 750) {
+          await new Promise(resolve => setTimeout(resolve, 750 - elapsed));
+        }
+      } catch (error: any) {
+        console.error('Failed to delete census:', error);
+        ailogger.error('Failed to delete census', error);
+        setError('Failed to delete census. Please try again.');
+      } finally {
+        setLoading(false);
+        setIsDeletingCensus(false);
+      }
+    },
+    [censusToDelete, currentSite?.schemaName, refreshCensusList, setLoading]
+  );
 
   const handleAddCensus = useCallback(async () => {
-    if (isCreatingCensus) return; // Prevent multiple clicks
+    console.log('handleAddCensus called');
+
+    if (isCreatingCensus) {
+      console.log('Census creation already in progress, ignoring click');
+      return;
+    }
 
     // Check if current census has measurements
     if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
-      setError('Cannot create a new census: Current census has no measurements.');
+      const errorMsg = 'Cannot create a new census: Current census has no measurements.';
+      console.warn(errorMsg);
+      setError(errorMsg);
       return;
     }
 
@@ -274,12 +328,16 @@ export default function DashboardPage() {
     );
 
     if (censusWithoutMeasurements) {
-      setError(`Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`);
+      const errorMsg = `Cannot create a new census: Census ${censusWithoutMeasurements.plotCensusNumber} has no measurements.`;
+      console.warn(errorMsg);
+      setError(errorMsg);
       return;
     }
 
     setIsCreatingCensus(true);
     setError(null);
+    setLoading(true, 'Creating new census...');
+    const startTime = Date.now();
 
     try {
       const highestPlotCensusNumber =
@@ -291,11 +349,15 @@ export default function DashboardPage() {
           : 0;
 
       const mapper = new OrgCensusToCensusResultMapper();
+      console.log('Creating new census with plotCensusNumber:', highestPlotCensusNumber + 1);
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
       if (!newCensusID) {
-        setError('Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.');
+        const errorMsg = 'Failed to create new census - census creation returned invalid ID. Please ensure site and plot are properly selected.';
+        console.error(errorMsg);
+        setError(errorMsg);
         return;
       }
+      console.log('New census created with ID:', newCensusID);
 
       // Rollover data from current census to new census (only if we have a valid source census)
       const sourceCensusID = currentCensus?.dateRanges?.[0]?.censusID;
@@ -313,16 +375,25 @@ export default function DashboardPage() {
         ailogger.info('Skipping rollover - no valid source census ID available (this is expected for the first census)');
       }
 
-      // Trigger a manual reset to reload the census list
-      setManualReset(true);
+      // Refresh the census list to show the new census
+      console.log('Census creation successful, refreshing census list');
+      await refreshCensusList();
+
+      // Ensure loading shows for at least 750ms for visual feedback
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 750) {
+        await new Promise(resolve => setTimeout(resolve, 750 - elapsed));
+      }
     } catch (error) {
+      console.error('Error creating census:', error);
       ailogger.error('Error creating census:', error instanceof Error ? error : undefined);
       setError('Failed to create census. Please try again.');
     } finally {
+      setLoading(false);
       // Debounce: prevent rapid successive clicks
       setTimeout(() => setIsCreatingCensus(false), 1000);
     }
-  }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot]);
+  }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
 
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
@@ -803,34 +874,16 @@ export default function DashboardPage() {
       )}
 
       {/* Census Delete Confirmation Modal */}
-      <Modal open={openDeleteCensusModal} onClose={() => setOpenDeleteCensusModal(false)}>
-        <ModalDialog variant="outlined" role="alertdialog">
-          <ModalClose />
-          <DialogTitle>
-            <DeleteForeverIcon sx={{ color: 'danger.500', mr: 1 }} />
-            Delete Census {censusToDelete?.plotCensusNumber}?
-          </DialogTitle>
-          <DialogContent>
-            <Typography level="body-md">
-              Are you sure you want to delete Census {censusToDelete?.plotCensusNumber}? This action cannot be undone and will remove all associated measurement
-              data.
-            </Typography>
-            <Alert color="danger" variant="soft" sx={{ mt: 2 }}>
-              <Typography level="body-sm">
-                <strong>Warning:</strong> This will permanently delete all trees, stems, and measurements associated with this census.
-              </Typography>
-            </Alert>
-          </DialogContent>
-          <DialogActions>
-            <Button variant="solid" color="danger" onClick={handleConfirmDeleteCensus} loading={isDeletingCensus}>
-              Delete Census
-            </Button>
-            <Button variant="plain" color="neutral" onClick={() => setOpenDeleteCensusModal(false)}>
-              Cancel
-            </Button>
-          </DialogActions>
-        </ModalDialog>
-      </Modal>
+      <CensusDeletionModal
+        open={openDeleteCensusModal}
+        onClose={() => {
+          setOpenDeleteCensusModal(false);
+          setCensusToDelete(null);
+        }}
+        onDelete={handleConfirmDeleteCensus}
+        census={censusToDelete}
+        isDeleting={isDeletingCensus}
+      />
     </Box>
   );
 }
