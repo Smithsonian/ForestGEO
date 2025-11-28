@@ -1442,99 +1442,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.warn('Processing verification failed, but continuing with collapser');
           }
 
-<<<<<<< HEAD
-          // Enhanced Session-Based Verification: Verify each uploaded file individually
-          setVerificationStatus('Performing per-file upload verification...');
-          let totalSessionProcessed = 0;
-          let totalSessionFailed = 0;
-          let totalExpectedRows = 0;
-          let dataIntegrityIssuesFound = false;
-
-          for (let fileIndex = 0; fileIndex < acceptedFiles.length; fileIndex++) {
-            const file = acceptedFiles[fileIndex];
-            const fileID = file.name;
-
-            // Get expected row count from parsing phase
-            const expectedForFile = expectedRowCounts.current.get(fileID) || 0;
-            totalExpectedRows += expectedForFile;
-
-            try {
-              const sessionVerifyResponse = await fetch(
-                `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}&fileID=${encodeURIComponent(fileID)}`
-              );
-
-              if (sessionVerifyResponse.ok) {
-                const sessionData = await sessionVerifyResponse.json();
-                totalSessionProcessed += sessionData.processedCount;
-                totalSessionFailed += sessionData.failedCount;
-
-                const actualTotal = sessionData.processedCount + sessionData.failedCount;
-                const discrepancy = expectedForFile - actualTotal;
-
-                if (discrepancy !== 0) {
-                  dataIntegrityIssuesFound = true;
-                  if (discrepancy > 0) {
-                    // Fewer rows in DB than expected - potential data loss
-                    ailogger.error(
-                      `DATA INTEGRITY MISMATCH for ${fileID}: Expected ${expectedForFile} rows from file, but only ${actualTotal} accounted for (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). MISSING: ${discrepancy} row(s)!`
-                    );
-                  } else {
-                    // More rows in DB than expected - likely includes data from previous uploads
-                    ailogger.warn(
-                      `DATA COUNT MISMATCH for ${fileID}: Expected ${expectedForFile} rows from current upload, but found ${actualTotal} total rows (${sessionData.processedCount} succeeded + ${sessionData.failedCount} failed). ` +
-                        `${Math.abs(discrepancy)} extra row(s) found - this may include data from previous uploads with the same filename.`
-                    );
-                  }
-                }
-
-                ailogger.info(
-                  `File ${fileIndex + 1}/${acceptedFiles.length} (${fileID}): Expected ${expectedForFile}, Actual ${actualTotal} (${sessionData.processedCount} succeeded, ${sessionData.failedCount} failed)${discrepancy !== 0 ? ` - ${discrepancy > 0 ? 'MISSING' : 'EXTRA'}: ${Math.abs(discrepancy)} rows` : ''}`
-                );
-              } else {
-                ailogger.warn(`Session verification failed for file ${fileID}`);
-              }
-            } catch (sessionError: any) {
-              ailogger.warn(`Error during session verification for ${fileID}:`, sessionError.message);
-            }
-          }
-
-          const totalSessionAccounted = totalSessionProcessed + totalSessionFailed;
-          const totalDiscrepancy = totalExpectedRows - totalSessionAccounted;
-
-          if (dataIntegrityIssuesFound || totalDiscrepancy !== 0) {
-            if (totalDiscrepancy > 0) {
-              // Fewer rows than expected - potential data loss
-              setVerificationStatus(
-                `⚠️ DATA INTEGRITY WARNING: Expected ${totalExpectedRows} rows, but only ${totalSessionAccounted} accounted (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). MISSING: ${totalDiscrepancy} row(s)!`
-              );
-              ailogger.error(
-                `CRITICAL DATA INTEGRITY ISSUE: Expected ${totalExpectedRows} rows from input files, only ${totalSessionAccounted} rows accounted for in database. ${totalDiscrepancy} row(s) were lost during processing!`
-              );
-            } else {
-              // More rows than expected - likely previous upload data
-              setVerificationStatus(
-                `ℹ️ VERIFICATION NOTE: Expected ${totalExpectedRows} rows from current upload, found ${totalSessionAccounted} total (${totalSessionProcessed} succeeded, ${totalSessionFailed} failed). ` +
-                  `${Math.abs(totalDiscrepancy)} additional row(s) may be from previous uploads with the same filename.`
-              );
-              ailogger.warn(
-                `Data count note: Expected ${totalExpectedRows} rows from current upload, found ${totalSessionAccounted} in database. ` +
-                  `The ${Math.abs(totalDiscrepancy)} extra row(s) likely include data from previous uploads with the same filename. ` +
-                  `This is not data loss but cumulative data in the census.`
-              );
-            }
-          } else {
-            setVerificationStatus(
-              `✓ Session verification complete: ${totalSessionProcessed} succeeded, ${totalSessionFailed} failed from this upload (${totalSessionAccounted} total rows - matches expected ${totalExpectedRows})`
-            );
-            ailogger.info(
-              `Upload session verification summary: ${totalSessionProcessed} rows succeeded, ${totalSessionFailed} rows failed. Total accounted: ${totalSessionAccounted} rows. Expected: ${totalExpectedRows} rows. ✓ No data loss detected.`
-            );
-          }
-=======
           // Note: Session-based verification moved to AFTER collapser completes
           // This ensures data has been moved from temporarymeasurements to coremeasurements
           ailogger.info('Pre-collapser verification complete. Data integrity check will run after collapser.');
->>>>>>> development
         } catch (verifyError: any) {
           setVerificationStatus(`Processing verification error: ${verifyError.message}`);
           ailogger.warn('Processing verification error:', verifyError.message);
