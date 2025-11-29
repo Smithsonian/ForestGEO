@@ -379,6 +379,7 @@ family (FamilyID)
 
 ## Files in This Directory
 
+### Core Migration Scripts (01-10)
 - `00_run_all_migrations.sh` - Master automation script
 - `01_create_mapping_tables.sql` - Create ID mapping tables
 - `02_migrate_plots.sql` - Migrate plot data
@@ -390,8 +391,85 @@ family (FamilyID)
 - `08_migrate_coremeasurements.sql` - Migrate measurements
 - `09_migrate_attributes.sql` - Migrate and link attributes
 - `10_validation_queries.sql` - Comprehensive validation
+- `10_cleanup.sql` - Remove mapping tables
+
+### Post-Migration Scripts (11-14)
+- `11_remove_cmattributes_fk_constraint.sql` - Remove FK constraint for error handling
+- `12_increase_fileid_column_size.sql` - Increase FileID/BatchID column sizes
+- `13_add_upload_session_tracking.sql` - Add upload session tracking columns
+- `13_update_bulkingestionprocess_with_tracking.sql` - Update bulk ingestion procedure
+- `14_add_performance_indexes.sql` - Add performance optimization indexes
+
+### Utility Scripts
+- `run-all-migrations.sh` - Alternative migration runner with MariaDB support
+- `provision_new_site.sh` - Automated site provisioning with checkpoints
+- `sync_schema_procedures.sh` - Synchronize stored procedures across schemas
+
+### Other Files
 - `README.md` - This file
+- `migration-validation.sql` - Additional validation queries
 - `migration_*.log` - Generated log files (after running)
+
+---
+
+## Schema Consistency
+
+### Baseline Schema
+The `forestgeo_panama` schema is designated as the baseline schema. All other ForestGEO schemas should match its stored procedures.
+
+### Target Schemas
+All ForestGEO schemas should be kept in sync:
+- `forestgeo_harvard`
+- `forestgeo_mpala`
+- `forestgeo_panama` (baseline)
+- `forestgeo_serc`
+- `forestgeo_testing`
+
+### Stored Procedures
+Each schema should have these stored procedures:
+1. `bulkingestioncollapser` - Collapse duplicate measurements
+2. `bulkingestionprocess` - Main bulk data ingestion
+3. `clearcensusfull` - Clear all census data
+4. `clearcensusmsmts` - Clear census measurements
+5. `RefreshMeasurementsSummary` - Refresh summary view
+6. `RefreshViewFullTable` - Refresh full table view
+7. `reingestfailedrows` - Re-ingest failed measurements
+8. `reinsertdefaultpostvalidations` - Reset post-validation queries
+9. `reinsertdefaultvalidations` - Reset validation queries
+10. `reviewfailed` - Review failed measurements
+
+### Synchronizing Procedures
+
+Use the `sync_schema_procedures.sh` script to compare and synchronize procedures:
+
+```bash
+# Compare all schemas (no changes)
+./sync_schema_procedures.sh --compare --all
+
+# Sync forestgeo_testing with baseline
+./sync_schema_procedures.sh --target forestgeo_testing
+
+# Sync all schemas
+./sync_schema_procedures.sh --all
+
+# Dry run (show what would change)
+./sync_schema_procedures.sh --target forestgeo_testing --dry-run
+```
+
+### Deploying to All Schemas
+
+Use the `DEPLOY_ALL_SCHEMAS.sh` script to deploy stored procedures to all schemas:
+
+```bash
+cd /Users/sambokar/Documents/ForestGEO/frontend
+./DEPLOY_ALL_SCHEMAS.sh
+```
+
+This will:
+1. Backup existing procedures for each schema
+2. Deploy from `sqlscripting/storedprocedures.sql`
+3. Verify deployment success
+4. Generate a deployment log
 
 ## License & Credits
 
