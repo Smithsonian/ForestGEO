@@ -348,7 +348,7 @@ const theme = extendTheme({
     // Typography - Force accessible colors for neutral variant
     JoyTypography: {
       styleOverrides: {
-        root: ({ theme, ownerState }) => ({
+        root: ({ ownerState }) => ({
           // Override neutral color to meet WCAG AA standards
           ...(ownerState.color === 'neutral' && {
             color: `${designTokens.colors.earthBrown[200]} !important` // #e7e5e4 - 9.6:1 contrast on black

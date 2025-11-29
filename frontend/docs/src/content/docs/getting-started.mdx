@@ -3,42 +3,19 @@ title: Getting Started
 description: Welcome to the ForestGEO Data Processing Application - learn how to get started.
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
-
 Welcome to the ForestGEO Data Processing Application!
 
-## About
+## Introduction
 
-The goal of this application is to allow you to record and analyze past and current census data for established global forest sites worldwide. By either directly entering data or uploading CSV/TSV files (conforming to defined constraints), you can save historical data and run validations or analysis on it as you complete a census.
-
-### Summary of Operations
-
-The app is intended to be used as follows:
-
-1. You must be **assigned** to a site by an administrator
-2. Select your **site** from the sidebar dropdown
-3. Select or create a **plot** within that site
-4. Select or create a **census** for data collection
-5. Populate your **Fixed Data**:
-   - **Quadrats** (required for measurements)
-   - **Species List** (required for measurements)
-   - Stem Codes (optional - for attribute codes)
-   - Personnel (optional - for tracking field staff)
-6. Once the required Fixed Data is complete, access **View Data** in the Census Hub
-7. Upload or enter **measurements** within the View Data page
-8. Validate and edit (if needed) your measurements information
-   - If you **upload** measurements, they will automatically be validated!
-9. Once you've entered measurements, use **Post-Census Statistics** for analysis
-10. If you have permissions, use the **Validations** page to enable, disable, or edit validations
-
----
+The goal of this application is to allow you to record and analyze past and current census data for established global sites worldwide. 
+By either directly entering data or uploading CSV/TSV files (conforming to defined constraints), you can save historical data and run validations or analysis on it as you complete a census.
 
 ## Logging In
 
 Before you can log in, you must complete the following (if you haven't already):
 
 - You must create a **personal** Microsoft (non-SI) account (if you don't have one already)
-- An administrator must invite you to the Smithsonian Research Computing tenant
+- An administrator must invite you to the Smithsonian Research Computing tenant.
 - From here, your account will be added to the ForestGEO app server
 - An administrator must assign at least one site to you
 
@@ -48,221 +25,109 @@ Once these steps are finished, you should be able to login to the application an
 This is a temporary measure! Once the Smithsonian TRB review process completes, ForestGEO users should be able to log in with their SI credentials.
 :::
 
-### Logging Into the Website
+## Selection System - Getting to your Data
 
-Navigate to the **production** website instance at [https://forestgeo-livesite.azurewebsites.net](https://forestgeo-livesite.azurewebsites.net).
+The application employs a selection system that enables users to choose from a site, plot, and census. After doing so, they can upload, analyze, or update information as needed.
 
-Click on the login button in the sidebar to authenticate!
+Each subsection of the selection system appears iteratively -- for example, the site selection appears first, but only after a site is selected does the plot selection appear, and only after 
+the plot is selected does the census selection appear. 
 
-#### Submitting Help Tickets
 
-If you encounter issues of any kind, submit a **help ticket** by clicking the **question mark** icon in the bottom right of the screen. This opens a form where you can describe the issue you're encountering.
+### Sites Overview and Selection
 
-![GitHub feedback form](../../assets/github-feedback-modal.png)
+After you log in, you will be directed to the primary view of the application -- a sidebar and a dashboard view. 
+Depending on the sites you have been assigned, you should see some variation of the following on the dashboard view. This has been termed the Sites Overview:
 
-The feedback form captures your current context (selected site, plot, and census) and allows you to categorize the issue type:
+![site dashboard view (no site selected)](../../assets/dashboard-no-site-selected.png)
 
-- **Data Issue** - Problems with missing information, incorrect data, or file upload issues
-- **UI/UX Issue** - Problems with buttons, pop-ups, navigation, or how the site looks and feels
-- **Functional Issue** - Issues with features not working, broken links, or buttons that don't respond
-- **Accessibility Issue** - Problems with accessing or using the site, especially for users with disabilities
-- **Other Issue** - Any other feedback or issues not listed above
+#### The Sites Overview
+
+The Sites Overview denotes the grid/card view of sites that you have access to. You should be able to see the following core components: 
+
+### Selecting a Plot
+
+Once you've selected a site, you'll be able to select a **Plot**, looking something like this:
+
+![plot dropdown](../../assets/plot-dropdown.png)
 
 :::note
-Completing this form will create a GitHub Issue ticket for developer review!
-:::
-
----
-
-## Using the Sidebar
-
-The sidebar contains **three selection dropdowns** that work progressively - each selection unlocks the next:
-
-### Step 1: Selecting a Site
-
-After you log in, you'll be redirected to the dashboard. The sidebar on the left shows a dropdown to select a **Site**. Initially, you'll see available sites displayed as cards on the dashboard:
-
-![dashboard with site cards](../../assets/dashboard-site-cards.png)
-
-Click on the **Site dropdown** to expand it and see all available sites:
-
-![site dropdown expanded](../../assets/site-dropdown-expanded.png)
-
-Sites are grouped into:
-
-- **Allowed Sites** - Sites assigned to your account (you can edit data here)
-- **Other Sites** - Sites you can view but not modify
-
-### Step 2: Selecting a Plot
-
-Once you've selected a site, the dashboard updates to show **Available Plots** as interactive cards, and the **Plot dropdown** becomes available:
-
-![site selected with plot cards](../../assets/site-selected-plot-cards.png)
-
-Click on the **Plot dropdown** to see all plots for the selected site:
-
-![plot dropdown expanded](../../assets/plot-dropdown-expanded.png)
-
-The dropdown shows plots grouped by whether they have quadrats defined. Each plot displays its quadrat count.
-
-:::tip
-You can also click on plot cards in the dashboard to select them. Use the **pencil icon** on a plot card to edit its properties.
+Please note - the plot you'll first see is a **placeholder**! Please use the **ellipsis** button to open the customization popup:
 :::
 
 ![plot edit button](../../assets/plot-edit-button.png)
 
-#### Plot Customization
+#### Customizing Your Plot
 
 ![plot customization](../../assets/plot-custom.png)
 
-Use the plot editor to configure:
+Use this to customize your plot! After saving, your selections will reset and the site will update itself. Please ensure your edits are visible when you attempt to select the plot again!
 
-- Plot name and location
-- Dimensions (X and Y)
-- Total area
-- Quadrat configuration
-
-### Step 3: Selecting a Census
-
-After selecting a plot, the dashboard shows **Available Censuses** as cards and the **Census dropdown** becomes available:
-
-![plot selected with census cards](../../assets/plot-selected-census-cards.png)
-
-Each census card displays:
-
-- Census number
-- Date range (first and last record dates)
-- Status information
-
-Click on the **Census dropdown** to expand it:
-
-![census dropdown expanded](../../assets/census-dropdown-expanded.png)
-
-:::caution
-The Census dropdown is marked as **Required** - most application features require a census to be selected before they become accessible!
-:::
-
-### Fully Enabled Interface
-
-Once you've selected a site, plot, and census, the navigation menu becomes fully enabled and the dashboard displays detailed metrics:
-
-![census selected dashboard](../../assets/census-selected-dashboard.png)
-
-The dashboard now shows:
-
-- **Core Counts** - Total trees and stems in the census
-- **Tree-Stem Classification** - Breakdown of old trees, new recruits, and multi-stem trees
-- **Quadrat Coverage** - Measurement completion percentage across all quadrats
-- **Active Personnel** - Number of people assigned to the census
-- **Data Quality** - Validation status and progress
-- **Your Profile** - Your assigned role and site access
-- **Recent Activity** - Latest changes to census data
-
----
-
-## Core Concepts
+### Creating or Selecting
 
 This app operates along the following **core concepts**:
 
-1. **Site**: A geographic location containing one or more plots (e.g., "Panama", "Harvard Forest")
-2. **Plot**: A specific geographic region marked for data collection within a site
-3. **Quadrat**: A subdivision of a plot - typically a standardized 20m × 20m area
-4. **Census**: A date range denoting a distinct time period where data was collected
+1. **Site**: A site is a collection of plots.
+2. **Plot**: A plot is a geographic region marked for data collection
+3. **Quadrat**: A subdivision of a plot -- this tends to be a standardized 20 x 20 box
+4. **Census**: A census is a **date range** denoting a distinct time period where data was collected in the **Plot**
 
----
+With this in mind, you will need to create a census before you can begin entering data. After opening the Census dropdown, click on the **Add New Census** button to automatically add a new census:
 
-## Understanding the Navigation
+![add new census](../../assets/add-new-census.png)
 
-Once you've selected a site, plot, and census, the navigation menu becomes active. It's organized into two main sections:
+Creating a new census will also trigger a selection reset. Please re-select your prior selections, and you should be able to see your new census displayed.
 
-### Stem & Plot Details (Fixed Data)
+#### Understand the Data Types
 
-This section manages reference data for your census. Some data types are **required** for measurement uploads, while others are optional.
+There are **three** core data types that are required before you can record measurements for a census.
 
-#### Required for Measurements
+import { Card, CardGrid } from '@astrojs/starlight/components';
 
-<CardGrid>
-  <Card title="Quadrats" icon="seti:html">
-    **Required.** Geographic subdivisions of your plot. Each measurement references a quadrat by name. Define coordinates, dimensions, and area for each
-    quadrat.
-  </Card>
-  <Card title="Species List" icon="star">
-    **Required.** Inventory of species found in the plot. Each measurement references a species code. Species codes must exist before uploading measurements.
-  </Card>
-</CardGrid>
-
-#### Optional Data Types
-
-<CardGrid>
-  <Card title="Stem Codes" icon="document">
-    **Optional.** Shorthand codes describing tree/stem conditions (e.g., "D" for dead, "L" for leaning). Used in the optional `codes` field of measurements.
-  </Card>
-  <Card title="Personnel" icon="open-book">
-    **Optional.** Field staff and data collection team members. Useful for tracking who collected data, but not validated during measurement uploads.
-  </Card>
-</CardGrid>
-
-:::note
-The **View Data** page in the UI requires all four Fixed Data types to have at least one record. This is a UX safeguard to encourage complete census setup, even though only Quadrats and Species are technically required for measurement uploads.
-:::
-
-### Census Hub (Measurements & Analysis)
-
-This section handles measurement data and census analysis:
-
-| Page                         | Description                                                |
-| ---------------------------- | ---------------------------------------------------------- |
-| **View Data**                | View, edit, and upload measurements for the current census |
-| **Post-Census Statistics**   | Run statistical analyses on your census data               |
-| **Recent Changes**           | Audit trail showing all data modifications                 |
-| **Uploaded Files**           | History of files uploaded with download links              |
-| **View All Historical Data** | Browse measurements across all censuses                    |
-| **Validations**              | Configure and manage data validation rules                 |
-
----
-
-## Creating a New Census
-
-To start a new census:
-
-1. Select your site and plot
-2. On the dashboard, scroll to the census section
-3. Click the **Start New Census** button
-4. The new census will be created and appear in the list
-
-:::tip
-New censuses are created with the next sequential number (Census 1, Census 2, etc.).
-:::
-
-#### Deleting a Census
-
-Each census card has a **trash icon** that allows deletion.
-
-:::caution
-You can only delete the **most recent** census! Previous censuses are preserved as historical data.
-:::
-
----
-
-## Next Steps
-
-Once you've made your selections and understand the navigation:
-
-1. **Add Fixed Data** - Start with [Understanding SAPD Datagrids](/ForestGEO/understanding-sapd-datagrids/) to learn how the data entry grids work
-2. **Upload Measurements** - See [Upload Process Breakdown](/ForestGEO/upload-process-breakdown/) for the complete upload workflow
-3. **Run Validations** - Learn about [Validations & Statistics](/ForestGEO/validations-statistics/) to ensure data quality
+## Quick Start
 
 <CardGrid stagger>
-  <Card title="Datagrids Guide" icon="document">
-    Learn how to use the data entry grids for viewing, editing, and uploading data. [Read the guide →](/ForestGEO/understanding-sapd-datagrids/)
+  <Card title="Stem Codes" icon="star">
+    A list of shorthand codes designating attributes that can assigned to a tree/stem object.
   </Card>
-  <Card title="Upload Process" icon="rocket">
+  <Card title="" icon="document">
     Understand the complete file upload workflow from start to finish. [Learn more →](/ForestGEO/upload-process-breakdown/)
   </Card>
-  <Card title="Validations" icon="warning">
-    Configure validation rules and review data quality checks. [Explore →](/ForestGEO/validations-statistics/)
+  <Card title="Error Guide" icon="warning">
+    Find solutions to common errors you may encounter. [Troubleshoot →](/ForestGEO/errors/error-guide-overview/)
   </Card>
-  <Card title="Glossary" icon="open-book">
-    Understand key terminology used throughout the application. [View glossary →](/ForestGEO/framework/glossary-of-terms/)
+  <Card title="Personnel" icon="open-book">
+    A list of personnel working on the census. Additionally, you can add/designate roles to each user to better denote how personnel are distributed job-wise
+    across the census.
   </Card>
 </CardGrid>
+
+They are:
+
+- **Stem Codes**: A list of shorthand codes designating attributes that can assigned to a tree/stem object.
+- ~~**Personnel**: A list of personnel working on the census. Additionally, you can add/designate roles to each user to better denote how personnel are distributed job-wise across the census.~~
+- **Quadrats**: A breakdown of the plot into smaller, standardized area segments.
+- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow rapid assignment when actively recording statistics in the field.
+
+#### Deleting a Census?
+
+If your permissions allow it, you may be able to highlight and click on a **Trashcan** icon along the **latest** census. Clicking on this will delete the census in question.
+
+:::caution
+You won't be able to delete a census if it's NOT the latest census!
+:::
+
+### Logging Into the Website
+
+In order to log into the website proper, please navigate to the **production** website instance, available at [https://forestgeo-livesite.azurewebsites.net](https://forestgeo-livesite.azurewebsites.net).
+
+Click on the login icon to log in!
+
+#### Submitting Help Tickets
+
+In the event that you run into issues of any kind, please submit a **help ticket** by clicking on the **question mark** icon in the bottom right of the screen. This button will open a form allowing you to explain the issue you're encountering!
+
+![GitHub feedback form](../../assets/github-feedback-form.png)
+
+:::note
+Completing this will create a GitHub Issue ticket for further review!
+:::

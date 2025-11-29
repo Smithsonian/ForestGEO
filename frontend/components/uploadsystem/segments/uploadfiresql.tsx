@@ -197,7 +197,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processedChunks, setProcessedChunks] = useState<number>(0);
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
-  const [verificationStatus, setVerificationStatus] = useState<string>('');
+  const [_verificationStatus, setVerificationStatus] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
@@ -1687,7 +1687,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploaded, processed, uploadForm]);
 
-  const { palette } = useTheme();
+  const { palette: _palette } = useTheme();
 
   // Get current phase description for user
   const getCurrentPhaseDescription = (): string => {

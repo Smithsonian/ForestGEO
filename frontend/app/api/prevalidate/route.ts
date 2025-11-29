@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow } from '@/config/macros/formdetails';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse(JSON.stringify({ error: 'Invalid JSON body' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { schema, plotId, censusId, sampleRows, formType } = body;
+  const { schema, plotId, sampleRows } = body;
 
   // Validate required params
   if (!schema || !plotId || !sampleRows || !Array.isArray(sampleRows)) {

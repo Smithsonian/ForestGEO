@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
  * Execute all enabled post-validation queries for a given plot and census
  * Updates each query's lastRunAt, lastRunResult, and lastRunStatus
  */
-async function executePostValidationQueries(
+async function _executePostValidationQueries(
   connectionManager: typeof ConnectionManager.prototype,
   schema: string,
   plotID: number,
@@ -98,15 +98,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
   const { view, schema } = params;
 
   // Parse optional plotID and censusID from request body for post-validation execution
-  let plotID: number | undefined;
-  let censusID: number | undefined;
-  let runPostValidation = false;
+  let _plotID: number | undefined;
+  let _censusID: number | undefined;
+  let _runPostValidation = false;
 
   try {
     const body = await request.json().catch(() => ({}));
-    plotID = body.plotID;
-    censusID = body.censusID;
-    runPostValidation = body.runPostValidation === true;
+    _plotID = body.plotID;
+    _censusID = body.censusID;
+    _runPostValidation = body.runPostValidation === true;
   } catch {
     // No body provided, that's fine
   }
