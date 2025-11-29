@@ -869,7 +869,9 @@ export default function Sidebar(props: SidebarProps) {
                         <Avatar size={'sm'} sx={{ marginRight: 1 }} alt={'census options icon'}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>{renderCensusOptions()}</Box>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: currentCensus ? '0.5em' : '1em' }}>
+                          {renderCensusOptions()}
+                        </Box>
                         {currentCensus && (
                           <Tooltip title="Clear census selection" arrow>
                             <IconButton
