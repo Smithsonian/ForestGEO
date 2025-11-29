@@ -61,7 +61,16 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
-  }, [currentPlot, censusDispatch, currentCensus?.plotCensusNumber, currentCensus?.dateRanges, currentSite?.schemaName, censusListDispatch, setCensusListStore, setCensusStore]);
+  }, [
+    currentPlot,
+    censusDispatch,
+    currentCensus?.plotCensusNumber,
+    currentCensus?.dateRanges,
+    currentSite?.schemaName,
+    censusListDispatch,
+    setCensusListStore,
+    setCensusStore
+  ]);
 
   const loadPlotsData = useCallback(async () => {
     if (!currentSite) return;

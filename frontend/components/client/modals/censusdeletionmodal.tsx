@@ -24,13 +24,7 @@ export interface CensusDeletionModalProps {
  * Used by both the sidebar census dropdown and the dashboard census overview
  * to provide consistent deletion options (partial vs full deletion).
  */
-export default function CensusDeletionModal({
-  open,
-  onClose,
-  onDelete,
-  census,
-  isDeleting = false
-}: CensusDeletionModalProps) {
+export default function CensusDeletionModal({ open, onClose, onDelete, census, isDeleting = false }: CensusDeletionModalProps) {
   const handlePartialDelete = async () => {
     await onDelete('msmts');
   };
@@ -43,22 +37,24 @@ export default function CensusDeletionModal({
     <Modal open={open} onClose={onClose}>
       <ModalDialog variant="outlined" role="alertdialog" sx={{ minWidth: { xs: '90%', sm: 500, md: 600 }, p: 3 }}>
         <ModalClose />
-        <DialogTitle>
-          Delete Census {census?.plotCensusNumber}?
-        </DialogTitle>
+        <DialogTitle>Delete Census {census?.plotCensusNumber}?</DialogTitle>
         <DialogContent>
           <Typography level="body-md" sx={{ mb: 2 }}>
             Please choose from the following options:
           </Typography>
           <Stack spacing={1.5}>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Chip color="warning" variant="soft">Partial Deletion</Chip>
+              <Chip color="warning" variant="soft">
+                Partial Deletion
+              </Chip>
               <Typography level="body-sm">
                 Delete <strong>only measurements</strong> - keeps census structure
               </Typography>
             </Stack>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Chip color="danger" variant="soft">Full Deletion</Chip>
+              <Chip color="danger" variant="soft">
+                Full Deletion
+              </Chip>
               <Typography level="body-sm">
                 Delete <strong>measurements and fixed data</strong> - complete removal
               </Typography>
@@ -66,22 +62,10 @@ export default function CensusDeletionModal({
           </Stack>
         </DialogContent>
         <DialogActions sx={{ pt: 2 }}>
-          <Button
-            variant="solid"
-            color="warning"
-            onClick={handlePartialDelete}
-            disabled={isDeleting}
-            loading={isDeleting}
-          >
+          <Button variant="solid" color="warning" onClick={handlePartialDelete} disabled={isDeleting} loading={isDeleting}>
             Partial Deletion
           </Button>
-          <Button
-            variant="solid"
-            color="danger"
-            onClick={handleFullDelete}
-            disabled={isDeleting}
-            loading={isDeleting}
-          >
+          <Button variant="solid" color="danger" onClick={handleFullDelete} disabled={isDeleting} loading={isDeleting}>
             Full Deletion
           </Button>
           <Button variant="plain" color="neutral" onClick={onClose} disabled={isDeleting}>

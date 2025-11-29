@@ -277,9 +277,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
           {/* Left section - filters and controls */}
           <Box display={'flex'} alignItems={'center'} sx={{ gap: 0.5, flex: 1, minWidth: 'max-content' }}>
             <Box display={'flex'} alignItems={'center'} sx={{ flex: 1, minWidth: 'max-content' }}>
-              <ColumnsPanelTrigger style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }} render={<ToolbarButton sx={{ px: 2 }}>Columns</ToolbarButton>} />
+              <ColumnsPanelTrigger
+                style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}
+                render={<ToolbarButton style={{ paddingLeft: 16, paddingRight: 16 }}>Columns</ToolbarButton>}
+              />
               <Divider orientation={'vertical'} sx={{ mx: 0.5, flexShrink: 0 }} />
-              <FilterPanelTrigger style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }} render={<ToolbarButton sx={{ px: 2 }}>Filter</ToolbarButton>} />
+              <FilterPanelTrigger
+                style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}
+                render={<ToolbarButton style={{ paddingLeft: 16, paddingRight: 16 }}>Filter</ToolbarButton>}
+              />
               <Divider orientation={'vertical'} sx={{ mx: 0.5, flexShrink: 0 }} />
               <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow sx={{ flex: 1, minWidth: '150px', maxWidth: '400px' }}>
                 <QuickFilter style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
