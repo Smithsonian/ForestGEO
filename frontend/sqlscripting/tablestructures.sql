@@ -26,6 +26,8 @@ create table if not exists failedmeasurements
 (
     FailedMeasurementID int auto_increment
         primary key,
+    FileID              varchar(255)   null comment 'Source file name from upload',
+    BatchID             varchar(36)    null comment 'Batch identifier for this upload chunk',
     PlotID              int            null,
     CensusID            int            null,
     Tag                 varchar(20)    null,
@@ -46,6 +48,12 @@ create table if not exists failedmeasurements
     constraint unique_required_hash
         unique (hash_id)
 );
+
+create index idx_upload_session
+    on failedmeasurements (FileID, BatchID) comment 'Index for upload session queries';
+
+create index idx_plot_census_upload
+    on failedmeasurements (PlotID, CensusID, FileID, BatchID) comment 'Composite index for verification queries';
 
 create table if not exists measurementssummary
 (
@@ -959,4 +967,131 @@ create table if not exists viewfulltable
     Attributes                 varchar(255)                                                        null,
     UserDefinedFields          json                                                                null
 );
+
+-- =====================================================================================
+-- Upload Session Tracking Tables
+-- =====================================================================================
+
+create table if not exists upload_sessions
+(
+    session_id        varchar(64)                                                                                                                                not null primary key,
+    schema_name       varchar(64)                                                                                                                                not null,
+    plot_id           int                                                                                                                                        not null,
+    census_id         int                                                                                                                                        not null,
+    user_id           varchar(255)                                                                                                                               not null,
+    state             enum ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing', 'completed', 'failed', 'abandoned', 'cleaned_up') default 'initialized' not null,
+    file_id           varchar(255)                                                                                                                               null,
+    total_chunks      int                                                                                                                         default 0     null,
+    uploaded_chunks   int                                                                                                                         default 0     null,
+    processed_batches int                                                                                                                         default 0     null,
+    total_batches     int                                                                                                                         default 0     null,
+    last_heartbeat    timestamp                                                                                                                   default CURRENT_TIMESTAMP null,
+    created_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null,
+    updated_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP,
+    error_message     text                                                                                                                                       null,
+    idempotency_key   varchar(255)                                                                                                                               null
+);
+
+create index idx_state
+    on upload_sessions (state);
+
+create index idx_heartbeat
+    on upload_sessions (last_heartbeat);
+
+create index idx_plot_census
+    on upload_sessions (plot_id, census_id);
+
+create index idx_idempotency
+    on upload_sessions (idempotency_key);
+
+create table if not exists uploadintegrityalerts
+(
+    id               int auto_increment primary key,
+    uploadId         varchar(50)                                     not null,
+    severity         enum ('info', 'warning', 'critical')            not null default 'warning',
+    type             varchar(50)                                     not null,
+    message          text                                            not null,
+    fileID           varchar(50)                                     not null,
+    batchID          varchar(50)                                     not null,
+    plotID           int                                             not null,
+    censusID         int                                             not null,
+    sourceRecords    int                                             not null,
+    processedRecords int                                             not null,
+    failedRecords    int                                             not null,
+    missingRecords   int                                             not null,
+    details          json                                            null,
+    resolved         tinyint(1)                                      default 0 null,
+    resolvedAt       datetime                                        null,
+    resolvedBy       varchar(100)                                    null,
+    resolution       text                                            null,
+    createdAt        datetime                                        default CURRENT_TIMESTAMP null
+);
+
+create index idx_alerts_uploadid
+    on uploadintegrityalerts (uploadId);
+
+create index idx_alerts_severity
+    on uploadintegrityalerts (severity);
+
+create index idx_alerts_type
+    on uploadintegrityalerts (type);
+
+create index idx_alerts_fileid
+    on uploadintegrityalerts (fileID);
+
+create index idx_alerts_batchid
+    on uploadintegrityalerts (batchID);
+
+create index idx_alerts_resolved
+    on uploadintegrityalerts (resolved);
+
+create index idx_alerts_created
+    on uploadintegrityalerts (createdAt);
+
+create table if not exists uploadmetrics
+(
+    id                         int auto_increment primary key,
+    uploadId                   varchar(50)                                          not null,
+    fileID                     varchar(50)                                          not null,
+    batchID                    varchar(50)                                          not null,
+    schema_name                varchar(100)                                         not null,
+    plotID                     int                                                  not null,
+    censusID                   int                                                  not null,
+    sourceRecords              int                                                  not null default 0,
+    processedRecords           int                                                  not null default 0,
+    failedRecords              int                                                  not null default 0,
+    missingRecords             int                                                  not null default 0,
+    dataLossDetected           tinyint(1)                                           default 0 null,
+    referentialIntegrityPassed tinyint(1)                                           null,
+    duplicatesDetected         tinyint(1)                                           default 0 null,
+    durationMs                 int                                                  null,
+    attemptsNeeded             int                                                  default 1 null,
+    status                     enum ('pending', 'processing', 'completed', 'failed') default 'pending' null,
+    errorMessage               text                                                 null,
+    startTime                  datetime                                             not null,
+    endTime                    datetime                                             null,
+    createdAt                  datetime                                             default CURRENT_TIMESTAMP null,
+    constraint uploadId unique (uploadId)
+);
+
+create index idx_uploadmetrics_fileid
+    on uploadmetrics (fileID);
+
+create index idx_uploadmetrics_batchid
+    on uploadmetrics (batchID);
+
+create index idx_uploadmetrics_plotid
+    on uploadmetrics (plotID);
+
+create index idx_uploadmetrics_censusid
+    on uploadmetrics (censusID);
+
+create index idx_uploadmetrics_status
+    on uploadmetrics (status);
+
+create index idx_uploadmetrics_dataloss
+    on uploadmetrics (dataLossDetected);
+
+create index idx_uploadmetrics_starttime
+    on uploadmetrics (startTime);
 

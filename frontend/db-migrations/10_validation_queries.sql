@@ -3,9 +3,10 @@
 -- ================================================================
 -- Purpose: Validate the entire migration and check data integrity
 -- Run this after all migration scripts have completed
+-- Note: Uses DATABASE() to work with any target schema
 -- ================================================================
 
-USE forestgeo_testing;
+-- No USE statement - schema is selected by the caller
 
 -- ================================================================
 -- SECTION 1: Row Count Comparison

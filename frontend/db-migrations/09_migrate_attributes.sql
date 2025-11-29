@@ -11,8 +11,8 @@
 -- ================================================================
 -- STEP 1: Populate Attributes Table
 -- ================================================================
--- Migrate attributes from tsmattributes table
-INSERT INTO attributes (
+-- Migrate attributes from tsmattributes table (using INSERT IGNORE for idempotency)
+INSERT IGNORE INTO attributes (
     Code,
     Description,
     Status,
@@ -75,8 +75,8 @@ SELECT 'TSM codes parsed from ListOfTSM' AS Status, COUNT(*) AS LinkCount FROM t
 -- ================================================================
 -- STEP 3: Link Attributes to Core Measurements
 -- ================================================================
--- Link parsed TSM codes to measurements via cmattributes
-INSERT INTO cmattributes (
+-- Link parsed TSM codes to measurements via cmattributes (using INSERT IGNORE for idempotency)
+INSERT IGNORE INTO cmattributes (
     CoreMeasurementID,
     Code
 )
@@ -107,8 +107,8 @@ VALUES
     ('OMITTED', 'Measurement omitted', 'omitted', 1),
     ('MISSING', 'Tree/Stem is missing', 'missing', 1);
 
--- Link status codes to measurements based on viewfulltable.Status
-INSERT INTO cmattributes (CoreMeasurementID, Code)
+-- Link status codes to measurements based on viewfulltable.Status (using INSERT IGNORE for idempotency)
+INSERT IGNORE INTO cmattributes (CoreMeasurementID, Code)
 SELECT DISTINCT
     cm.CoreMeasurementID,
     CASE v.Status
@@ -127,21 +127,7 @@ JOIN id_map_census c_map ON sdbh.CensusID = c_map.old_CensusID
 JOIN coremeasurements cm ON
     cm.StemGUID = s_map.new_StemGUID
     AND cm.CensusID = c_map.new_CensusID
-WHERE v.Status IS NOT NULL
-    AND NOT EXISTS (
-        -- Avoid duplicates
-        SELECT 1 FROM cmattributes cma
-        WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
-            AND cma.Code = CASE v.Status
-                WHEN 'alive' THEN 'ALIVE'
-                WHEN 'dead' THEN 'DEAD'
-                WHEN 'stem dead' THEN 'STEM_DEAD'
-                WHEN 'broken below' THEN 'BROKEN_BELOW'
-                WHEN 'omitted' THEN 'OMITTED'
-                WHEN 'missing' THEN 'MISSING'
-                ELSE 'ALIVE'
-            END
-    );
+WHERE v.Status IS NOT NULL;
 
 -- ================================================================
 -- Validation Queries

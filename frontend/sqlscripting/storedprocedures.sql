@@ -8,6 +8,8 @@ drop procedure if exists reviewfailed;
 drop procedure if exists reinsertdefaultvalidations;
 drop procedure if exists reinsertdefaultpostvalidations;
 
+DELIMITER $$
+
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
@@ -74,7 +76,7 @@ BEGIN
 
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
-END;
+END $$
 
 create
     definer = azureroot@`%` procedure RefreshViewFullTable()
@@ -208,7 +210,7 @@ BEGIN
              LEFT JOIN attributes a ON a.Code = ca.Code;
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
-END;
+END $$
 
 create
     definer = azureroot@`%` procedure bulkingestioncollapser(IN vCensusID int)
@@ -278,7 +280,7 @@ begin
 
     -- Return success message
     SELECT CONCAT('Census ', vCensusID, ' collapsed successfully') as message;
-end;
+end $$
 
 create
     definer = azureroot@`%` procedure clearcensusfull(IN targetCensusID int)
@@ -346,7 +348,7 @@ BEGIN
     set foreign_key_checks = 1;
     -- Re-enable triggers after census deletion
     set @disable_triggers = 0;
-END;
+END $$
 
 create
     definer = azureroot@`%` procedure clearcensusmsmts(IN targetCensusID int)
@@ -400,7 +402,7 @@ BEGIN
     set foreign_key_checks = 1;
     -- Re-enable triggers after census deletion
     set @disable_triggers = 0;
-END;
+END $$
 
 create
     definer = azureroot@`%` procedure reingestfailedrows(IN vPlotID int, IN vCensusID int)
@@ -453,7 +455,7 @@ begin
 
     drop temporary table if exists approved;
 
-end;
+end $$
 
 create
     definer = azureroot@`%` procedure reinsertdefaultpostvalidations()
@@ -716,7 +718,7 @@ begin
       AND a.Status = ''dead''
     ORDER BY sp.SpeciesName, s.StemGUID;',
             'dead stems by species, organized to determine which species (if any) are struggling', true);
-end;
+end $$
 
 create
     definer = azureroot@`%` procedure reinsertdefaultvalidations()
@@ -1008,7 +1010,7 @@ where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
     set foreign_key_checks = 1;
-end;
+end $$
 
 create
     definer = azureroot@`%` procedure reviewfailed()
@@ -1062,9 +1064,11 @@ begin
     WHERE FailureReasons IS NULL
        OR FailureReasons = '';
 
-end;
+end $$
 
+DELIMITER ;
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
+DELIMITER $$
 
 CREATE
     DEFINER = azureroot@`%` PROCEDURE bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
@@ -1873,4 +1877,6 @@ BEGIN
         SELECT CONCAT('Batch ', vBatchID, ' processed successfully: ', vProcessedCount, ' records') as message,
                FALSE as batch_failed, 0 as records_failed;
     END IF;
-END;
+END $$
+
+DELIMITER ;

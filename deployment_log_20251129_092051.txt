@@ -1,0 +1,3 @@
+[0;32m[2025-11-29 09:20:51][0m Starting deployment to all ForestGEO schemas...
+[0;32m[2025-11-29 09:20:51][0m ===========================================
+[0;31m[ERROR] Stored procedure file not found: ./sqlscripting/storedprocedures.sql[0m

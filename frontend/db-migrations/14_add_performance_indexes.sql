@@ -1,117 +1,101 @@
--- Performance Optimization: Add indexes for common query patterns
+-- =====================================================================================
+-- Performance Optimization: Add indexes for common query patterns (idempotent)
+-- =====================================================================================
 -- These indexes improve query performance for dashboard metrics and data grid operations
 -- Estimated improvement: 50-200ms per complex query
+--
+-- Note: Uses prepared statements for idempotent index creation since MySQL doesn't
+-- support CREATE INDEX IF NOT EXISTS syntax natively
+-- =====================================================================================
+
+SET @schema = DATABASE();
+
+-- Helper procedure for idempotent index creation
+DROP PROCEDURE IF EXISTS add_index_if_not_exists;
+DELIMITER $$
+CREATE PROCEDURE add_index_if_not_exists(
+    IN p_table_name VARCHAR(64),
+    IN p_index_name VARCHAR(64),
+    IN p_columns VARCHAR(255)
+)
+BEGIN
+    DECLARE v_exists INT DEFAULT 0;
+
+    SELECT COUNT(*) INTO v_exists
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = p_table_name
+      AND INDEX_NAME = p_index_name;
+
+    IF v_exists = 0 THEN
+        SET @sql = CONCAT('CREATE INDEX ', p_index_name, ' ON ', p_table_name, '(', p_columns, ')');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+        SELECT CONCAT('Created index ', p_index_name, ' on ', p_table_name) AS status;
+    ELSE
+        SELECT CONCAT('Index ', p_index_name, ' already exists on ', p_table_name) AS status;
+    END IF;
+END$$
+DELIMITER ;
 
 -- =============================================================================
 -- Core Measurements Indexes
 -- =============================================================================
 
--- Index for census-based queries (dashboard metrics, validation queries)
--- Covers queries filtering by CensusID
-CREATE INDEX IF NOT EXISTS idx_coremeasurements_censusid
-  ON coremeasurements(CensusID);
+-- Note: Some indexes already exist on coremeasurements from the table structure
+-- Only add additional indexes that don't exist
 
--- Composite index for census + plot queries (most common pattern)
--- Covers dashboard metrics and filtered data grids
-CREATE INDEX IF NOT EXISTS idx_coremeasurements_census_plot
-  ON coremeasurements(CensusID, PlotID);
-
--- Index for quadrat-based queries
-CREATE INDEX IF NOT EXISTS idx_coremeasurements_quadratid
-  ON coremeasurements(QuadratID);
-
--- Composite index for validation queries by census and plot
-CREATE INDEX IF NOT EXISTS idx_coremeasurements_census_plot_validation
-  ON coremeasurements(CensusID, PlotID, IsValidated);
+CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_plot', 'CensusID');
+CALL add_index_if_not_exists('coremeasurements', 'idx_coremeasurements_census_plot_validation', 'CensusID, IsValidated');
 
 -- =============================================================================
 -- Stems Indexes
 -- =============================================================================
 
--- Index for census-based stem queries
-CREATE INDEX IF NOT EXISTS idx_stems_censusid
-  ON stems(CensusID);
-
--- Composite index for tree-based queries
-CREATE INDEX IF NOT EXISTS idx_stems_treeid_censusid
-  ON stems(TreeID, CensusID);
-
--- Index for quadrat-based stem queries
-CREATE INDEX IF NOT EXISTS idx_stems_quadratid
-  ON stems(QuadratID);
+-- Note: Most stem indexes already exist from the table structure
+CALL add_index_if_not_exists('stems', 'idx_stems_censusid', 'CensusID');
+CALL add_index_if_not_exists('stems', 'idx_stems_treeid_censusid', 'TreeID, CensusID');
 
 -- =============================================================================
 -- Tree Indexes
 -- =============================================================================
 
--- Index for plot-based tree queries
-CREATE INDEX IF NOT EXISTS idx_trees_plotid
-  ON trees(PlotID);
-
--- Composite index for species queries
-CREATE INDEX IF NOT EXISTS idx_trees_speciesid_plotid
-  ON trees(SpeciesID, PlotID);
-
--- =============================================================================
--- Quadrat Indexes
--- =============================================================================
-
--- Index for plot-based quadrat queries (dashboard progress metrics)
-CREATE INDEX IF NOT EXISTS idx_quadrats_plotid
-  ON quadrats(PlotID);
-
--- Composite index for census quadrat queries
-CREATE INDEX IF NOT EXISTS idx_quadrats_censusid_plotid
-  ON quadrats(CensusID, PlotID);
-
--- =============================================================================
--- Personnel Indexes
--- =============================================================================
-
--- Index for active personnel queries
-CREATE INDEX IF NOT EXISTS idx_personnel_censusid
-  ON personnel(CensusID);
+CALL add_index_if_not_exists('trees', 'idx_trees_censusid', 'CensusID');
 
 -- =============================================================================
 -- Validation Indexes
 -- =============================================================================
 
--- Index for validation error queries
-CREATE INDEX IF NOT EXISTS idx_cmverrors_coreMeasurementID
-  ON cmverrors(CoreMeasurementID);
-
--- Composite index for validation status queries
-CREATE INDEX IF NOT EXISTS idx_cmverrors_censusid_plotid
-  ON cmverrors(CensusID, PlotID);
+CALL add_index_if_not_exists('cmverrors', 'idx_cmverrors_coreMeasurementID', 'CoreMeasurementID');
 
 -- =============================================================================
--- Upload Session Tracking Indexes (if table exists)
+-- Upload Session Tracking Indexes
 -- =============================================================================
 
--- Index for session-based queries
-CREATE INDEX IF NOT EXISTS idx_upload_sessions_session_id
-  ON upload_sessions(session_id);
+-- Check if upload_sessions table exists before adding indexes
+SELECT COUNT(*) INTO @upload_sessions_exists
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'upload_sessions';
 
--- Index for user-based session queries
-CREATE INDEX IF NOT EXISTS idx_upload_sessions_user_id
-  ON upload_sessions(user_id);
+-- These indexes are created by 00b_ensure_table_structures.sql, but verify they exist
 
--- Composite index for active sessions
-CREATE INDEX IF NOT EXISTS idx_upload_sessions_user_status
-  ON upload_sessions(user_id, status);
+-- =============================================================================
+-- Cleanup helper procedure
+-- =============================================================================
+DROP PROCEDURE IF EXISTS add_index_if_not_exists;
 
 -- =============================================================================
 -- Verification and Statistics
 -- =============================================================================
 
--- Show all newly created indexes
+-- Show all indexes on key tables
 SELECT
   TABLE_NAME,
   INDEX_NAME,
-  COLUMN_NAME,
-  SEQ_IN_INDEX,
-  INDEX_TYPE
+  GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
 FROM information_schema.STATISTICS
 WHERE TABLE_SCHEMA = DATABASE()
-  AND INDEX_NAME LIKE 'idx_%'
-ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX;
+  AND TABLE_NAME IN ('coremeasurements', 'stems', 'trees', 'cmverrors', 'upload_sessions')
+GROUP BY TABLE_NAME, INDEX_NAME
+ORDER BY TABLE_NAME, INDEX_NAME;
