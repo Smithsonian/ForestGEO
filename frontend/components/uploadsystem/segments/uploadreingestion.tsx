@@ -510,7 +510,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processed]);
 
-  const { palette } = useTheme();
+  const { palette: _palette } = useTheme();
 
   // Determine which animation to show based on current stage
   // Reingestion skips the upload stage, so we use processing and verification animations

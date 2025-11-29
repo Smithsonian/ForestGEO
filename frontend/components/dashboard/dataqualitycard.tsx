@@ -13,7 +13,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, Tooltip, IconButton, Skeleton, Divider } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
-import AssessmentIcon from '@mui/icons-material/Assessment';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import WarningIcon from '@mui/icons-material/Warning';
@@ -244,7 +243,7 @@ export default function DataQualityCard({
   censusID,
   isLoading = false,
   stats: preloadedStats,
-  onRefresh,
+  onRefresh: _onRefresh,
   defaultExpanded = false,
   compact = false
 }: DataQualityCardProps) {
@@ -253,7 +252,7 @@ export default function DataQualityCard({
   // const [localStats, setLocalStats] = useState<DataQualityStats | null>(preloadedStats || null);
   const [localStats, setLocalStats] = useState<DataQualityStats | null>(PLACEHOLDER_STATS);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fetchError, _setFetchError] = useState<string | null>(null);
 
   // TODO: Re-enable API fetch when post-validation is ready
   // Fetch stats if not preloaded
@@ -294,7 +293,7 @@ export default function DataQualityCard({
     // } catch (error) {
     //   setFetchError(error instanceof Error ? error.message : 'Unknown error');
     // }
-  }, [schema, plotID, censusID]);
+  }, []);
 
   useEffect(() => {
     // TODO: Re-enable when post-validation is ready

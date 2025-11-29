@@ -1212,7 +1212,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     getCellErrorMessages,
     rowHasError,
     getGridActionsColumn,
-    session?.user.userStatus
+    session?.user.userStatus,
+    attributesMap
   ]);
 
   const filteredColumns = useMemo(() => {

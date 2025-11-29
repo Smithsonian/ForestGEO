@@ -14,7 +14,7 @@ type ValidationMessages = Record<string, { id: number; description: string; defi
  */
 function formatValidationName(name: string): string {
   // Handle common abbreviations that should stay together
-  const preserveAbbreviations = ['DBH', 'HOM', 'ID', 'SQL', 'API'];
+  const _preserveAbbreviations = ['DBH', 'HOM', 'ID', 'SQL', 'API'];
 
   // First, insert spaces before capital letters (but not at the start)
   let formatted = name.replace(/([a-z])([A-Z])/g, '$1 $2');

@@ -12,7 +12,7 @@
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Stack, Chip, LinearProgress, Divider, Avatar, Tooltip } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Stack, Chip, Avatar, Tooltip } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
 import ParkIcon from '@mui/icons-material/Park';
 import NatureIcon from '@mui/icons-material/Nature';
@@ -20,7 +20,6 @@ import FiberNewIcon from '@mui/icons-material/FiberNew';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import HistoryIcon from '@mui/icons-material/History';
 import PeopleIcon from '@mui/icons-material/People';
-import GridOnIcon from '@mui/icons-material/GridOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import MetricCard from './metriccard';

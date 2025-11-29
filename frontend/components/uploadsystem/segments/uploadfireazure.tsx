@@ -18,7 +18,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   setReviewState
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
-  const [results, setResults] = useState<string[]>([]);
+  const [_results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState('');

@@ -1,28 +1,6 @@
 'use client';
 
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionGroup,
-  AccordionSummary,
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Modal,
-  ModalClose,
-  ModalDialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Stack,
-  Tooltip,
-  Typography
-} from '@mui/joy';
-import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
+import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Alert, Box, Card, CardContent, Chip, Divider, Stack, Typography } from '@mui/joy';
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckIcon from '@mui/icons-material/Check';
 import PublicIcon from '@mui/icons-material/Public';
@@ -53,7 +31,6 @@ import { designTokens } from '@/config/design-tokens';
 import AddIcon from '@mui/icons-material/Add';
 import DatasetIcon from '@mui/icons-material/Dataset';
 import AssessmentIcon from '@mui/icons-material/Assessment';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/config/store/appstore';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
@@ -77,7 +54,7 @@ interface StemTypesType {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { triggerPulse, isPulsing } = useLockAnimation();
+  const { triggerPulse } = useLockAnimation();
   const { setLoading } = useLoading();
   const { data: session } = useSession();
   const currentSite = useSiteContext();
@@ -116,7 +93,7 @@ export default function DashboardPage() {
   // Plot edit modal state
   const [plotToEdit, setPlotToEdit] = useState<Plot | null>(null);
   const [openPlotModal, setOpenPlotModal] = useState(false);
-  const [manualReset, setManualReset] = useState(false);
+  const [_manualReset, setManualReset] = useState(false);
 
   // Census delete confirmation modal state
   const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);

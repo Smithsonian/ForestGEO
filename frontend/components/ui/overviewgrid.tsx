@@ -17,7 +17,6 @@
 import React, { ReactNode } from 'react';
 import { Box, Card, CardContent, Typography, Avatar, Skeleton, Button, Divider, Stack } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
-import { designTokens } from '@/config/design-tokens';
 
 // ============================================================================
 // Types
