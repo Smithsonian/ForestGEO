@@ -8,6 +8,7 @@ import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
 import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import { AssignmentOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 
 export default function IsolatedQuadratPersonnelDataGrid() {
@@ -101,8 +102,13 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         initialRow={initialQuadratPersonnelRDSRow}
         fieldToFocus={'quadratID'}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> }
         ]}
       />
     </>

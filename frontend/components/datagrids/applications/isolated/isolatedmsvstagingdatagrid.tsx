@@ -7,6 +7,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { AssignmentOutlined, UploadFileOutlined } from '@mui/icons-material';
 
 export default function IsolatedMeasurementsSummaryDraftDataGrid() {
   const currentPlot = usePlotContext();
@@ -58,8 +59,13 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
         initialRow={initialMeasurementsSummaryStagingRDSRow}
         fieldToFocus={'quadratName'}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> }
         ]}
       />
     </>

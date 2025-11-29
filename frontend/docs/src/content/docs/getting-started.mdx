@@ -7,8 +7,17 @@ Welcome to the ForestGEO Data Processing Application!
 
 ## Introduction
 
-The goal of this application is to allow you to record and analyze past and current census data for established global sites worldwide. 
+The goal of this application is to allow you to record and analyze past and current census data for established global sites worldwide.
 By either directly entering data or uploading CSV/TSV files (conforming to defined constraints), you can save historical data and run validations or analysis on it as you complete a census.
+
+### Core Concepts
+
+This app operates along the following **core concepts**:
+
+1. **Site**: A site is a collection of plots.
+2. **Plot**: A plot is a geographic region marked for data collection
+3. **Quadrat**: A subdivision of a plot -- this tends to be a standardized 20 x 20 box
+4. **Census**: A census is a **date range** denoting a distinct time period where data was collected in the **Plot**
 
 ## Logging In
 
@@ -29,30 +38,29 @@ This is a temporary measure! Once the Smithsonian TRB review process completes, 
 
 The application employs a selection system that enables users to choose from a site, plot, and census. After doing so, they can upload, analyze, or update information as needed.
 
-Each subsection of the selection system appears iteratively -- for example, the site selection appears first, but only after a site is selected does the plot selection appear, and only after 
-the plot is selected does the census selection appear. 
-
+Each subsection of the selection system appears iteratively -- for example, the site selection appears first, but only after a site is selected does the plot selection appear, and only after
+the plot is selected does the census selection appear.
 
 ### Sites Overview and Selection
 
-After you log in, you will be directed to the primary view of the application -- a sidebar and a dashboard view. 
+After you log in, you will be directed to the primary view of the application -- a sidebar and a dashboard view.
 Depending on the sites you have been assigned, you should see some variation of the following on the dashboard view. This has been termed the Sites Overview:
 
 ![site dashboard view (no site selected)](../../assets/dashboard-no-site-selected.png)
 
 #### The Sites Overview
 
-The Sites Overview denotes the grid/card view of sites that you have access to. You should be able to see the following core components: 
+The Sites Overview denotes the grid/card view of sites that you have access to. You should be able to see the following core components:
 
 ![sites overview card example w/ notation](../../assets/site-overview-card.jpg)
 
-Here is an explanation of each of the highlighted objects: 
+Here is an explanation of each of the highlighted objects:
 
-1. Site name 
-2. Site schema name -- this is the database name that the site has been assigned 
+1. Site name
+2. Site schema name -- this is the database name that the site has been assigned
 3. Subquadrat size -- this is an **optional** property that allows you to set the size of each subsection of a quadrat
-4. Entry mode -- by default, this is set to **single entry** -- that is, users only have to submit data once for it to be accepted. 
-However, the entry mode can also be set to **double entry**, wherein users must submit data twice for it to be accepted once.
+4. Entry mode -- by default, this is set to **single entry** -- that is, users only have to submit data once for it to be accepted.
+   However, the entry mode can also be set to **double entry**, wherein users must submit data twice for it to be accepted once.
 
 :::note
 You **currently** cannot use a site's overview card to select a site! You must use the dropdown to select a site and continue to plot selection.
@@ -70,7 +78,7 @@ Selecting this will change the dashboard view and open the plot selection view.
 
 Similar to how the site overview and selection mechanism is structured, the implementation of the plots system is much the same way, save some additional editing options.
 
-#### The Plots Overview 
+#### The Plots Overview
 
 Similar to the sites overview, you should see the plots present in a site as a collection of cards in a grid system. However, there are some crucial additions from the sites overview:
 
@@ -85,34 +93,34 @@ The overview card for a plot is subdivided into the following core properties:
 ![cocoli overview card](../../assets/cocoli-plot-overview.png)
 
 1. Number of quadrats recorded in the plot
-2. Name of plot 
+2. Name of plot
 3. Location (including country) of the plot -- **optional**
-4. Grid evaluation -- this is a rough designation of the size of your plot based on the number of quadrats it contains. It is purely for informational purposes and 
-does not factor into **any** analytics or other calculations.
+4. Grid evaluation -- this is a rough designation of the size of your plot based on the number of quadrats it contains. It is purely for informational purposes and
+   does not factor into **any** analytics or other calculations.
 5. Plot editing icon button -- see the subheader for more information.
 
-##### Plot Editing 
+##### Plot Editing
 
-One of the primary differences between the sites overview card and the plots overview card is the **editing** option. Users can update the core information for a plot as needed by 
+One of the primary differences between the sites overview card and the plots overview card is the **editing** option. Users can update the core information for a plot as needed by
 clicking on the Edit icon button. Clicking this will open this editing modal:
 
 ![cocoli-specific editing menu](../../assets/cocoli-editing-menu.png)
 
 1. Plot Name & Details - denotes the name and general cosmetic information about the plot's location.
-2. Starting Coordinates - denotes the **global** coordinates that the plot's **upper left hand corner** resides at. This should **not** be edited unless absolutely necessary -- this is a core 
-part of the various validations used to determine if a stem is in the right location or not, and thus affects a large amount of core data. 
-3. Plot dimensions - denotes the length x width values for the plot. This assumes that a plot is roughly rectangular, and unless this is definitively not the case, 
-should be accepted as the default shape of the plot. 
-4. Plot default units - denotes the baseline unit values used for each core measurement in the plot. Similar to the dimensions and coordinates, this should only be edited carefully and 
-when needed.
+2. Starting Coordinates - denotes the **global** coordinates that the plot's **upper left hand corner** resides at. This should **not** be edited unless absolutely necessary -- this is a core
+   part of the various validations used to determine if a stem is in the right location or not, and thus affects a large amount of core data.
+3. Plot dimensions - denotes the length x width values for the plot. This assumes that a plot is roughly rectangular, and unless this is definitively not the case,
+   should be accepted as the default shape of the plot.
+4. Plot default units - denotes the baseline unit values used for each core measurement in the plot. Similar to the dimensions and coordinates, this should only be edited carefully and
+   when needed.
 
 #### Plot Dropdown
 
-The plots dropdown **also** has the quadrats-based separation. Please select the plot you are working on to continue to the census selection interface. 
+The plots dropdown **also** has the quadrats-based separation. Please select the plot you are working on to continue to the census selection interface.
 
 Once you select your plot, you should see the sidebar interface update:
 
-![sidebar view after plot is selected](../../plot-cocoli-selected.png)
+![sidebar view after plot is selected](../../assets/plot-cocoli-selected.png)
 
 :::caution
 After selecting a plot in the sidebar, you should see an "X" icon appear next to the selection box. Use this to clear your selection and return to the plot overview page!
@@ -132,32 +140,19 @@ As you review the census overview, you will see that there are specific actions 
 
 ![panama - cocoli - census overview numbered](../../assets/census-overview-numbered.jpg)
 
-### Selecting a Plot
+1. **Delete your census** -- this will open a new modal view that will allow you to delete the selected census. You will see options for partial and full deletion, but please **only**
+   use the partial deletion at this time!
 
-Once you've selected a site, you'll be able to select a **Plot**, looking something like this:
-
-![plot dropdown](../../assets/plot-dropdown.png)
-
-:::note
-Please note - the plot you'll first see is a **placeholder**! Please use the **ellipsis** button to open the customization popup:
+:::danger
+The **full** deletion option is currently disabled! The system is currently designed to use the **same** pool of supporting data for **all** censuses! Deleting all supporting data
+while there are other censuses present in the system will cause those censuses to become corrupted.
 :::
 
-![plot edit button](../../assets/plot-edit-button.png)
+2. **Start new census** - select this to create a new census for new measurements!
 
-#### Customizing Your Plot
-
-![plot customization](../../assets/plot-custom.png)
-
-Use this to customize your plot! After saving, your selections will reset and the site will update itself. Please ensure your edits are visible when you attempt to select the plot again!
-
-### Creating or Selecting
-
-This app operates along the following **core concepts**:
-
-1. **Site**: A site is a collection of plots.
-2. **Plot**: A plot is a geographic region marked for data collection
-3. **Quadrat**: A subdivision of a plot -- this tends to be a standardized 20 x 20 box
-4. **Census**: A census is a **date range** denoting a distinct time period where data was collected in the **Plot**
+:::caution
+A new census cannot be created if an existing census has **no** data!
+:::
 
 With this in mind, you will need to create a census before you can begin entering data. After opening the Census dropdown, click on the **Add New Census** button to automatically add a new census:
 
@@ -165,52 +160,44 @@ With this in mind, you will need to create a census before you can begin enterin
 
 Creating a new census will also trigger a selection reset. Please re-select your prior selections, and you should be able to see your new census displayed.
 
-#### Understand the Data Types
+## Navigation Interface
 
-There are **three** core data types that are required before you can record measurements for a census.
+Use the navigation interface to move through the site proper!
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+### Navigation Menu -- Disabled State
 
-## Quick Start
+Once you select a **site** and a **plot**, you should see the following appear below the selection interface in the sidebar:
 
-<CardGrid stagger>
-  <Card title="Stem Codes" icon="star">
-    A list of shorthand codes designating attributes that can assigned to a tree/stem object.
-  </Card>
-  <Card title="" icon="document">
-    Understand the complete file upload workflow from start to finish. [Learn more →](/ForestGEO/upload-process-breakdown/)
-  </Card>
-  <Card title="Error Guide" icon="warning">
-    Find solutions to common errors you may encounter. [Troubleshoot →](/ForestGEO/errors/error-guide-overview/)
-  </Card>
-  <Card title="Personnel" icon="open-book">
-    A list of personnel working on the census. Additionally, you can add/designate roles to each user to better denote how personnel are distributed job-wise
-    across the census.
-  </Card>
-</CardGrid>
+![disabled nav view -- only site and plot selected](../../assets/plot-selected-nav-disabled.png)
 
-They are:
-
-- **Stem Codes**: A list of shorthand codes designating attributes that can assigned to a tree/stem object.
-- ~~**Personnel**: A list of personnel working on the census. Additionally, you can add/designate roles to each user to better denote how personnel are distributed job-wise across the census.~~
-- **Quadrats**: A breakdown of the plot into smaller, standardized area segments.
-- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow rapid assignment when actively recording statistics in the field.
-
-#### Deleting a Census?
-
-If your permissions allow it, you may be able to highlight and click on a **Trashcan** icon along the **latest** census. Clicking on this will delete the census in question.
-
-:::caution
-You won't be able to delete a census if it's NOT the latest census!
+:::note
+Note: The navigation interface will be disabled when a census is not selected! You **must** select a census to access the various pages on the application
 :::
 
-### Logging Into the Website
+### Navigation Menu -- Enabled State
 
-In order to log into the website proper, please navigate to the **production** website instance, available at [https://forestgeo-livesite.azurewebsites.net](https://forestgeo-livesite.azurewebsites.net).
+Once you select a census (regardless of whether measurements exist for it), you should see the navigation menu become interactible!
 
-Click on the login icon to log in!
+The navigation menu is divided into **two** primary categories: **Stem & Plot Details** and **Census Hub**.
 
-#### Submitting Help Tickets
+## Sidebar - Footer
+
+At the bottom of the sidebar, you should see your name, login email, and two additional icons:
+
+![sidebar footer -- numbered](../../assets/sidebar-footer.png)
+
+import { Card, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="1. Administrative Settings">
+    Use this interface to modify site-user interactions and settings! [Learn more
+    →](/ForestGEO/upload-process-breakdown/)
+  </Card>
+  <Card title="2. Log in/out">Use these buttons to log in and log out of the site!</Card>
+</CardGrid>
+
+
+## Submitting Help Tickets
 
 In the event that you run into issues of any kind, please submit a **help ticket** by clicking on the **question mark** icon in the bottom right of the screen. This button will open a form allowing you to explain the issue you're encountering!
 
@@ -219,3 +206,9 @@ In the event that you run into issues of any kind, please submit a **help ticket
 :::note
 Completing this will create a GitHub Issue ticket for further review!
 :::
+
+## Next Steps
+
+Please continue on to the Understanding Supporting Data page!
+
+<LinkCard title="Understanding Supporting Data" href="/ForestGEO/starting/understanding-supporting-data"/>

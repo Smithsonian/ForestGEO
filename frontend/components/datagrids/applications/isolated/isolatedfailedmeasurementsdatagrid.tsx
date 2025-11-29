@@ -7,7 +7,8 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { Alert, Box, Chip, IconButton, Snackbar, Stack, Typography } from '@mui/joy';
+import CloseIcon from '@mui/icons-material/Close';
 import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
@@ -29,6 +30,8 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     spCode: [],
     codes: []
   });
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [rowsWithNoFailures, setRowsWithNoFailures] = useState(0);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -102,13 +105,23 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       if (row.y == null || row.y === -1) reasons.push('Missing Y');
 
       const hasCodes = !!row.codes?.trim();
-      // Note: DBH/HOM of 0 may be valid in some contexts
-      // Only flag as missing if null or -1 (sentinel value)
-      if (!hasCodes && (row.dbh == null || row.dbh === -1)) {
-        reasons.push('Missing Codes and DBH');
-      }
-      if (!hasCodes && (row.hom == null || row.hom === -1)) {
-        reasons.push('Missing Codes and HOM');
+      // If both DBH > 0 AND HOM > 0, the row has valid measurement data
+      // and doesn't need codes - skip missing codes/DBH/HOM validation
+      const hasValidMeasurements = row.dbh != null && row.dbh > 0 && row.hom != null && row.hom > 0;
+
+      if (!hasValidMeasurements) {
+        // Only flag for missing/invalid codes if we don't have valid measurements
+        // Rows with DBH > 0 AND HOM > 0 are valid without codes
+        if (!hasCodes && (row.dbh == null || row.dbh === -1)) {
+          reasons.push('Missing Codes and DBH');
+        }
+        if (!hasCodes && (row.hom == null || row.hom === -1)) {
+          reasons.push('Missing Codes and HOM');
+        }
+        // Only check for invalid codes if row doesn't have valid measurements
+        if (countInvalidCodes(row.codes) > 0) {
+          reasons.push('Invalid Codes');
+        }
       }
 
       const sentinel = new Date('1900-01-01');
@@ -118,13 +131,34 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         reasons.push('Missing Date');
       }
 
-      if (countInvalidCodes(row.codes) > 0) {
-        reasons.push('Invalid Codes');
-      }
-
       return reasons.join('|');
     },
     [selectableOpts, countInvalidCodes]
+  );
+
+  // Check loaded data for rows with no actual failures
+  const handleDataLoaded = useCallback(
+    (rows: GridRowModel[]) => {
+      if (!rows || rows.length === 0) return;
+
+      // Wait for selectable options to be loaded before checking
+      const hasOptions = Object.keys(selectableOpts)
+        .filter(i => !['tag', 'stemTag'].includes(i))
+        .every(key => selectableOpts[key].length > 0);
+      if (!hasOptions) return;
+
+      // Count rows that have no actual failures
+      const noFailureCount = rows.filter(row => {
+        const reasons = computeFailureReasons(row as FailedMeasurementsRDS);
+        return reasons.length === 0;
+      }).length;
+
+      if (noFailureCount > 0) {
+        setRowsWithNoFailures(noFailureCount);
+        setSnackbarOpen(true);
+      }
+    },
+    [selectableOpts, computeFailureReasons]
   );
 
   const onRowSave = useCallback(
@@ -182,7 +216,16 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
 
   const displayFailureReason = useCallback(
     (params: any, column: GridColDef) => {
-      const failureReasonsFromRow = (params.row.failureReasons ?? '')
+      const storedReasons = params.row.failureReasons ?? '';
+
+      // Check if stored reasons contain actual failure messages (not just status like "Ready for reingestion")
+      const actualFailureKeys = Object.keys(failureErrorMapping);
+      const hasActualFailures = actualFailureKeys.some(key => storedReasons.includes(key));
+
+      // Use stored reasons only if they contain actual failure messages, otherwise compute them client-side
+      const failureReasonsString = hasActualFailures ? storedReasons : computeFailureReasons(params.row);
+
+      const failureReasonsFromRow = failureReasonsString
         .split('|')
         .map((reason: string) => reason.trim())
         .filter((reason: string) => reason !== '');
@@ -217,7 +260,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         );
       } else return null;
     },
-    [fieldToReasons]
+    [fieldToReasons, computeFailureReasons]
   );
 
   const columns: GridColDef[] = useMemo(() => {
@@ -315,18 +358,36 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   return Object.keys(selectableOpts)
     .filter(i => !['tag', 'stemTag'].includes(i))
     .every(key => selectableOpts[key].length > 0) ? (
-    <IsolatedDataGridCommons
-      gridType="failedmeasurements"
-      gridColumns={columns}
-      refresh={refresh}
-      setRefresh={setRefresh}
-      initialRow={initialFailedMeasurementsRow}
-      fieldToFocus={'tag'}
-      dynamicButtons={[]}
-      defaultHideEmpty={false}
-      apiRef={apiRef as RefObject<GridApiCommunity>}
-      onDataUpdate={onRowSave}
-    />
+    <>
+      <IsolatedDataGridCommons
+        gridType="failedmeasurements"
+        gridColumns={columns}
+        refresh={refresh}
+        setRefresh={setRefresh}
+        initialRow={initialFailedMeasurementsRow}
+        fieldToFocus={'tag'}
+        dynamicButtons={[]}
+        defaultHideEmpty={false}
+        apiRef={apiRef as RefObject<GridApiCommunity>}
+        onDataUpdate={onRowSave}
+        onDataLoaded={handleDataLoaded}
+      />
+      <Snackbar open={snackbarOpen} autoHideDuration={10000} onClose={() => setSnackbarOpen(false)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
+        <Alert
+          variant="soft"
+          color="success"
+          sx={{ width: '100%' }}
+          endDecorator={
+            <IconButton variant="soft" color="success" size="sm" onClick={() => setSnackbarOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          }
+        >
+          {rowsWithNoFailures} row{rowsWithNoFailures !== 1 ? 's have' : ' has'} no validation failures and can be reingested. Click &quot;Reingest All
+          Rows&quot; or save individual rows to process them.
+        </Alert>
+      </Snackbar>
+    </>
   ) : (
     <CircularProgress />
   );

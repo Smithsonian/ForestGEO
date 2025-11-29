@@ -73,7 +73,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
     defaultHideEmpty = false,
     apiRef = undefined,
     adminEmail = undefined,
-    onDataUpdate
+    onDataUpdate,
+    onDataLoaded
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -161,6 +162,11 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
 
+        // Notify parent component that data has been loaded
+        if (onDataLoaded) {
+          onDataLoaded(data.output);
+        }
+
         // Note: handleAddNewRow will be triggered via processRowUpdate
         // Removed direct call to avoid circular dependency
       } catch (error: any) {
@@ -180,7 +186,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       currentQuadrat?.quadratID,
       adminEmail,
       setSnackbar,
-      setLoading
+      setLoading,
+      onDataLoaded
     ]
   );
 

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Box,
   Button,
   CircularProgress,
   DialogActions,
@@ -213,19 +214,19 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
       >
         <ModalClose aria-label="Close failed measurements modal" onClick={handleCloseModal} />
         <DialogTitle sx={{ pb: 1 }}>Failed Measurements</DialogTitle>
-        <DialogContent sx={{ flex: 1, overflow: 'hidden', p: 0 }}>
-          <Stack spacing={2} sx={{ height: '100%' }}>
-            <Typography level="body-sm" sx={{ px: 3, py: 1 }}>
-              The following measurements failed to be uploaded. You can edit individual measurements in this table, reingest all rows, or clear failed records
-              entirely.
-            </Typography>
+        <DialogContent sx={{ flex: 1, overflow: 'hidden', p: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Typography level="body-sm" sx={{ px: 3, py: 1, flexShrink: 0 }}>
+            The following measurements failed to be uploaded. You can edit individual measurements in this table, reingest all rows, or clear failed records
+            entirely.
+          </Typography>
+          <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 2, pb: 2 }}>
             <IsolatedFailedMeasurementsDataGrid
               onRowReingested={() => {
                 ailogger.info('Row successfully reingested - refreshing failed measurement count');
                 fetchRecordCounts();
               }}
             />
-          </Stack>
+          </Box>
         </DialogContent>
         <DialogActions>
           <Stack spacing={2} sx={{ width: '100%' }}>
