@@ -7,6 +7,7 @@ import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolum
 import { FormType } from '@/config/macros/formdetails';
 import { StemTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import { UploadFileOutlined } from '@mui/icons-material';
 
 export default function IsolatedStemTaxonomiesViewDataGrid() {
   const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
@@ -62,7 +63,9 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
           Species: ['speciesCode', 'speciesName', 'validCode', 'speciesAuthority', 'speciesIDLevel', 'speciesFieldFamily'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
-        dynamicButtons={[{ label: 'Upload', onClick: () => setIsUploadModalOpen(true) }]}
+        dynamicButtons={[
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> }
+        ]}
       />
     </>
   );

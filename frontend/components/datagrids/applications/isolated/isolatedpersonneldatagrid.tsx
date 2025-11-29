@@ -8,6 +8,7 @@ import { FormType } from '@/config/macros/formdetails';
 import { formatHeader, PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import CloseIcon from '@mui/icons-material/Close';
+import { AssignmentOutlined, ManageAccountsOutlined, UploadFileOutlined } from '@mui/icons-material';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';
 import IsolatedRolesDataGrid from '@/components/datagrids/applications/isolated/isolatedrolesdatagrid';
@@ -167,9 +168,14 @@ export default function IsolatedPersonnelDataGrid() {
           Role: ['roleID']
         }}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true), tooltip: 'Edit roles for personnel' }
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
+          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true), tooltip: 'Edit roles for personnel', icon: <ManageAccountsOutlined /> }
         ]}
       />
     </>

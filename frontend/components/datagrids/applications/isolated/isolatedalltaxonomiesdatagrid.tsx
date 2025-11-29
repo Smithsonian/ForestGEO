@@ -12,6 +12,7 @@ import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcomm
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import { AssignmentOutlined, UploadFileOutlined } from '@mui/icons-material';
 import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
@@ -146,8 +147,13 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> }
         ]}
       />
       {selectedSpeciesRow && (

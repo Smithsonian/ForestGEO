@@ -380,6 +380,7 @@ family (FamilyID)
 ## Files in This Directory
 
 ### Core Migration Scripts (01-10)
+
 - `00_run_all_migrations.sh` - Master automation script
 - `01_create_mapping_tables.sql` - Create ID mapping tables
 - `02_migrate_plots.sql` - Migrate plot data
@@ -394,6 +395,7 @@ family (FamilyID)
 - `10_cleanup.sql` - Remove mapping tables
 
 ### Post-Migration Scripts (11-14)
+
 - `11_remove_cmattributes_fk_constraint.sql` - Remove FK constraint for error handling
 - `12_increase_fileid_column_size.sql` - Increase FileID/BatchID column sizes
 - `13_add_upload_session_tracking.sql` - Add upload session tracking columns
@@ -401,11 +403,13 @@ family (FamilyID)
 - `14_add_performance_indexes.sql` - Add performance optimization indexes
 
 ### Utility Scripts
+
 - `run-all-migrations.sh` - Alternative migration runner with MariaDB support
 - `provision_new_site.sh` - Automated site provisioning with checkpoints
 - `sync_schema_procedures.sh` - Synchronize stored procedures across schemas
 
 ### Other Files
+
 - `README.md` - This file
 - `migration-validation.sql` - Additional validation queries
 - `migration_*.log` - Generated log files (after running)
@@ -415,10 +419,13 @@ family (FamilyID)
 ## Schema Consistency
 
 ### Baseline Schema
+
 The `forestgeo_panama` schema is designated as the baseline schema. All other ForestGEO schemas should match its stored procedures.
 
 ### Target Schemas
+
 All ForestGEO schemas should be kept in sync:
+
 - `forestgeo_harvard`
 - `forestgeo_mpala`
 - `forestgeo_panama` (baseline)
@@ -426,7 +433,9 @@ All ForestGEO schemas should be kept in sync:
 - `forestgeo_testing`
 
 ### Stored Procedures
+
 Each schema should have these stored procedures:
+
 1. `bulkingestioncollapser` - Collapse duplicate measurements
 2. `bulkingestionprocess` - Main bulk data ingestion
 3. `clearcensusfull` - Clear all census data
@@ -466,6 +475,7 @@ cd /Users/sambokar/Documents/ForestGEO/frontend
 ```
 
 This will:
+
 1. Backup existing procedures for each schema
 2. Deploy from `sqlscripting/storedprocedures.sql`
 3. Verify deployment success

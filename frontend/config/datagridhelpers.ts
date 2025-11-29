@@ -187,6 +187,7 @@ export interface IsolatedDataGridCommonProps {
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
   onDataUpdate?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<void>;
+  onDataLoaded?: (rows: GridRowModel[]) => void;
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
