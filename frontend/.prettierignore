@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+out/
+build/
+
+# Documentation site (has its own prettier config and dependencies)
+docs/
+
+# Other
+*.min.js
+*.min.css
+package-lock.json
