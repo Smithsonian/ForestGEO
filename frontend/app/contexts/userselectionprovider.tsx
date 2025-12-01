@@ -1,6 +1,6 @@
 // userselectionprovider.tsx
 'use client';
-import React, { createContext, useContext, useReducer } from 'react';
+import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { createEnhancedDispatch, EnhancedDispatch, genericLoadContextReducer, LoadAction } from '@/config/macros/contextreducers';
 import { useOrgCensusListContext, usePlotListContext, useQuadratListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
 import { Plot, Quadrat, Site } from '@/config/sqlrdsdefinitions/zones';
@@ -39,10 +39,12 @@ export default function UserSelectionProvider({ children }: Readonly<{ children:
     undefined
   );
 
-  const enhancedPlotDispatch = createEnhancedDispatch(plotDispatch, 'plot');
-  const enhancedOrgCensusDispatch = createEnhancedDispatch(orgCensusDispatch, 'census');
-  const enhancedQuadratDispatch = createEnhancedDispatch(quadratDispatch, 'quadrat');
-  const enhancedSiteDispatch = createEnhancedDispatch(siteDispatch, 'site');
+  // Memoize enhanced dispatches to prevent infinite re-renders
+  // These functions need to maintain stable references across renders
+  const enhancedPlotDispatch = useMemo(() => createEnhancedDispatch(plotDispatch, 'plot'), [plotDispatch]);
+  const enhancedOrgCensusDispatch = useMemo(() => createEnhancedDispatch(orgCensusDispatch, 'census'), [orgCensusDispatch]);
+  const enhancedQuadratDispatch = useMemo(() => createEnhancedDispatch(quadratDispatch, 'quadrat'), [quadratDispatch]);
+  const enhancedSiteDispatch = useMemo(() => createEnhancedDispatch(siteDispatch, 'site'), [siteDispatch]);
 
   return (
     <SiteContext.Provider value={site}>
