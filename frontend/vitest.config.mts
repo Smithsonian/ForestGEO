@@ -34,9 +34,17 @@ export default defineConfig(({ mode }) => ({
         isolate: true
       }
     },
-    // Prevent tests from running indefinitely
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    // Strict timeout controls to prevent infinite loops
+    testTimeout: 15000, // 15 seconds max per test
+    hookTimeout: 10000, // 10 seconds max for hooks
+    teardownTimeout: 10000, // 10 seconds max for teardown
+    // Bail on first failure to catch issues early
+    bail: 0, // Set to 1 to stop on first failure
+    // Enforce timeouts even with fake timers
+    fakeTimers: {
+      // Ensure fake timers respect test timeouts
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

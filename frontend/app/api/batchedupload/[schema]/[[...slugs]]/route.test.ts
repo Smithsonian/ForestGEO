@@ -91,15 +91,16 @@ describe('batchedupload POST route', () => {
 
     // ⟵ FIX: default import already *is* the mocked module
     const exec = connectionmanager.getInstance().executeQuery as ReturnType<typeof vi.fn>;
-    expect(exec).toHaveBeenCalledTimes(1);
+    // Route calls executeQuery twice: INSERT + CALL reviewfailed()
+    expect(exec).toHaveBeenCalledTimes(2);
 
     // With mocked mysql2.format we can sanity-check the SQL + params
     const sqlArg = exec.mock.calls[0][0] as string;
     expect(sqlArg).toContain('FORMATTED_SQL:');
-    expect(sqlArg).toContain('INSERT INTO ?? ('); // don’t assert exact number of ?? (order can vary)
+    expect(sqlArg).toContain('INSERT INTO ?? ('); // don't assert exact number of ?? (order can vary)
     expect(sqlArg).toContain('myschema.failedmeasurements');
 
-    // Ensure excluded keys don’t appear as column names
+    // Ensure excluded keys don't appear as column names
     expect(sqlArg).not.toMatch(/failedMeasurementID/);
     // Beware: /id/ would also match 'plotID', so avoid that generic check.
 
@@ -108,6 +109,10 @@ describe('batchedupload POST route', () => {
     expect(sqlArg).toContain('"censusID"');
     expect(sqlArg).toContain('42'); // plotID
     expect(sqlArg).toContain('7'); // censusID
+
+    // Verify the second call is the reviewfailed procedure
+    const reviewFailedCall = exec.mock.calls[1][0] as string;
+    expect(reviewFailedCall).toMatch(/CALL myschema\.reviewfailed\(\)/i);
   });
 
   it('500s and logs on DB error', async () => {

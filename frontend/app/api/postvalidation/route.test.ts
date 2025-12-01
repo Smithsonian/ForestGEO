@@ -47,9 +47,16 @@ describe('GET /api/postvalidation', () => {
     vi.clearAllMocks();
   });
 
-  it('throws if schema is missing', async () => {
+  it('returns 400 if schema is missing', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
     const req = makeRequest('http://localhost/api/postvalidation'); // no ?schema=
-    await expect(GET(req)).rejects.toThrow(/no schema variable provided/i);
+    const res = await GET(req);
+
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/no schema variable provided/i);
   });
 
   it('404 when no queries found; closes connection', async () => {
@@ -98,13 +105,17 @@ describe('GET /api/postvalidation', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates DB errors and still closes connection', async () => {
+  it('returns 500 on DB errors and still closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api/postvalidation?schema=myschema');
-    await expect(GET(req)).rejects.toThrow(/boom/i);
+    const res = await GET(req);
+
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/boom/i);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

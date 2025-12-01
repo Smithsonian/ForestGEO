@@ -4,6 +4,11 @@ import React from 'react';
 import ErrorPage from '@/app/error';
 
 vi.mock('@mui/joy', () => ({
+  Alert: ({ children, ...props }: any) => (
+    <div data-testid="alert" role="alert" {...props}>
+      {children}
+    </div>
+  ),
   Box: ({ children, ...props }: any) => (
     <div data-testid="box" {...props}>
       {children}
@@ -14,11 +19,24 @@ vi.mock('@mui/joy', () => ({
       {children}
     </button>
   ),
+  Stack: ({ children, ...props }: any) => (
+    <div data-testid="stack" {...props}>
+      {children}
+    </div>
+  ),
   Typography: ({ children, level, ...props }: any) => (
     <div data-testid={`typography-${level}`} {...props}>
       {children}
     </div>
   )
+}));
+
+vi.mock('@mui/icons-material/Error', () => ({
+  default: () => <span data-testid="error-icon">ErrorIcon</span>
+}));
+
+vi.mock('@mui/icons-material/Warning', () => ({
+  default: () => <span data-testid="warning-icon">WarningIcon</span>
 }));
 
 describe('Error Boundary Behavior Tests', () => {
@@ -42,7 +60,7 @@ describe('Error Boundary Behavior Tests', () => {
 
       expect(screen.getByText('Something went wrong')).toBeTruthy();
       expect(screen.getByText('Test error message')).toBeTruthy();
-      expect(screen.getByText('Retrying in 5 seconds...')).toBeTruthy();
+      expect(screen.getByText('Retrying automatically in 5 seconds...')).toBeTruthy();
     });
 
     it('should display fallback message when error has no message', () => {
@@ -204,7 +222,7 @@ describe('Error Boundary Behavior Tests', () => {
 
       expect(screen.getByText('Z.map is not a function')).toBeTruthy();
       expect(screen.getByText('Something went wrong')).toBeTruthy();
-      expect(screen.getByText('Retrying in 5 seconds...')).toBeTruthy();
+      expect(screen.getByText('Retrying automatically in 5 seconds...')).toBeTruthy();
     });
 
     it('should display context-related errors', () => {
@@ -389,7 +407,7 @@ describe('Error Boundary Behavior Tests', () => {
       expect(screen.getByText('Network connection lost')).toBeTruthy();
 
       // Auto-retry message
-      expect(screen.getByText('Retrying in 5 seconds...')).toBeTruthy();
+      expect(screen.getByText('Retrying automatically in 5 seconds...')).toBeTruthy();
 
       // Manual retry option
       expect(screen.getByTestId('retry-button')).toBeTruthy();

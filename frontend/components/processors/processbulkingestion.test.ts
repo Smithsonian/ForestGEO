@@ -289,8 +289,9 @@ describe('processBulkIngestionCollapser', () => {
       const clearErrorsQuery = calls.find((call: any) => call[0].includes('still_duplicates'));
 
       // Verify it uses the same duplicate detection logic
-      expect(clearErrorsQuery[0]).toMatch(/GROUP BY t2\.CensusID, t2\.TreeTag, s2\.StemTag/);
-      expect(clearErrorsQuery[0]).toMatch(/HAVING count\(distinct s2\.StemGUID\) > 1/);
+      // Note: The query uses cm3.CensusID for grouping since it's checking coremeasurements duplicates
+      expect(clearErrorsQuery[0]).toMatch(/GROUP BY cm3\.CensusID, t2\.TreeTag, s2\.StemTag/);
+      expect(clearErrorsQuery[0]).toMatch(/HAVING count\(distinct cm3\.CoreMeasurementID\) > 1/);
     });
 
     it('should only clear ValidationErrorID 5 (duplicate tree/stem tag)', async () => {

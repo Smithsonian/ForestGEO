@@ -18,7 +18,7 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 // Mock dependencies
 vi.mock('next-auth/react');
-vi.mock('@/app/contexts/userselectionprovider');
+vi.mock('@/app/contexts/compat-hooks');
 vi.mock('@/app/contexts/lockanimationcontext');
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -36,6 +36,86 @@ vi.mock('@/components/metrics/progresstachometer', () => ({
 vi.mock('@/components/metrics/progresspiechart', () => ({
   default: ({ PopulatedPercent }: any) => <div data-testid="piechart">{PopulatedPercent}%</div>
 }));
+vi.mock('@/config/sqlrdsdefinitions/views', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getAllViewFullTableViewsHCs: () => ({
+      coreMeasurementID: false,
+      plotID: false,
+      censusID: false,
+      quadratID: false,
+      speciesID: false,
+      treeID: false,
+      stemGUID: false,
+      personnelID: false,
+      familyID: false,
+      genusID: false
+    }),
+    getMeasurementsSummaryViewHCs: () => ({
+      coreMeasurementID: false,
+      plotID: false,
+      censusID: false,
+      quadratID: false,
+      speciesID: false,
+      treeID: false,
+      stemGUID: false,
+      personnelID: false
+    }),
+    getAllTaxonomiesViewHCs: () => ({
+      speciesID: false,
+      familyID: false,
+      genusID: false
+    })
+  };
+});
+vi.mock('@/config/sqlrdsdefinitions/core', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getFailedMeasurementsHCs: () => ({
+      failedMeasurementID: false,
+      plotID: false,
+      censusID: false
+    }),
+    getCoreMeasurementsHCs: () => ({
+      censusID: false,
+      stemGUID: false,
+      description: false
+    })
+  };
+});
+vi.mock('@/config/sqlrdsdefinitions/personnel', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getPersonnelHCs: () => ({
+      censusID: false,
+      personnelID: false
+    })
+  };
+});
+vi.mock('@/config/sqlrdsdefinitions/zones', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getQuadratHCs: () => ({
+      quadratID: false,
+      plotID: false,
+      censusID: false
+    })
+  };
+});
+vi.mock('@/config/sqlrdsdefinitions/taxonomies', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getSpeciesLimitsHCs: () => ({
+      speciesLimitsID: false,
+      speciesID: false
+    })
+  };
+});
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -189,7 +269,7 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('TOTAL TREES')).toBeInTheDocument();
+        expect(screen.getByText('Total Trees')).toBeInTheDocument();
         expect(screen.getByText('1,234')).toBeInTheDocument();
       });
     });
@@ -198,7 +278,7 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('TOTAL STEMS')).toBeInTheDocument();
+        expect(screen.getByText('Total Stems')).toBeInTheDocument();
         expect(screen.getByText('2,468')).toBeInTheDocument();
       });
     });
@@ -216,7 +296,7 @@ describe('Enhanced Dashboard Page', () => {
       render(<DashboardPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('ACTIVE PERSONNEL')).toBeInTheDocument();
+        expect(screen.getByText('Active Personnel')).toBeInTheDocument();
         expect(screen.getByText('Currently active')).toBeInTheDocument();
       });
     });

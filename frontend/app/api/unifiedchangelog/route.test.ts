@@ -24,7 +24,8 @@ import ConnectionManager from '@/config/connectionmanager';
 // ========== Mocks ==========
 vi.mock('@/config/utils/sqlsecurity', () => ({
   validateSchemaOrThrow: vi.fn(),
-  safeFormatQuery: vi.fn((schema, query) => query)
+  safeFormatQuery: vi.fn((schema, query) => query),
+  isValidSchema: vi.fn(() => true)
 }));
 
 vi.mock('mysql2/promise', () => ({
@@ -88,6 +89,12 @@ vi.mock('@/ailogger', () => ({
 
 vi.mock('@/app/actions/cookiemanager', () => ({
   getCookie: vi.fn(async () => '123')
+}));
+
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: { id: 'test-user-id', email: 'test@example.com' }
+  }))
 }));
 
 // Import handlers AFTER mocks
@@ -262,12 +269,15 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence for measurements upload path:
-      // 1. INSERT to temporarymeasurements
-      // 2. COUNT inserted rows
-      // 3. SELECT existing changelog entry (none found)
-      // 4. INSERT new changelog entry
+      // 1-2. Duplicate detection checks (checkRowExists for first and last row)
+      // 3. INSERT to temporarymeasurements
+      // 4. COUNT inserted rows
+      // 5. SELECT existing changelog entry (none found)
+      // 6. INSERT new changelog entry
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
         .mockResolvedValueOnce([{ count: 1200 }]) // COUNT inserted rows
         .mockResolvedValueOnce([]) // SELECT existing changelog entry (none found)
@@ -349,9 +359,16 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-7');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      // Mock sequence: INSERT temporarymeasurements, COUNT rows, SELECT changelog (found), UPDATE changelog
+      // Mock sequence:
+      // 1-2. Duplicate detection checks
+      // 3. INSERT temporarymeasurements
+      // 4. COUNT rows
+      // 5. SELECT changelog (found)
+      // 6. UPDATE changelog
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
         .mockResolvedValueOnce([{ count: 800 }]) // COUNT inserted rows
         .mockResolvedValueOnce([
@@ -458,6 +475,8 @@ describe('Unified Changelog Tracking System', () => {
 
       let _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 500 }])
         .mockResolvedValueOnce([]) // No existing entry for file1
@@ -470,7 +489,7 @@ describe('Unified Changelog Tracking System', () => {
         plot: { plotID: 1 },
         census: { dateRanges: [{ censusID: 10 }] },
         user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
       });
 
       const res1 = await SQLPACKETLOAD_POST(req1);
@@ -485,6 +504,8 @@ describe('Unified Changelog Tracking System', () => {
 
       _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 300 }])
         .mockResolvedValueOnce([]) // No existing entry for file2
@@ -497,7 +518,7 @@ describe('Unified Changelog Tracking System', () => {
         plot: { plotID: 1 },
         census: { dateRanges: [{ censusID: 10 }] },
         user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '200', stemtag: '1' } }
+        fileRowSet: { 'row-1': { tag: '200', stemtag: '1', spcode: 'sp2', quadrat: 'Q02' } }
       });
 
       const res2 = await SQLPACKETLOAD_POST(req2);
@@ -554,6 +575,8 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 100 }])
         .mockResolvedValueOnce([])
@@ -566,7 +589,7 @@ describe('Unified Changelog Tracking System', () => {
         plot: { plotID: 1 },
         census: { dateRanges: [{ censusID: 10 }] },
         user: 'john.doe@example.com',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
       });
 
       await SQLPACKETLOAD_POST(req);
@@ -589,9 +612,11 @@ describe('Unified Changelog Tracking System', () => {
       // Mock changelog insert failure but upload succeeds
       const _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
+        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
         .mockResolvedValueOnce([{ count: 50 }]) // COUNT succeeds
-        .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog fails
+        .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog SELECT fails
 
       const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
         schema: 'testschema',
@@ -600,7 +625,7 @@ describe('Unified Changelog Tracking System', () => {
         plot: { plotID: 1 },
         census: { dateRanges: [{ censusID: 10 }] },
         user: 'test-user',
-        fileRowSet: { 'row-1': { tag: '100', stemtag: '1' } }
+        fileRowSet: { 'row-1': { tag: '100', stemtag: '1', spcode: 'sp1', quadrat: 'Q01' } }
       });
 
       const res = await SQLPACKETLOAD_POST(req);

@@ -30,10 +30,14 @@ vi.mock('@/ailogger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));
 
-// Mock uuid
-vi.mock('uuid', () => ({
-  v4: () => 'test-batch-id-12345'
-}));
+// Mock generateShortBatchID from utils
+vi.mock('@/config/utils', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    generateShortBatchID: () => 'test-batch-id-12345'
+  };
+});
 
 // Mock context validation
 vi.mock('@/lib/contextvalidation', () => ({

@@ -579,12 +579,15 @@ describe('LoginLogout - Functional Tests', () => {
       expect(style.whiteSpace).toBe('nowrap');
     });
 
-    it('SHOULD explain why settings button is disabled', () => {
+    it('SHOULD have disabled settings button with title explaining its purpose', () => {
       render(<LoginLogout />);
 
-      const settingsButton = screen.getByRole('button', { name: /settings menu.*currently unavailable/i });
+      // The settings button has aria-label="Settings menu" and title="Settings menu"
+      // It is disabled for non-admin users
+      const settingsButton = screen.getByRole('button', { name: /settings menu/i });
       expect(settingsButton).toBeInTheDocument();
       expect(settingsButton).toBeDisabled();
+      expect(settingsButton).toHaveAttribute('title', 'Settings menu');
     });
   });
 

@@ -40,8 +40,8 @@ class ConnectionManager {
   >();
   private readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
   private readonly MAX_CONCURRENT_TRANSACTIONS = 12; // Reduced to prevent overwhelming connection pool
-  private applicationLocks = new Map<string, { transactionId: string; acquiredAt: number }>();
-  private readonly LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for application locks
+  // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
+  private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
   private transactionSlotQueue: Array<() => void> = []; // Queue for waiting transactions
 
   // Private constructor
@@ -149,7 +149,7 @@ class ConnectionManager {
       throw error;
     } finally {
       // Clean up application locks before releasing connection
-      this.cleanupApplicationLocks(transactionId);
+      await this.cleanupApplicationLocks(transactionId);
       connection.release();
       this.transactionConnections.delete(transactionId);
 
@@ -175,7 +175,7 @@ class ConnectionManager {
       throw error;
     } finally {
       // Clean up application locks before releasing connection
-      this.cleanupApplicationLocks(transactionId);
+      await this.cleanupApplicationLocks(transactionId);
       connection.release();
       this.transactionConnections.delete(transactionId);
 
@@ -334,60 +334,93 @@ class ConnectionManager {
     }
   }
 
-  // Application-level lock management
+  // Application-level lock management using MySQL distributed locks
   public async acquireApplicationLock(lockName: string, transactionId: string, timeoutMs: number = this.LOCK_TIMEOUT_MS): Promise<boolean> {
-    const startTime = Date.now();
+    const lockStartTime = Date.now();
+    const timeoutSeconds = Math.ceil(timeoutMs / 1000);
 
-    while (Date.now() - startTime < timeoutMs) {
-      const existingLock = this.applicationLocks.get(lockName);
+    try {
+      // Use MySQL GET_LOCK for distributed, atomic lock acquisition
+      // GET_LOCK returns:
+      // - 1 if lock was acquired successfully
+      // - 0 if timeout occurred
+      // - NULL if an error occurred
+      const query = 'SELECT GET_LOCK(?, ?) as acquired';
+      const result = await this.executeQuery(query, [lockName, timeoutSeconds], transactionId);
 
-      if (!existingLock) {
-        // No existing lock, acquire it
-        this.applicationLocks.set(lockName, {
-          transactionId,
-          acquiredAt: Date.now()
-        });
-
+      if (result && result[0]?.acquired === 1) {
+        // Track lock for cleanup
         const meta = this.transactionMeta.get(transactionId);
         if (meta) {
           meta.resourceLocks.add(lockName);
         }
 
-        ailogger.info(chalk.blue(`Application lock acquired: ${lockName} by transaction ${transactionId}`));
-        return true;
-      } else if (existingLock.transactionId === transactionId) {
-        // Same transaction already holds the lock
+        const lockWaitTime = Date.now() - lockStartTime;
+        if (lockWaitTime > 10000) {
+          ailogger.warn(chalk.yellow(`Slow lock acquisition: ${lockWaitTime}ms for ${lockName}`));
+        }
+
+        ailogger.info(chalk.blue(`MySQL lock acquired: ${lockName} by transaction ${transactionId} (waited ${lockWaitTime}ms)`));
         return true;
       }
 
-      // Wait and retry
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Lock acquisition failed (timeout or error)
+      const lockWaitTime = Date.now() - lockStartTime;
+      ailogger.warn(chalk.yellow(`Failed to acquire MySQL lock: ${lockName} within ${timeoutMs}ms (actual: ${lockWaitTime}ms)`));
+      return false;
+    } catch (error: any) {
+      ailogger.error(chalk.red(`Error acquiring MySQL lock ${lockName}:`, error));
+      return false;
     }
-
-    ailogger.warn(chalk.yellow(`Failed to acquire application lock: ${lockName} within ${timeoutMs}ms`));
-    return false;
   }
 
-  public releaseApplicationLock(lockName: string, transactionId: string): void {
-    const lock = this.applicationLocks.get(lockName);
-    if (lock && lock.transactionId === transactionId) {
-      this.applicationLocks.delete(lockName);
+  public async releaseApplicationLock(lockName: string, transactionId: string): Promise<void> {
+    try {
+      // Use MySQL RELEASE_LOCK for distributed lock release
+      // RELEASE_LOCK returns:
+      // - 1 if lock was released successfully
+      // - 0 if lock was not held by this connection
+      // - NULL if the lock doesn't exist
+      const query = 'SELECT RELEASE_LOCK(?) as released';
+      const result = await this.executeQuery(query, [lockName], transactionId);
 
+      // Remove from resource locks tracking
       const meta = this.transactionMeta.get(transactionId);
       if (meta) {
         meta.resourceLocks.delete(lockName);
       }
 
-      ailogger.info(chalk.blue(`Application lock released: ${lockName} by transaction ${transactionId}`));
+      if (result && result[0]?.released === 1) {
+        ailogger.info(chalk.blue(`MySQL lock released: ${lockName} by transaction ${transactionId}`));
+      } else if (result && result[0]?.released === 0) {
+        ailogger.warn(chalk.yellow(`Lock ${lockName} was not held by transaction ${transactionId}`));
+      }
+    } catch (error: any) {
+      ailogger.error(chalk.red(`Error releasing MySQL lock ${lockName}:`, error));
+      // Don't throw - we want cleanup to continue even if release fails
     }
   }
 
-  private cleanupApplicationLocks(transactionId: string): void {
+  private async cleanupApplicationLocks(transactionId: string): Promise<void> {
     const meta = this.transactionMeta.get(transactionId);
-    if (meta) {
-      for (const lockName of meta.resourceLocks) {
-        this.releaseApplicationLock(lockName, transactionId);
-      }
+    if (meta && meta.resourceLocks.size > 0) {
+      ailogger.info(`Cleaning up ${meta.resourceLocks.size} locks for transaction ${transactionId}`);
+
+      // Release all locks for this transaction
+      const releasePromises = Array.from(meta.resourceLocks).map(lockName =>
+        this.releaseApplicationLock(lockName, transactionId)
+      );
+
+      // Wait for all releases to complete (with timeout)
+      await Promise.race([
+        Promise.all(releasePromises),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000)
+        )
+      ]).catch(error => {
+        ailogger.error(`Error during lock cleanup for transaction ${transactionId}:`, error);
+        // Continue anyway - locks will be auto-released when connection closes
+      });
     }
   }
 
