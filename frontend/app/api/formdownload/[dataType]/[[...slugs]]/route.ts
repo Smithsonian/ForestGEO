@@ -153,9 +153,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                   cm.MeasuredHOM                                      AS MeasuredHOM,
                   cm.MeasurementDate                                  AS MeasurementDate,
                   (
-                    SELECT GROUP_CONCAT(a.Code SEPARATOR '; ')
+                    SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
                     FROM ${schema}.cmattributes ca
-                    JOIN ${schema}.attributes a ON ca.Code = a.Code
                     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
                   ) as Codes,
                   (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR '; ')
