@@ -34,7 +34,8 @@ describe('useUploadState', () => {
       const { result } = renderHook(() => useUploadState(FormType.measurements));
 
       expect(result.current.state.uploadForm).toBe(FormType.measurements);
-      expect(result.current.state.reviewState).toBe(ReviewStates.START);
+      // When form is pre-selected, hook skips START and goes directly to UPLOAD_FILES
+      expect(result.current.state.reviewState).toBe(ReviewStates.UPLOAD_FILES);
     });
 
     it('should skip to processing when flag is set', () => {

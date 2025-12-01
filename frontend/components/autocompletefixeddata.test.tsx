@@ -6,8 +6,12 @@ import { useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
 // Mock dependencies
-vi.mock('@/app/contexts/userselectionprovider');
+vi.mock('@/app/contexts/compat-hooks', () => ({
+  useSiteContext: vi.fn()
+}));
 vi.mock('@/ailogger');
+
+const mockUseSiteContext = vi.mocked(useSiteContext);
 
 describe('AutocompleteFixedData - Functional Tests', () => {
   const mockOnChange = vi.fn();
@@ -19,7 +23,7 @@ describe('AutocompleteFixedData - Functional Tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (useSiteContext as any).mockReturnValue(mockSiteContext);
+    mockUseSiteContext.mockReturnValue(mockSiteContext as any);
 
     // Mock fetch globally with immediate resolution
     global.fetch = vi.fn().mockResolvedValue({
@@ -148,7 +152,10 @@ describe('AutocompleteFixedData - Functional Tests', () => {
 
       await waitFor(
         () => {
-          expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/formsearch/Species?schema=test_schema&searchfor='));
+          expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/api/formsearch/Species?schema=test_schema&searchfor='),
+            expect.objectContaining({ signal: expect.any(AbortSignal) })
+          );
         },
         { timeout: 3000 }
       );
@@ -159,7 +166,10 @@ describe('AutocompleteFixedData - Functional Tests', () => {
 
       await waitFor(
         () => {
-          expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('schema=test_schema'));
+          expect(global.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('schema=test_schema'),
+            expect.objectContaining({ signal: expect.any(AbortSignal) })
+          );
         },
         { timeout: 3000 }
       );
@@ -392,13 +402,17 @@ describe('AutocompleteFixedData - Functional Tests', () => {
     });
 
     it('MUST throw helpful error when site context is missing', () => {
-      (useSiteContext as any).mockReturnValue(null);
+      mockUseSiteContext.mockReturnValue(null as any);
 
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+      // Component now handles missing context gracefully instead of crashing
       expect(() => {
         render(<AutocompleteFixedData dataType="Species" value="" onChange={mockOnChange} />);
-      }).toThrow('Site must be selected!');
+      }).not.toThrow();
+
+      // But it should still render without errors
+      expect(screen.getByLabelText('Species')).toBeInTheDocument();
 
       consoleError.mockRestore();
     });

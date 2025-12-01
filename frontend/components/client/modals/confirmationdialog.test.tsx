@@ -277,15 +277,15 @@ describe('ConfirmationDialog - Functional Tests', () => {
     it('MUST have modal backdrop when open', () => {
       render(<ConfirmationDialog {...defaultProps} />);
 
-      // MUI renders backdrop in document body, not in component container
-      const backdrop = document.querySelector('.MuiBackdrop-root');
+      // MUI Joy uses MuiModal-backdrop class for the backdrop
+      const backdrop = document.querySelector('.MuiModal-backdrop');
       expect(backdrop).toBeInTheDocument();
     });
 
     it('MUST NOT have modal backdrop when closed', () => {
       render(<ConfirmationDialog {...defaultProps} open={false} />);
 
-      const backdrop = document.querySelector('.MuiBackdrop-root');
+      const backdrop = document.querySelector('.MuiModal-backdrop');
       expect(backdrop).not.toBeInTheDocument();
     });
   });

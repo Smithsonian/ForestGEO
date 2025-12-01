@@ -59,7 +59,13 @@ vi.mock('@/config/connectionmanager', async () => {
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
   insertOrUpdate: vi.fn()
 }));
-vi.mock('uuid', () => ({ v4: vi.fn(() => 'test-batch-id') }));
+vi.mock('@/config/utils', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    generateShortBatchID: () => 'test-batch-id'
+  };
+});
 
 // Optional mysql2 format mock
 vi.mock('mysql2/promise', () => {
@@ -199,7 +205,7 @@ describe('bulkcrud POST route', () => {
 
     const req = makeRequest({
       gridType: 'measurementssummary',
-      schema: 'myschema',
+      schema: 'forestgeo_testing',
       plot: { plotID: 42 },
       census: { dateRanges: [{ censusID: 7 }] },
       fileRowSet: rows
@@ -218,15 +224,14 @@ describe('bulkcrud POST route', () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
 
     const [firstSQL, firstParams] = execSpy.mock.calls[0];
-    expect(String(firstSQL)).toMatch(/INSERT INTO \?\? SET \?/i);
-    expect((firstParams as unknown as any)[0]).toBe('myschema.temporarymeasurements');
-
-    const mappedArray = (firstParams as unknown as any)[1];
-    expect(Array.isArray(mappedArray)).toBe(true);
-    expect(mappedArray).toHaveLength(2);
+    expect(String(firstSQL)).toMatch(/INSERT INTO `forestgeo_testing`\.temporarymeasurements.*VALUES \?/i);
+    // firstParams is an array: [values] where values is an array of row arrays
+    const values = (firstParams as unknown as any)[0];
+    expect(Array.isArray(values)).toBe(true);
+    expect(values).toHaveLength(2);
 
     const [secondSQL, secondParams] = execSpy.mock.calls[1];
-    expect(String(secondSQL)).toMatch(/CALL myschema\.bulkingestionprocess\(\?, \?\);?/i);
+    expect(String(secondSQL)).toMatch(/CALL `forestgeo_testing`\.bulkingestionprocess\(\?, \?\);?/i);
     expect(secondParams).toEqual(['sample_bulk_insert.csv', 'test-batch-id']);
 
     expect(insertOrUpdate).not.toHaveBeenCalled();
@@ -261,7 +266,7 @@ describe('bulkcrud POST route', () => {
 
     const req = makeRequest({
       gridType: 'trees', // anything not in ['measurementssummary','measurementssummaryview']
-      schema: 'myschema',
+      schema: 'forestgeo_testing',
       plot: { plotID: 99 },
       census: { dateRanges: [{ censusID: 5 }] },
       fileRowSet: rows
@@ -278,7 +283,7 @@ describe('bulkcrud POST route', () => {
     // Validate the first call's props
     const [firstProps] = (insertOrUpdate as any).mock.calls[0];
     expect(firstProps).toMatchObject({
-      schema: 'myschema',
+      schema: 'forestgeo_testing',
       formType: 'trees',
       rowData: { foo: 1 },
       plot: { plotID: 99 },
@@ -317,7 +322,7 @@ describe('bulkcrud POST route', () => {
     // Force the summary path so we hit executeQuery early
     const req = makeRequest({
       gridType: 'measurementssummary',
-      schema: 'myschema',
+      schema: 'forestgeo_testing',
       plot: { plotID: 1 },
       census: { dateRanges: [{ censusID: 2 }] },
       fileRowSet: {

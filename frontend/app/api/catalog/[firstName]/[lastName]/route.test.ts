@@ -54,21 +54,21 @@ describe('GET /api/catalog/[firstName]/[lastName]', () => {
     vi.clearAllMocks();
   });
 
-  it('returns 500 error when firstName or lastName missing', async () => {
+  it('returns 400 error when firstName or lastName missing', async () => {
     const req = makeRequest();
     const close = vi.spyOn((ConnectionManager as any).getInstance(), 'closeConnection').mockResolvedValueOnce(undefined);
 
     // Missing lastName
     const res1 = await GET(req, makeParams('Ada', undefined as any));
-    expect(res1.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(res1.status).toBe(HTTPResponses.BAD_REQUEST);
     const body1 = await res1.json();
-    expect(body1.error).toMatch(/no first or last name provided/i);
+    expect(body1.error).toMatch(/first name and last name are required/i);
 
     // Missing firstName
     const res2 = await GET(req, makeParams(undefined as any, 'Lovelace'));
-    expect(res2.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    expect(res2.status).toBe(HTTPResponses.BAD_REQUEST);
     const body2 = await res2.json();
-    expect(body2.error).toMatch(/no first or last name provided/i);
+    expect(body2.error).toMatch(/first name and last name are required/i);
 
     expect(close).toHaveBeenCalledTimes(2);
   });
@@ -95,7 +95,7 @@ describe('GET /api/catalog/[firstName]/[lastName]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('500 and logs when user not found', async () => {
+  it('404 and logs info when user not found', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]); // no rows
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
@@ -104,18 +104,17 @@ describe('GET /api/catalog/[firstName]/[lastName]', () => {
     const res = await GET(req, makeParams('Grace', 'Hopper'));
 
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    // User not found is now correctly a 404, not a 500
+    expect(res.status).toBe(HTTPResponses.NOT_FOUND);
 
     const body = await res.json();
     expect(body.error).toMatch(/User not found/i);
 
-    // logger called with message and endpoint
-    const logErr = (ailogger as any).error as ReturnType<typeof vi.fn>;
-    expect(logErr).toHaveBeenCalled();
-    const [msg, errMessage, meta] = logErr.mock.calls[0];
-    expect(String(msg)).toMatch(/Error in GET request/i);
-    expect(String(errMessage)).toMatch(/User not found/i);
-    expect(meta).toMatchObject({ endpoint: expect.stringContaining('/api/catalog/Grace/Hopper') });
+    // Logger now uses info, not error (user not found is not a server error)
+    const logInfo = (ailogger as any).info as ReturnType<typeof vi.fn>;
+    expect(logInfo).toHaveBeenCalled();
+    const [msg] = logInfo.mock.calls[0];
+    expect(String(msg)).toMatch(/User not found.*Grace.*Hopper/i);
 
     expect(close).toHaveBeenCalledTimes(1);
   });

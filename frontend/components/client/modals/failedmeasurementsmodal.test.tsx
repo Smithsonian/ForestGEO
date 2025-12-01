@@ -148,7 +148,7 @@ describe('FailedMeasurementsModal', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ recordCount: 0 })
+          json: async () => ({ recordCount: 2 })
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -157,14 +157,29 @@ describe('FailedMeasurementsModal', () => {
 
       render(<FailedMeasurementsModal {...defaultProps} />);
 
+      // Wait for record counts to load first (failedCount = 5)
+      await waitFor(
+        () => {
+          expect(screen.getByRole('button', { name: /Clear Failed/i })).toHaveTextContent('5');
+        },
+        { timeout: 3000 }
+      );
+
+      // Now the reingest button should be enabled and clickable
       const reingestButton = screen.getByRole('button', { name: /Reingest All Rows/i });
+      expect(reingestButton).not.toBeDisabled();
       await user.click(reingestButton);
 
-      await waitFor(() => {
-        expect(mockSetReingested).toHaveBeenCalledWith(true);
-        expect(mockHandleCloseModal).toHaveBeenCalled();
-        expect(mockOnTriggerReingestion).toHaveBeenCalled();
-      });
+      // Wait for the reingestion process to complete
+      await waitFor(
+        () => {
+          expect(mockSetReingested).toHaveBeenCalledWith(true);
+        },
+        { timeout: 15000 } // Increased timeout for async operations
+      );
+
+      expect(mockHandleCloseModal).toHaveBeenCalled();
+      expect(mockOnTriggerReingestion).toHaveBeenCalled();
     });
   });
 

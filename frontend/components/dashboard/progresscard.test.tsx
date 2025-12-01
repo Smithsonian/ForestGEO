@@ -162,18 +162,24 @@ describe('ProgressCard Component', () => {
       // Chip renders with callback - click handling tested in E2E
     });
 
-    it('should have pointer cursor on pending chip when onClick provided', () => {
-      const { container: _container } = render(<ProgressCard {...defaultProps} onViewUnpopulated={() => {}} />);
+    it('should wrap pending chip in button when onClick provided', () => {
+      render(<ProgressCard {...defaultProps} onViewUnpopulated={() => {}} />);
 
-      const pendingChip = screen.getByText('3 Pending').closest('.MuiChip-root');
-      expect(pendingChip).toHaveStyle({ cursor: 'pointer' });
+      // When onViewUnpopulated is provided, the chip is wrapped in a button
+      const button = screen.getByRole('button', { name: /view.*unpopulated/i });
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveStyle({ cursor: 'pointer' });
     });
 
-    it('should have default cursor on pending chip when onClick not provided', () => {
-      const { container: _container } = render(<ProgressCard {...defaultProps} />);
+    it('should not wrap pending chip in button when onClick not provided', () => {
+      render(<ProgressCard {...defaultProps} />);
 
-      const pendingChip = screen.getByText('3 Pending').closest('.MuiChip-root');
-      expect(pendingChip).toHaveStyle({ cursor: 'default' });
+      // Without onViewUnpopulated, there should be no button wrapping the pending chip
+      const pendingText = screen.getByText('3 Pending');
+      expect(pendingText).toBeInTheDocument();
+
+      // The chip should not be wrapped in a clickable button
+      expect(screen.queryByRole('button', { name: /view.*unpopulated/i })).not.toBeInTheDocument();
     });
   });
 

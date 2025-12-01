@@ -108,27 +108,33 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(j).toEqual({ delegated: true });
   });
 
-  // AFTER
-  it('throws if slugs missing or fewer than 5', async () => {
-    await expect(POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', undefined as any))).rejects.toThrow(/slugs not received/i);
+  it('returns 400 if slugs missing or fewer than 5', async () => {
+    const res1 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', undefined as any));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body1 = await res1.json();
+    expect(body1.error).toMatch(/slugs not received/i);
 
-    await expect(POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0', '25', '101']))).rejects.toThrow(
-      /slugs not received/i
-    );
+    const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0', '25', '101']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body2 = await res2.json();
+    expect(body2.error).toMatch(/slugs not received/i);
   });
 
-  it('throws if core slugs schema/page/pageSize invalid', async () => {
-    await expect(POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', [undefined as any, '0', '25', '1', '2']))).rejects.toThrow(
-      /core slugs/i
-    );
+  it('returns 400 if core slugs schema/page/pageSize invalid', async () => {
+    const res1 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', [undefined as any, '0', '25', '1', '2']));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body1 = await res1.json();
+    expect(body1.error).toMatch(/core slugs/i);
 
-    await expect(POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', undefined as any, '25', '1', '2']))).rejects.toThrow(
-      /core slugs/i
-    );
+    const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', undefined as any, '25', '1', '2']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body2 = await res2.json();
+    expect(body2.error).toMatch(/core slugs/i);
 
-    await expect(POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0', 'undefined', '1', '2']))).rejects.toThrow(
-      /core slugs/i
-    );
+    const res3 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0', 'undefined', '1', '2']));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body3 = await res3.json();
+    expect(body3.error).toMatch(/core slugs/i);
   });
 
   it('sitespecificvalidations: builds WHERE with search+filter, paginates, maps rows, commits, closes', async () => {
@@ -190,7 +196,7 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
       items: [{ field: 'foo', operator: 'contains', value: 'bar' }],
       quickFilterValues: ['needle'],
       visible: ['valid', 'pending'],
-      tss: ['alive', 'dead']
+      tss: ['multi stem', 'old tree']
     };
 
     const req = makeRequest({ filterModel });
@@ -206,8 +212,8 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     // sanity that our extra conditions were embedded
     expect(sqlStr).toMatch(/IsValidated = TRUE/);
     expect(sqlStr).toMatch(/IsValidated IS NULL/);
-    expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('alive'\), '\$\.treestemstate'\)/);
-    expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('dead'\), '\$\.treestemstate'\)/);
+    expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\)/);
+    expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('old tree'\), '\$\.treestemstate'\)/);
 
     expect(begin).toHaveBeenCalled();
     expect(commit).toHaveBeenCalledWith('tx-ms');
@@ -259,7 +265,7 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('rolls back and rethrows if a DB error occurs during query; closes connection', async () => {
+  it('rolls back and returns 500 if a DB error occurs during query; closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
     const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-err');
@@ -272,7 +278,11 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     exec.mockRejectedValueOnce(new Error('kapow'));
 
     const req = makeRequest({ filterModel: baseFilterModel });
-    await expect(POST(req, makeProps('species', ['myschema', '0', '25', '1', '2']))).rejects.toThrow(/kapow/i);
+    const res = await POST(req, makeProps('species', ['myschema', '0', '25', '1', '2']));
+
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/kapow/i);
 
     expect(begin).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-err');

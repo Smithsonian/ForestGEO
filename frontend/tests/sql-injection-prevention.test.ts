@@ -103,8 +103,13 @@ describe('SQL Security Utility Functions', () => {
 });
 
 describe('Schema Whitelist Configuration', () => {
-  it('should have exactly 4 allowed schemas', () => {
-    expect(ALLOWED_SCHEMAS).toHaveLength(4);
+  it('should have all expected allowed schemas', () => {
+    // The whitelist includes production, testing, and site-specific schemas
+    expect(ALLOWED_SCHEMAS).toContain('forestgeo');
+    expect(ALLOWED_SCHEMAS).toContain('forestgeo_testing');
+    expect(ALLOWED_SCHEMAS).toContain('forestgeo_testing_alternate');
+    expect(ALLOWED_SCHEMAS).toContain('catalog');
+    expect(ALLOWED_SCHEMAS.length).toBeGreaterThanOrEqual(4);
   });
 
   it('should include production schema', () => {

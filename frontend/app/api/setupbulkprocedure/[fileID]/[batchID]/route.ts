@@ -76,8 +76,8 @@ export async function GET(
         async (transactionID: string) => {
           ailogger.info(`Transaction ${transactionID} started for ${fileID}-${batchID} (attempt ${attempt})`);
 
-          // Lock timeout - allow time for large batches to complete
-          const lockTimeoutMs = 5 * 60 * 1000; // 5 minutes
+          // Lock timeout - reduced for faster retry on contention
+          const lockTimeoutMs = 2 * 60 * 1000; // 2 minutes (reduced from 5 to improve retry behavior)
 
           // Get plotID and censusID first for compound lock
           const plotCensusQuery = safeFormatQuery(
@@ -102,9 +102,9 @@ export async function GET(
           // Acquire single compound lock
           const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, transactionID, lockTimeoutMs);
           if (!lockAcquired) {
-            throw new Error(`Failed to acquire upload lock (${lockKey}) after ${lockTimeoutMs / 1000}s. Another upload may be in progress.`);
+            throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
           }
-          ailogger.info(`Acquired upload lock: ${lockKey}`);
+          ailogger.info(`Acquired application lock: ${lockKey}`);
 
           const queryStart = Date.now();
           // Use pre-validated and formatted SQL to prevent injection
@@ -161,14 +161,14 @@ export async function GET(
         break;
       }
 
-      // Lock contention means another batch is actively processing - wait significantly longer
-      // Since we already waited up to 5 minutes for the lock, don't retry many times
+      // Lock contention means another batch is actively processing
+      // Since we already waited up to 2 minutes for the lock, don't retry many times
       if (isLockContention) {
-        if (attempt >= 3) {
+        if (attempt >= 2) {
           ailogger.error(`Lock contention persists after ${attempt} attempts, aborting for ${fileID}-${batchID}`);
           break;
         }
-        delay = 30000; // Wait 30 seconds before retry - the other batch should finish soon
+        delay = 15000; // Wait 15 seconds before retry - the other batch should finish soon
       } else if (isConnectionError) {
         delay = Math.min(delay * 3, 15000); // Longer delay for connection issues
       } else if (isDeadlock) {

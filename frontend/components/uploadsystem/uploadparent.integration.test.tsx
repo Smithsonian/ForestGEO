@@ -16,10 +16,96 @@ import UploadParent from './uploadparent';
 import { FormType } from '@/config/macros/formdetails';
 import React from 'react';
 
-// Mock AttributeStatusOptions
-vi.mock('@/config/sqlrdsdefinitions/core', () => ({
-  AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing']
-}));
+// Mock AttributeStatusOptions and HC functions
+vi.mock('@/config/sqlrdsdefinitions/core', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'],
+    getFailedMeasurementsHCs: () => ({
+      failedMeasurementID: false,
+      plotID: false,
+      censusID: false
+    }),
+    getCoreMeasurementsHCs: () => ({
+      censusID: false,
+      stemGUID: false,
+      description: false
+    })
+  };
+});
+
+// Mock views HC functions
+vi.mock('@/config/sqlrdsdefinitions/views', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getAllViewFullTableViewsHCs: () => ({
+      coreMeasurementID: false,
+      plotID: false,
+      censusID: false,
+      quadratID: false,
+      speciesID: false,
+      treeID: false,
+      stemGUID: false,
+      personnelID: false,
+      familyID: false,
+      genusID: false
+    }),
+    getMeasurementsSummaryViewHCs: () => ({
+      coreMeasurementID: false,
+      plotID: false,
+      censusID: false,
+      quadratID: false,
+      speciesID: false,
+      treeID: false,
+      stemGUID: false,
+      personnelID: false
+    }),
+    getAllTaxonomiesViewHCs: () => ({
+      speciesID: false,
+      familyID: false,
+      genusID: false
+    })
+  };
+});
+
+// Mock personnel HC functions
+vi.mock('@/config/sqlrdsdefinitions/personnel', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getPersonnelHCs: () => ({
+      censusID: false,
+      personnelID: false
+    })
+  };
+});
+
+// Mock zones HC functions
+vi.mock('@/config/sqlrdsdefinitions/zones', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getQuadratHCs: () => ({
+      quadratID: false,
+      plotID: false,
+      censusID: false
+    })
+  };
+});
+
+// Mock taxonomies HC functions
+vi.mock('@/config/sqlrdsdefinitions/taxonomies', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getSpeciesLimitsHCs: () => ({
+      speciesLimitsID: false,
+      speciesID: false
+    })
+  };
+});
 
 // Mock next-auth
 vi.mock('next-auth/react', () => ({
