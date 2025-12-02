@@ -6,8 +6,9 @@ export async function getContainerClient(containerName: string): Promise<Contain
   // console.log('Connection String:', storageAccountConnectionString);
   // console.log(`container name: ${containerName.toLowerCase()}`);
   if (!storageAccountConnectionString) {
-    ailogger.error('process envs failed');
-    throw new Error('process envs failed');
+    const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING environment variable is not set';
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
   }
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);

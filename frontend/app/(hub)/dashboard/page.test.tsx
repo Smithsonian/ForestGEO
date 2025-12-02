@@ -36,7 +36,7 @@ vi.mock('@/components/metrics/progresstachometer', () => ({
 vi.mock('@/components/metrics/progresspiechart', () => ({
   default: ({ PopulatedPercent }: any) => <div data-testid="piechart">{PopulatedPercent}%</div>
 }));
-vi.mock('@/config/sqlrdsdefinitions/views', async (importOriginal) => {
+vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -69,7 +69,7 @@ vi.mock('@/config/sqlrdsdefinitions/views', async (importOriginal) => {
     })
   };
 });
-vi.mock('@/config/sqlrdsdefinitions/core', async (importOriginal) => {
+vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -85,7 +85,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async (importOriginal) => {
     })
   };
 });
-vi.mock('@/config/sqlrdsdefinitions/personnel', async (importOriginal) => {
+vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -95,7 +95,7 @@ vi.mock('@/config/sqlrdsdefinitions/personnel', async (importOriginal) => {
     })
   };
 });
-vi.mock('@/config/sqlrdsdefinitions/zones', async (importOriginal) => {
+vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
   const actual = await importOriginal();
   return {
     ...actual,
@@ -106,7 +106,7 @@ vi.mock('@/config/sqlrdsdefinitions/zones', async (importOriginal) => {
     })
   };
 });
-vi.mock('@/config/sqlrdsdefinitions/taxonomies', async (importOriginal) => {
+vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
   const actual = await importOriginal();
   return {
     ...actual,
