@@ -65,12 +65,18 @@ export default function CensusSelector() {
   };
 
   const handleCensusChange = (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
-    if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) {
+    try {
+      if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) {
+        setCensus(undefined);
+      } else {
+        const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
+        const selectedCensus = censusList?.find(census => census?.plotCensusNumber === selectedPlotCensusNumber) || undefined;
+        setCensus(selectedCensus);
+      }
+    } catch (error) {
+      console.error('Error changing census:', error);
+      // Reset to undefined to prevent stale state
       setCensus(undefined);
-    } else {
-      const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
-      const selectedCensus = censusList?.find(census => census?.plotCensusNumber === selectedPlotCensusNumber) || undefined;
-      setCensus(selectedCensus);
     }
   };
 

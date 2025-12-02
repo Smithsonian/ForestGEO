@@ -41,8 +41,16 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           // formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
         const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+
+        // Validate context before attempting upload
+        if (!currentPlot?.plotName || !censusID || !user) {
+          const errorMsg = 'Missing required context for upload (plot, census, or user)';
+          ailogger.error(errorMsg, new Error(errorMsg));
+          throw new Error(errorMsg);
+        }
+
         const response = await fetch(
-          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${censusID ? censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
+          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${censusID.toString().trim()}&user=${user}&formType=${uploadForm}`,
           {
             method: 'POST',
             body: formData
@@ -51,6 +59,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         setCompletedOperations(prevCompleted => prevCompleted + 1);
         return response.ok ? 'Storage load successful' : 'Storage load failed';
       } catch (error) {
+        ailogger.error(`Upload failed for ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
         setUploadError(error);
         setErrorComponent('UploadFire');
         setReviewState(ReviewStates.ERRORS);

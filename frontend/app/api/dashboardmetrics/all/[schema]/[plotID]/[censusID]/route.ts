@@ -78,8 +78,16 @@ export async function GET(
     // Start transaction for consistent data
     transactionID = await connectionManager.beginTransaction();
 
-    // Execute all queries in parallel for maximum performance
-    const [progressTachoResults, activeUsersResults, countTreesResults, countStemsResults, stemTypesResults] = await Promise.all([
+    // First, check if a previous census exists (fast query)
+    const prevCensusResult = await connectionManager.executeQuery(
+      `SELECT MAX(c.CensusID) as PrevCensusID FROM ${schema}.census c WHERE c.PlotID = ? AND c.CensusID < ?`,
+      [plotID, censusID],
+      transactionID
+    );
+    const previousCensusID = prevCensusResult[0]?.PrevCensusID;
+
+    // Execute simple queries in parallel
+    const [progressTachoResults, activeUsersResults, countTreesResults, countStemsResults] = await Promise.all([
       // 1. Progress Tachometer Query
       connectionManager.executeQuery(
         `
@@ -142,67 +150,57 @@ export async function GET(
         `,
         [censusID, plotID],
         transactionID
-      ),
+      )
+    ]);
 
-      // 5. Stem Types Query (complex with CTEs)
-      connectionManager.executeQuery(
+    // 5. Stem Types Query - Handle first census (no previous) as fast path
+    let stemTypesResults: any[];
+    if (!previousCensusID) {
+      // First census: all measured stems are new recruits
+      const countResult = await connectionManager.executeQuery(
+        `SELECT COUNT(DISTINCT s.StemGUID) as CountNewRecruits
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
+         WHERE cm.CensusID = ? AND s.CensusID = ?`,
+        [censusID, censusID],
+        transactionID
+      );
+      stemTypesResults = [{ CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: countResult[0]?.CountNewRecruits || 0 }];
+    } else {
+      // Subsequent census: use optimized comparison query with explicit census ID
+      stemTypesResults = await connectionManager.executeQuery(
         `
-          WITH previous_census AS (
-            SELECT MAX(c.CensusID) as PreviousCensusID
-            FROM ${schema}.census c
-            WHERE c.PlotID = ? AND c.CensusID < ?
-          ),
-          measured_stems AS (
-            SELECT DISTINCT s.StemGUID, s.TreeID, t.TreeTag, s.StemTag
+          WITH measured_stems AS (
+            SELECT DISTINCT s.StemGUID, t.TreeTag, s.StemTag
             FROM ${schema}.coremeasurements cm
             JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
             JOIN ${schema}.trees t ON s.TreeID = t.TreeID
             WHERE cm.CensusID = ? AND s.CensusID = ?
           ),
-          old_stems AS (
-            SELECT ms.StemGUID
-            FROM measured_stems ms
-            WHERE EXISTS (
-              SELECT 1
-              FROM ${schema}.trees t_prev
-              JOIN ${schema}.stems s_prev ON s_prev.TreeID = t_prev.TreeID
-              CROSS JOIN previous_census pc
-              WHERE t_prev.TreeTag = ms.TreeTag
-                AND s_prev.StemTag = ms.StemTag
-                AND t_prev.CensusID = pc.PreviousCensusID
-                AND s_prev.CensusID = pc.PreviousCensusID
-                AND t_prev.IsActive = 1
-                AND s_prev.IsActive = 1
-            )
+          previous_stems AS (
+            SELECT t_prev.TreeTag, s_prev.StemTag
+            FROM ${schema}.trees t_prev
+            JOIN ${schema}.stems s_prev ON s_prev.TreeID = t_prev.TreeID
+            WHERE t_prev.CensusID = ? AND s_prev.CensusID = ?
+              AND t_prev.IsActive = 1 AND s_prev.IsActive = 1
           ),
-          multi_stems AS (
-            SELECT ms.StemGUID
-            FROM measured_stems ms
-            WHERE EXISTS (
-              SELECT 1
-              FROM ${schema}.trees t_prev
-              CROSS JOIN previous_census pc
-              WHERE t_prev.TreeTag = ms.TreeTag
-                AND t_prev.CensusID = pc.PreviousCensusID
-                AND t_prev.IsActive = 1
-            )
-            AND NOT EXISTS (SELECT 1 FROM old_stems os WHERE os.StemGUID = ms.StemGUID)
-          ),
-          new_recruits AS (
-            SELECT ms.StemGUID
-            FROM measured_stems ms
-            WHERE NOT EXISTS (SELECT 1 FROM old_stems os WHERE os.StemGUID = ms.StemGUID)
-              AND NOT EXISTS (SELECT 1 FROM multi_stems mst WHERE mst.StemGUID = ms.StemGUID)
+          previous_trees AS (
+            SELECT DISTINCT t_prev.TreeTag
+            FROM ${schema}.trees t_prev
+            WHERE t_prev.CensusID = ? AND t_prev.IsActive = 1
           )
           SELECT
-            (SELECT COUNT(*) FROM old_stems) as CountOldStems,
-            (SELECT COUNT(*) FROM multi_stems) as CountMultiStems,
-            (SELECT COUNT(*) FROM new_recruits) as CountNewRecruits
+            COALESCE(SUM(CASE WHEN ps.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountOldStems,
+            COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NOT NULL THEN 1 ELSE 0 END), 0) as CountMultiStems,
+            COALESCE(SUM(CASE WHEN ps.TreeTag IS NULL AND pt.TreeTag IS NULL THEN 1 ELSE 0 END), 0) as CountNewRecruits
+          FROM measured_stems ms
+          LEFT JOIN previous_stems ps ON ms.TreeTag = ps.TreeTag AND ms.StemTag = ps.StemTag
+          LEFT JOIN previous_trees pt ON ms.TreeTag = pt.TreeTag
         `,
-        [plotID, censusID, censusID, censusID],
+        [censusID, censusID, previousCensusID, previousCensusID, previousCensusID],
         transactionID
-      )
-    ]);
+      );
+    }
 
     // Commit transaction
     await connectionManager.commitTransaction(transactionID);

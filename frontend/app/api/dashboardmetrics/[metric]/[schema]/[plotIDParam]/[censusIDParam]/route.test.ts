@@ -255,4 +255,174 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
     const body = await res.json();
     expect(body.error).toMatch(/Failed to retrieve metrics/i);
   });
+
+  // ===== StemTypes Tests =====
+  describe('StemTypes metric', () => {
+    it('first census (no previous census): returns all stems as new recruits', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: check for previous census - returns NULL (no previous)
+      exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
+      // Second query: count new recruits
+      exec.mockResolvedValueOnce([{ CountNewRecruits: 100 }]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '1', 'TestPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      // All stems should be new recruits for first census
+      expect(body).toEqual({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 100
+      });
+
+      // Verify the fast path was taken (only 2 queries instead of 1 complex query)
+      expect(exec).toHaveBeenCalledTimes(2);
+
+      // First query checks for previous census
+      const [sql1, params1] = exec.mock.calls[0];
+      expect(String(sql1)).toMatch(/SELECT MAX\(c\.CensusID\) as PrevCensusID/i);
+      expect(params1).toEqual([1, 1]); // plotID, censusID
+    });
+
+    it('subsequent census: correctly classifies old stems, multi-stems, and new recruits', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: check for previous census - returns census ID 1
+      exec.mockResolvedValueOnce([{ PrevCensusID: 1 }]);
+      // Second query: the optimized stem types query
+      exec.mockResolvedValueOnce([
+        {
+          CountOldStems: 500,
+          CountMultiStems: 150,
+          CountNewRecruits: 50
+        }
+      ]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '2', 'TestPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      expect(body).toEqual({
+        CountOldStems: 500,
+        CountMultiStems: 150,
+        CountNewRecruits: 50
+      });
+
+      // Verify both queries were called
+      expect(exec).toHaveBeenCalledTimes(2);
+
+      // Second query should use the previous census ID
+      const [sql2, params2] = exec.mock.calls[1];
+      expect(String(sql2)).toMatch(/WITH measured_stems AS/i);
+      expect(String(sql2)).toMatch(/LEFT JOIN previous_stems/i);
+      expect(String(sql2)).toMatch(/LEFT JOIN previous_trees/i);
+      expect(String(sql2)).toMatch(/COALESCE\(SUM\(CASE/i);
+      // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
+      expect(params2).toEqual([2, 2, 1, 1, 1]);
+    });
+
+    it('empty measurements: returns zeros for all stem types', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: has a previous census
+      exec.mockResolvedValueOnce([{ PrevCensusID: 1 }]);
+      // Second query: COALESCE returns 0 for empty results
+      exec.mockResolvedValueOnce([
+        {
+          CountOldStems: 0,
+          CountMultiStems: 0,
+          CountNewRecruits: 0
+        }
+      ]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '2', 'EmptyPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      expect(body).toEqual({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 0
+      });
+    });
+
+    it('handles NULL database results gracefully via COALESCE and nullish coalescing', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: has a previous census
+      exec.mockResolvedValueOnce([{ PrevCensusID: 1 }]);
+      // Second query: returns NULL values (edge case if COALESCE somehow fails)
+      exec.mockResolvedValueOnce([
+        {
+          CountOldStems: null,
+          CountMultiStems: null,
+          CountNewRecruits: null
+        }
+      ]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '2', 'NullPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      // JavaScript's ?? 0 fallback should convert nulls to 0
+      expect(body).toEqual({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 0
+      });
+    });
+
+    it('handles empty result set (no rows returned)', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: has a previous census
+      exec.mockResolvedValueOnce([{ PrevCensusID: 1 }]);
+      // Second query: returns empty array (no rows)
+      exec.mockResolvedValueOnce([]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '2', 'EmptyResult');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      // Should handle undefined gracefully
+      expect(body).toEqual({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 0
+      });
+    });
+
+    it('first census with zero measurements: returns 0 new recruits', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // First query: no previous census
+      exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
+      // Second query: count returns 0
+      exec.mockResolvedValueOnce([{ CountNewRecruits: 0 }]);
+
+      const res = await callGET('StemTypes', 'testschema', '1', '1', 'EmptyFirstCensus');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+
+      expect(body).toEqual({
+        CountOldStems: 0,
+        CountMultiStems: 0,
+        CountNewRecruits: 0
+      });
+    });
+  });
 });

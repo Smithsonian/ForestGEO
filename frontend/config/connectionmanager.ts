@@ -138,6 +138,13 @@ class ConnectionManager {
 
     if (!connection) {
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      // Clean up metadata even if connection is gone
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
+      }
       return; // Avoid throwing an error for an already finalized transaction
     }
 
@@ -153,6 +160,14 @@ class ConnectionManager {
       connection.release();
       this.transactionConnections.delete(transactionId);
 
+      // CRITICAL FIX: Clean up metadata to prevent leaks
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
+      }
+
       // Release a waiting transaction slot (race condition fix)
       this.releaseTransactionSlot();
     }
@@ -164,6 +179,13 @@ class ConnectionManager {
 
     if (!connection) {
       ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      // Clean up metadata even if connection is gone
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
+      }
       return; // Avoid throwing an error for an already finalized transaction
     }
 
@@ -178,6 +200,14 @@ class ConnectionManager {
       await this.cleanupApplicationLocks(transactionId);
       connection.release();
       this.transactionConnections.delete(transactionId);
+
+      // CRITICAL FIX: Clean up metadata to prevent leaks
+      const meta = this.transactionMeta.get(transactionId);
+      if (meta) {
+        if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+        if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
+        this.transactionMeta.delete(transactionId);
+      }
 
       // Release a waiting transaction slot (race condition fix)
       this.releaseTransactionSlot();
@@ -321,14 +351,32 @@ class ConnectionManager {
   public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {
     const threshold = maxAgeMs ?? this.DEFAULT_TX_TIMEOUT_MS * 2; // e.g., twice default
     const now = Date.now();
+    const staleTransactions: string[] = [];
+
     for (const [txId, meta] of this.transactionMeta.entries()) {
       if (now - meta.startedAt > threshold) {
-        ailogger.warn(`Detected stale transaction ${txId} (age ${(now - meta.startedAt) / 1000}s), forcing rollback.`);
-        try {
+        staleTransactions.push(txId);
+      }
+    }
+
+    if (staleTransactions.length === 0) {
+      return; // No stale transactions, exit silently
+    }
+
+    // Log once for all stale transactions found
+    ailogger.warn(`Detected ${staleTransactions.length} stale transaction(s), cleaning up...`);
+
+    for (const txId of staleTransactions) {
+      try {
+        const meta = this.transactionMeta.get(txId);
+        if (meta) {
+          const ageSeconds = (now - meta.startedAt) / 1000;
+          ailogger.info(`Cleaning up stale transaction ${txId} (age: ${ageSeconds.toFixed(1)}s)`);
           await this.rollbackTransaction(txId);
-        } catch (e: any) {
-          ailogger.error(`Error rolling back stale transaction ${txId}:`, e);
         }
+      } catch (e: any) {
+        ailogger.error(`Error rolling back stale transaction ${txId}:`, e);
+        // Ensure metadata is deleted even if rollback fails
         this.transactionMeta.delete(txId);
       }
     }
@@ -407,20 +455,15 @@ class ConnectionManager {
       ailogger.info(`Cleaning up ${meta.resourceLocks.size} locks for transaction ${transactionId}`);
 
       // Release all locks for this transaction
-      const releasePromises = Array.from(meta.resourceLocks).map(lockName =>
-        this.releaseApplicationLock(lockName, transactionId)
-      );
+      const releasePromises = Array.from(meta.resourceLocks).map(lockName => this.releaseApplicationLock(lockName, transactionId));
 
       // Wait for all releases to complete (with timeout)
-      await Promise.race([
-        Promise.all(releasePromises),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000)
-        )
-      ]).catch(error => {
-        ailogger.error(`Error during lock cleanup for transaction ${transactionId}:`, error);
-        // Continue anyway - locks will be auto-released when connection closes
-      });
+      await Promise.race([Promise.all(releasePromises), new Promise((_, reject) => setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000))]).catch(
+        error => {
+          ailogger.error(`Error during lock cleanup for transaction ${transactionId}:`, error);
+          // Continue anyway - locks will be auto-released when connection closes
+        }
+      );
     }
   }
 

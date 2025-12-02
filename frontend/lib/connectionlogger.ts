@@ -43,12 +43,19 @@ export function patchConnectionManager(cm: any) {
   cm.executeQuery = async function (sql: string, params?: any[], transactionId?: string) {
     const store = await getCookiesSafely();
     if (!store || !store.has('user') || !store.has('schema') || !store.has('plotID') || !store.has('censusID')) {
-      return orig(sql, params, transactionId); // don't log anything - missing required cookies
+      // Silently skip changelog tracking if required cookies are missing
+      return orig(sql, params, transactionId);
     }
     const user = String(store.get('user')?.value);
     const schema = String(store.get('schema')?.value);
     const plotID = Number(store.get('plotID')?.value);
     const censusID = Number(store.get('censusID')?.value);
+
+    // Validate that we have valid numeric IDs
+    if (isNaN(plotID) || isNaN(censusID) || plotID <= 0 || censusID <= 0) {
+      // Invalid context - skip changelog tracking
+      return orig(sql, params, transactionId);
+    }
     const cleaned = sql.trim().replace(/`/g, '');
     const regexOutput = /^(UPDATE|DELETE)\s+(?:FROM\s+)?(?:\w+\.)?(\w+)/i.exec(cleaned) || [];
     const op = regexOutput?.[1]?.toUpperCase() as 'UPDATE' | 'DELETE' | undefined;
@@ -89,14 +96,20 @@ export function patchConnectionManager(cm: any) {
     }
 
     if (coreValue == null) {
-      ailogger.warn(`Changelog tracking skipped: Could not extract ${pk}${fk ? ` or ${fk}` : ''} from query for table ${table}`);
+      // Only log in development - this is expected for some query types
+      if (process.env.NODE_ENV === 'development') {
+        ailogger.debug(`Changelog tracking skipped: Could not extract ${pk}${fk ? ` or ${fk}` : ''} from query for table ${table}`);
+      }
       return orig(sql, params, transactionId);
     }
 
     // shifting all to bulk updating:
     const where = cleaned.toUpperCase().indexOf(' WHERE ') > 0 ? cleaned.slice(cleaned.toUpperCase().indexOf(' WHERE ')) : '';
     if (!where) {
-      ailogger.warn(`Changelog tracking skipped: No WHERE clause found for ${table} ${op}`);
+      // Only log in development - queries without WHERE clause are not tracked but this is expected
+      if (process.env.NODE_ENV === 'development') {
+        ailogger.debug(`Changelog tracking skipped: No WHERE clause found for ${table} ${op}`);
+      }
       return orig(sql, params, transactionId);
     }
 
