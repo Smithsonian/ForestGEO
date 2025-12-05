@@ -268,7 +268,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
         {/* Definition / Editor */}
         <TableCell sx={{ position: 'relative', whiteSpace: 'normal', wordBreak: 'break-word' }}>
           <Box
+            role="presentation"
             onClick={e => e.stopPropagation()}
+            onKeyDown={e => e.stopPropagation()}
             sx={{
               width: '100%',
               ...(open ? {} : { maxHeight: '60px', overflow: 'hidden' }),

@@ -10,17 +10,7 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 export const runtime = 'nodejs';
 
 // Valid data types (table names) that can be queried
-const VALID_DATA_TYPES = [
-  'attributes',
-  'census',
-  'coremeasurements',
-  'personnel',
-  'plots',
-  'quadrats',
-  'species',
-  'stems',
-  'trees'
-] as const;
+const VALID_DATA_TYPES = ['attributes', 'census', 'coremeasurements', 'personnel', 'plots', 'quadrats', 'species', 'stems', 'trees'] as const;
 
 function isValidDataType(dataType: string): boolean {
   return VALID_DATA_TYPES.includes(dataType as (typeof VALID_DATA_TYPES)[number]);
