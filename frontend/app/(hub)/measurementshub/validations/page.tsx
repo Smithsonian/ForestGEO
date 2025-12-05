@@ -47,6 +47,7 @@ export default function ValidationsPage() {
 
   const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [newValidation, setNewValidation] = useState<ValidationProceduresRDS>({
     procedureName: '',
     description: '',
@@ -57,9 +58,23 @@ export default function ValidationsPage() {
 
   useEffect(() => {
     if (session && !['db admin', 'global'].includes(session.user.userStatus)) {
-      throw new Error('access-denied');
+      setAccessDenied(true);
     }
   }, [session]);
+
+  // Render access denied message instead of throwing error
+  if (accessDenied) {
+    return (
+      <Box sx={{ p: 4 }}>
+        <Alert severity="error">
+          <Typography variant="h6">Access Denied</Typography>
+          <Typography>
+            You do not have permission to view this page. Only database administrators and global users can access validations management.
+          </Typography>
+        </Alert>
+      </Box>
+    );
+  }
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {

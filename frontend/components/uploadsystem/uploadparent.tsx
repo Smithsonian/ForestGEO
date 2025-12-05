@@ -22,6 +22,7 @@ import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/useFileManagement';
 import { useUploadState } from '@/app/hooks/useUploadState';
 import { useErrorHandling } from '@/app/hooks/useErrorHandling';
+import { ErrorBoundary } from '@/components/errorboundary';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -43,7 +44,7 @@ interface UploadParentProps {
   onUploadComplete?: () => void;
 }
 
-export default function UploadParent(props: UploadParentProps) {
+function UploadParentInner(props: UploadParentProps) {
   const { onReset, overrideUploadForm, skipToProcessing, onUploadComplete } = props;
 
   // Custom hooks for state management
@@ -311,5 +312,14 @@ export default function UploadParent(props: UploadParentProps) {
         </Box>
       </>
     </ContextValidationGuard>
+  );
+}
+
+// Wrap the component with an ErrorBoundary for graceful error handling
+export default function UploadParent(props: UploadParentProps) {
+  return (
+    <ErrorBoundary componentName="UploadParent">
+      <UploadParentInner {...props} />
+    </ErrorBoundary>
   );
 }

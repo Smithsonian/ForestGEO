@@ -7,10 +7,40 @@ import { buildFilterModelStub, buildSearchStub } from '@/components/processors/p
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Whitelist of allowed data types for this route
+const ALLOWED_DATA_TYPES = [
+  'sitespecificvalidations',
+  'failedmeasurements',
+  'attributes',
+  'species',
+  'stems',
+  'alltaxonomiesview',
+  'roles',
+  'personnel',
+  'unifiedchangelog',
+  'quadrats',
+  'census',
+  'measurementssummary',
+  'measurementssummary_staging',
+  'measurementssummaryview',
+  'viewfulltable',
+  'viewfulltableview',
+  'coremeasurements'
+] as const;
+type AllowedDataType = (typeof ALLOWED_DATA_TYPES)[number];
+
+function isValidDataType(dataType: string): dataType is AllowedDataType {
+  return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
+}
+
+// Whitelist of allowed TSS values for measurements filter (for future validation)
+const _ALLOWED_TSS_VALUES = ['multi stem', 'old tree', 'new recruit'] as const;
 
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
@@ -38,6 +68,23 @@ export async function POST(
         status: HTTPResponses.INVALID_REQUEST
       });
     }
+
+    // SECURITY: Validate schema against whitelist to prevent SQL injection
+    if (!isValidSchema(schema)) {
+      ailogger.error(`[fixeddatafilter API] Invalid schema provided: ${schema}`);
+      return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
+    // SECURITY: Validate dataType against whitelist
+    if (!isValidDataType(params.dataType)) {
+      ailogger.error(`[fixeddatafilter API] Invalid dataType provided: ${params.dataType}`);
+      return new NextResponse(JSON.stringify({ error: 'Invalid data type' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
     if (!filterModel || (!filterModel.items && !filterModel.quickFilterValues)) {
       return new NextResponse(JSON.stringify({ error: 'filterModel is empty - filter API should not have triggered' }), {
         status: HTTPResponses.INVALID_REQUEST
@@ -47,6 +94,14 @@ export async function POST(
     const pageSize = parseInt(pageSizeParam);
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
+
+    // Validate numeric parameters
+    if (isNaN(page) || page < 0 || isNaN(pageSize) || pageSize <= 0) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid pagination parameters' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
     const connectionManager = ConnectionManager.getInstance();
     let updatedMeasurementsExist = false;
     let censusIDs;

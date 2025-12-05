@@ -38,13 +38,17 @@ export default function PostValidationPage() {
   async function fetchValidationResults(postValidation: PostValidationQueriesRDS) {
     if (!postValidation.queryID) return;
     try {
-      await fetch(
+      const response = await fetch(
         `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}/${postValidation.queryID}`,
         { method: 'GET' }
       );
-    } catch (error: any) {
-      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
-      throw new Error(error);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, errorObj);
+      throw errorObj;
     }
   }
 
@@ -54,10 +58,14 @@ export default function PostValidationPage() {
         `/api/fetchall/postvalidationqueries/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`,
         { method: 'GET' }
       );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       setPostValidations(data);
-    } catch (error: any) {
-      ailogger.error('Error loading queries:', error);
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error loading queries:', errorObj);
     }
   }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
@@ -117,7 +125,7 @@ export default function PostValidationPage() {
     };
 
     if (postValidations.length > 0) {
-      fetchSchema().then((r: any) => ailogger.warn(r));
+      fetchSchema();
     }
   }, [postValidations, currentSite?.schemaName]);
 

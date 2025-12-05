@@ -2,10 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
+import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Whitelist of allowed data types for this route
+const ALLOWED_DATA_TYPES = ['personnel', 'species', 'quadrats'] as const;
+type AllowedDataType = (typeof ALLOWED_DATA_TYPES)[number];
+
+function isValidDataType(dataType: string): dataType is AllowedDataType {
+  return ALLOWED_DATA_TYPES.includes(dataType.toLowerCase() as AllowedDataType);
+}
 
 /**
  * GET endpoint for autocomplete search functionality
@@ -28,6 +38,22 @@ export async function GET(
 
   if (!schema) {
     return new NextResponse(JSON.stringify({ error: 'Schema parameter is required' }), {
+      status: HTTPResponses.BAD_REQUEST
+    });
+  }
+
+  // SECURITY: Validate schema against whitelist to prevent SQL injection
+  if (!isValidSchema(schema)) {
+    ailogger.error(`[formsearch API] Invalid schema provided: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
+      status: HTTPResponses.BAD_REQUEST
+    });
+  }
+
+  // SECURITY: Validate dataType against whitelist
+  if (!isValidDataType(params.dataType)) {
+    ailogger.error(`[formsearch API] Invalid dataType provided: ${params.dataType}`);
+    return new NextResponse(JSON.stringify({ error: `Unsupported dataType: ${params.dataType}` }), {
       status: HTTPResponses.BAD_REQUEST
     });
   }
@@ -120,9 +146,10 @@ export async function GET(
         'Content-Type': 'application/json'
       }
     });
-  } catch (error: any) {
-    console.error(`Error in formsearch/${params.dataType}:`, error);
-    return new NextResponse(JSON.stringify({ error: error.message || 'Internal server error' }), {
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    ailogger.error(`[formsearch API] Error in ${params.dataType}:`, err);
+    return new NextResponse(JSON.stringify({ error: err.message || 'Internal server error' }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   } finally {

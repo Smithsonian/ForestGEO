@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { useLoading } from '@/app/contexts/loadingprovider';
 
-interface UseAsyncOperationOptions {
+interface UseAsyncOperationOptions<R> {
   loadingMessage?: string;
   category?: 'api' | 'upload' | 'processing' | 'general';
-  onSuccess?: (result: any) => void;
+  onSuccess?: (result: R) => void;
   onError?: (error: Error) => void;
   preventDuplicates?: boolean;
 }
@@ -15,12 +15,32 @@ interface UseAsyncOperationOptions {
  * Hook for managing async operations with automatic loading states
  * Provides operation deduplication, error handling, and loading state management
  */
-export function useAsyncOperation<T extends any[], R>(asyncFunction: (...args: T) => Promise<R>, options: UseAsyncOperationOptions = {}) {
+export function useAsyncOperation<T extends unknown[], R>(asyncFunction: (...args: T) => Promise<R>, options: UseAsyncOperationOptions<R> = {}) {
   const { loadingMessage = 'Processing...', category = 'general', onSuccess, onError, preventDuplicates = true } = options;
 
   const { startOperation, endOperation, isOperationActive } = useLoading();
   const activeOperationRef = useRef<string | null>(null);
   const lastArgsRef = useRef<string | null>(null);
+  // Track pending cache clear timeouts for proper cleanup
+  const cacheTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Track if component is still mounted to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Clear any pending cache timeout
+      if (cacheTimeoutRef.current) {
+        clearTimeout(cacheTimeoutRef.current);
+        cacheTimeoutRef.current = null;
+      }
+      // Clear refs to allow garbage collection
+      activeOperationRef.current = null;
+      lastArgsRef.current = null;
+    };
+  }, []);
 
   const execute = useCallback(
     async (...args: T): Promise<R | undefined> => {
@@ -58,8 +78,8 @@ export function useAsyncOperation<T extends any[], R>(asyncFunction: (...args: T
           // Execute the async function
           const result = await asyncFunction(...args);
 
-          // Handle success
-          if (onSuccess) {
+          // Handle success (only if still mounted)
+          if (isMountedRef.current && onSuccess) {
             onSuccess(result);
           }
 
@@ -69,10 +89,10 @@ export function useAsyncOperation<T extends any[], R>(asyncFunction: (...args: T
           const errorObj = error instanceof Error ? error : new Error(String(error));
           console.error(`Operation failed: ${loadingMessage}`, errorObj);
 
-          if (onError) {
+          if (isMountedRef.current && onError) {
             onError(errorObj);
-          } else {
-            // Default error handling
+          } else if (isMountedRef.current) {
+            // Default error handling - only if mounted
             alert(`Operation failed: ${errorObj.message}`);
           }
 
@@ -83,9 +103,18 @@ export function useAsyncOperation<T extends any[], R>(asyncFunction: (...args: T
           activeOperationRef.current = null;
 
           // Clear args cache after a delay to allow for legitimate re-runs
+          // Track the timeout so we can clean it up on unmount
           if (preventDuplicates) {
-            setTimeout(() => {
-              lastArgsRef.current = null;
+            // Clear any existing timeout first
+            if (cacheTimeoutRef.current) {
+              clearTimeout(cacheTimeoutRef.current);
+            }
+            cacheTimeoutRef.current = setTimeout(() => {
+              // Only clear if still mounted
+              if (isMountedRef.current) {
+                lastArgsRef.current = null;
+              }
+              cacheTimeoutRef.current = null;
             }, 2000);
           }
         }
@@ -142,7 +171,7 @@ export function useAsyncWrapper() {
  */
 export function useFormSubmission<T>(
   submitFunction: (data: T) => Promise<void>,
-  options: Omit<UseAsyncOperationOptions, 'category'> & {
+  options: Omit<UseAsyncOperationOptions<void>, 'category'> & {
     resetForm?: () => void;
     redirectAfterSuccess?: string;
   } = {}

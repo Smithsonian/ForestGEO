@@ -1,5 +1,6 @@
 'use client';
 
+import { ErrorBoundary } from '@/components/errorboundary';
 import {
   CellItemContainer,
   createDeleteQuery,
@@ -57,7 +58,7 @@ export type IsolatedDataGridCommonsHandle = {
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
 
-const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommonsInner(
   props: Readonly<IsolatedDataGridCommonProps>,
   ref: ForwardedRef<IsolatedDataGridCommonsHandle>
 ) {
@@ -1153,6 +1154,18 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       </Box>
     );
   }
+});
+
+// Wrap the forwardRef component with ErrorBoundary
+const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+  props: Readonly<IsolatedDataGridCommonProps>,
+  ref: ForwardedRef<IsolatedDataGridCommonsHandle>
+) {
+  return (
+    <ErrorBoundary componentName="IsolatedDataGridCommons">
+      <IsolatedDataGridCommonsInner {...props} ref={ref} />
+    </ErrorBoundary>
+  );
 });
 
 export default IsolatedDataGridCommons;

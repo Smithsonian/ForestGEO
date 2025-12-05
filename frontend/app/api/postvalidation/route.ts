@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -15,16 +16,25 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  // SECURITY: Validate schema against whitelist to prevent SQL injection
+  if (!isValidSchema(schema)) {
+    ailogger.error(`[postvalidation API] Invalid schema provided: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
   const connectionManager = ConnectionManager.getInstance();
   try {
-    const query = `SELECT QueryID, QueryName, Description FROM ${schema}.postvalidationqueries WHERE IsEnabled IS TRUE;`;
+    // Schema is validated, safe to use in query (with backtick escaping for extra safety)
+    const query = `SELECT QueryID, QueryName, Description FROM \`${schema}\`.postvalidationqueries WHERE IsEnabled IS TRUE;`;
     const results = await connectionManager.executeQuery(query);
     if (results.length === 0) {
       return new NextResponse(JSON.stringify({ message: 'No queries found' }), {
         status: HTTPResponses.NOT_FOUND
       });
     }
-    const postValidations = results.map((row: any) => ({
+    const postValidations = results.map((row: { QueryID: number; QueryName: string; Description: string }) => ({
       queryID: row.QueryID,
       queryName: row.QueryName,
       queryDescription: row.Description
@@ -32,9 +42,10 @@ export async function GET(request: NextRequest) {
     return new NextResponse(JSON.stringify(postValidations), {
       status: HTTPResponses.OK
     });
-  } catch (e: any) {
-    ailogger.error('Error in postvalidation GET:', e);
-    return new NextResponse(JSON.stringify({ error: e.message }), {
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error(String(e));
+    ailogger.error('[postvalidation API] Error:', error);
+    return new NextResponse(JSON.stringify({ error: error.message }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
   } finally {

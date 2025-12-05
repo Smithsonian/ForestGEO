@@ -1,6 +1,7 @@
 // measurementcommons datagrid
 'use client';
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ErrorBoundary } from '@/components/errorboundary';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -122,7 +123,7 @@ export function EditMeasurements({ params }: { params: GridRenderEditCellParams 
   );
 }
 
-export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
+function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const {
     addNewRowToGrid,
     gridType,
@@ -1611,4 +1612,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       </Box>
     );
   }
+}
+
+// Wrap the component with an ErrorBoundary for graceful error handling
+export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
+  return (
+    <ErrorBoundary componentName="MeasurementsCommons">
+      <MeasurementsCommonsInner {...props} />
+    </ErrorBoundary>
+  );
 }

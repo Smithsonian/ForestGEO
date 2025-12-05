@@ -166,60 +166,22 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
     }
   }, [activeOperations]);
 
-  // Apply UI blocking effects
+  // Apply UI blocking effects using CSS classes (no direct DOM manipulation)
+  // The loading-blocked class is defined in globals.css and uses ::after pseudo-element
+  // for the overlay, avoiding dynamic element creation and potential XSS vectors
   useEffect(() => {
     if (isLoading) {
-      // Block all interactive elements
-      document.body.classList.add('cursor-wait');
-      document.body.style.pointerEvents = 'none';
-
-      // Create overlay to catch any events that might slip through
-      const blockingOverlay = document.createElement('div');
-      blockingOverlay.id = 'loading-blocking-overlay';
-      blockingOverlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 1999;
-        background: transparent;
-        pointer-events: auto;
-        cursor: wait;
-      `;
-
-      // Prevent all interactions on the overlay
-      const preventInteraction = (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      };
-
-      ['click', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'keydown', 'keyup'].forEach(eventType => {
-        blockingOverlay.addEventListener(eventType, preventInteraction, true);
-      });
-
-      document.body.appendChild(blockingOverlay);
+      // Add CSS class that blocks interactions via pointer-events and adds cursor-wait
+      // The ::after pseudo-element in CSS creates the overlay automatically
+      document.body.classList.add('loading-blocked');
     } else {
-      // Re-enable interactions
-      document.body.classList.remove('cursor-wait');
-      document.body.style.pointerEvents = '';
-
-      // Remove blocking overlay
-      const blockingOverlay = document.getElementById('loading-blocking-overlay');
-      if (blockingOverlay) {
-        blockingOverlay.remove();
-      }
+      // Remove blocking class to re-enable interactions
+      document.body.classList.remove('loading-blocked');
     }
 
-    // Cleanup function
+    // Cleanup function - ensure class is removed on unmount
     return () => {
-      document.body.classList.remove('cursor-wait');
-      document.body.style.pointerEvents = '';
-      const blockingOverlay = document.getElementById('loading-blocking-overlay');
-      if (blockingOverlay) {
-        blockingOverlay.remove();
-      }
+      document.body.classList.remove('loading-blocked');
     };
   }, [isLoading]);
 

@@ -144,7 +144,7 @@ ${pathname}
     },
     {
       loadingMessage: 'Creating GitHub issue...',
-      onError: error => {
+      onError: (error: Error) => {
         alert(`Failed to create GitHub issue: ${error.message}`);
       },
       onSuccess: () => {

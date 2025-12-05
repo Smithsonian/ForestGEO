@@ -386,6 +386,7 @@ export default function Sidebar(props: SidebarProps) {
       name="None"
       required
       size={'md'}
+      value={currentCensus?.plotCensusNumber?.toString() || ''}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
       aria-label="Select a Census. Required field for accessing measurement tools"
@@ -745,9 +746,11 @@ export default function Sidebar(props: SidebarProps) {
     <>
       <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
+          component="nav"
           ref={sidebarRef}
           id="side-navigation"
           className="Sidebar"
+          aria-label="Site navigation sidebar"
           sx={{
             position: 'sticky',
             top: 0,
@@ -761,7 +764,12 @@ export default function Sidebar(props: SidebarProps) {
             gap: 2,
             borderRight: '1px solid',
             borderColor: 'divider',
-            overflowY: 'auto'
+            overflowY: 'auto',
+            '&:focus': {
+              outline: '2px solid',
+              outlineColor: 'primary.500',
+              outlineOffset: '-2px'
+            }
           }}
         >
           <GlobalStyles
