@@ -72,12 +72,18 @@ async function _executePostValidationQueries(
         if (queryResults && queryResults.length > 0) {
           // Query succeeded with results - use parameterized query
           const successResults = JSON.stringify(queryResults);
-          const updateQuery = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?');
+          const updateQuery = safeFormatQuery(
+            schema,
+            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?'
+          );
           await connectionManager.executeQuery(updateQuery, [currentTime, successResults, 'success', queryID]);
           stats.success++;
         } else {
           // Query succeeded but returned no results (treated as failure/no issues found)
-          const updateQuery = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ? WHERE QueryID = ?');
+          const updateQuery = safeFormatQuery(
+            schema,
+            'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = NULL, LastRunStatus = ? WHERE QueryID = ?'
+          );
           await connectionManager.executeQuery(updateQuery, [currentTime, 'failure', queryID]);
           stats.failed++;
         }
