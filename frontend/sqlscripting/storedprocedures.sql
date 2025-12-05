@@ -1167,11 +1167,16 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
-    -- Idempotency check: Skip if this batch has already been processed
+    -- ============================================================
+    -- PERFORMANCE FIX: Use uploadmetrics for idempotency check
+    -- instead of scanning coremeasurements with JSON extraction
+    -- This changes O(N) per batch to O(1) using indexed lookup
+    -- ============================================================
     IF EXISTS (
-        SELECT 1 FROM coremeasurements cm
-        WHERE cm.CensusID = vCurrentCensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+        SELECT 1 FROM uploadmetrics
+        WHERE batchID = vBatchID
+          AND censusID = vCurrentCensusID
+          AND status = 'completed'
         LIMIT 1
     ) THEN
         -- Batch already processed, skip and clean up temporarymeasurements
