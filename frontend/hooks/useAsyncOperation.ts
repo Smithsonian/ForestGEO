@@ -144,7 +144,7 @@ export function useAsyncWrapper() {
   const { startOperation, endOperation } = useLoading();
 
   const wrapAsync = useCallback(
-    <T extends any[], R>(
+    <T extends unknown[], R>(
       asyncFn: (...args: T) => Promise<R>,
       loadingMessage: string = 'Loading...',
       category: 'api' | 'upload' | 'processing' | 'general' = 'general'

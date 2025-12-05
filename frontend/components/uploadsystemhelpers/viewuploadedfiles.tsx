@@ -251,14 +251,15 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileTextCSV.length === 0 ? (
+                  {sortedFileTextCSV.length === 0 && sortedFileArcGIS.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={fileColumns.length + 2} align="center">
                         No data available
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedFileTextCSV.map(row => {
+                    <>
+                    {sortedFileTextCSV.map(row => {
                       // let errs = row.errors == "false";
                       const errs = false;
                       return (
@@ -345,16 +346,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           </TableCell>
                         </TableRow>
                       );
-                    })
-                  )}
-                  {sortedFileArcGIS.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={fileColumns.length + 2} align="center">
-                        No data available
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sortedFileArcGIS.map(row => {
+                    })}
+                    {sortedFileArcGIS.map(row => {
                       const errs = 'false';
                       return (
                         <TableRow key={row.key}>
@@ -443,7 +436,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           </TableCell>
                         </TableRow>
                       );
-                    })
+                    })}
+                    </>
                   )}
                 </TableBody>
               </Table>

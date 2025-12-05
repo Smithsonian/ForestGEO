@@ -3,7 +3,7 @@ import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSu
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, RefObject, SetStateAction } from 'react';
+import { Dispatch, ReactElement, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -12,6 +12,16 @@ import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 // Import and re-export types from servergridhelpers to avoid duplication
 import type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction } from '@/config/servergridhelpers';
 export type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction };
+
+/**
+ * Type for dynamic toolbar buttons in data grids
+ */
+export interface DynamicButton {
+  label: string;
+  onClick: () => void | Promise<void>;
+  tooltip?: string;
+  icon?: ReactElement;
+}
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -151,7 +161,7 @@ export interface EditToolbarCustomProps {
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: ExtendedGridFilterModel;
   apiRef?: RefObject<GridApiCommunity>;
-  dynamicButtons?: any;
+  dynamicButtons?: DynamicButton[];
   locked?: boolean;
   currentSite?: Site;
   currentPlot?: Plot;
@@ -170,7 +180,7 @@ export interface IsolatedDataGridCommonProps {
   gridColumns: GridColDef[];
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
-  dynamicButtons: any[];
+  dynamicButtons: DynamicButton[];
   initialRow?: GridRowModel;
   fieldToFocus?: string;
   locked?: boolean;
@@ -261,7 +271,7 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
-  dynamicButtons: any[];
+  dynamicButtons: DynamicButton[];
   failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;

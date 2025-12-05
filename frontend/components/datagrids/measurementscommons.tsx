@@ -164,11 +164,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [isClearingErrors, setIsClearingErrors] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
-    reject: (reason?: any) => void;
+    reject: (reason?: unknown) => void;
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
-  // const [usingQuery, setUsingQuery] = useState('');
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
@@ -279,8 +278,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
       const failedData = await failedResponse.json();
       setFailedCount(failedData[0].CountFailed);
-    } catch (error: any) {
-      ailogger.error('Error refreshing counts:', error);
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error refreshing counts:', errorObj);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite, currentPlot, currentCensus, gridType]);
@@ -365,8 +365,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           if (isNewRowAdded && pageToFetch === newLastPage) {
             addNewRowToGrid();
           }
-        } catch (error: any) {
-          ailogger.error('Error fetching data:', error);
+        } catch (error: unknown) {
+          const errorObj = error instanceof Error ? error : new Error(String(error));
+          ailogger.error('Error fetching data:', errorObj);
           setSnackbar({ children: 'Error fetching data', severity: 'error' });
         } finally {
           setLoading(false);
@@ -429,8 +430,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           }, {})
         : {};
       setValidationErrors(errorMap);
-    } catch (error: any) {
-      ailogger.error('Error fetching validation errors:', error);
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error fetching validation errors:', errorObj);
     }
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
@@ -522,7 +524,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         getTableHeaders(FormType.measurements)
           .map(row => row.label)
           .join(',') + '\n';
-      data.forEach((row: any) => {
+      data.forEach((row: Record<string, unknown>) => {
         const values = [...getTableHeaders(FormType.measurements), { label: 'stemID' }, { label: 'treeID' }]
           .map(rowHeader => rowHeader.label)
           .map(header => row[header])
@@ -658,8 +660,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       }
 
       return newRow;
-    } catch (error: any) {
-      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSnackbar({ children: `Error: ${message}`, severity: 'error' });
       return Promise.reject(newRow);
     }
   };
@@ -722,7 +725,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         paginationModel
       );
       promiseArguments.resolve(updatedRow);
-    } catch (error) {
+    } catch (error: unknown) {
       promiseArguments.reject(error);
     }
     const row = rows.find(row => String(row.id) === String(id));
@@ -747,15 +750,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         });
         setAttributesMap(attrMap);
         setReloadAttrs(false);
-      } catch (e: any) {
-        ailogger.error('Failed to reload attributes:', e);
+      } catch (e: unknown) {
+        const errorObj = e instanceof Error ? e : new Error(String(e));
+        ailogger.error('Failed to reload attributes:', errorObj);
       }
     }
 
     try {
       await fetchValidationErrors();
-    } catch (e: any) {
-      ailogger.error('Failed to fetch validation errors:', e);
+    } catch (e: unknown) {
+      const errorObj = e instanceof Error ? e : new Error(String(e));
+      ailogger.error('Failed to fetch validation errors:', errorObj);
     } finally {
       setLoading(false);
     }
@@ -803,8 +808,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
         if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
         await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (e: any) {
-        ailogger.error(e);
+      } catch (e: unknown) {
+        const errorObj = e instanceof Error ? e : new Error(String(e));
+        ailogger.error('Error refreshing measurements summary view:', errorObj);
       } finally {
         setLoading(false);
       }
@@ -909,7 +915,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   );
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: any, onClick: any) => (
+    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
       <CellItemContainer>
         <Tooltip
           disableInteractive
@@ -947,7 +953,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         if (isInEditMode) {
           return [
             getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e))
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
 
@@ -1283,8 +1289,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
       await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (e: any) {
-      ailogger.error(e);
+    } catch (e: unknown) {
+      const errorObj = e instanceof Error ? e : new Error(String(e));
+      ailogger.error('Error refreshing measurements summary view:', errorObj);
     } finally {
       setLoading(false);
     }
@@ -1333,9 +1340,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         ailogger.error('Validation reset query failed:', errorData);
         throw new Error(`Validation reset failed: ${errorData.error || 'Unknown error'}`);
       }
-    } catch (error: any) {
-      ailogger.error('Error in handleResetValidations:', error);
-      throw error;
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error in handleResetValidations:', errorObj);
+      throw errorObj;
     }
   }
 
@@ -1371,7 +1379,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onPaginationModelChange={newPaginationModel => {
               setPaginationModel(newPaginationModel);
             }}
-            onProcessRowUpdateError={(error: any) => {
+            onProcessRowUpdateError={(error: Error) => {
               ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',
@@ -1590,10 +1598,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                         children: 'Validation errors cleared successfully',
                         severity: 'success'
                       });
-                    } catch (error: any) {
-                      ailogger.error('Clear errors failed:', error);
+                    } catch (error: unknown) {
+                      const errorObj = error instanceof Error ? error : new Error(String(error));
+                      const message = errorObj.message || 'Unknown error';
+                      ailogger.error('Clear errors failed:', errorObj);
                       setSnackbar({
-                        children: `Failed to clear errors: ${error.message || 'Unknown error'}`,
+                        children: `Failed to clear errors: ${message}`,
                         severity: 'error'
                       });
                     } finally {

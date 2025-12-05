@@ -189,12 +189,13 @@ export async function GET(
       }),
       { status: HTTPResponses.OK }
     );
-  } catch (error: any) {
-    ailogger.error(`Error getting ${tableType} count for ${schema}/${plotID}/${censusID}:`, error);
+  } catch (error: unknown) {
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    ailogger.error(`Error getting ${tableType} count for ${schema}/${plotID}/${censusID}:`, errObj);
     return new NextResponse(
       JSON.stringify({
         error: 'Failed to get record count',
-        details: error.message
+        details: errObj.message
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
@@ -202,8 +203,9 @@ export async function GET(
     // Always close connection to prevent connection leaks
     try {
       await connectionManager.closeConnection();
-    } catch (closeError: any) {
-      ailogger.error(`Error closing connection in admin/clear GET for ${tableType}:`, closeError);
+    } catch (closeError: unknown) {
+      const closeErr = closeError instanceof Error ? closeError : new Error(String(closeError));
+      ailogger.error(`Error closing connection in admin/clear GET for ${tableType}:`, closeErr);
     }
   }
 }

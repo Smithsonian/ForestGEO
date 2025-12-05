@@ -1,7 +1,7 @@
 // postvalidationrow.tsx
 'use client';
 import React from 'react';
-import { Box, Collapse, TableCell, TableRow, Typography } from '@mui/material';
+import { Box, TableCell, TableRow, Typography } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
@@ -177,7 +177,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
         </TableCell>
       </TableRow>
 
-      <Collapse in={expanded} timeout="auto" unmountOnExit>
+      {expanded && (
         <TableRow aria-label={'row for last run results display'} sx={{ height: 'auto' }}>
           <TableCell colSpan={7} sx={{ height: 'auto', border: 'none' }}>
             <Box
@@ -185,8 +185,6 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
                 margin: 1,
                 flex: 1,
                 width: '100%',
-                ...(expanded ? {} : { maxHeight: '60px', overflow: 'hidden' }),
-                transition: 'max-height 0.3s ease',
                 display: 'flex',
                 flexDirection: 'column'
               }}
@@ -205,7 +203,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
             </Box>
           </TableCell>
         </TableRow>
-      </Collapse>
+      )}
     </>
   );
 };

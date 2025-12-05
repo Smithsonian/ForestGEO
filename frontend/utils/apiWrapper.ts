@@ -2,9 +2,11 @@
 
 import { useLoading } from '@/app/contexts/loadingprovider';
 
+type LoadingCategory = 'api' | 'upload' | 'processing' | 'general';
+
 interface ApiWrapperOptions {
   loadingMessage?: string;
-  category?: 'api' | 'upload' | 'processing' | 'general';
+  category?: LoadingCategory;
   showErrorAlert?: boolean;
   retryAttempts?: number;
   retryDelay?: number;
@@ -13,15 +15,28 @@ interface ApiWrapperOptions {
 }
 
 /**
+ * Loading context interface - subset of LoadingContextType used by ApiWrapper
+ */
+interface ApiWrapperLoadingContext {
+  startOperation: (message: string, category?: LoadingCategory) => string;
+  endOperation: (operationId: string) => void;
+}
+
+/**
  * Enhanced fetch wrapper that automatically manages loading states
  * Provides retry logic, error handling, and loading state management
  */
 export class ApiWrapper {
-  public static loadingContext: any = null;
+  private static loadingContext: ApiWrapperLoadingContext | null = null;
 
   // Initialize with loading context (called from a hook)
-  static initialize(loadingContext: any) {
+  static initialize(loadingContext: ApiWrapperLoadingContext): void {
     ApiWrapper.loadingContext = loadingContext;
+  }
+
+  // Getter for external access (used by withLoadingState)
+  static getLoadingContext(): ApiWrapperLoadingContext | null {
+    return ApiWrapper.loadingContext;
   }
 
   /**
@@ -105,7 +120,7 @@ export class ApiWrapper {
   /**
    * POST request wrapper
    */
-  static async post(url: string, data: any, options: ApiWrapperOptions & { headers?: Record<string, string> } = {}): Promise<Response> {
+  static async post(url: string, data: unknown, options: ApiWrapperOptions & { headers?: Record<string, string> } = {}): Promise<Response> {
     const { headers = {}, ...apiOptions } = options;
 
     return ApiWrapper.fetch(
@@ -129,7 +144,7 @@ export class ApiWrapper {
   /**
    * PUT request wrapper
    */
-  static async put(url: string, data: any, options: ApiWrapperOptions & { headers?: Record<string, string> } = {}): Promise<Response> {
+  static async put(url: string, data: unknown, options: ApiWrapperOptions & { headers?: Record<string, string> } = {}): Promise<Response> {
     const { headers = {}, ...apiOptions } = options;
 
     return ApiWrapper.fetch(
@@ -308,18 +323,19 @@ export function useApiWrapper() {
 /**
  * Utility function to wrap existing fetch calls
  */
-export function withLoadingState<T extends any[], R>(
+export function withLoadingState<T extends unknown[], R>(
   asyncFn: (...args: T) => Promise<R>,
   loadingMessage: string = 'Processing...',
-  category: 'api' | 'upload' | 'processing' | 'general' = 'general'
+  category: LoadingCategory = 'general'
 ): (...args: T) => Promise<R> {
   return async (...args: T): Promise<R> => {
-    if (!ApiWrapper.loadingContext) {
+    const loadingContext = ApiWrapper.getLoadingContext();
+    if (!loadingContext) {
       console.warn('ApiWrapper not initialized. Loading states will not work.');
       return asyncFn(...args);
     }
 
-    const { startOperation, endOperation } = ApiWrapper.loadingContext;
+    const { startOperation, endOperation } = loadingContext;
     const operationId = startOperation(loadingMessage, category);
 
     try {

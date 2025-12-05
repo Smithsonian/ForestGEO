@@ -7,11 +7,35 @@ import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager } from '@/lib/connectionlogger';
 import ailogger from '@/ailogger';
 
-// at the top of connectionmanager.ts
+/**
+ * MySQL error interface for type-safe error handling
+ */
+interface MySQLError extends Error {
+  code?: string;
+  errno?: number;
+  sqlState?: string;
+  sqlMessage?: string;
+}
+
+/**
+ * Type for accessing PoolConnection with threadId property (internal mysql2 property)
+ */
+type PoolConnectionWithThreadId = PoolConnection & { threadId?: number };
+
+/**
+ * Helper to safely extract error message from unknown type
+ */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+// Observable map for debugging transaction connections
 class ObservableMap<K, V> extends Map<K, V> {
   override set(key: K, value: V): this {
     super.set(key, value);
-    ailogger.info(`[transactionConnections] set ${key} → ${(value as any).threadId}`);
+    const conn = value as PoolConnectionWithThreadId;
+    ailogger.info(`[transactionConnections] set ${key} → ${conn.threadId}`);
     this.logContents();
     return this;
   }
@@ -26,7 +50,7 @@ class ObservableMap<K, V> extends Map<K, V> {
   private logContents() {
     ailogger.info(
       '[transactionConnections] current:',
-      Array.from(this.entries()).map(([id, conn]) => ({ id, threadId: (conn as any).threadId }))
+      Array.from(this.entries()).map(([id, conn]) => ({ id, threadId: (conn as PoolConnectionWithThreadId).threadId }))
     );
   }
 }
@@ -58,7 +82,9 @@ class ConnectionManager {
   }
 
   // Execute a query using the acquired connection
-  public async executeQuery(query: string, params?: any[], transactionId?: string): Promise<any> {
+  // Note: Return type is any[] to maintain backward compatibility with numerous callers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  public async executeQuery(query: string, params?: unknown[], transactionId?: string): Promise<any> {
     const connection = transactionId ? this.transactionConnections.get(transactionId) : await this.acquireConnectionInternal();
 
     if (!connection) {
@@ -67,8 +93,9 @@ class ConnectionManager {
 
     try {
       return await runQuery(connection, query, params);
-    } catch (error: any) {
-      ailogger.error(chalk.red('Error executing query:', error));
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      ailogger.error(chalk.red(`Error executing query: ${errMsg}`));
       throw error;
     } finally {
       if (!transactionId) {
@@ -105,12 +132,13 @@ class ConnectionManager {
           };
           this.transactionMeta.set(transactionId, meta);
 
-          ailogger.info(chalk.green(`Transaction started: ${transactionId} (thread: ${(connection as any).threadId})`));
+          ailogger.info(chalk.green(`Transaction started: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
           return transactionId;
-        } catch (error: any) {
+        } catch (error: unknown) {
           connection?.release();
           if (!this.isDeadlockError(error) && !this.isLockTimeoutError(error)) {
-            ailogger.error(chalk.red('Error starting transaction:', error));
+            const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+            ailogger.error(chalk.red(`Error starting transaction: ${getErrorMessage(error)}`), errorObj);
             throw error;
           }
 
@@ -120,14 +148,17 @@ class ConnectionManager {
           const totalDelay = retryDelay + jitter;
 
           ailogger.warn(
-            chalk.yellow(`${error.message} encountered, retrying after ${totalDelay.toFixed(0)}ms... (thread: ${(connection as any)?.threadId || 'unknown'})`)
+            chalk.yellow(
+              `${getErrorMessage(error)} encountered, retrying after ${totalDelay.toFixed(0)}ms... (thread: ${(connection as PoolConnectionWithThreadId)?.threadId || 'unknown'})`
+            )
           );
           await new Promise(resolve => setTimeout(resolve, totalDelay));
         }
       }
       throw new Error('Failed to start transaction after 30 seconds due to persistent deadlock/timeout issues.');
-    } catch (e: any) {
-      ailogger.error(chalk.red('Error starting transaction:', e));
+    } catch (e: unknown) {
+      const errorObj = e instanceof Error ? e : new Error(getErrorMessage(e));
+      ailogger.error(chalk.red(`Error starting transaction: ${getErrorMessage(e)}`), errorObj);
       throw e;
     }
   }
@@ -150,9 +181,10 @@ class ConnectionManager {
 
     try {
       await connection.commit();
-      ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as any).threadId})`));
-    } catch (error: any) {
-      ailogger.error(chalk.red('Error committing transaction:', error));
+      ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+      ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
       throw error;
     } finally {
       // Clean up application locks before releasing connection
@@ -191,9 +223,10 @@ class ConnectionManager {
 
     try {
       await connection.rollback();
-      ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as any).threadId})`));
-    } catch (error: any) {
-      ailogger.error(chalk.red('Error rolling back transaction:', error));
+      ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+      ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
       throw error;
     } finally {
       // Clean up application locks before releasing connection
@@ -257,10 +290,10 @@ class ConnectionManager {
       try {
         transactionId = await this.beginTransaction();
         break;
-      } catch (error: any) {
+      } catch (error: unknown) {
         retryCount++;
         if (retryCount >= maxRetries) {
-          throw new Error(`Failed to start transaction after ${maxRetries} retries: ${error.message}`);
+          throw new Error(`Failed to start transaction after ${maxRetries} retries: ${getErrorMessage(error)}`);
         }
         ailogger.warn(`Transaction start failed (attempt ${retryCount}/${maxRetries}), retrying...`);
         await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
@@ -278,8 +311,8 @@ class ConnectionManager {
       await connection.query('SET SESSION interactive_timeout = ?', [Math.ceil(timeoutMs / 1000) + 300]);
       await connection.query('SET SESSION innodb_lock_wait_timeout = ?', [Math.min(300, Math.ceil(timeoutMs / 1000))]); // Cap at 5 minutes
       ailogger.info(`Enhanced connection settings applied for transaction ${transactionId!}`);
-    } catch (configError: any) {
-      ailogger.warn(`Failed to apply enhanced connection settings: ${configError.message}`);
+    } catch (configError: unknown) {
+      ailogger.warn(`Failed to apply enhanced connection settings: ${getErrorMessage(configError)}`);
     }
 
     // set up metadata / timeout with resource locks
@@ -300,10 +333,10 @@ class ConnectionManager {
             await conn.ping();
             // Also refresh connection settings to prevent timeout
             await conn.query('SET SESSION wait_timeout = ?', [Math.ceil(timeoutMs / 1000) + 300]);
-            ailogger.info(`Keep-alive ping and timeout refresh for transaction ${transactionId!} (thread: ${(conn as any).threadId})`);
+            ailogger.info(`Keep-alive ping and timeout refresh for transaction ${transactionId!} (thread: ${(conn as PoolConnectionWithThreadId).threadId})`);
           }
-        } catch (pingError: any) {
-          ailogger.error(`Keep-alive ping failed for transaction ${transactionId!}:`, pingError);
+        } catch (pingError: unknown) {
+          ailogger.error(`Keep-alive ping failed for transaction ${transactionId!}: ${getErrorMessage(pingError)}`);
           // If ping fails, the connection might be dead - this will cause the transaction to fail
           // but that's better than hanging indefinitely
         }
@@ -324,24 +357,27 @@ class ConnectionManager {
       await this.commitTransaction(transactionId!);
       this.transactionMeta.delete(transactionId!);
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       // on error / timeout
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
 
       // Enhanced error logging
-      ailogger.error(`Transaction ${transactionId!} failed: ${err.message}`, {
+      const errMessage = getErrorMessage(err);
+      const errorType = err instanceof Error ? err.constructor.name : 'Unknown';
+      const errorObj = err instanceof Error ? err : new Error(errMessage);
+      ailogger.error(`Transaction ${transactionId!} failed: ${errMessage}`, errorObj, {
         transactionId: transactionId!,
         duration: Date.now() - meta.startedAt,
-        errorType: err.constructor.name,
+        errorType,
         isConnectionError: this.isConnectionError(err),
-        isTimeoutError: this.isLockTimeoutError(err) || err.message?.includes('timed out')
-      } as any);
+        isTimeoutError: this.isLockTimeoutError(err) || errMessage.includes('timed out')
+      });
 
       try {
         await this.rollbackTransaction(transactionId!);
-      } catch (rbErr: any) {
-        ailogger.error(`Rollback failed for transaction ${transactionId!}:`, rbErr);
+      } catch (rbErr: unknown) {
+        ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
       this.transactionMeta.delete(transactionId!);
       throw err;
@@ -374,8 +410,9 @@ class ConnectionManager {
           ailogger.info(`Cleaning up stale transaction ${txId} (age: ${ageSeconds.toFixed(1)}s)`);
           await this.rollbackTransaction(txId);
         }
-      } catch (e: any) {
-        ailogger.error(`Error rolling back stale transaction ${txId}:`, e);
+      } catch (e: unknown) {
+        const errorObj = e instanceof Error ? e : new Error(getErrorMessage(e));
+        ailogger.error(`Error rolling back stale transaction ${txId}: ${getErrorMessage(e)}`, errorObj);
         // Ensure metadata is deleted even if rollback fails
         this.transactionMeta.delete(txId);
       }
@@ -416,8 +453,9 @@ class ConnectionManager {
       const lockWaitTime = Date.now() - lockStartTime;
       ailogger.warn(chalk.yellow(`Failed to acquire MySQL lock: ${lockName} within ${timeoutMs}ms (actual: ${lockWaitTime}ms)`));
       return false;
-    } catch (error: any) {
-      ailogger.error(chalk.red(`Error acquiring MySQL lock ${lockName}:`, error));
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+      ailogger.error(chalk.red(`Error acquiring MySQL lock ${lockName}: ${getErrorMessage(error)}`), errorObj);
       return false;
     }
   }
@@ -443,8 +481,9 @@ class ConnectionManager {
       } else if (result && result[0]?.released === 0) {
         ailogger.warn(chalk.yellow(`Lock ${lockName} was not held by transaction ${transactionId}`));
       }
-    } catch (error: any) {
-      ailogger.error(chalk.red(`Error releasing MySQL lock ${lockName}:`, error));
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+      ailogger.error(chalk.red(`Error releasing MySQL lock ${lockName}: ${getErrorMessage(error)}`), errorObj);
       // Don't throw - we want cleanup to continue even if release fails
     }
   }
@@ -459,8 +498,9 @@ class ConnectionManager {
 
       // Wait for all releases to complete (with timeout)
       await Promise.race([Promise.all(releasePromises), new Promise((_, reject) => setTimeout(() => reject(new Error('Lock cleanup timeout')), 10000))]).catch(
-        error => {
-          ailogger.error(`Error during lock cleanup for transaction ${transactionId}:`, error);
+        (error: unknown) => {
+          const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+          ailogger.error(`Error during lock cleanup for transaction ${transactionId}: ${getErrorMessage(error)}`, errorObj);
           // Continue anyway - locks will be auto-released when connection closes
         }
       );
@@ -479,26 +519,34 @@ class ConnectionManager {
   }
 
   // Helper methods to detect various MySQL errors
-  private isDeadlockError(error: any): boolean {
-    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213 || error.message?.includes('Deadlock found when trying to get lock'));
+  private isDeadlockError(error: unknown): boolean {
+    const mysqlError = error as MySQLError;
+    return Boolean(
+      mysqlError &&
+        (mysqlError.code === 'ER_LOCK_DEADLOCK' || mysqlError.errno === 1213 || mysqlError.message?.includes('Deadlock found when trying to get lock'))
+    );
   }
 
-  private isLockTimeoutError(error: any): boolean {
-    return error && (error.code === 'ER_LOCK_WAIT_TIMEOUT' || error.errno === 1205 || error.message?.includes('Lock wait timeout exceeded'));
+  private isLockTimeoutError(error: unknown): boolean {
+    const mysqlError = error as MySQLError;
+    return Boolean(
+      mysqlError && (mysqlError.code === 'ER_LOCK_WAIT_TIMEOUT' || mysqlError.errno === 1205 || mysqlError.message?.includes('Lock wait timeout exceeded'))
+    );
   }
 
-  private isConnectionError(error: any): boolean {
-    return (
-      error &&
-      (error.code === 'ECONNRESET' ||
-        error.code === 'PROTOCOL_CONNECTION_LOST' ||
-        error.code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR' ||
-        error.code === 'ER_CONNECTION_KILLED' ||
-        error.errno === 1927 || // Connection was killed
-        error.errno === 2013 || // Lost connection to MySQL server during query
-        error.message?.includes('Connection lost') ||
-        error.message?.includes('server has gone away') ||
-        error.message?.includes('Connection was killed'))
+  private isConnectionError(error: unknown): boolean {
+    const mysqlError = error as MySQLError;
+    return Boolean(
+      mysqlError &&
+        (mysqlError.code === 'ECONNRESET' ||
+          mysqlError.code === 'PROTOCOL_CONNECTION_LOST' ||
+          mysqlError.code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR' ||
+          mysqlError.code === 'ER_CONNECTION_KILLED' ||
+          mysqlError.errno === 1927 || // Connection was killed
+          mysqlError.errno === 2013 || // Lost connection to MySQL server during query
+          mysqlError.message?.includes('Connection lost') ||
+          mysqlError.message?.includes('server has gone away') ||
+          mysqlError.message?.includes('Connection was killed'))
     );
   }
 
@@ -509,8 +557,9 @@ class ConnectionManager {
       await connection.ping(); // Validate connection
       // console.log(chalk.green('Connection validated.'));
       return connection;
-    } catch (error: any) {
-      ailogger.error(chalk.red('Error acquiring or validating connection:', error));
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
+      ailogger.error(chalk.red(`Error acquiring or validating connection: ${getErrorMessage(error)}`), errorObj);
       throw error;
     }
   }

@@ -119,8 +119,8 @@ export default function PostValidationPage() {
         if (data.schema) {
           setSchemaDetails(data.schema);
         }
-      } catch (error: any) {
-        ailogger.error('Error fetching schema:', error);
+      } catch (error: unknown) {
+        ailogger.error('Error fetching schema:', error instanceof Error ? error : new Error(String(error)));
       }
     };
 

@@ -19,9 +19,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="icon" href="/icon.jpg" />
       </head>
       <body>
-        <a href="#main-content" className="skip-to-main">
-          Skip to main content
-        </a>
         <ClearCookiesOnUnload />
         <Providers>
           <LoadingProvider>

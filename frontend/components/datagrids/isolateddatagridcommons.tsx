@@ -101,7 +101,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   });
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
-    reject: (reason?: any) => void;
+    reject: (reason?: unknown) => void;
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
@@ -170,8 +170,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
         // Note: handleAddNewRow will be triggered via processRowUpdate
         // Removed direct call to avoid circular dependency
-      } catch (error: any) {
-        ailogger.error('Error fetching data:', error);
+      } catch (error: unknown) {
+        ailogger.error('Error fetching data:', error instanceof Error ? error : new Error(String(error)));
         setSnackbar({ children: 'Error fetching data', severity: 'error' });
       } finally {
         setLoading(false);
@@ -276,8 +276,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       link.click();
 
       URL.revokeObjectURL(url);
-    } catch (error: any) {
-      ailogger.error('Error fetching full data:', error);
+    } catch (error: unknown) {
+      ailogger.error('Error fetching full data:', error instanceof Error ? error : new Error(String(error)));
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -297,7 +297,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           getTableHeaders(FormType.attributes)
             .map(row => row.label)
             .join(',') + '\n';
-        aData.forEach((row: any) => {
+        aData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.attributes)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -308,16 +308,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           aCSVRows += values.join(',') + '\n';
         });
@@ -342,7 +341,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           getTableHeaders(FormType.quadrats)
             .map(row => row.label)
             .join(',') + '\n';
-        qData.forEach((row: any) => {
+        qData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.quadrats)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -353,16 +352,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           qCSVRows += values.join(',') + '\n';
         });
@@ -387,7 +385,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           getTableHeaders(FormType.personnel)
             .map(row => row.label)
             .join(',') + '\n';
-        pData.forEach((row: any) => {
+        pData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.personnel)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -398,16 +396,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           pCSVRows += values.join(',') + '\n';
         });
@@ -433,7 +430,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           getTableHeaders(FormType.species)
             .map(row => row.label)
             .join(',') + '\n';
-        sData.forEach((row: any) => {
+        sData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.species)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -444,16 +441,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           sCSVRows += values.join(',') + '\n';
         });
@@ -525,8 +521,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         let responseJSON;
         try {
           responseJSON = await response.json();
-        } catch (e: any) {
-          ailogger.error(e);
+        } catch (e: unknown) {
+          ailogger.error('Error parsing response JSON:', e instanceof Error ? e : new Error(String(e)));
         }
 
         if (!response.ok) {
@@ -545,8 +541,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
 
         return newRow;
-      } catch (error: any) {
-        setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(newRow);
       } finally {
         setLoading(false);
@@ -653,9 +650,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
           await fetchPaginatedData(paginationModel.page);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Deletion failed';
         setSnackbar({
-          children: `Error: ${error.message || 'Deletion failed'}`,
+          children: `Error: ${message}`,
           severity: 'error'
         });
       } finally {
@@ -677,8 +675,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           await performSaveAction(promiseArguments.newRow.id, resolvedRow);
           setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
-        } catch (error: any) {
-          setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         }
       }
 
@@ -716,7 +715,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (oldRow && updatedRow) {
         setPromiseArguments({
           resolve: (_value: GridRowModel) => {},
-          reject: (_reason?: any) => {},
+          reject: (_reason?: unknown) => {},
           oldRow,
           newRow: updatedRow
         });
@@ -815,8 +814,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 paginationModel
               );
               return updatedRow;
-            } catch (error: any) {
-              setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              setSnackbar({ children: `Error: ${message}`, severity: 'error' });
               return Promise.reject(error);
             } finally {
               setLoading(false);
@@ -847,8 +847,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           paginationModel
         );
         return updatedRow;
-      } catch (error: any) {
-        setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(error);
       } finally {
         setLoading(false);
@@ -959,7 +960,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, []);
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: any, onClick: any) => (
+    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
       <CellItemContainer>
         <Tooltip
           disableInteractive
@@ -999,7 +1000,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (isInEditMode && !locked) {
           return [
             getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e))
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
         return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
@@ -1080,13 +1081,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               await waitForStateUpdates();
               try {
                 return await processRowUpdate(newRow, oldRow);
-              } catch (error: any) {
-                ailogger.error('Error processing row update:', error);
+              } catch (error: unknown) {
+                ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
                 setSnackbar({ children: 'Error updating row', severity: 'error' });
                 return Promise.reject(error);
               }
             }}
-            onProcessRowUpdateError={(error: any) => {
+            onProcessRowUpdateError={(error: Error) => {
               ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',

@@ -155,14 +155,16 @@ export async function validateContextualValues(
     }
 
     return { success: true, values };
-  } catch (error: any) {
-    ailogger.error('Context validation error:', error);
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    ailogger.error('Context validation error:', errorObj);
+    const message = errorObj.message;
     return {
       success: false,
       response: NextResponse.json(
         {
           error: 'Failed to validate context values',
-          details: error.message,
+          details: message,
           fallback: allowFallback
         },
         { status: HTTPResponses.INTERNAL_SERVER_ERROR }
@@ -172,13 +174,20 @@ export async function validateContextualValues(
 }
 
 /**
+ * Route context type for Next.js API routes
+ */
+export interface RouteContext {
+  params: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/**
  * Middleware wrapper for API routes that require contextual values
  */
 export function withContextValidation(
-  handler: (request: NextRequest, context: any, values: ContextValues) => Promise<NextResponse>,
+  handler: (request: NextRequest, context: RouteContext, values: ContextValues) => Promise<NextResponse>,
   options: ValidationOptions = {}
 ) {
-  return async (request: NextRequest, context: any) => {
+  return async (request: NextRequest, context: RouteContext) => {
     const validation = await validateContextualValues(request, options);
 
     if (!validation.success) {
@@ -187,9 +196,10 @@ export function withContextValidation(
 
     try {
       return await handler(request, context, validation.values!);
-    } catch (error: any) {
-      ailogger.error('Handler error with context validation:', error);
-      return NextResponse.json({ error: 'Internal server error', details: error.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Handler error with context validation:', errorObj);
+      return NextResponse.json({ error: 'Internal server error', details: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
   };
 }
