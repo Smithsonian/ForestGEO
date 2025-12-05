@@ -1095,3 +1095,6 @@ create index idx_uploadmetrics_dataloss
 create index idx_uploadmetrics_starttime
     on uploadmetrics (startTime);
 
+create index idx_uploadmetrics_batch_census_status
+    on uploadmetrics (batchID, censusID, status) comment 'Composite index for idempotency check in bulkingestionprocess';
+
