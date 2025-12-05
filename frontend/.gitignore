@@ -67,4 +67,6 @@ yarn-error.log*
 
 # Documentation (auto-generated)
 /docs/upload-system-robustness-improvements.md
-CODEBASE*
+
+# Ignore all-caps markdown files (tracking documents, etc.)
+[A-Z][A-Z_]*.md

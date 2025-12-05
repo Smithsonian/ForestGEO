@@ -244,7 +244,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
           <List aria-label="Validation description list" marker="disc" sx={{ p: 0, m: 0, listStylePosition: 'inside' }}>
             {formattedDescription?.split(';').map((snippet, index) => (
               <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', p: 0, flexWrap: 'wrap' }}>
-                <Chip size="sm" sx={{ whiteSpace: 'normal', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal' } }}>{snippet.trim()}</Chip>
+                <Chip size="sm" sx={{ whiteSpace: 'normal', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal' } }}>
+                  {snippet.trim()}
+                </Chip>
               </ListItem>
             ))}
           </List>
@@ -255,7 +257,9 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
           <List aria-label="Validation criteria list" marker="disc" sx={{ p: 0, m: 0, listStylePosition: 'inside' }}>
             {validation.criteria?.split(';').map((snippet, index) => (
               <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', p: 0, flexWrap: 'wrap' }}>
-                <Chip size="sm" sx={{ whiteSpace: 'normal', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal' } }}>{snippet.trim()}</Chip>
+                <Chip size="sm" sx={{ whiteSpace: 'normal', height: 'auto', '& .MuiChip-label': { whiteSpace: 'normal' } }}>
+                  {snippet.trim()}
+                </Chip>
               </ListItem>
             ))}
           </List>

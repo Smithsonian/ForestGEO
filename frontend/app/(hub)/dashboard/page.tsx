@@ -107,6 +107,33 @@ export default function DashboardPage() {
   const loadingRef = useRef<boolean>(false);
   const lastLoadedKeyRef = useRef<string>('');
 
+  // Timer ref for census creation debounce - cleaned up on unmount
+  const censusCreationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // AbortControllers for cancelling in-flight fetch requests on unmount
+  // Separate controllers for parallel requests to avoid race conditions
+  const metricsAbortControllerRef = useRef<AbortController | null>(null);
+  const changelogAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Track mounted state for safe state updates
+  const isMountedRef = useRef(true);
+
+  // Cleanup timer and abort controllers on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (censusCreationTimerRef.current) {
+        clearTimeout(censusCreationTimerRef.current);
+      }
+      if (metricsAbortControllerRef.current) {
+        metricsAbortControllerRef.current.abort();
+      }
+      if (changelogAbortControllerRef.current) {
+        changelogAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   /**
    * Aggregated Dashboard Metrics Loader
    *
@@ -116,14 +143,26 @@ export default function DashboardPage() {
   const loadAllDashboardMetrics = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0].censusID) return;
 
+    // Abort any in-flight metrics request before starting a new one
+    if (metricsAbortControllerRef.current) {
+      metricsAbortControllerRef.current.abort();
+    }
+    metricsAbortControllerRef.current = new AbortController();
+
     try {
-      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`);
+      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
+        signal: metricsAbortControllerRef.current.signal
+      });
+
+      if (!isMountedRef.current) return;
 
       if (!response.ok) {
         throw new Error(`Failed to load dashboard data: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
+
+      if (!isMountedRef.current) return;
 
       // Update all state from single aggregated response
       setProgressTacho({
@@ -144,6 +183,9 @@ export default function DashboardPage() {
 
       ailogger.info('Dashboard metrics loaded successfully via aggregated API');
     } catch (e: any) {
+      // Ignore abort errors - they're expected when component unmounts or context changes
+      if (e.name === 'AbortError') return;
+      if (!isMountedRef.current) return;
       const errorMessage = e instanceof Error ? e.message : 'Failed to load dashboard data. Please try again.';
       setError(errorMessage);
       ailogger.error('Aggregated dashboard metrics error:', e);
@@ -151,18 +193,35 @@ export default function DashboardPage() {
   }, [currentSite, currentPlot, currentCensus]);
 
   const loadChangelogHistory = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      if (!currentSite || !currentPlot || !currentCensus) {
+    if (!currentSite || !currentPlot || !currentCensus) {
+      if (isMountedRef.current) {
         setChangelogHistory(Array(5).fill({}));
-        return;
       }
+      return;
+    }
+
+    // Abort any in-flight changelog request before starting a new one
+    if (changelogAbortControllerRef.current) {
+      changelogAbortControllerRef.current.abort();
+    }
+    changelogAbortControllerRef.current = new AbortController();
+
+    try {
+      if (isMountedRef.current) {
+        setIsLoading(true);
+      }
+
       const response = await fetch(
         `/api/changelog/overview/unifiedchangelog/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`,
-        { method: 'GET' }
+        { method: 'GET', signal: changelogAbortControllerRef.current.signal }
       );
+
+      if (!isMountedRef.current) return;
+
       try {
         const results: UnifiedChangelogRDS[] = await response.json();
+
+        if (!isMountedRef.current) return;
 
         // Pad the array if it has less than 5 items
         const paddedResults = [...results];
@@ -175,10 +234,16 @@ export default function DashboardPage() {
         ailogger.warn('changeloghistory - no json response');
       }
     } catch (error: any) {
+      // Ignore abort errors - expected when component unmounts or context changes
+      if (error.name === 'AbortError') return;
+      if (!isMountedRef.current) return;
+
       ailogger.error('Failed to load changelog history', error);
       setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -368,7 +433,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
       // Debounce: prevent rapid successive clicks
-      setTimeout(() => setIsCreatingCensus(false), 1000);
+      censusCreationTimerRef.current = setTimeout(() => setIsCreatingCensus(false), 1000);
     }
   }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
 

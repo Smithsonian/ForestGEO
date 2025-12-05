@@ -1,7 +1,7 @@
 'use client';
 
 import { Alert, Box, Button, Checkbox, CircularProgress, Input, Option, Select, Stack, Table } from '@mui/joy';
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import ailogger from '@/ailogger';
 
@@ -15,23 +15,42 @@ export default function UserSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     async function fetchUsers() {
       try {
-        setLoading(true);
-        setError(null);
+        if (isMountedRef.current) {
+          setLoading(true);
+          setError(null);
+        }
 
         const userResponse = await fetch(`/api/administrative/fetch/users`);
+        if (!isMountedRef.current) return;
+
         if (!userResponse.ok) {
           throw new Error(`Failed to load users: ${userResponse.status} ${userResponse.statusText}`);
         }
         const tempUsers: AdminUserRDS[] = await userResponse.json();
 
+        if (!isMountedRef.current) return;
+
         const sitesResponse = await fetch(`/api/administrative/fetch/sites`);
+        if (!isMountedRef.current) return;
+
         if (!sitesResponse.ok) {
           throw new Error(`Failed to load sites: ${sitesResponse.status} ${sitesResponse.statusText}`);
         }
         const tempSites: AdminSiteRDS[] = await sitesResponse.json();
+
+        if (!isMountedRef.current) return;
+
         setSites(tempSites);
 
         const siteMap: Record<number, AdminSiteRDS> = {};
@@ -57,11 +76,14 @@ export default function UserSettingsPage() {
         setUsers(mappedUsers);
         setBaseUsers(mappedUsers);
       } catch (err) {
+        if (!isMountedRef.current) return;
         const errorMessage = err instanceof Error ? err.message : 'Failed to load data. Please try again.';
         setError(errorMessage);
         ailogger.error('Failed to fetch users', err instanceof Error ? err : new Error(String(err)));
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     }
 

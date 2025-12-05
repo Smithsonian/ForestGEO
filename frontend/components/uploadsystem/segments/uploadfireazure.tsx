@@ -26,8 +26,16 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [continueDisabled, setContinueDisabled] = useState<boolean>(true); // To control the Continue button
 
   const hasUploaded = useRef(false);
+  const isMountedRef = useRef(true);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const uploadToStorage = useCallback(
     async (file: FileWithPath) => {
@@ -56,13 +64,17 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             body: formData
           }
         );
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
+        if (isMountedRef.current) {
+          setCompletedOperations(prevCompleted => prevCompleted + 1);
+        }
         return response.ok ? 'Storage load successful' : 'Storage load failed';
       } catch (error) {
         ailogger.error(`Upload failed for ${file.name}:`, error instanceof Error ? error : new Error(String(error)));
-        setUploadError(error);
-        setErrorComponent('UploadFire');
-        setReviewState(ReviewStates.ERRORS);
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setErrorComponent('UploadFire');
+          setReviewState(ReviewStates.ERRORS);
+        }
       }
     },
     [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user]
@@ -74,7 +86,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       if (uploadForm === 'measurements') {
         totalOps += acceptedFiles.length * 2; // For measurements, add 2 more operations per file for the refresh views
       }
-      setTotalOperations(totalOps);
+      if (isMountedRef.current) {
+        setTotalOperations(totalOps);
+      }
     };
 
     const uploadFiles = async () => {
@@ -84,13 +98,16 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       calculateTotalOperations();
 
       for (const file of acceptedFiles) {
+        if (!isMountedRef.current) return; // Exit early if unmounted
         const storageResult = await uploadToStorage(file);
         uploadResults.push(`File: ${file.name}, Storage: ${storageResult}`);
       }
 
-      setResults(uploadResults);
-      setLoading(false);
-      setIsDataUnsaved(false);
+      if (isMountedRef.current) {
+        setResults(uploadResults);
+        setLoading(false);
+        setIsDataUnsaved(false);
+      }
     };
 
     if (!hasUploaded.current) {
@@ -98,7 +115,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         .catch(ailogger.error)
         .then(() => {
           hasUploaded.current = true;
-          setReviewState(ReviewStates.COMPLETE);
+          if (isMountedRef.current) {
+            setReviewState(ReviewStates.COMPLETE);
+          }
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

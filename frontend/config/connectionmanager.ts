@@ -18,6 +18,32 @@ interface MySQLError extends Error {
 }
 
 /**
+ * Extracts schema name from a query containing fully-qualified table names
+ * Matches patterns like: schema.tablename, `schema`.`tablename`, schema.tablename AS alias
+ * Returns the first schema found, or null if none
+ */
+function extractSchemaFromQuery(query: string): string | null {
+  // Match patterns like: FROM schema.table, JOIN schema.table, INTO schema.table, UPDATE schema.table
+  // Also handles backtick-quoted identifiers
+  const schemaPatterns = [
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.\w+/i,
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.`?\w+`?/i
+  ];
+
+  for (const pattern of schemaPatterns) {
+    const match = query.match(pattern);
+    if (match && match[1]) {
+      // Validate that it looks like a ForestGEO schema name
+      const schema = match[1];
+      if (schema.startsWith('forestgeo_') || schema.includes('_')) {
+        return schema;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Type for accessing PoolConnection with threadId property (internal mysql2 property)
  */
 type PoolConnectionWithThreadId = PoolConnection & { threadId?: number };
@@ -92,6 +118,26 @@ class ConnectionManager {
     }
 
     try {
+      // Extract schema from query and ensure database context is set
+      // This prevents "No database selected" errors when connections are acquired
+      // from a pool that may have been reinitialized without proper database context
+      //
+      // NOTE: We use connection.query('USE ...') instead of connection.changeUser()
+      // because changeUser has a known mysql2 bug where it affects the entire pool
+      // configuration, not just the current connection. See:
+      // https://github.com/sidorares/node-mysql2/issues/477
+      // https://github.com/sidorares/node-mysql2/issues/1469
+      const schema = extractSchemaFromQuery(query);
+      if (schema) {
+        try {
+          // Use simple query protocol (not prepared statements) to switch database
+          await connection.query(`USE \`${schema}\``);
+        } catch (useError: unknown) {
+          // Log but don't fail - the query may still work with fully-qualified names
+          ailogger.warn(chalk.yellow(`Could not set database context to ${schema}: ${getErrorMessage(useError)}`));
+        }
+      }
+
       return await runQuery(connection, query, params);
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);

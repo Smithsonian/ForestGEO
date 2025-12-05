@@ -204,6 +204,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   // Handle refresh signal from parent - use ref to track previous state
   const previousRefresh = useRef(refresh);
+
+  // Timer ref for edit click focus delay - cleaned up on unmount
+  const editClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     // Only refresh when transitioning from false to true
     if (refresh && !previousRefresh.current && currentSite) {
@@ -901,7 +905,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         ...prevModel,
         [id]: { mode: GridRowModes.Edit }
       }));
-      setTimeout(() => {
+      // Store timer in ref for cleanup on unmount
+      editClickTimerRef.current = setTimeout(() => {
         const firstEditableColumn = gridColumns.find(col => col.editable);
         if (firstEditableColumn) {
           localApiRef.current?.setCellFocus(id, firstEditableColumn.field);
@@ -940,6 +945,18 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   // Debounced filter change to prevent excessive re-renders and API calls
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timers on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (editClickTimerRef.current) {
+        clearTimeout(editClickTimerRef.current);
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => {
     // Clear existing timer

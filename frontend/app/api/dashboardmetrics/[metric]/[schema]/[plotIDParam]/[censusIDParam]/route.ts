@@ -68,12 +68,12 @@ async function processMetrics(metric: string, schema: string, plotID: number, ce
   try {
     switch (metric) {
       case 'CountActiveUsers':
-        query = `SELECT COUNT(p.PersonnelID) as PersonnelCount FROM ${schema}.personnel p 
+        query = `SELECT COUNT(p.PersonnelID) as PersonnelCount FROM ${schema}.personnel p
                     JOIN ${schema}.censusactivepersonnel cap ON p.PersonnelID = cap.PersonnelID
                     JOIN ${schema}.census c ON c.CensusID = cap.CensusID
                   WHERE c.CensusID = ? AND c.PlotID = ?`;
-        const cauResults = (await connectionManager.executeQuery(query, [censusID, plotID]))[0].PersonnelCount;
-        return NextResponse.json({ CountActiveUsers: cauResults }, { status: HTTPResponses.OK });
+        const cauResults = await connectionManager.executeQuery(query, [censusID, plotID]);
+        return NextResponse.json({ CountActiveUsers: cauResults[0]?.PersonnelCount ?? 0 }, { status: HTTPResponses.OK });
       case 'ProgressTachometer':
         query = `
           WITH measured_quads AS (
@@ -93,10 +93,10 @@ async function processMetrics(metric: string, schema: string, plotID: number, ce
           WHERE q.PlotID = ? GROUP BY q.PlotID;`;
         const ptResults = await connectionManager.executeQuery(query, [censusID, plotID, plotID]);
         return NextResponse.json({
-          TotalQuadrats: ptResults[0].total_quadrats,
-          PopulatedQuadrats: ptResults[0].populated_quadrats,
-          PopulatedPercent: ptResults[0].populated_pct,
-          UnpopulatedQuadrats: ptResults[0].unpopulated_quadrats
+          TotalQuadrats: ptResults[0]?.total_quadrats ?? 0,
+          PopulatedQuadrats: ptResults[0]?.populated_quadrats ?? 0,
+          PopulatedPercent: ptResults[0]?.populated_pct ?? 0,
+          UnpopulatedQuadrats: ptResults[0]?.unpopulated_quadrats ?? ''
         });
       // case 'FilesUploaded':
       //   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) return NextResponse.json({ FilesUploaded: [] }, { status: HTTPResponses.SERVICE_UNAVAILABLE });
@@ -122,11 +122,11 @@ async function processMetrics(metric: string, schema: string, plotID: number, ce
       case 'CountTrees':
         query = `SELECT COUNT(t.TreeID) AS CountTrees FROM ${schema}.trees t JOIN ${schema}.census c ON t.CensusID = c.CensusID WHERE t.CensusID = ? AND c.PlotID = ?`;
         const ctResults = await connectionManager.executeQuery(query, [censusID, plotID]);
-        return NextResponse.json({ CountTrees: ctResults[0].CountTrees }, { status: HTTPResponses.OK });
+        return NextResponse.json({ CountTrees: ctResults[0]?.CountTrees ?? 0 }, { status: HTTPResponses.OK });
       case 'CountStems':
         query = `SELECT COUNT(st.StemGUID)AS CountStems FROM ${schema}.stems st JOIN ${schema}.census c ON st.CensusID = c.CensusID WHERE st.CensusID = ? AND c.PlotID = ?`;
         const csResults = await connectionManager.executeQuery(query, [censusID, plotID]);
-        return NextResponse.json({ CountStems: csResults[0].CountStems }, { status: HTTPResponses.OK });
+        return NextResponse.json({ CountStems: csResults[0]?.CountStems ?? 0 }, { status: HTTPResponses.OK });
       case 'StemTypes':
         // First check if previous census exists (fast path for first census)
         const prevCensusQuery = `SELECT MAX(c.CensusID) as PrevCensusID FROM ${schema}.census c WHERE c.PlotID = ? AND c.CensusID < ?`;

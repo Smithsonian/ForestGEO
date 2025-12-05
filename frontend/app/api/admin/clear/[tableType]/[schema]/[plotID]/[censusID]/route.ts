@@ -5,6 +5,7 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -24,6 +25,13 @@ export async function DELETE(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
+  // Authentication check - admin operations require authenticated user
+  const session = await auth();
+  if (!session?.user) {
+    ailogger.warn('Unauthorized admin clear DELETE attempt - no session');
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  }
+
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
 
   if (!tableType) {
@@ -138,6 +146,14 @@ export async function DELETE(
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    // Always close connection to prevent connection leaks
+    try {
+      await connectionManager.closeConnection();
+    } catch (closeError: unknown) {
+      const closeErr = closeError instanceof Error ? closeError : new Error(String(closeError));
+      ailogger.error(`Error closing connection in admin/clear DELETE for ${tableType}:`, closeErr);
+    }
   }
 }
 
@@ -147,6 +163,13 @@ export async function GET(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
+  // Authentication check - admin operations require authenticated user
+  const session = await auth();
+  if (!session?.user) {
+    ailogger.warn('Unauthorized admin clear GET attempt - no session');
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  }
+
   const { tableType, schema, plotID, censusID } = await props.params;
 
   if (!tableType || !schema || !plotID || !censusID) {

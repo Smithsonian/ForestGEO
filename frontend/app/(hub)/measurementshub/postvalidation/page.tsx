@@ -2,7 +2,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -28,6 +28,14 @@ export default function PostValidationPage() {
     currentCensusID: currentCensus?.dateRanges[0].censusID
   };
   const { setLoading } = useLoading();
+
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
@@ -62,7 +70,9 @@ export default function PostValidationPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setPostValidations(data);
+      if (isMountedRef.current) {
+        setPostValidations(data);
+      }
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error loading queries:', errorObj);
@@ -116,7 +126,7 @@ export default function PostValidationPage() {
       try {
         const response = await fetch(`/api/structure/${currentSite?.schemaName ?? ''}`);
         const data = await response.json();
-        if (data.schema) {
+        if (isMountedRef.current && data.schema) {
           setSchemaDetails(data.schema);
         }
       } catch (error: unknown) {
