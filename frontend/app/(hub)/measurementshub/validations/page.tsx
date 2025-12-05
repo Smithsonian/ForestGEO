@@ -47,6 +47,7 @@ export default function ValidationsPage() {
 
   const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [newValidation, setNewValidation] = useState<ValidationProceduresRDS>({
     procedureName: '',
     description: '',
@@ -57,9 +58,23 @@ export default function ValidationsPage() {
 
   useEffect(() => {
     if (session && !['db admin', 'global'].includes(session.user.userStatus)) {
-      throw new Error('access-denied');
+      setAccessDenied(true);
     }
   }, [session]);
+
+  // Render access denied message instead of throwing error
+  if (accessDenied) {
+    return (
+      <Box sx={{ p: 4 }}>
+        <Alert severity="error">
+          <Typography variant="h6">Access Denied</Typography>
+          <Typography>
+            You do not have permission to view this page. Only database administrators and global users can access validations management.
+          </Typography>
+        </Alert>
+      </Box>
+    );
+  }
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {
@@ -75,8 +90,8 @@ export default function ValidationsPage() {
         ailogger.error('Failed to update validation', undefined, { errorText, status: response.status, statusText: response.statusText });
         throw new Error(`Failed to update validation: ${response.status} ${response.statusText}`);
       }
-    } catch (error: any) {
-      ailogger.error('Error updating validation:', error);
+    } catch (error: unknown) {
+      ailogger.error('Error updating validation:', error instanceof Error ? error : new Error(String(error)));
       throw error; // Re-throw to allow child components to handle error display
     }
   };
@@ -112,8 +127,8 @@ export default function ValidationsPage() {
         ailogger.error('Failed to create validation', undefined, { errorText, status: response.status, statusText: response.statusText });
         throw new Error(`Failed to create validation: ${response.status} ${response.statusText}`);
       }
-    } catch (error: any) {
-      ailogger.error('Error creating validation:', error);
+    } catch (error: unknown) {
+      ailogger.error('Error creating validation:', error instanceof Error ? error : new Error(String(error)));
       throw error; // Re-throw to allow child components to handle error display
     }
   };
@@ -129,7 +144,7 @@ export default function ValidationsPage() {
     setIsCreatingNew(false);
   };
 
-  const handleNewValidationChange = (field: keyof ValidationProceduresRDS, value: any) => {
+  const handleNewValidationChange = (field: keyof ValidationProceduresRDS, value: ValidationProceduresRDS[keyof ValidationProceduresRDS]) => {
     setNewValidation(prev => ({ ...prev, [field]: value }));
   };
 
@@ -173,12 +188,12 @@ export default function ValidationsPage() {
         <Table stickyHeader sx={{ tableLayout: 'fixed', width: '100%' }}>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ width: '5%' }}>Enabled?</TableCell>
-              <TableCell sx={{ width: '10%' }}>Validation</TableCell>
-              <TableCell sx={{ width: '15%' }}>Description</TableCell>
-              <TableCell sx={{ width: '10%' }}>Affecting Criteria</TableCell>
-              <TableCell sx={{ flexGrow: 1, flexShrink: 0, flexBasis: '35%' }}>Query</TableCell>
-              <TableCell sx={{ width: '10%' }}>Actions</TableCell>
+              <TableCell sx={{ width: '6%' }}>Enabled?</TableCell>
+              <TableCell sx={{ width: '12%' }}>Validation</TableCell>
+              <TableCell sx={{ width: '18%' }}>Description</TableCell>
+              <TableCell sx={{ width: '12%' }}>Affecting Criteria</TableCell>
+              <TableCell sx={{ width: '44%' }}>Query</TableCell>
+              <TableCell sx={{ width: '8%' }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>

@@ -6,7 +6,6 @@ import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
-// Note: TransactionAwarePQueue moved to server-side to avoid client-side MySQL imports
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { useSession } from 'next-auth/react';
@@ -14,134 +13,7 @@ import { v4 } from 'uuid';
 import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
 import { useUploadSession } from '@/app/hooks/useUploadSession';
-// TransactionMonitor disabled due to architectural changes
-
-/**
- * Formats milliseconds into a human-readable time remaining string
- */
-function formatTimeRemaining(ms: number): string {
-  if (ms < 0 || !isFinite(ms)) return 'Calculating...';
-
-  const totalSeconds = Math.ceil(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m remaining`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds}s remaining`;
-  } else if (seconds > 10) {
-    return `${seconds}s remaining`;
-  } else {
-    return 'Almost done...';
-  }
-}
-
-/**
- * Exponential Moving Average (EMA) Calculator for ETA estimation
- *
- * Uses EMA to smooth out speed measurements for more accurate time remaining estimates.
- * EMA gives more weight to recent measurements while still considering historical data.
- *
- * Formula: EMA(t) = α * value(t) + (1 - α) * EMA(t-1)
- * Where α (alpha) is the smoothing factor between 0 and 1.
- *
- * Higher alpha = more responsive to recent changes (but more volatile)
- * Lower alpha = smoother estimates (but slower to adapt)
- *
- * References:
- * - https://stackoverflow.com/questions/40057020/calculating-exponential-moving-average-ema-using-javascript
- * - https://stackoverflow.com/questions/933242/smart-progress-bar-eta-computation
- */
-class ETACalculator {
-  private emaSpeed: number | null = null;
-  private lastTimestamp: number = 0;
-  private lastProgress: number = 0;
-  private alpha: number;
-  private minSamples: number;
-  private sampleCount: number = 0;
-
-  /**
-   * @param alpha - Smoothing factor (0.1 = very smooth, 0.3 = responsive). Default 0.2
-   * @param minSamples - Minimum samples before providing ETA. Default 3
-   */
-  constructor(alpha: number = 0.2, minSamples: number = 3) {
-    this.alpha = alpha;
-    this.minSamples = minSamples;
-  }
-
-  /**
-   * Update with new progress measurement
-   * @param currentProgress - Current progress (0 to total)
-   * @param total - Total units of work
-   * @returns Estimated time remaining in milliseconds, or null if insufficient data
-   */
-  update(currentProgress: number, total: number): number | null {
-    const now = performance.now();
-
-    if (this.lastTimestamp === 0) {
-      // First measurement - just record it
-      this.lastTimestamp = now;
-      this.lastProgress = currentProgress;
-      return null;
-    }
-
-    const timeDelta = now - this.lastTimestamp;
-    const progressDelta = currentProgress - this.lastProgress;
-
-    // Skip if no progress or negative time (shouldn't happen)
-    if (progressDelta <= 0 || timeDelta <= 0) {
-      return this.emaSpeed !== null ? this.calculateETA(currentProgress, total) : null;
-    }
-
-    // Calculate instantaneous speed (units per millisecond)
-    const instantSpeed = progressDelta / timeDelta;
-
-    // Apply EMA smoothing
-    if (this.emaSpeed === null) {
-      this.emaSpeed = instantSpeed;
-    } else {
-      this.emaSpeed = this.alpha * instantSpeed + (1 - this.alpha) * this.emaSpeed;
-    }
-
-    // Update state
-    this.lastTimestamp = now;
-    this.lastProgress = currentProgress;
-    this.sampleCount++;
-
-    // Only return ETA after minimum samples collected
-    if (this.sampleCount < this.minSamples) {
-      return null;
-    }
-
-    return this.calculateETA(currentProgress, total);
-  }
-
-  private calculateETA(currentProgress: number, total: number): number | null {
-    if (this.emaSpeed === null || this.emaSpeed <= 0) {
-      return null;
-    }
-
-    const remaining = total - currentProgress;
-    if (remaining <= 0) {
-      return 0;
-    }
-
-    // ETA = remaining work / smoothed speed
-    return remaining / this.emaSpeed;
-  }
-
-  /**
-   * Reset calculator for new operation
-   */
-  reset(): void {
-    this.emaSpeed = null;
-    this.lastTimestamp = 0;
-    this.lastProgress = 0;
-    this.sampleCount = 0;
-  }
-}
+import { ETACalculator, formatTimeRemaining, createTransactionAwareQueue } from '@/components/uploadsystemhelpers/uploadprocessingutils';
 
 /**
  * UploadFireSQL Component
@@ -207,69 +79,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadStartedRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
 
-  // Enhanced client-side queue with proper transaction tracking
-  const createTransactionAwareQueue = (concurrency: number) => {
-    let running = 0;
-    let pending: (() => Promise<void>)[] = [];
-    let isEmpty = true;
-    let emptyResolvers: (() => void)[] = [];
-
-    // Use iterative approach instead of recursion to prevent stack overflow on large queues
-    const processNext = async () => {
-      if (pending.length === 0) {
-        if (running === 0) {
-          isEmpty = true;
-          emptyResolvers.forEach(resolve => resolve());
-          emptyResolvers = [];
-        }
-        return;
-      }
-
-      const task = pending.shift()!;
-      running++;
-      isEmpty = false;
-
-      try {
-        await task();
-      } catch (error) {
-        ailogger.error('Task failed:', error instanceof Error ? error : new Error(String(error)));
-      } finally {
-        running--;
-        // Use setImmediate/setTimeout to break recursion chain and prevent stack overflow
-        if (pending.length > 0 && running < concurrency) {
-          setTimeout(() => processNext(), 0);
-        } else if (running === 0 && pending.length === 0) {
-          isEmpty = true;
-          emptyResolvers.forEach(resolve => resolve());
-          emptyResolvers = [];
-        }
-      }
-    };
-
-    return {
-      add: (task: () => Promise<void>) => {
-        pending.push(task);
-        if (running < concurrency) {
-          processNext();
-        }
-      },
-      clear: () => {
-        pending = [];
-      },
-      onEmpty: () => {
-        if (isEmpty && running === 0) {
-          return Promise.resolve();
-        }
-        return new Promise<void>(resolve => {
-          emptyResolvers.push(resolve);
-        });
-      },
-      get size() {
-        return pending.length;
-      }
-    };
-  };
-
+  // Transaction-aware queue for managing concurrent operations
   const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
 
   // Simplified approach: track operations with completion callbacks
@@ -302,8 +112,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
 
   // Helper function to detect Application Insights monitoring errors
-  const isApplicationInsightsError = useCallback((error: any): boolean => {
-    const errorString = error?.message || error?.toString() || '';
+  const isApplicationInsightsError = useCallback((error: unknown): boolean => {
+    const errorString = error instanceof Error ? error.message : String(error);
     return (
       errorString.includes('Maximum ajax per page view limit') ||
       errorString.includes('AI (Internal)') ||
@@ -330,8 +140,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       return response;
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
         ailogger.error(`Request aborted due to timeout for ${url}`);
         throw new Error(`Request timeout after ${timeout}ms`);
       }
@@ -378,8 +188,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
-      } catch (error: any) {
-        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, error);
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, errorObj);
         // Don't throw - we don't want to stop the upload process because of error row insertion failures
       }
     },
@@ -563,21 +374,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
 
             return data;
-          } catch (e: any) {
-            ailogger.error('Error parsing response data:', e);
-            throw new Error(`Failed to parse server response: ${e.message}`);
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            ailogger.error('Error parsing response data:', e instanceof Error ? e : new Error(message));
+            throw new Error(`Failed to parse server response: ${message}`);
           }
-        } catch (error: any) {
-          ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, error);
+        } catch (error: unknown) {
+          const errorObj = error instanceof Error ? error : new Error(String(error));
+          const errorMessage = errorObj.message;
+          ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, errorObj);
 
           // Determine if we should retry based on error type
           const shouldRetry =
             retryCount < maxRetries &&
-            (error.message?.includes('Server error (5') ||
-              error.message?.includes('Rate limit exceeded') ||
-              error.message?.includes('timeout') ||
-              error.message?.includes('ECONNRESET') ||
-              error.message?.includes('PROTOCOL_CONNECTION_LOST'));
+            (errorMessage.includes('Server error (5') ||
+              errorMessage.includes('Rate limit exceeded') ||
+              errorMessage.includes('timeout') ||
+              errorMessage.includes('ECONNRESET') ||
+              errorMessage.includes('PROTOCOL_CONNECTION_LOST'));
 
           if (shouldRetry) {
             const delay = baseDelay * Math.pow(2, retryCount) + Math.random() * 1000; // Exponential backoff with jitter
@@ -585,7 +399,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await new Promise(resolve => setTimeout(resolve, delay));
             // Continue to next iteration of retry loop
           } else {
-            ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, error);
+            ailogger.error(`Upload failed permanently for ${fileName} after ${retryCount + 1} attempts:`, errorObj);
 
             // Mark operation as complete even on failure to prevent hanging
             activeOperations.current.delete(operationId);
@@ -597,7 +411,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               operationCompletionCallbacks.current = [];
             }
 
-            throw error;
+            throw errorObj;
           }
         }
       }
@@ -922,8 +736,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               queue.add(async () => {
                 try {
                   await uploadToSql(fileCollectionRowSet, file.name);
-                } catch (error: any) {
-                  ailogger.error(`Chunk upload failed for ${file.name}:`, error);
+                } catch (error: unknown) {
+                  const errorObj = error instanceof Error ? error : new Error(String(error));
+                  ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
                   // Still increment progress to prevent UI from hanging
                   // The error will be handled at a higher level
                 } finally {
@@ -934,10 +749,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
                 }
               });
-            } catch (err: any) {
-              ailogger.error('Error processing chunk:', err);
+            } catch (err: unknown) {
+              const errObj = err instanceof Error ? err : new Error(String(err));
+              ailogger.error('Error processing chunk:', errObj);
               parser.abort();
-              throw err;
+              throw errObj;
             }
           },
           complete: async () => {
@@ -969,7 +785,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             resolve();
           },
-          error: (err: any) => {
+          error: (err: Error) => {
             ailogger.error('Error parsing file:', err);
             reject(err);
           }
@@ -1017,11 +833,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           await createSession(primaryFileName, acceptedFiles.length);
           ailogger.info(`Upload session created for ${acceptedFiles.length} files, primary: ${primaryFileName}`);
           // Transition to 'uploading' state now that we're about to start uploading
-          updateState('uploading').catch(err => {
-            ailogger.warn(`Failed to update session state to uploading: ${err.message}`);
+          updateState('uploading').catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            ailogger.warn(`Failed to update session state to uploading: ${message}`);
           });
-        } catch (sessionError: any) {
-          ailogger.warn(`Failed to create upload session (continuing anyway): ${sessionError.message}`);
+        } catch (sessionError: unknown) {
+          const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
+          ailogger.warn(`Failed to create upload session (continuing anyway): ${message}`);
         }
 
         // Calculate total operations for the UI.
@@ -1129,11 +947,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setVerificationStatus('Upload verification completed successfully');
           }
           ailogger.info('All upload operations and database transactions verified successfully');
-        } catch (verificationError: any) {
+        } catch (verificationError: unknown) {
+          const message = verificationError instanceof Error ? verificationError.message : String(verificationError);
           if (isMountedRef.current) {
-            setVerificationStatus(`Upload verification warning: ${verificationError.message}`);
+            setVerificationStatus(`Upload verification warning: ${message}`);
           }
-          ailogger.warn('Upload verification failed, but continuing:', verificationError.message);
+          ailogger.warn(`Upload verification failed, but continuing: ${message}`);
           // Don't fail the upload if verification fails, but log the warning
         }
 
@@ -1148,16 +967,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         if (isMountedRef.current) {
           ailogger.info('Setting uploaded to true - processing should begin');
           // Update session state to uploaded (ready for processing)
-          updateState('uploaded').catch(err => {
-            ailogger.warn(`Failed to update session state to uploaded: ${err.message}`);
+          updateState('uploaded').catch((err: unknown) => {
+            const errMessage = err instanceof Error ? err.message : String(err);
+            ailogger.warn(`Failed to update session state to uploaded: ${errMessage}`);
           });
           setUploaded(true);
         } else {
           ailogger.warn('Component unmounted before upload could complete');
         }
-      } catch (error: any) {
-        ailogger.error('Upload error:', error);
-        throw error;
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Upload error:', errorObj);
+        throw errorObj;
       }
     }
 
@@ -1305,12 +1126,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             setVerificationStatus('All processing verification completed');
             setVerificationStep(2);
-          } catch (collapserError: any) {
+          } catch (collapserError: unknown) {
+            const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
             if (isMountedRef.current) {
-              setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+              setVerificationStatus(`Data consolidation error: ${message}`);
             }
-            ailogger.error('Collapser error (no batches):', collapserError.message);
-            throw collapserError;
+            ailogger.error(`Collapser error (no batches): ${message}`);
+            throw collapserError instanceof Error ? collapserError : new Error(message);
           }
 
           setIsVerifying(false);
@@ -1390,8 +1212,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         if (!failureResponse.ok) {
                           throw new Error(`Failed to move batch to failed measurements: ${failureResponse.status}`);
                         }
-                      } catch (failureError: any) {
-                        ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failureError);
+                      } catch (failureError: unknown) {
+                        const failErrObj = failureError instanceof Error ? failureError : new Error(String(failureError));
+                        ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failErrObj);
                       }
                     }
                   }
@@ -1425,8 +1248,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               });
             }
             // Don't increment here - wait for all batches to complete
-          } catch (fileError: any) {
-            ailogger.error(`File processing failed for ${fileID}:`, fileError);
+          } catch (fileError: unknown) {
+            const fileErrObj = fileError instanceof Error ? fileError : new Error(String(fileError));
+            ailogger.error(`File processing failed for ${fileID}:`, fileErrObj);
             // Continue with other files even if one fails
           }
         }
@@ -1475,9 +1299,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           // Note: Session-based verification moved to AFTER collapser completes
           // This ensures data has been moved from temporarymeasurements to coremeasurements
           ailogger.info('Pre-collapser verification complete. Data integrity check will run after collapser.');
-        } catch (verifyError: any) {
-          setVerificationStatus(`Processing verification error: ${verifyError.message}`);
-          ailogger.warn('Processing verification error:', verifyError.message);
+        } catch (verifyError: unknown) {
+          const message = verifyError instanceof Error ? verifyError.message : String(verifyError);
+          setVerificationStatus(`Processing verification error: ${message}`);
+          ailogger.warn(`Processing verification error: ${message}`);
         }
 
         // Synchronization checkpoint before collapser
@@ -1498,8 +1323,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.info('Starting collapser procedure...');
 
           // Update session state to collapsing
-          updateState('collapsing').catch(err => {
-            ailogger.warn(`Failed to update session state to collapsing: ${err.message}`);
+          updateState('collapsing').catch((err: unknown) => {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            ailogger.warn(`Failed to update session state to collapsing: ${errMsg}`);
           });
 
           const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
@@ -1569,8 +1395,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 } else {
                   ailogger.warn(`Session verification request failed for file ${fileID}`);
                 }
-              } catch (sessionError: any) {
-                ailogger.warn(`Error during session verification for ${fileID}:`, sessionError.message);
+              } catch (sessionError: unknown) {
+                const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
+                ailogger.warn(`Error during session verification for ${fileID}: ${message}`);
               }
             }
 
@@ -1598,12 +1425,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           if (isMountedRef.current) {
             setVerificationStatus('All processing verification completed');
           }
-        } catch (collapserError: any) {
+        } catch (collapserError: unknown) {
+          const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
           if (isMountedRef.current) {
-            setVerificationStatus(`Data consolidation error: ${collapserError.message}`);
+            setVerificationStatus(`Data consolidation error: ${message}`);
           }
-          ailogger.error('Collapser error:', collapserError.message);
-          throw collapserError;
+          ailogger.error(`Collapser error: ${message}`);
+          throw collapserError instanceof Error ? collapserError : new Error(message);
         }
 
         // Final processing synchronization checkpoint

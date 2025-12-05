@@ -2,18 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { format } from 'mysql2/promise';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid data types that can be validated
-const VALID_DATA_TYPES = ['attributes', 'species', 'personnel', 'quadrats', 'postvalidation', 'failedmeasurements'] as const;
-type ValidDataType = (typeof VALID_DATA_TYPES)[number];
+// Whitelist of allowed data types for this route
+const ALLOWED_DATA_TYPES = ['attributes', 'species', 'personnel', 'quadrats', 'postvalidation', 'failedmeasurements'] as const;
+type AllowedDataType = (typeof ALLOWED_DATA_TYPES)[number];
 
-function isValidDataType(dataType: string): dataType is ValidDataType {
-  return VALID_DATA_TYPES.includes(dataType as ValidDataType);
+function isValidDataType(dataType: string): dataType is AllowedDataType {
+  return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
 }
 
 // datatype: table name
@@ -21,44 +22,52 @@ function isValidDataType(dataType: string): dataType is ValidDataType {
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
 
-  // Input validation - return 400 for invalid requests
+  // Validate required parameters exist
   if (!params.slugs || !params.dataType) {
-    ailogger.warn('CMPRevalidation: Missing slugs or dataType');
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
 
-  const [schema, plotID, plotCensusNumber] = params.slugs;
+  const [schema, plotIDStr, plotCensusNumberStr] = params.slugs;
+
+  // Validate slug count and values
   if (
     !schema ||
     schema === 'undefined' ||
-    !plotID ||
-    plotID === 'undefined' ||
-    !plotCensusNumber ||
-    plotCensusNumber === 'undefined' ||
+    !plotIDStr ||
+    plotIDStr === 'undefined' ||
+    !plotCensusNumberStr ||
+    plotCensusNumberStr === 'undefined' ||
     params.slugs.length !== 3
   ) {
-    ailogger.warn('CMPRevalidation: Invalid slugs provided', { slugs: params.slugs });
-    return new NextResponse(JSON.stringify({ error: 'Invalid parameters: expected schema, plotID, plotCensusNumber' }), {
+    return new NextResponse(JSON.stringify({ error: 'Invalid or missing slug parameters' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
 
-  // Validate dataType
+  // SECURITY: Validate schema against whitelist to prevent SQL injection
+  if (!isValidSchema(schema)) {
+    ailogger.error(`[cmprevalidation API] Invalid schema provided: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
+  // SECURITY: Validate dataType against whitelist
   if (!isValidDataType(params.dataType)) {
-    ailogger.warn(`CMPRevalidation: Invalid dataType '${params.dataType}'`);
-    return new NextResponse(JSON.stringify({ error: `Invalid dataType: ${params.dataType}` }), {
+    ailogger.error(`[cmprevalidation API] Invalid dataType provided: ${params.dataType}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid data type' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
 
-  // Validate plotID and plotCensusNumber are numbers
-  const plotIDNum = parseInt(plotID, 10);
-  const plotCensusNumberNum = parseInt(plotCensusNumber, 10);
-  if (isNaN(plotIDNum) || isNaN(plotCensusNumberNum)) {
-    ailogger.warn('CMPRevalidation: plotID or plotCensusNumber is not a valid number', { plotID, plotCensusNumber });
-    return new NextResponse(JSON.stringify({ error: 'plotID and plotCensusNumber must be numbers' }), {
+  // Parse and validate numeric parameters
+  const plotID = parseInt(plotIDStr, 10);
+  const plotCensusNumber = parseInt(plotCensusNumberStr, 10);
+
+  if (isNaN(plotID) || plotID <= 0 || isNaN(plotCensusNumber) || plotCensusNumber <= 0) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid numeric parameters' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -70,45 +79,72 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
 
     switch (params.dataType) {
       case 'attributes':
-      case 'species':
-        // Check if the table has any data
-        query = safeFormatQuery(schema, `SELECT 1 FROM ??.${params.dataType} LIMIT 1`);
-        queryParams = [];
+      case 'species': {
+        // Use backtick-escaped identifiers for schema/table (already validated)
+        const baseQuery = `SELECT 1 FROM \`${schema}\`.\`${params.dataType}\` dt LIMIT 1`;
+        const baseResults = await connection.executeQuery(baseQuery);
+        if (baseResults.length === 0) {
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        }
         break;
+      }
       case 'personnel':
-        // Personnel doesn't require validation, always passes
-        return new NextResponse(null, { status: HTTPResponses.OK });
-      case 'quadrats':
-        query = safeFormatQuery(schema, 'SELECT 1 FROM ??.quadrats WHERE PlotID = ? LIMIT 1');
-        queryParams = [plotIDNum];
+        // Personnel check passes without query
         break;
-      case 'postvalidation':
-        query = safeFormatQuery(
-          schema,
-          `SELECT 1 FROM ??.coremeasurements cm
-           JOIN ??.census c ON c.CensusID = cm.CensusID
-           WHERE c.PlotID = ?
-           AND c.PlotCensusNumber = ?
-           LIMIT 1`
+      case 'quadrats': {
+        // Use parameterized query for user-provided values
+        const query = format(`SELECT 1 FROM \`${schema}\`.quadrats q WHERE q.PlotID = ? LIMIT 1`, [plotID]);
+        const results = await connection.executeQuery(query);
+        if (results.length === 0) {
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        }
+        break;
+      }
+      case 'postvalidation': {
+        // Use parameterized query for all user-provided values
+        const pvQuery = format(
+          `SELECT 1 FROM \`${schema}\`.coremeasurements cm
+           JOIN \`${schema}\`.census c ON c.CensusID = cm.CensusID
+           JOIN \`${schema}\`.plots p ON p.PlotID = c.PlotID
+           WHERE p.PlotID = ?
+           AND c.CensusID IN (
+             SELECT CensusID FROM \`${schema}\`.census
+             WHERE PlotID = ? AND PlotCensusNumber = ?
+           ) LIMIT 1`,
+          [plotID, plotID, plotCensusNumber]
         );
-        queryParams = [plotIDNum, plotCensusNumberNum];
+        const pvResults = await connection.executeQuery(pvQuery);
+        if (pvResults.length === 0) {
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        }
         break;
-      case 'failedmeasurements':
-        query = safeFormatQuery(
-          schema,
-          `SELECT 1 FROM ??.failedmeasurements fm
-           JOIN ??.census c ON c.CensusID = fm.CensusID
-           WHERE fm.PlotID = ?
-           AND c.PlotCensusNumber = ?
-           AND c.IsActive IS TRUE
-           LIMIT 1`
+      }
+      case 'failedmeasurements': {
+        // Use parameterized query for all user-provided values
+        const fmQuery = format(
+          `SELECT 1 FROM \`${schema}\`.failedmeasurements fm
+           JOIN \`${schema}\`.census c ON c.CensusID = fm.CensusID
+           WHERE fm.PlotID = ? AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE LIMIT 1`,
+          [plotID, plotCensusNumber]
         );
-        queryParams = [plotIDNum, plotCensusNumberNum];
+        const fmResults = await connection.executeQuery(fmQuery);
+        if (fmResults.length === 0) {
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        }
         break;
+      }
       default:
-        // This shouldn't be reachable due to isValidDataType check above
-        return new NextResponse(JSON.stringify({ error: 'Unhandled dataType' }), {
-          status: HTTPResponses.INVALID_REQUEST
+        // This should never be reached due to isValidDataType check above
+        return new NextResponse(null, {
+          status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
         });
     }
 
@@ -128,11 +164,11 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
 
     // All conditions satisfied
     return new NextResponse(null, { status: HTTPResponses.OK });
-  } catch (e: any) {
-    // Database errors should return 500, not 412
-    ailogger.error(`CMPRevalidation database error for ${params.dataType} (${schema}/${plotID}/${plotCensusNumber}): ${e.message}`);
-    return new NextResponse(JSON.stringify({ error: 'Database error during validation' }), {
-      status: HTTPResponses.INTERNAL_SERVER_ERROR
+  } catch (e: unknown) {
+    const error = e instanceof Error ? e : new Error(String(e));
+    ailogger.error('[cmprevalidation API] Error:', error);
+    return new NextResponse(null, {
+      status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
     });
   } finally {
     await connection.closeConnection();

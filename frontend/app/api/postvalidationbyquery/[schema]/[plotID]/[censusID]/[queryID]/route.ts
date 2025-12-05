@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 import moment from 'moment';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
+import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -11,30 +12,47 @@ export const runtime = 'nodejs';
 export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
   const params = await props.params;
   const { schema } = params;
-  const plotID = parseInt(params.plotID);
-  const censusID = parseInt(params.censusID);
-  const queryID = parseInt(params.queryID);
+  const plotID = parseInt(params.plotID, 10);
+  const censusID = parseInt(params.censusID, 10);
+  const queryID = parseInt(params.queryID, 10);
   let transactionID: string | undefined = undefined;
 
-  if (!schema || !plotID || !censusID || !queryID) {
-    return new NextResponse('Missing parameters', { status: HTTPResponses.INVALID_REQUEST });
+  // Validate all parameters
+  if (!schema || isNaN(plotID) || isNaN(censusID) || isNaN(queryID)) {
+    return new NextResponse(JSON.stringify({ error: 'Missing or invalid parameters' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // SQL Injection Prevention: Validate schema against whitelist
+  if (!isValidSchema(schema)) {
+    ailogger.warn(`Invalid schema attempted: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   const connectionManager = ConnectionManager.getInstance();
   try {
-    const query = `SELECT QueryDefinition FROM ${schema}.postvalidationqueries WHERE QueryID = ${queryID}`;
-    const results = await connectionManager.executeQuery(query);
+    // Use parameterized query with safe schema formatting
+    const query = safeFormatQuery(schema, 'SELECT QueryDefinition FROM ??.postvalidationqueries WHERE QueryID = ?');
+    const results = await connectionManager.executeQuery(query, [queryID]);
 
     if (results.length === 0) {
-      return new NextResponse('Query not found', { status: HTTPResponses.NOT_FOUND });
+      return new NextResponse(JSON.stringify({ error: 'Query not found' }), { status: HTTPResponses.NOT_FOUND });
     }
 
-    const replacements = {
+    const replacements: Record<string, string | number> = {
       schema: schema,
       currentPlotID: plotID,
       currentCensusID: censusID
     };
-    const formattedQuery = results[0].QueryDefinition.replace(/\${(.*?)}/g, (_match: any, p1: string) => replacements[p1 as keyof typeof replacements]);
+
+    // Safe template replacement with undefined check
+    const formattedQuery = results[0].QueryDefinition.replace(/\${(.*?)}/g, (_match: string, p1: string) => {
+      const value = replacements[p1];
+      if (value === undefined) {
+        throw new Error(`Unknown template variable: ${p1}`);
+      }
+      return String(value);
+    });
+
     transactionID = await connectionManager.beginTransaction();
     const queryResults = await connectionManager.executeQuery(formattedQuery);
 
@@ -42,20 +60,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
 
     const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
     const successResults = JSON.stringify(queryResults);
-    const successUpdate = `UPDATE ${schema}.postvalidationqueries 
-                            SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = 'success' 
-                            WHERE QueryID = ${queryID}`;
-    await connectionManager.executeQuery(successUpdate, [currentTime, successResults]);
+    // Use parameterized query for UPDATE
+    const successUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = ? WHERE QueryID = ?');
+    await connectionManager.executeQuery(successUpdate, [currentTime, successResults, 'success', queryID]);
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
-      const failureUpdate = `UPDATE ${schema}.postvalidationqueries 
-                             SET LastRunAt = ?, LastRunStatus = 'failure' 
-                             WHERE QueryID = ${queryID}`;
-      await connectionManager.executeQuery(failureUpdate, [currentTime]);
+      // Use parameterized query for UPDATE
+      const failureUpdate = safeFormatQuery(schema, 'UPDATE ??.postvalidationqueries SET LastRunAt = ?, LastRunStatus = ? WHERE QueryID = ?');
+      await connectionManager.executeQuery(failureUpdate, [currentTime, 'failure', queryID]);
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     ailogger.error('Error in postvalidation query:', e.message, {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 
 export interface ContextValues {
   siteID?: number;
@@ -9,6 +10,40 @@ export interface ContextValues {
   censusID?: number;
   schema?: string;
   quadratID?: number;
+}
+
+/**
+ * Helper to extract an integer value from query params with cookie fallback
+ * Consolidates the repeated pattern of checking params -> cookies -> returning number
+ */
+async function extractIntegerValue(request: NextRequest, paramName: string, cookieName: string): Promise<number | undefined> {
+  const paramValue = request.nextUrl.searchParams.get(paramName);
+  if (paramValue && paramValue !== '0' && paramValue !== 'undefined') {
+    const parsed = parseInt(paramValue, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  const cookieValue = await getCookie(cookieName);
+  if (cookieValue && cookieValue !== '0' && cookieValue !== 'undefined') {
+    const parsed = parseInt(cookieValue, 10);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+/**
+ * Helper to extract a string value from query params with cookie fallback
+ * Note: Currently unused but kept for future use with schema extraction
+ */
+async function _extractStringValue(request: NextRequest, paramName: string, cookieName: string): Promise<string | undefined> {
+  const paramValue = request.nextUrl.searchParams.get(paramName);
+  if (paramValue && paramValue !== 'undefined') {
+    return paramValue;
+  }
+  const cookieValue = await getCookie(cookieName);
+  if (cookieValue && cookieValue !== 'undefined') {
+    return cookieValue;
+  }
+  return undefined;
 }
 
 export interface ValidationOptions {
@@ -50,42 +85,39 @@ export async function validateContextualValues(
     // Get schema from query params or cookies
     const schemaParam = request.nextUrl.searchParams.get('schema');
     if (schemaParam && schemaParam !== 'undefined') {
+      // SECURITY: Validate schema against whitelist to prevent SQL injection
+      if (!isValidSchema(schemaParam)) {
+        ailogger.error(`[contextvalidation] Invalid schema provided: ${schemaParam}`);
+        return {
+          success: false,
+          missing: ['schema'],
+          response: NextResponse.json({ error: 'Invalid schema provided', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST })
+        };
+      }
       values.schema = schemaParam;
     } else {
       const schemaCookie = await getCookie('schema');
       if (schemaCookie && schemaCookie !== 'undefined') {
+        // SECURITY: Also validate schema from cookies
+        if (!isValidSchema(schemaCookie)) {
+          ailogger.error(`[contextvalidation] Invalid schema in cookie: ${schemaCookie}`);
+          return {
+            success: false,
+            missing: ['schema'],
+            response: NextResponse.json({ error: 'Invalid schema in session', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST })
+          };
+        }
         values.schema = schemaCookie;
       }
     }
 
-    // Get plotID from query params or cookies
-    const plotIDParam = request.nextUrl.searchParams.get('plotID');
-    if (plotIDParam && plotIDParam !== '0' && plotIDParam !== 'undefined') {
-      values.plotID = parseInt(plotIDParam);
-    } else {
-      const plotIDCookie = await getCookie('plotID');
-      if (plotIDCookie && plotIDCookie !== '0' && plotIDCookie !== 'undefined') {
-        values.plotID = parseInt(plotIDCookie);
-      }
-    }
+    // Get plotID, censusID, and quadratID using helper function
+    values.plotID = await extractIntegerValue(request, 'plotID', 'plotID');
+    values.censusID = await extractIntegerValue(request, 'censusID', 'censusID');
+    values.quadratID = await extractIntegerValue(request, 'quadratID', 'quadratID');
 
-    // Get censusID from cookies
-    const censusIDCookie = await getCookie('censusID');
-    if (censusIDCookie && censusIDCookie !== '0' && censusIDCookie !== 'undefined') {
-      values.censusID = parseInt(censusIDCookie);
-    }
-
-    // Get quadratID from cookies (optional)
-    const quadratIDCookie = await getCookie('quadratID');
-    if (quadratIDCookie && quadratIDCookie !== '0' && quadratIDCookie !== 'undefined') {
-      values.quadratID = parseInt(quadratIDCookie);
-    }
-
-    // Determine siteID from schema (if available)
-    if (values.schema) {
-      // You may need to adjust this logic based on your schema naming convention
-      values.siteID = 1; // Placeholder - adjust based on actual site determination logic
-    }
+    // Get siteID from query params or cookies (similar to other values)
+    values.siteID = await extractIntegerValue(request, 'siteID', 'siteID');
 
     // Check requirements
     if (requireSchema && !values.schema) missing.push('schema/site selection');
@@ -123,14 +155,16 @@ export async function validateContextualValues(
     }
 
     return { success: true, values };
-  } catch (error: any) {
-    ailogger.error('Context validation error:', error);
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    ailogger.error('Context validation error:', errorObj);
+    const message = errorObj.message;
     return {
       success: false,
       response: NextResponse.json(
         {
           error: 'Failed to validate context values',
-          details: error.message,
+          details: message,
           fallback: allowFallback
         },
         { status: HTTPResponses.INTERNAL_SERVER_ERROR }
@@ -140,13 +174,20 @@ export async function validateContextualValues(
 }
 
 /**
+ * Route context type for Next.js API routes
+ */
+export interface RouteContext {
+  params: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/**
  * Middleware wrapper for API routes that require contextual values
  */
 export function withContextValidation(
-  handler: (request: NextRequest, context: any, values: ContextValues) => Promise<NextResponse>,
+  handler: (request: NextRequest, context: RouteContext, values: ContextValues) => Promise<NextResponse>,
   options: ValidationOptions = {}
 ) {
-  return async (request: NextRequest, context: any) => {
+  return async (request: NextRequest, context: RouteContext) => {
     const validation = await validateContextualValues(request, options);
 
     if (!validation.success) {
@@ -155,9 +196,10 @@ export function withContextValidation(
 
     try {
       return await handler(request, context, validation.values!);
-    } catch (error: any) {
-      ailogger.error('Handler error with context validation:', error);
-      return NextResponse.json({ error: 'Internal server error', details: error.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Handler error with context validation:', errorObj);
+      return NextResponse.json({ error: 'Internal server error', details: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
     }
   };
 }

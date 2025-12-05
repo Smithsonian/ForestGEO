@@ -1,7 +1,7 @@
 // userstosites.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import {
   Autocomplete,
@@ -101,6 +101,14 @@ export default function UsersToSitesPage() {
     return map;
   }, [sites]);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Fetch initial data
   useEffect(() => {
     async function fetchData() {
@@ -112,6 +120,8 @@ export default function UsersToSitesPage() {
           fetch('/api/administrative/fetch/usersiterelations')
         ]);
 
+        if (!isMountedRef.current) return;
+
         if (!usersRes.ok || !sitesRes.ok || !relationsRes.ok) {
           throw new Error('Failed to fetch data');
         }
@@ -120,15 +130,21 @@ export default function UsersToSitesPage() {
         const sitesData = await sitesRes.json();
         const relationsData = await relationsRes.json();
 
-        setUsers(usersData);
-        setSites(sitesData);
-        setUserSiteRelations(relationsData);
-        setOriginalRelations(relationsData);
+        if (isMountedRef.current) {
+          setUsers(usersData);
+          setSites(sitesData);
+          setUserSiteRelations(relationsData);
+          setOriginalRelations(relationsData);
+        }
       } catch (error) {
         ailogger.error('Failed to fetch user-site data:', error instanceof Error ? error : new Error(String(error)));
-        setSnackbar({ open: true, message: 'Failed to load data', color: 'danger' });
+        if (isMountedRef.current) {
+          setSnackbar({ open: true, message: 'Failed to load data', color: 'danger' });
+        }
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     }
     fetchData();

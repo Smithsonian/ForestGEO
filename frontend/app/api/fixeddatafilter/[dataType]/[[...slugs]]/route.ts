@@ -7,10 +7,40 @@ import { buildFilterModelStub, buildSearchStub } from '@/components/processors/p
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+// Whitelist of allowed data types for this route
+const ALLOWED_DATA_TYPES = [
+  'sitespecificvalidations',
+  'failedmeasurements',
+  'attributes',
+  'species',
+  'stems',
+  'alltaxonomiesview',
+  'roles',
+  'personnel',
+  'unifiedchangelog',
+  'quadrats',
+  'census',
+  'measurementssummary',
+  'measurementssummary_staging',
+  'measurementssummaryview',
+  'viewfulltable',
+  'viewfulltableview',
+  'coremeasurements'
+] as const;
+type AllowedDataType = (typeof ALLOWED_DATA_TYPES)[number];
+
+function isValidDataType(dataType: string): dataType is AllowedDataType {
+  return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
+}
+
+// Whitelist of allowed TSS values for measurements filter (for future validation)
+const _ALLOWED_TSS_VALUES = ['multi stem', 'old tree', 'new recruit'] as const;
 
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
@@ -38,6 +68,23 @@ export async function POST(
         status: HTTPResponses.INVALID_REQUEST
       });
     }
+
+    // SECURITY: Validate schema against whitelist to prevent SQL injection
+    if (!isValidSchema(schema)) {
+      ailogger.error(`[fixeddatafilter API] Invalid schema provided: ${schema}`);
+      return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
+    // SECURITY: Validate dataType against whitelist
+    if (!isValidDataType(params.dataType)) {
+      ailogger.error(`[fixeddatafilter API] Invalid dataType provided: ${params.dataType}`);
+      return new NextResponse(JSON.stringify({ error: 'Invalid data type' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
     if (!filterModel || (!filterModel.items && !filterModel.quickFilterValues)) {
       return new NextResponse(JSON.stringify({ error: 'filterModel is empty - filter API should not have triggered' }), {
         status: HTTPResponses.INVALID_REQUEST
@@ -47,24 +94,34 @@ export async function POST(
     const pageSize = parseInt(pageSizeParam);
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
+
+    // Validate numeric parameters
+    if (isNaN(page) || page < 0 || isNaN(pageSize) || pageSize <= 0) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid pagination parameters' }), {
+        status: HTTPResponses.INVALID_REQUEST
+      });
+    }
+
     const connectionManager = ConnectionManager.getInstance();
     let updatedMeasurementsExist = false;
-    let censusIDs;
-    let pastCensusIDs: string | any[];
+    let censusIDs: number[] = [];
+    let pastCensusIDs: number[] = [];
     let transactionID: string | undefined = undefined;
 
     try {
       let paginatedQuery = ``;
-      const queryParams: any[] = [];
-      let columns: any[] = [];
+      const queryParams: (string | number | undefined)[] = [];
+      let columns: string[] = [];
       try {
         const query = `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? 
       AND COLUMN_NAME NOT LIKE '%id%' AND COLUMN_NAME NOT LIKE '%uuid%' AND COLUMN_NAME NOT LIKE 'id%'  AND COLUMN_NAME NOT LIKE '%_id' `;
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
-        columns = results.map((row: any) => row.COLUMN_NAME);
-      } catch (e: any) {
-        ailogger.error('Error fetching columns in fixeddatafilter:', e);
-        return new NextResponse(JSON.stringify({ error: e.message }), {
+        columns = results.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME);
+      } catch (e: unknown) {
+        const errorObj = e instanceof Error ? e : new Error(String(e));
+        ailogger.error('Error fetching columns in fixeddatafilter:', errorObj);
+        const message = errorObj.message;
+        return new NextResponse(JSON.stringify({ error: message }), {
           status: HTTPResponses.INTERNAL_SERVER_ERROR
         });
       }
@@ -227,7 +284,7 @@ export async function POST(
             break;
           } else {
             updatedMeasurementsExist = true;
-            censusIDs = censusResults.map((c: any) => c.CensusID);
+            censusIDs = censusResults.map((c: { CensusID: number }) => c.CensusID);
             pastCensusIDs = censusIDs.slice(1);
             paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS pdt.*
@@ -257,11 +314,11 @@ export async function POST(
       }
       transactionID = await connectionManager.beginTransaction();
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
-      paginatedResults.forEach((result: any) => {
+      paginatedResults.forEach((result: Record<string, unknown>) => {
         if (result.UserDefinedFields !== undefined && result.UserDefinedFields !== null) {
           if (typeof result.UserDefinedFields === 'string') {
             result.UserDefinedFields = JSON.parse(result.UserDefinedFields).treestemstate;
-          } else result.UserDefinedFields = result.UserDefinedFields.treestemstate;
+          } else result.UserDefinedFields = (result.UserDefinedFields as { treestemstate?: unknown }).treestemstate;
         }
       });
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
@@ -269,11 +326,11 @@ export async function POST(
       const totalRows = totalRowsResult[0].totalRows;
       await connectionManager.commitTransaction(transactionID ?? '');
       if (updatedMeasurementsExist) {
-        const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
+        const deprecated = paginatedResults.filter((row: Record<string, unknown>) => pastCensusIDs.includes(row.CensusID as number));
 
-        const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemGUID'];
-        const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
-        const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
+        const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemGUID'] as const;
+        const outputKeys = paginatedResults.map((row: Record<string, unknown>) => uniqueKeys.map(key => row[key]).join('|'));
+        const filteredDeprecated = deprecated.filter((row: Record<string, unknown>) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
         return new NextResponse(
           JSON.stringify({
             output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
@@ -294,12 +351,13 @@ export async function POST(
           { status: HTTPResponses.OK }
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (transactionID) {
         await connectionManager.rollbackTransaction(transactionID);
       }
-      ailogger.error('Error in fixeddatafilter POST:', error);
-      return new NextResponse(JSON.stringify({ error: error.message }), {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error in fixeddatafilter POST:', errorObj);
+      return new NextResponse(JSON.stringify({ error: errorObj.message }), {
         status: HTTPResponses.INTERNAL_SERVER_ERROR
       });
     } finally {

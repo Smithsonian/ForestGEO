@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { getGridID } from '@/config/servergridhelpers';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
+import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -11,18 +13,64 @@ export const runtime = 'nodejs';
 
 export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
+// Valid data types that can be queried via this endpoint
+const VALID_DATA_TYPES = [
+  'sitesspecificvalidations',
+  'specieslimits',
+  'unifiedchangelog',
+  'failedmeasurements',
+  'viewfulltable',
+  'attributes',
+  'species',
+  'quadrats',
+  'personnel',
+  'alltaxonomiesview',
+  'stems',
+  'roles',
+  'census'
+] as const;
+
+type ValidDataType = (typeof VALID_DATA_TYPES)[number];
+
+function isValidDataType(dataType: string): dataType is ValidDataType {
+  return VALID_DATA_TYPES.includes(dataType as ValidDataType);
+}
+
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
   _request: NextRequest,
   props: {
     params: Promise<{ dataType: string; slugs?: string[] }>;
   }
-): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string }>> {
+): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string } | { error: string }>> {
   const params = await props.params;
-  if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
+
+  // Validate slugs parameter
+  if (!params.slugs || params.slugs.length < 5) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid parameters: expected at least 5 slug values' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, speciesIDParam] = params.slugs;
-  if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
-    throw new Error('core slugs schema/page/pageSize not correctly received');
+
+  if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined') {
+    return new NextResponse(JSON.stringify({ error: 'Missing required parameters: schema, page, and pageSize' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
+  // SQL Injection Prevention: Validate schema against whitelist
+  if (!isValidSchema(schema)) {
+    ailogger.warn(`Invalid schema attempted in fixeddata: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  // Validate dataType against whitelist
+  if (!params.dataType || !isValidDataType(params.dataType)) {
+    ailogger.warn(`Invalid data type attempted in fixeddata: ${params.dataType}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid data type' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
@@ -106,14 +154,17 @@ export async function GET(
             WHERE PlotID = ? AND IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
-      default:
-        throw new Error(`Unknown dataType: ${params.dataType}`);
+      // No default needed - dataType is validated against VALID_DATA_TYPES whitelist above
     }
 
     // Ensure query parameters match the placeholders in the query
     if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-      throw new Error('Mismatch between query placeholders and parameters');
+      ailogger.error(`Query parameter mismatch for ${params.dataType}: expected ${paginatedQuery.match(/\?/g)?.length}, got ${queryParams.length}`);
+      return new NextResponse(JSON.stringify({ error: 'Internal query configuration error' }), {
+        status: HTTPResponses.INTERNAL_SERVER_ERROR
+      });
     }
+
     const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
     paginatedResults.forEach((result: any) => {
       if (result.UserDefinedFields !== undefined && result.UserDefinedFields !== null) {
@@ -125,7 +176,7 @@ export async function GET(
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
     const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
-    const totalRows = totalRowsResult[0].totalRows;
+    const totalRows = totalRowsResult[0]?.totalRows ?? 0;
 
     return new NextResponse(
       JSON.stringify({
@@ -136,8 +187,12 @@ export async function GET(
       }),
       { status: HTTPResponses.OK }
     );
-  } catch (error: any) {
-    throw new Error(error);
+  } catch (error: unknown) {
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    ailogger.error('Fixed data query error:', errObj);
+    return new NextResponse(JSON.stringify({ error: 'Failed to retrieve data' }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
   } finally {
     await connectionManager.closeConnection();
   }

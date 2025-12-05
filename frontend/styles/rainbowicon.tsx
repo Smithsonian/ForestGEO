@@ -2,7 +2,7 @@
 'use client';
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
-import React, { useState } from 'react';
+import React from 'react';
 import { css, keyframes } from '@emotion/react';
 import { Logo } from '@/components/icons';
 
@@ -55,17 +55,9 @@ const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
 `;
 
 export const RainbowIcon: React.FC = () => {
-  const [animate, setAnimate] = useState(true);
-
-  // useEffect(() => {
-  //   const timer = setTimeout(() => {
-  //     setAnimate(false);
-  //   }, 30000); // Stop the animation after 30 seconds
-  //   return () => clearTimeout(timer);
-  // }, []);
-
+  // Animation always enabled - removed unused state
   return (
-    <RainbowIconWrapper animate={animate}>
+    <RainbowIconWrapper animate={true}>
       <svg width="0" height="0">
         <mask id="logo-mask">
           <Logo fill="white" /> {/* Mask uses white to indicate visible areas */}

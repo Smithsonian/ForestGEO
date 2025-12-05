@@ -32,6 +32,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
                         JOIN catalog.sites s on usr.SiteID = s.SiteID;`;
     }
     const results = await connectionManager.executeQuery(query);
+
     const mappedData = MapperFactory.getMapper<any, any>(type).mapData(results);
 
     // Return paginated format when email param is present (for IsolatedDataGridCommons)

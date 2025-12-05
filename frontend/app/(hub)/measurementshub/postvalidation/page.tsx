@@ -2,7 +2,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -29,6 +29,14 @@ export default function PostValidationPage() {
   };
   const { setLoading } = useLoading();
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
 
@@ -38,13 +46,17 @@ export default function PostValidationPage() {
   async function fetchValidationResults(postValidation: PostValidationQueriesRDS) {
     if (!postValidation.queryID) return;
     try {
-      await fetch(
+      const response = await fetch(
         `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}/${postValidation.queryID}`,
         { method: 'GET' }
       );
-    } catch (error: any) {
-      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
-      throw new Error(error);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, errorObj);
+      throw errorObj;
     }
   }
 
@@ -54,10 +66,16 @@ export default function PostValidationPage() {
         `/api/fetchall/postvalidationqueries/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`,
         { method: 'GET' }
       );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
-      setPostValidations(data);
-    } catch (error: any) {
-      ailogger.error('Error loading queries:', error);
+      if (isMountedRef.current) {
+        setPostValidations(data);
+      }
+    } catch (error: unknown) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      ailogger.error('Error loading queries:', errorObj);
     }
   }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
@@ -108,16 +126,16 @@ export default function PostValidationPage() {
       try {
         const response = await fetch(`/api/structure/${currentSite?.schemaName ?? ''}`);
         const data = await response.json();
-        if (data.schema) {
+        if (isMountedRef.current && data.schema) {
           setSchemaDetails(data.schema);
         }
-      } catch (error: any) {
-        ailogger.error('Error fetching schema:', error);
+      } catch (error: unknown) {
+        ailogger.error('Error fetching schema:', error instanceof Error ? error : new Error(String(error)));
       }
     };
 
     if (postValidations.length > 0) {
-      fetchSchema().then((r: any) => ailogger.warn(r));
+      fetchSchema();
     }
   }, [postValidations, currentSite?.schemaName]);
 

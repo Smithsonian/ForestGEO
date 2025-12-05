@@ -70,6 +70,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     })
       .then(r => r.json())
       .then(data => {
+        if (!isMounted.current) return;
         // If no validations are defined, immediately call completion with success
         if (data.coreValidations.length === 0) {
           if (onValidationComplete && !hasCalledCompletionRef.current) {
@@ -189,8 +190,10 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     } catch (error: any) {
       ailogger.error('Error during validation process:', error);
     } finally {
-      setIsUpdatingRows(false);
-      setIsValidationComplete(true);
+      if (isMounted.current) {
+        setIsUpdatingRows(false);
+        setIsValidationComplete(true);
+      }
     }
   }, [validationMessages, currentSite, currentCensus, plotID]);
 

@@ -44,8 +44,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'X',
     flex: 0.5,
     type: 'number',
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true
   },
@@ -54,8 +54,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Y',
     flex: 0.5,
     type: 'number',
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true,
     filterOperators: customNumericOperators
@@ -65,8 +65,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Area',
     flex: 0.75,
     type: 'number',
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true,
     filterOperators: customNumericOperators
@@ -77,10 +77,9 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     flex: 1,
     renderHeader: () => formatHeader('Dimension', 'X'),
     type: 'number',
-    valueFormatter: (value: any) => {
-      let parsedValue = Number(value);
-      if (isNaN(value)) parsedValue = 0.0;
-      return parsedValue.toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      const parsedValue = Number(value ?? 0);
+      return isNaN(parsedValue) ? '0.00' : parsedValue.toFixed(2);
     },
     editable: true,
     filterOperators: customNumericOperators
@@ -91,10 +90,9 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     flex: 1,
     renderHeader: () => formatHeader('Dimension', 'Y'),
     type: 'number',
-    valueFormatter: (value: any) => {
-      let parsedValue = Number(value);
-      if (isNaN(value)) parsedValue = 0.0;
-      return parsedValue.toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      const parsedValue = Number(value ?? 0);
+      return isNaN(parsedValue) ? '0.00' : parsedValue.toFixed(2);
     },
     editable: true,
     filterOperators: customNumericOperators
@@ -608,8 +606,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     maxWidth: 100,
     editable: true,
@@ -624,8 +622,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     flex: 0.7,
     type: 'number',
     maxWidth: 100,
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true,
     filterOperators: customNumericOperators,
@@ -638,7 +636,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     type: 'number',
     filterOperators: customNumericOperators,
-    valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
+    valueFormatter: (value: number | null | undefined) => parseFloat(Number(value ?? 0).toFixed(2)),
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
@@ -648,8 +646,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     type: 'number',
     filterOperators: customNumericOperators,
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     preProcessEditCellProps: params => preprocessor(params)
   },
@@ -682,8 +680,8 @@ export const StemGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Plot X',
     flex: 1,
     type: 'number',
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true
   },
@@ -692,8 +690,8 @@ export const StemGridColumns: GridColDef[] = standardizeGridColumns([
     headerName: 'Plot Y',
     flex: 1,
     type: 'number',
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+    valueFormatter: (value: number | null | undefined) => {
+      return Number(value ?? 0).toFixed(2);
     },
     editable: true
   },

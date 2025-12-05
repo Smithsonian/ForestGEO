@@ -310,27 +310,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <a
-        href="#main-content"
-        style={{
-          position: 'absolute',
-          left: '-9999px',
-          zIndex: 999999,
-          padding: '8px 16px',
-          backgroundColor: '#000',
-          color: '#fff',
-          textDecoration: 'none',
-          fontSize: '14px'
-        }}
-        onFocus={e => {
-          e.target.style.left = '6px';
-          e.target.style.top = '6px';
-        }}
-        onBlur={e => {
-          e.target.style.left = '-9999px';
-          e.target.style.top = 'auto';
-        }}
-      >
+      <a href="#main-content" className="skip-to-main">
         Skip to main content
       </a>
       <Box

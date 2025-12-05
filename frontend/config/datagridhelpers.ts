@@ -3,34 +3,32 @@ import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSu
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, RefObject, SetStateAction } from 'react';
+import { Dispatch, ReactElement, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+// Import and re-export types from servergridhelpers to avoid duplication
+import type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction } from '@/config/servergridhelpers';
+export type { FetchQueryFunction, ProcessPostPatchQueryFunction, ProcessDeletionQueryFunction };
+
+/**
+ * Type for dynamic toolbar buttons in data grids
+ */
+export interface DynamicButton {
+  label: string;
+  onClick: () => void | Promise<void>;
+  tooltip?: string;
+  icon?: ReactElement;
+}
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
-  initialValue?: string | number | boolean | any[] | null;
+  initialValue?: string | number | boolean | unknown[] | null;
 }
 
 export type Templates = Record<string, Record<string, FieldTemplate>>;
-
-export type FetchQueryFunction = (
-  siteSchema: string,
-  gridType: string,
-  page: number,
-  pageSize: number,
-  plotID?: number,
-  plotCensusNumber?: number,
-  quadratID?: number,
-  speciesID?: number,
-  filtered?: boolean
-) => string;
-
-export type ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string, plotID?: number, censusID?: number) => string;
-export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
 const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   default: {
@@ -111,7 +109,9 @@ export const createFetchQuery: FetchQueryFunction = (
   filtered: boolean = false
 ): string => {
   const endpoint = filtered ? 'fixeddatafilter' : 'fixeddata';
-  return `/api/${endpoint}/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  const baseUrl = `/api/${endpoint}/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}`;
+  const segments = [plotID, plotCensusNumber, quadratID, speciesID].filter(seg => seg !== undefined && seg !== null);
+  return segments.length > 0 ? `${baseUrl}/${segments.join('/')}` : baseUrl;
 };
 
 // Deprecated: Use createFetchQuery with filtered=true instead
@@ -161,7 +161,7 @@ export interface EditToolbarCustomProps {
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: ExtendedGridFilterModel;
   apiRef?: RefObject<GridApiCommunity>;
-  dynamicButtons?: any;
+  dynamicButtons?: DynamicButton[];
   locked?: boolean;
   currentSite?: Site;
   currentPlot?: Plot;
@@ -180,7 +180,7 @@ export interface IsolatedDataGridCommonProps {
   gridColumns: GridColDef[];
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
-  dynamicButtons: any[];
+  dynamicButtons: DynamicButton[];
   initialRow?: GridRowModel;
   fieldToFocus?: string;
   locked?: boolean;
@@ -271,7 +271,7 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
-  dynamicButtons: any[];
+  dynamicButtons: DynamicButton[];
   failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;

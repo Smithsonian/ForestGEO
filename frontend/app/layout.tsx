@@ -16,12 +16,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={'dark'}>
       <head>
         <title>ForestGEO Census</title>
-        <link rel="icon" href="icon.jpg" />
+        <link rel="icon" href="/icon.jpg" />
       </head>
       <body>
-        <a href="#main-content" className="skip-to-main">
-          Skip to main content
-        </a>
         <ClearCookiesOnUnload />
         <Providers>
           <LoadingProvider>

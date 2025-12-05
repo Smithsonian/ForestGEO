@@ -1,7 +1,7 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { Alert, Box, Chip, Divider, Option, Select, Sheet, Stack, Typography } from '@mui/joy';
-import { DelimiterDetectionResult, DelimiterValidationResult, detectDelimiter, validateDelimiter } from './delimiterdetection';
+import { useFilePreviewAnalysis, DELIMITER_OPTIONS } from './useFilePreviewAnalysis';
 
 interface FilePreviewCompactProps {
   file: File;
@@ -11,85 +11,13 @@ interface FilePreviewCompactProps {
   showPreview?: boolean;
 }
 
-interface DelimiterOption {
-  value: string;
-  label: string;
-  icon: string;
-}
-
-const DELIMITER_OPTIONS: DelimiterOption[] = [
-  { value: ',', label: 'Comma', icon: ',' },
-  { value: '\t', label: 'Tab', icon: '⭾' },
-  { value: ';', label: 'Semicolon', icon: ';' },
-  { value: '|', label: 'Pipe', icon: '|' }
-];
-
 export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterChange, initialDelimiter, showPreview = false }: FilePreviewCompactProps) {
-  const [selectedDelimiter, setSelectedDelimiter] = useState<string>(initialDelimiter || ',');
-  const [detectionResult, setDetectionResult] = useState<DelimiterDetectionResult | null>(null);
-  const [validationResult, setValidationResult] = useState<DelimiterValidationResult | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(true);
-  const [previewData, setPreviewData] = useState<string[][]>([]);
-  const previousDelimiterRef = useRef<string>('');
-
-  // Auto-detect delimiter on component mount
-  useEffect(() => {
-    const analyzeFile = async () => {
-      setIsAnalyzing(true);
-      try {
-        const detection = await detectDelimiter(file);
-        setDetectionResult(detection);
-
-        // Use detected delimiter if confidence is high enough and no initial delimiter provided
-        const delimiterToUse = initialDelimiter || (detection.confidence > 50 ? detection.delimiter : ',');
-        setSelectedDelimiter(delimiterToUse);
-
-        // Validate with the chosen delimiter
-        const validation = await validateDelimiter(file, delimiterToUse, expectedHeaders);
-        setValidationResult(validation);
-        setPreviewData(validation.preview);
-
-        // Notify parent of delimiter choice
-        onDelimiterChange(delimiterToUse);
-      } catch (error) {
-        console.error('Error analyzing file:', error);
-      } finally {
-        setIsAnalyzing(false);
-      }
-    };
-
-    analyzeFile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, initialDelimiter]);
-
-  // Revalidate when delimiter changes (but not on initial mount)
-  useEffect(() => {
-    if (isAnalyzing) return;
-    if (previousDelimiterRef.current === selectedDelimiter) return;
-
-    const validateCurrentDelimiter = async () => {
-      try {
-        const validation = await validateDelimiter(file, selectedDelimiter, expectedHeaders);
-        setValidationResult(validation);
-        setPreviewData(validation.preview);
-
-        // Update ref and notify parent
-        previousDelimiterRef.current = selectedDelimiter;
-        onDelimiterChange(selectedDelimiter);
-      } catch (error) {
-        console.error('Error validating delimiter:', error);
-      }
-    };
-
-    validateCurrentDelimiter();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDelimiter, file, isAnalyzing]);
-
-  const handleDelimiterChange = useCallback((newDelimiter: string | null) => {
-    if (newDelimiter) {
-      setSelectedDelimiter(newDelimiter);
-    }
-  }, []);
+  const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, handleDelimiterChange } = useFilePreviewAnalysis({
+    file,
+    expectedHeaders,
+    onDelimiterChange,
+    initialDelimiter
+  });
 
   const getStatusColor = () => {
     if (isAnalyzing) return 'neutral';
@@ -163,7 +91,7 @@ export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterC
                 <Option key={option.value} value={option.value} aria-label={`${option.label} delimiter`}>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Typography sx={{ fontFamily: 'monospace', fontSize: 'sm' }}>{option.icon}</Typography>
-                    <Typography level="body-sm">{option.label}</Typography>
+                    <Typography level="body-sm">{option.label.split(' ')[0]}</Typography>
                   </Stack>
                 </Option>
               ))}

@@ -1,7 +1,7 @@
 // datagridelements.tsx
 'use client';
 
-import { ExtendedGridFilterModel, RowControl, VisibleFilter } from '@/config/datagridhelpers';
+import { DynamicButton, ExtendedGridFilterModel, RowControl, VisibleFilter } from '@/config/datagridhelpers';
 import {
   Badge,
   Box,
@@ -76,7 +76,7 @@ declare module '@mui/x-data-grid' {
     handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
     filterModel?: ExtendedGridFilterModel;
     apiRef?: RefObject<GridApiCommunity>;
-    dynamicButtons?: any;
+    dynamicButtons?: DynamicButton[];
     validationMenu?: React.ReactNode;
     locked?: boolean;
     currentSite?: Site;

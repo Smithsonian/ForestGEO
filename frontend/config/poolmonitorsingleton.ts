@@ -8,7 +8,11 @@ const sqlConfig: PoolOptions = {
   password: process.env.AZURE_SQL_PASSWORD,
   host: process.env.AZURE_SQL_SERVER,
   port: parseInt(process.env.AZURE_SQL_PORT!),
-  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
+  // NOTE: No default database is set intentionally - the system uses fully-qualified
+  // table names (schema.table) for multi-schema support. The ConnectionManager
+  // dynamically sets database context via USE statement before each query to work
+  // around a mysql2 library quirk where FQN alone isn't recognized without context.
+  // See: https://stackoverflow.com/questions/57598136
   waitForConnections: true,
   connectionLimit: 15, // Reduced for production stability
   queueLimit: 25, // Increased queue to handle burst requests

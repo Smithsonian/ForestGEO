@@ -1,5 +1,6 @@
 'use client';
 
+import { ErrorBoundary } from '@/components/errorboundary';
 import {
   CellItemContainer,
   createDeleteQuery,
@@ -57,7 +58,7 @@ export type IsolatedDataGridCommonsHandle = {
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
 
-const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommonsInner(
   props: Readonly<IsolatedDataGridCommonProps>,
   ref: ForwardedRef<IsolatedDataGridCommonsHandle>
 ) {
@@ -100,7 +101,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
   });
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
-    reject: (reason?: any) => void;
+    reject: (reason?: unknown) => void;
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
@@ -169,8 +170,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
         // Note: handleAddNewRow will be triggered via processRowUpdate
         // Removed direct call to avoid circular dependency
-      } catch (error: any) {
-        ailogger.error('Error fetching data:', error);
+      } catch (error: unknown) {
+        ailogger.error('Error fetching data:', error instanceof Error ? error : new Error(String(error)));
         setSnackbar({ children: 'Error fetching data', severity: 'error' });
       } finally {
         setLoading(false);
@@ -203,6 +204,10 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
   // Handle refresh signal from parent - use ref to track previous state
   const previousRefresh = useRef(refresh);
+
+  // Timer ref for edit click focus delay - cleaned up on unmount
+  const editClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     // Only refresh when transitioning from false to true
     if (refresh && !previousRefresh.current && currentSite) {
@@ -275,8 +280,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       link.click();
 
       URL.revokeObjectURL(url);
-    } catch (error: any) {
-      ailogger.error('Error fetching full data:', error);
+    } catch (error: unknown) {
+      ailogger.error('Error fetching full data:', error instanceof Error ? error : new Error(String(error)));
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -296,7 +301,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           getTableHeaders(FormType.attributes)
             .map(row => row.label)
             .join(',') + '\n';
-        aData.forEach((row: any) => {
+        aData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.attributes)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -307,16 +312,15 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           aCSVRows += values.join(',') + '\n';
         });
@@ -341,7 +345,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           getTableHeaders(FormType.quadrats)
             .map(row => row.label)
             .join(',') + '\n';
-        qData.forEach((row: any) => {
+        qData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.quadrats)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -352,16 +356,15 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           qCSVRows += values.join(',') + '\n';
         });
@@ -386,7 +389,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           getTableHeaders(FormType.personnel)
             .map(row => row.label)
             .join(',') + '\n';
-        pData.forEach((row: any) => {
+        pData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.personnel)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -397,16 +400,15 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           pCSVRows += values.join(',') + '\n';
         });
@@ -432,7 +434,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           getTableHeaders(FormType.species)
             .map(row => row.label)
             .join(',') + '\n';
-        sData.forEach((row: any) => {
+        sData.forEach((row: Record<string, unknown>) => {
           const values = getTableHeaders(FormType.species)
             .map(rowHeader => rowHeader.label)
             .map(header => row[header])
@@ -443,16 +445,15 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               if (typeof value === 'number') {
                 return value;
               }
-              const parsedValue = parseFloat(value);
-              if (!isNaN(parsedValue)) {
-                return parsedValue;
-              }
               if (typeof value === 'string') {
-                value = value.replace(/"/g, '""');
-                value = `"${value}"`;
+                const parsedValue = parseFloat(value);
+                if (!isNaN(parsedValue)) {
+                  return parsedValue;
+                }
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
               }
-
-              return value;
+              return String(value);
             });
           sCSVRows += values.join(',') + '\n';
         });
@@ -524,8 +525,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         let responseJSON;
         try {
           responseJSON = await response.json();
-        } catch (e: any) {
-          ailogger.error(e);
+        } catch (e: unknown) {
+          ailogger.error('Error parsing response JSON:', e instanceof Error ? e : new Error(String(e)));
         }
 
         if (!response.ok) {
@@ -544,8 +545,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         }
 
         return newRow;
-      } catch (error: any) {
-        setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(newRow);
       } finally {
         setLoading(false);
@@ -652,9 +654,10 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
           await fetchPaginatedData(paginationModel.page);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Deletion failed';
         setSnackbar({
-          children: `Error: ${error.message || 'Deletion failed'}`,
+          children: `Error: ${message}`,
           severity: 'error'
         });
       } finally {
@@ -676,8 +679,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           await performSaveAction(promiseArguments.newRow.id, resolvedRow);
           setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
-        } catch (error: any) {
-          setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         }
       }
 
@@ -715,7 +719,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       if (oldRow && updatedRow) {
         setPromiseArguments({
           resolve: (_value: GridRowModel) => {},
-          reject: (_reason?: any) => {},
+          reject: (_reason?: unknown) => {},
           oldRow,
           newRow: updatedRow
         });
@@ -814,8 +818,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
                 paginationModel
               );
               return updatedRow;
-            } catch (error: any) {
-              setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              setSnackbar({ children: `Error: ${message}`, severity: 'error' });
               return Promise.reject(error);
             } finally {
               setLoading(false);
@@ -846,8 +851,9 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
           paginationModel
         );
         return updatedRow;
-      } catch (error: any) {
-        setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(error);
       } finally {
         setLoading(false);
@@ -899,7 +905,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         ...prevModel,
         [id]: { mode: GridRowModes.Edit }
       }));
-      setTimeout(() => {
+      // Store timer in ref for cleanup on unmount
+      editClickTimerRef.current = setTimeout(() => {
         const firstEditableColumn = gridColumns.find(col => col.editable);
         if (firstEditableColumn) {
           localApiRef.current?.setCellFocus(id, firstEditableColumn.field);
@@ -939,6 +946,18 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
   // Debounced filter change to prevent excessive re-renders and API calls
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Cleanup timers on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (editClickTimerRef.current) {
+        clearTimeout(editClickTimerRef.current);
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
   const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => {
     // Clear existing timer
     if (debounceTimerRef.current) {
@@ -958,7 +977,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
   }, []);
 
   const getEnhancedCellAction = useCallback(
-    (type: string, icon: any, onClick: any) => (
+    (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
       <CellItemContainer>
         <Tooltip
           disableInteractive
@@ -998,7 +1017,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
         if (isInEditMode && !locked) {
           return [
             getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e))
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: React.MouseEvent<HTMLButtonElement>) => handleCancelClick(id, e))
           ];
         }
         return [getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)), getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id))];
@@ -1079,13 +1098,13 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               await waitForStateUpdates();
               try {
                 return await processRowUpdate(newRow, oldRow);
-              } catch (error: any) {
-                ailogger.error('Error processing row update:', error);
+              } catch (error: unknown) {
+                ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
                 setSnackbar({ children: 'Error updating row', severity: 'error' });
                 return Promise.reject(error);
               }
             }}
-            onProcessRowUpdateError={(error: any) => {
+            onProcessRowUpdateError={(error: Error) => {
               ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',
@@ -1153,6 +1172,18 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       </Box>
     );
   }
+});
+
+// Wrap the forwardRef component with ErrorBoundary
+const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+  props: Readonly<IsolatedDataGridCommonProps>,
+  ref: ForwardedRef<IsolatedDataGridCommonsHandle>
+) {
+  return (
+    <ErrorBoundary componentName="IsolatedDataGridCommons">
+      <IsolatedDataGridCommonsInner {...props} ref={ref} />
+    </ErrorBoundary>
+  );
 });
 
 export default IsolatedDataGridCommons;

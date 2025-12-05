@@ -1,5 +1,5 @@
 'use client';
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { tableHeaderSettings } from '@/config/macros';
 import { fileColumns, UploadedFileData } from '@/config/macros/formdetails';
 import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -85,6 +85,14 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const [_openSnackbar, setOpenSnackbar] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const handleDownload = async (filename: string) => {
     try {
       const { primary, legacy } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
@@ -102,8 +110,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       window.location.href = data.url; // Navigates to the pre-signed URL
     } catch (error: any) {
       ailogger.error('Download error:', error);
-      setErrorMessage(error.message); // Set the error message
-      setOpenSnackbar(true); // Open the snackbar
+      if (isMountedRef.current) {
+        setErrorMessage(error.message);
+        setOpenSnackbar(true);
+      }
     }
   };
 
@@ -124,11 +134,15 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       if (!response.ok) throw new Error('Error deleting file');
 
       // Refresh the file list after successful deletion
-      setRefreshFileList(true);
+      if (isMountedRef.current) {
+        setRefreshFileList(true);
+      }
     } catch (error: any) {
       ailogger.error('Delete error:', error);
-      setErrorMessage(error.message); // Set the error message
-      setOpenSnackbar(true); // Open the snackbar
+      if (isMountedRef.current) {
+        setErrorMessage(error.message);
+        setOpenSnackbar(true);
+      }
     }
   };
 
@@ -151,6 +165,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         method: 'GET'
       });
 
+      if (!isMountedRef.current) return;
+
       if (!response.ok) {
         const jsonOutput = await response.json();
         ailogger.error('response.statusText', jsonOutput.statusText);
@@ -161,8 +177,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setIsLoaded(true);
       }
     } catch (error: any) {
-      setErrorMessage(error.message); // Set the error message
-      setOpenSnackbar(true); // Open the snackbar
+      if (isMountedRef.current) {
+        setErrorMessage(error.message);
+        setOpenSnackbar(true);
+      }
     }
   }, [currentPlot, currentCensus]);
 
@@ -251,199 +269,193 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileTextCSV.length === 0 ? (
+                  {sortedFileTextCSV.length === 0 && sortedFileArcGIS.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={fileColumns.length + 2} align="center">
                         No data available
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedFileTextCSV.map(row => {
-                      // let errs = row.errors == "false";
-                      const errs = false;
-                      return (
-                        <TableRow key={row.key}>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.key}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.name}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.user}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.formType}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.fileErrors}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {new Date(row.date ? row.date : '').toString()}
-                          </TableCell>
-                          <TableCell align="center">
-                            <Button onClick={() => handleDownload(row.name)}>
-                              <DownloadIcon />
-                            </Button>
-                            <Button onClick={() => handleDelete(row.name)}>
-                              <DeleteIcon />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                  {sortedFileArcGIS.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={fileColumns.length + 2} align="center">
-                        No data available
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sortedFileArcGIS.map(row => {
-                      const errs = 'false';
-                      return (
-                        <TableRow key={row.key}>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.key}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.name}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.user}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {new Date(row.date ? row.date : '').toString()}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.formType}
-                          </TableCell>
-                          <TableCell
-                            sx={
-                              errs
-                                ? {
-                                    color: 'red',
-                                    fontWeight: 'bold'
-                                  }
-                                : {}
-                            }
-                          >
-                            {row.fileErrors}
-                          </TableCell>
-                          <TableCell align="center">
-                            <Button onClick={() => handleDownload(row.name)}>
-                              <DownloadIcon />
-                            </Button>
-                            <Button>
-                              <EditIcon />
-                            </Button>
-                            <Button onClick={() => handleDelete(row.name)}>
-                              <DeleteIcon />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                    <>
+                      {sortedFileTextCSV.map(row => {
+                        // let errs = row.errors == "false";
+                        const errs = false;
+                        return (
+                          <TableRow key={row.key}>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.key}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.name}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.user}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.formType}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.fileErrors}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {new Date(row.date ? row.date : '').toString()}
+                            </TableCell>
+                            <TableCell align="center">
+                              <Button onClick={() => handleDownload(row.name)}>
+                                <DownloadIcon />
+                              </Button>
+                              <Button onClick={() => handleDelete(row.name)}>
+                                <DeleteIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {sortedFileArcGIS.map(row => {
+                        const errs = 'false';
+                        return (
+                          <TableRow key={row.key}>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.key}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.name}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.user}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {new Date(row.date ? row.date : '').toString()}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.formType}
+                            </TableCell>
+                            <TableCell
+                              sx={
+                                errs
+                                  ? {
+                                      color: 'red',
+                                      fontWeight: 'bold'
+                                    }
+                                  : {}
+                              }
+                            >
+                              {row.fileErrors}
+                            </TableCell>
+                            <TableCell align="center">
+                              <Button onClick={() => handleDownload(row.name)}>
+                                <DownloadIcon />
+                              </Button>
+                              <Button>
+                                <EditIcon />
+                              </Button>
+                              <Button onClick={() => handleDelete(row.name)}>
+                                <DeleteIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </>
                   )}
                 </TableBody>
               </Table>

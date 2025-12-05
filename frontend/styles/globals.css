@@ -69,3 +69,28 @@ textarea:focus-visible {
   outline: 3px solid #0066cc;
   outline-offset: 2px;
 }
+
+/* Loading state - blocks all user interactions */
+body.loading-blocked {
+  cursor: wait !important;
+  pointer-events: none !important;
+}
+
+/* Loading overlay - pure CSS implementation */
+body.loading-blocked::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9998;
+  background: transparent;
+  pointer-events: auto;
+  cursor: wait;
+}
+
+/* Allow the loading indicator itself to be visible and non-blocked */
+body.loading-blocked .loading-indicator-container {
+  pointer-events: auto !important;
+}
