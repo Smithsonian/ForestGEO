@@ -74,9 +74,6 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
 
   const connection = ConnectionManager.getInstance();
   try {
-    let query: string;
-    let queryParams: any[];
-
     switch (params.dataType) {
       case 'attributes':
       case 'species': {
@@ -147,22 +144,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
         });
     }
-
-    const results = await connection.executeQuery(query, queryParams);
-
-    if (results.length === 0) {
-      // Precondition not met - this is expected behavior, not an error
-      ailogger.info(`CMPRevalidation: Precondition not met for ${params.dataType}`, {
-        schema,
-        plotID: plotIDNum,
-        plotCensusNumber: plotCensusNumberNum
-      });
-      return new NextResponse(null, {
-        status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
-      });
-    }
-
-    // All conditions satisfied
+    // If all conditions are satisfied
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: unknown) {
     const error = e instanceof Error ? e : new Error(String(e));
