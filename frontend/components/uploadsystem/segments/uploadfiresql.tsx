@@ -1492,41 +1492,53 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   ]);
 
   useEffect(() => {
-    if (uploadForm === FormType.measurements) {
-      if (uploaded && processed) {
-        // Final synchronization checkpoint: Ensure all verification states are clean
-        setIsVerifying(false);
-        setVerificationStatus('All operations completed successfully');
-        setVerificationStep(0);
-        setTotalVerificationSteps(0);
+    // Use async IIFE to properly await completeSession before state transition
+    // This prevents race condition where unmount cleanup fires before session is marked complete
+    const handleUploadComplete = async () => {
+      if (uploadForm === FormType.measurements) {
+        if (uploaded && processed) {
+          // Final synchronization checkpoint: Ensure all verification states are clean
+          setIsVerifying(false);
+          setVerificationStatus('All operations completed successfully');
+          setVerificationStep(0);
+          setTotalVerificationSteps(0);
 
-        // Complete the upload session to stop heartbeat and mark as done
-        completeSession().catch((err: Error) => {
-          ailogger.warn(`Failed to complete upload session: ${err.message}`);
-        });
+          // Complete the upload session to stop heartbeat and mark as done
+          // MUST await to ensure sessionIdRef is cleared before state transition triggers unmount
+          try {
+            await completeSession();
+          } catch (err: unknown) {
+            ailogger.warn(`Failed to complete upload session: ${err instanceof Error ? err.message : String(err)}`);
+          }
 
-        hasUploaded.current = true;
-        setReviewState(ReviewStates.VALIDATE);
-        setIsDataUnsaved(false);
+          hasUploaded.current = true;
+          setReviewState(ReviewStates.VALIDATE);
+          setIsDataUnsaved(false);
+        }
+      } else {
+        if (uploaded) {
+          // Final synchronization checkpoint for non-measurements uploads
+          setIsVerifying(false);
+          setVerificationStatus('Upload completed successfully');
+          setVerificationStep(0);
+          setTotalVerificationSteps(0);
+
+          // Complete the upload session to stop heartbeat and mark as done
+          // MUST await to ensure sessionIdRef is cleared before state transition triggers unmount
+          try {
+            await completeSession();
+          } catch (err: unknown) {
+            ailogger.warn(`Failed to complete upload session: ${err instanceof Error ? err.message : String(err)}`);
+          }
+
+          hasUploaded.current = true;
+          setReviewState(ReviewStates.UPLOAD_AZURE);
+          setIsDataUnsaved(false);
+        }
       }
-    } else {
-      if (uploaded) {
-        // Final synchronization checkpoint for non-measurements uploads
-        setIsVerifying(false);
-        setVerificationStatus('Upload completed successfully');
-        setVerificationStep(0);
-        setTotalVerificationSteps(0);
+    };
 
-        // Complete the upload session to stop heartbeat and mark as done
-        completeSession().catch((err: Error) => {
-          ailogger.warn(`Failed to complete upload session: ${err.message}`);
-        });
-
-        hasUploaded.current = true;
-        setReviewState(ReviewStates.UPLOAD_AZURE);
-        setIsDataUnsaved(false);
-      }
-    }
+    handleUploadComplete();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploaded, processed, uploadForm]);
 
