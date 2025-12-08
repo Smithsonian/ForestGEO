@@ -19,6 +19,7 @@ import {
   useQuadratListDispatch,
   useSiteListDispatch
 } from '@/app/contexts/compat-hooks';
+import { useHasHydrated } from '@/config/store/appstore';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -62,6 +63,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const hasHydrated = useHasHydrated();
   const siteDispatch = useSiteDispatch();
   const plotDispatch = usePlotDispatch();
   const censusDispatch = useOrgCensusDispatch();
@@ -279,11 +281,17 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   ]);
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
+  // IMPORTANT: Wait for Zustand store to hydrate from localStorage before checking context values
+  // This prevents the redirect from firing before persisted state is restored
   useEffect(() => {
+    if (!hasHydrated) {
+      // Store hasn't hydrated yet, don't redirect
+      return;
+    }
     if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard' && !pathname.includes('admin')) {
       redirect('/dashboard');
     }
-  }, [pathname, currentSite, currentPlot, currentCensus]);
+  }, [pathname, currentSite, currentPlot, currentCensus, hasHydrated]);
 
   // Handle sidebar visibility based on session presence
   useEffect(() => {

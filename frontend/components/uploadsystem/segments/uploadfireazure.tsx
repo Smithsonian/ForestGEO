@@ -30,9 +30,12 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  // Cleanup on unmount
+  // Cleanup on unmount - reset isMountedRef on mount (important for React StrictMode remounts)
   useEffect(() => {
+    ailogger.info('[UploadFireAzure] Mount effect running, setting isMountedRef = true');
+    isMountedRef.current = true;
     return () => {
+      ailogger.info('[UploadFireAzure] Mount effect cleanup, setting isMountedRef = false');
       isMountedRef.current = false;
     };
   }, []);
@@ -111,17 +114,30 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     };
 
     if (!hasUploaded.current) {
+      ailogger.info(`[UploadFireAzure] Starting upload, acceptedFiles count: ${acceptedFiles.length}`);
       uploadFiles()
         .catch(ailogger.error)
         .then(() => {
           hasUploaded.current = true;
+          ailogger.info(`[UploadFireAzure] Upload complete, isMountedRef: ${isMountedRef.current}`);
           if (isMountedRef.current) {
+            ailogger.info('[UploadFireAzure] Transitioning to COMPLETE state');
             setReviewState(ReviewStates.COMPLETE);
+          } else {
+            ailogger.warn('[UploadFireAzure] Component unmounted, cannot transition to COMPLETE');
           }
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acceptedFiles, uploadToStorage, uploadForm]);
+
+  // Fallback: If upload completed during a previous mount (StrictMode), ensure we transition to COMPLETE
+  useEffect(() => {
+    if (hasUploaded.current && !loading) {
+      ailogger.info('[UploadFireAzure] Fallback check: upload already completed, ensuring transition to COMPLETE');
+      setReviewState(ReviewStates.COMPLETE);
+    }
+  }, [loading, setReviewState]);
 
   const progressPercent = totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
 

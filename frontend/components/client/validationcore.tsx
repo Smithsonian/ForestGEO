@@ -45,6 +45,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [isUpdatingRows, setIsUpdatingRows] = useState<boolean>(false);
+  const [isLoadingValidationList, setIsLoadingValidationList] = useState<boolean>(true);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -57,24 +58,58 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const hasCalledCompletionRef = useRef<boolean>(false);
 
   useEffect(() => {
+    // Reset isMounted to true on mount (important for React StrictMode remounts)
+    ailogger.info('[ValidationCore] Mount effect running, setting isMounted = true');
+    isMounted.current = true;
     abortControllerRef.current = new AbortController();
     return () => {
+      ailogger.info('[ValidationCore] Mount effect cleanup, setting isMounted = false');
       isMounted.current = false;
       abortControllerRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
-    fetch(`/api/validations/validationlist?schema=${currentSite?.schemaName}`, {
-      signal: abortControllerRef.current!.signal
+    // Guard: Don't fetch if schemaName is not available
+    if (!currentSite?.schemaName) {
+      ailogger.info('[ValidationCore] Skipping fetch - schemaName not available yet');
+      return;
+    }
+
+    ailogger.info(`[ValidationCore] Starting fetch for schema: ${currentSite.schemaName}`);
+    setIsLoadingValidationList(true);
+
+    // Create a local abort controller for this effect
+    const abortController = new AbortController();
+
+    fetch(`/api/validations/validationlist?schema=${currentSite.schemaName}`, {
+      signal: abortController.signal
     })
-      .then(r => r.json())
+      .then(r => {
+        ailogger.info(`[ValidationCore] Fetch response status: ${r.status}`);
+        return r.json();
+      })
       .then(data => {
-        if (!isMounted.current) return;
+        ailogger.info(`[ValidationCore] Parsed data, isMounted: ${isMounted.current}`);
+
+        if (!isMounted.current) {
+          ailogger.info('[ValidationCore] Component unmounted, skipping state update');
+          return;
+        }
+
+        // Null safety: ensure coreValidations exists and is an object
+        const coreValidations = data?.coreValidations || {};
+        const validationCount = Object.keys(coreValidations).length;
+        ailogger.info(`[ValidationCore] Found ${validationCount} validations`);
+
         // If no validations are defined, immediately call completion with success
-        if (data.coreValidations.length === 0) {
+        // Note: coreValidations is an object (Record<string, ...>), not an array, so use Object.keys()
+        if (validationCount === 0) {
+          ailogger.info('[ValidationCore] No validations, calling completion callback');
+          setIsLoadingValidationList(false);
           if (onValidationComplete && !hasCalledCompletionRef.current) {
             hasCalledCompletionRef.current = true;
+            ailogger.info('No validations defined for this schema. Completing validation with success.');
             onValidationComplete({
               success: true,
               hasFailedMeasurements: false,
@@ -82,15 +117,41 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               errors: []
             });
           }
+          return; // Exit early - no validations to process or render
         }
-        setValidationMessages(data.coreValidations);
-        setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
+
+        ailogger.info(`[ValidationCore] Setting validationMessages with ${validationCount} validations`);
+        setValidationMessages(coreValidations);
+        setValidationProgress(Object.keys(coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
+        setIsLoadingValidationList(false);
+        ailogger.info('[ValidationCore] State update complete, isLoadingValidationList set to false');
       })
       .catch((err: any) => {
         if (err.name !== 'AbortError') {
-          ailogger.error('Error fetching validation list:', err);
+          ailogger.error('[ValidationCore] Error fetching validation list:', err);
+          if (isMounted.current) {
+            setIsLoadingValidationList(false);
+          }
+          // If fetch fails, call completion with error to avoid stuck blank state
+          if (isMounted.current && onValidationComplete && !hasCalledCompletionRef.current) {
+            hasCalledCompletionRef.current = true;
+            onValidationComplete({
+              success: false,
+              hasFailedMeasurements: false,
+              failedCount: 0,
+              errors: [`Failed to fetch validation list: ${err.message || 'Unknown error'}`]
+            });
+          }
+        } else {
+          ailogger.info('[ValidationCore] Fetch aborted');
         }
       });
+
+    // Cleanup: abort fetch on unmount or when dependencies change
+    return () => {
+      ailogger.info('[ValidationCore] Cleanup - aborting fetch');
+      abortController.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSite?.schemaName]);
 
@@ -306,7 +367,34 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   return (
     <>
-      {Object.keys(validationMessages).length > 0 && (
+      {/* Loading state while fetching validation list */}
+      {isLoadingValidationList && (
+        <Box
+          component="section"
+          sx={{
+            width: '100%',
+            p: 3,
+            display: 'flex',
+            flex: 1,
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: { xs: '400px', sm: '500px', md: '600px' }
+          }}
+          role="status"
+          aria-live="polite"
+          aria-label="Loading validations"
+        >
+          <Stack spacing={3} sx={{ alignItems: 'center' }}>
+            <CircularProgress size="lg" aria-label="Loading validation list" />
+            <Typography level="h4">Preparing validations...</Typography>
+            <Typography level="body-sm" color="neutral">
+              Loading validation rules for this schema
+            </Typography>
+          </Stack>
+        </Box>
+      )}
+      {!isLoadingValidationList && Object.keys(validationMessages).length > 0 && (
         <Box
           component="section"
           sx={{

@@ -45,6 +45,9 @@ interface AppState {
   // ===== UI State =====
   isPulsing: boolean;
 
+  // ===== Hydration State =====
+  hasHydrated: boolean;
+
   // ===== Loading Actions =====
   startOperation: (message: string, category?: LoadingOperation['category']) => string;
   endOperation: (operationId: string) => void;
@@ -77,6 +80,9 @@ interface AppState {
   // ===== Reset Actions =====
   reset: () => void;
   clearSelections: () => void;
+
+  // ===== Hydration Actions =====
+  setHasHydrated: (state: boolean) => void;
 }
 
 // ============================================================================
@@ -113,7 +119,10 @@ const initialState = {
   validity: initialValidityState,
 
   // UI State
-  isPulsing: false
+  isPulsing: false,
+
+  // Hydration State
+  hasHydrated: false
 };
 
 // ============================================================================
@@ -280,7 +289,10 @@ export const useAppStore = create<AppState>()(
             },
             false,
             'clearSelections'
-          )
+          ),
+
+        // ===== Hydration Actions =====
+        setHasHydrated: (state: boolean) => set({ hasHydrated: state }, false, 'setHasHydrated')
       }),
       {
         name: 'forestgeo-storage', // localStorage key
@@ -290,7 +302,11 @@ export const useAppStore = create<AppState>()(
           currentPlot: state.currentPlot,
           currentCensus: state.currentCensus,
           currentQuadrat: state.currentQuadrat
-        })
+        }),
+        onRehydrateStorage: () => state => {
+          // Called when the store has been hydrated from storage
+          state?.setHasHydrated(true);
+        }
       }
     ),
     { name: 'ForestGEO App Store' }
@@ -384,3 +400,10 @@ export const useUIState = () =>
     setPulsing: state.setPulsing,
     triggerPulse: state.triggerPulse
   }));
+
+/**
+ * Hook to check if the store has been hydrated from localStorage
+ * Use this to prevent actions that depend on persisted state
+ * until the store has finished hydrating
+ */
+export const useHasHydrated = () => useAppStore(state => state.hasHydrated);

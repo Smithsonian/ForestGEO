@@ -33,6 +33,10 @@ BEGIN
     DECLARE vDataLossCount INT DEFAULT 0;
     DECLARE vProcessedCount INT DEFAULT 0;
     DECLARE vUploadId VARCHAR(50);
+    -- FIX: Declare collation-safe variables to prevent collation mismatch errors
+    -- when client connection uses different collation than database tables
+    DECLARE vFileIDSafe VARCHAR(36) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    DECLARE vBatchIDSafe VARCHAR(36) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
     -- Error handler with proper logging
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -85,9 +89,9 @@ BEGIN
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150))
             FROM temporarymeasurements
-            WHERE FileID = vFileID AND BatchID = vBatchID;
+            WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
 
-            DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
+            DELETE FROM temporarymeasurements WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
 
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
                 old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
@@ -101,13 +105,18 @@ BEGIN
     -- FIX: Set connection collation to match database to prevent collation errors in JSON_TABLE
     SET collation_connection = 'utf8mb4_0900_ai_ci';
 
-    SET vUploadId = CONCAT(vFileID, '-', vBatchID);
+    -- FIX: Convert input parameters to database collation to prevent collation mismatch
+    -- when client connection uses utf8mb4_unicode_ci but tables use utf8mb4_0900_ai_ci
+    SET vFileIDSafe = vFileID COLLATE utf8mb4_0900_ai_ci;
+    SET vBatchIDSafe = vBatchID COLLATE utf8mb4_0900_ai_ci;
+
+    SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);
 
     -- Get census info
     SELECT CensusID, PlotID, COUNT(*)
     INTO vCurrentCensusID, vCurrentPlotID, vBatchRowCount
     FROM temporarymeasurements
-    WHERE FileID = vFileID AND BatchID = vBatchID
+    WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe
     GROUP BY CensusID, PlotID
     LIMIT 1;
 
@@ -117,15 +126,20 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
-    -- Idempotency check: Skip if this batch has already been processed
+    -- ============================================================
+    -- PERFORMANCE FIX: Use uploadmetrics for idempotency check
+    -- instead of scanning coremeasurements with JSON extraction
+    -- This changes O(N) per batch to O(1) using indexed lookup
+    -- ============================================================
     IF EXISTS (
-        SELECT 1 FROM coremeasurements cm
-        WHERE cm.CensusID = vCurrentCensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+        SELECT 1 FROM uploadmetrics
+        WHERE batchID = vBatchIDSafe
+          AND censusID = vCurrentCensusID
+          AND status = 'completed'
         LIMIT 1
     ) THEN
         -- Batch already processed, skip and clean up temporarymeasurements
-        DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
+        DELETE FROM temporarymeasurements WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
         SET @disable_triggers = 0;
         SELECT CONCAT('Batch ', vBatchID, ' already processed, skipped') as message, FALSE as batch_failed;
         LEAVE main_proc;
@@ -137,7 +151,7 @@ BEGIN
         sourceRecords, processedRecords, failedRecords, missingRecords,
         status, startTime
     ) VALUES (
-        vUploadId, vFileID, vBatchID, DATABASE(),
+        vUploadId, vFileIDSafe, vBatchIDSafe, DATABASE(),
         vCurrentPlotID, vCurrentCensusID,
         vBatchRowCount, 0, 0, 0,
         'processing', NOW()
@@ -188,7 +202,7 @@ BEGIN
             ELSE NULL
         END as FailureReason
     FROM temporarymeasurements tm
-    WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID AND tm.CensusID = vCurrentCensusID
+    WHERE tm.FileID = vFileIDSafe AND tm.BatchID = vBatchIDSafe AND tm.CensusID = vCurrentCensusID
     HAVING FailureReason IS NOT NULL;
 
     IF EXISTS(SELECT 1 FROM validation_failures) THEN
@@ -229,7 +243,7 @@ BEGIN
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
                    ORDER BY Comments SEPARATOR ' | '), '') as Comments
     FROM temporarymeasurements
-    WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
+    WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe AND CensusID = vCurrentCensusID
       AND id NOT IN (SELECT id FROM validation_failures)
     GROUP BY FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
              QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
@@ -572,7 +586,7 @@ BEGIN
         SELECT 1 FROM coremeasurements cm_check
         WHERE cm_check.StemGUID = s.StemGUID
           AND cm_check.CensusID = f.CensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+          AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchIDSafe
     );
 
     SET vProcessedCount = ROW_COUNT();
@@ -617,7 +631,7 @@ BEGIN
         old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
         stem_crossid_mapping, pre_insert_check;
 
-    DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
+    DELETE FROM temporarymeasurements WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
 
     UPDATE uploadmetrics
     SET processedRecords = vProcessedCount,
