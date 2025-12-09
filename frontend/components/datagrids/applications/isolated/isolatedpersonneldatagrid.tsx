@@ -40,7 +40,10 @@ export default function IsolatedPersonnelDataGrid() {
       setRoles(await response.json());
     }
 
-    fetchRoles().catch(ailogger.error);
+    // Guard: only fetch if all required context values are defined
+    if (currentPlot?.plotID && currentCensus?.plotCensusNumber && currentSite?.schemaName) {
+      fetchRoles().catch(ailogger.error);
+    }
   }, [refresh, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
   const roleIDColumn: GridColDef = {

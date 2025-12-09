@@ -141,7 +141,7 @@ export default function DashboardPage() {
    * Performance improvement: 3-4x faster (from ~1200ms to ~300ms)
    */
   const loadAllDashboardMetrics = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0].censusID) return;
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) return;
 
     // Abort any in-flight metrics request before starting a new one
     if (metricsAbortControllerRef.current) {
@@ -150,7 +150,7 @@ export default function DashboardPage() {
     metricsAbortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
+      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0]?.censusID}`, {
         signal: metricsAbortControllerRef.current.signal
       });
 
@@ -323,8 +323,10 @@ export default function DashboardPage() {
       try {
         console.log(loadingMessage, { schema: currentSite.schemaName, censusID, type: deleteType });
 
-        // Match sidebar behavior - fire request and proceed (don't check response.ok)
-        await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        if (!response.ok) {
+          throw new Error(`Failed to clear census: ${response.status}`);
+        }
 
         // Refresh the census list to reflect the deletion
         setCensusToDelete(null);
@@ -357,7 +359,7 @@ export default function DashboardPage() {
     }
 
     // Check if current census has measurements
-    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges[0].startDate)) {
+    if (currentCensus && (!currentCensus.dateRanges || currentCensus.dateRanges.length === 0 || !currentCensus.dateRanges?.[0]?.startDate)) {
       const errorMsg = 'Cannot create a new census: Current census has no measurements.';
       console.warn(errorMsg);
       setError(errorMsg);
@@ -366,7 +368,7 @@ export default function DashboardPage() {
 
     // Check if any existing census has no measurements
     const censusWithoutMeasurements = censusListContext?.find(
-      census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges[0]?.startDate
+      census => !census?.dateRanges || census.dateRanges.length === 0 || !census.dateRanges?.[0]?.startDate
     );
 
     if (censusWithoutMeasurements) {
@@ -460,9 +462,9 @@ export default function DashboardPage() {
   }, [currentSite, currentPlot, currentCensus]);
 
   useEffect(() => {
-    if (currentSite && currentPlot && currentCensus) {
+    if (currentSite && currentPlot && currentCensus?.dateRanges?.[0]?.censusID) {
       // Create unique key to prevent duplicate loads
-      const loadKey = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.dateRanges[0].censusID}`;
+      const loadKey = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.dateRanges?.[0]?.censusID}`;
 
       // Skip if already loading or if same key as last load
       if (loadingRef.current || lastLoadedKeyRef.current === loadKey) {
@@ -664,17 +666,17 @@ export default function DashboardPage() {
             <DataQualityCard
               schema={currentSite?.schemaName}
               plotID={currentPlot?.plotID}
-              censusID={currentCensus?.dateRanges[0].censusID}
+              censusID={currentCensus?.dateRanges?.[0]?.censusID}
               isLoading={isLoading}
               onRefresh={async () => {
                 // Trigger measurements summary refresh with post-validation execution
-                if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges[0].censusID) {
+                if (currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
                   await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       plotID: currentPlot.plotID,
-                      censusID: currentCensus.dateRanges[0].censusID,
+                      censusID: currentCensus.dateRanges?.[0]?.censusID,
                       runPostValidation: true
                     })
                   });

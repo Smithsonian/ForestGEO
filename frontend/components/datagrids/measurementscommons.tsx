@@ -269,7 +269,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         });
       }
 
-      const failedQuery = `SELECT COUNT(*) AS CountFailed FROM ${currentSite.schemaName}.failedmeasurements WHERE PlotID = ${currentPlot.plotID} AND CensusID = ${currentCensus.dateRanges[0].censusID}`;
+      const failedQuery = `SELECT COUNT(*) AS CountFailed FROM ${currentSite.schemaName}.failedmeasurements WHERE PlotID = ${currentPlot.plotID} AND CensusID = ${currentCensus.dateRanges?.[0]?.censusID}`;
       const failedResponse = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -516,7 +516,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     };
     if (exportType === 'form') {
       const response = await fetch(
-        `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(tempFilter)}`,
+        `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}/${JSON.stringify(tempFilter)}`,
         { method: 'GET' }
       );
       const data = await response.json();
@@ -768,10 +768,15 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
+    // Guard: ensure site context is available before attempting delete
+    if (!currentSite?.schemaName) {
+      setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
+      return;
+    }
     setLoading(true, 'Deleting...');
     const deletionID = rows.find(row => String(row.id) === String(id))?.id;
     if (!deletionID) return;
-    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), deletionID);
+    const deleteQuery = createDeleteQuery(currentSite.schemaName, gridType, getGridID(gridType), deletionID);
     const response = await fetch(deleteQuery, {
       method: 'DELETE',
       headers: {
@@ -805,7 +810,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
-        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
         if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (e: unknown) {
@@ -1282,11 +1287,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
     closeModal(false);
-    if (!shouldRefresh) return;
+    if (!shouldRefresh || !currentSite?.schemaName) return;
 
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: unknown) {
@@ -1430,9 +1435,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                     onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
                     onResetValidations={() => setIsResetValidationModalOpen(true)}
                     onRefreshView={async () => {
+                      if (!currentSite?.schemaName) return;
                       setLoading(true, 'Refreshing Measurements Summary View...');
                       try {
-                        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+                        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
                         if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
                         await new Promise(resolve => setTimeout(resolve, 1000));
                       } finally {

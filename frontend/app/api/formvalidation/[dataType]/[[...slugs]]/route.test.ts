@@ -40,6 +40,13 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema', 'catdb', 's'].includes(schema);
+  })
+}));
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function makeProps(dataType?: string, slugs?: string[]) {
   return { params: Promise.resolve({ dataType: dataType as any, slugs }) } as any;
@@ -50,20 +57,25 @@ describe('GET /api/formvalidation/[dataType]/[[...slugs]]', () => {
     vi.clearAllMocks();
   });
 
-  it('throws if slugs missing or length !== 3', async () => {
-    await expect(GET({} as any, makeProps('attributes', undefined as any))).rejects.toThrow(/slugs missing/i);
-    await expect(GET({} as any, makeProps('attributes', ['schema', 'col']))).rejects.toThrow(/slugs missing/i);
-    await expect(GET({} as any, makeProps('attributes', ['a', 'b', 'c', 'd']))).rejects.toThrow(/slugs missing/i);
+  it('returns 400 if slugs missing or length !== 3', async () => {
+    const res1 = await GET({} as any, makeProps('attributes', undefined as any));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res2 = await GET({} as any, makeProps('attributes', ['schema', 'col']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res3 = await GET({} as any, makeProps('attributes', ['a', 'b', 'c', 'd']));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('throws if dataType missing or "undefined"', async () => {
-    await expect(GET({} as any, makeProps(undefined as any, ['s', 'c', 'v']))).rejects.toThrow(/no schema provided/i);
-    await expect(GET({} as any, makeProps('undefined' as any, ['s', 'c', 'v']))).rejects.toThrow(/no schema provided/i);
+  it('returns 400 if dataType missing or "undefined"', async () => {
+    const res1 = await GET({} as any, makeProps(undefined as any, ['s', 'c', 'v']));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res2 = await GET({} as any, makeProps('undefined' as any, ['s', 'c', 'v']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('returns 404 when any of schema/columnName/value is falsy (empty string)', async () => {
+  it('returns 400 when any of schema/columnName/value is falsy (empty string)', async () => {
     const res = await GET({} as any, makeProps('personnel', ['', 'FirstName', 'Alice']));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
   it('404 when query returns no rows; closes connection; formats SQL with ?? and ?', async () => {
@@ -71,14 +83,15 @@ describe('GET /api/formvalidation/[dataType]/[[...slugs]]', () => {
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const res = await GET({} as any, makeProps('users', ['myschema', 'FirstName', 'Alice']));
+    // Use valid dataType 'personnel' instead of 'users'
+    const res = await GET({} as any, makeProps('personnel', ['myschema', 'FirstName', 'Alice']));
     expect(res.status).toBe(404);
 
     expect(exec).toHaveBeenCalledTimes(1);
     const [formatted] = exec.mock.calls[0];
     // Our format mock encodes both SQL and params for easy assertion
     expect(String(formatted)).toContain('SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1');
-    expect(String(formatted)).toContain(`["myschema.users","FirstName","Alice"]`);
+    expect(String(formatted)).toContain(`["myschema.personnel","FirstName","Alice"]`);
 
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -99,12 +112,14 @@ describe('GET /api/formvalidation/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates DB errors and still closes connection', async () => {
+  it('returns 500 on DB errors and still closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('boom'));
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    await expect(GET({} as any, makeProps('roles', ['myschema', 'RoleName', 'Admin']))).rejects.toThrow(/boom/i);
+    // Use valid dataType 'personnel' instead of 'roles'
+    const res = await GET({} as any, makeProps('personnel', ['myschema', 'FirstName', 'Admin']));
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

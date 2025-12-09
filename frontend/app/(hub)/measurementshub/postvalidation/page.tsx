@@ -25,7 +25,7 @@ export default function PostValidationPage() {
   const replacements = {
     schema: currentSite?.schemaName,
     currentPlotID: currentPlot?.plotID,
-    currentCensusID: currentCensus?.dateRanges[0].censusID
+    currentCensusID: currentCensus?.dateRanges?.[0]?.censusID
   };
   const { setLoading } = useLoading();
 
@@ -47,7 +47,7 @@ export default function PostValidationPage() {
     if (!postValidation.queryID) return;
     try {
       const response = await fetch(
-        `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}/${postValidation.queryID}`,
+        `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}/${postValidation.queryID}`,
         { method: 'GET' }
       );
       if (!response.ok) {
@@ -134,7 +134,8 @@ export default function PostValidationPage() {
       }
     };
 
-    if (postValidations.length > 0) {
+    // Guard: only fetch if schemaName is defined and there are validations to show
+    if (postValidations.length > 0 && currentSite?.schemaName) {
       fetchSchema();
     }
   }, [postValidations, currentSite?.schemaName]);

@@ -44,6 +44,14 @@ vi.mock('@/ailogger', () => ({
   default: { error: logErr, info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    // Accept test schemas used in tests
+    return ['forestgeo_testing', 'myschema', 's1', 'sch', 'schema'].includes(schema);
+  })
+}));
+
 // ========== Helpers ==========
 function makeProps(dataType?: string, slugs?: string[]) {
   return { params: Promise.resolve({ dataType: dataType as any, slugs }) } as any;
@@ -58,17 +66,22 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     vi.clearAllMocks();
   });
 
-  it('throws when slugs or dataType missing', async () => {
+  it('returns 400 when slugs or dataType missing', async () => {
     // missing slugs
-    await expect(GET(noopRequest(), makeProps('attributes', undefined as any))).rejects.toThrow(/missing slugs/i);
+    const res1 = await GET(noopRequest(), makeProps('attributes', undefined as any));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
     // missing dataType
-    await expect(GET(noopRequest(), makeProps(undefined as any, ['s', '1', '1']))).rejects.toThrow(/missing slugs/i);
+    const res2 = await GET(noopRequest(), makeProps(undefined as any, ['s', '1', '1']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('throws when incorrect slugs (length not 3 or "undefined" values)', async () => {
-    await expect(GET(noopRequest(), makeProps('attributes', ['schema', '1']))).rejects.toThrow(/incorrect slugs/i);
-    await expect(GET(noopRequest(), makeProps('attributes', ['schema', '1', 'undefined']))).rejects.toThrow(/incorrect slugs/i);
-    await expect(GET(noopRequest(), makeProps('attributes', ['undefined', '1', '2']))).rejects.toThrow(/incorrect slugs/i);
+  it('returns 400 when incorrect slugs (length not 3 or "undefined" values)', async () => {
+    const res1 = await GET(noopRequest(), makeProps('attributes', ['schema', '1']));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res2 = await GET(noopRequest(), makeProps('attributes', ['schema', '1', 'undefined']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res3 = await GET(noopRequest(), makeProps('attributes', ['undefined', '1', '2']));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
   it('attributes: 200 when table has rows; 428 when empty; closes connection', async () => {
@@ -82,7 +95,8 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     expect(close).toHaveBeenCalledTimes(1);
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/^SELECT 1 FROM myschema\.attributes dt/i);
+    // Route uses backtick-escaped identifiers
+    expect(String(sql)).toMatch(/SELECT 1 FROM `myschema`\.`attributes` dt/i);
 
     // failure path (no rows)
     exec.mockResolvedValueOnce([]);
@@ -99,7 +113,8 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     const ok = await GET(noopRequest(), makeProps('species', ['s1', '1', '2']));
     expect(ok.status).toBe(HTTPResponses.OK);
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/^SELECT 1 FROM s1\.species dt/i);
+    // Route uses backtick-escaped identifiers
+    expect(String(sql)).toMatch(/SELECT 1 FROM `s1`\.`species` dt/i);
 
     exec.mockResolvedValueOnce([]);
     const fail = await GET(noopRequest(), makeProps('species', ['s1', '1', '2']));
@@ -117,7 +132,8 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     let res = await GET(noopRequest(), makeProps('quadrats', ['myschema', '99', '4']));
     expect(res.status).toBe(HTTPResponses.OK);
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.quadrats q\s+WHERE q\.PlotID = 99/i);
+    // Route uses backtick-escaped schema and parameterized query
+    expect(String(sql)).toMatch(/FROM `myschema`\.quadrats q\s+WHERE q\.PlotID = 99/i);
 
     exec.mockResolvedValueOnce([]);
     res = await GET(noopRequest(), makeProps('quadrats', ['myschema', '99', '4']));
@@ -136,10 +152,11 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
 
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM sch\.coremeasurements cm/i);
-    expect(String(sql)).toMatch(/JOIN sch\.census c ON C\.CensusID = cm\.CensusID/i);
-    expect(String(sql)).toMatch(/JOIN sch\.plots p ON p\.PlotID = c\.PlotID/i);
-    expect(String(sql)).toMatch(/WHERE p\.PlotID = 7 AND c\.CensusID IN \(SELECT CensusID from sch\.census WHERE PlotID = 7 AND PlotCensusNumber = 3\)/i);
+    // Route uses backtick-escaped identifiers
+    expect(String(sql)).toMatch(/FROM `sch`\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/JOIN `sch`\.census c ON c\.CensusID = cm\.CensusID/i);
+    expect(String(sql)).toMatch(/JOIN `sch`\.plots p ON p\.PlotID = c\.PlotID/i);
+    expect(String(sql)).toMatch(/WHERE p\.PlotID = 7[\s\S]*AND c\.CensusID IN/i);
 
     exec.mockResolvedValueOnce([]);
     res = await GET(noopRequest(), makeProps('postvalidation', ['sch', '7', '3']));
@@ -148,15 +165,14 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(2);
   });
 
-  it('default (unknown dataType): returns 428 and closes connection (no DB call)', async () => {
+  it('default (unknown dataType): returns 400 for invalid data type', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
+    // Unknown dataType is rejected early with 400 (before DB connection is established)
     const res = await GET(noopRequest(), makeProps('wut', ['myschema', '1', '2']));
-    expect(res.status).toBe(HTTPResponses.PRECONDITION_VALIDATION_FAILURE);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     expect(exec).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('on DB error: logs via ailogger.error and returns 428; always closes connection', async () => {

@@ -14,7 +14,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   const currentCensus = useOrgCensusContext();
 
   // Extract census ID to satisfy ESLint dependency rules
-  const censusID = currentCensus?.dateRanges[0]?.censusID;
+  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
 
   const updateValidations = useCallback(async () => {
     setIsUpdateValidationComplete(false);

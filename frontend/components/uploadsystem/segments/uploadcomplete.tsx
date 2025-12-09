@@ -54,7 +54,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
     setCensusListStore(censusList); // Also update Zustand store
 
-    const existingCensus = censusList.find(census => census.dateRanges[0].censusID === currentCensus?.dateRanges[0].censusID);
+    const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
     if (existingCensus) {
       await censusDispatch({ census: existingCensus });
       setCensusStore(existingCensus); // Also update Zustand store
@@ -112,18 +112,18 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
     const runAsyncTasks = async () => {
       try {
-        if (uploadForm === FormType.measurements) {
+        if (uploadForm === FormType.measurements && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
           // Clean up temporary measurements table
           await fetch(`/api/query`, {
             body: JSON.stringify({
-              query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID],
+              query: `delete from ${currentSite.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+              params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
               format: true
             }),
             method: 'POST'
           });
           // Run failed measurements review procedure
-          await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
+          await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) });
         }
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);

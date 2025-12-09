@@ -45,7 +45,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     id: 0,
     failedMeasurementID: 0,
     plotID: currentPlot?.plotID,
-    censusID: currentCensus?.dateRanges[0].censusID,
+    censusID: currentCensus?.dateRanges?.[0]?.censusID,
     tag: '',
     stemTag: '',
     spCode: '',

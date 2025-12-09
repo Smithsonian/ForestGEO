@@ -173,7 +173,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               schema: currentSite?.schemaName,
               validationProcedureID,
               cursorQuery,
-              p_CensusID: currentCensus?.dateRanges[0].censusID,
+              p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
               p_PlotID: plotID
             })
           });
@@ -230,7 +230,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           setIsUpdatingRows(true);
         }
         await fetch(
-          `/api/validations/updatepassedvalidations?schema=${currentSite?.schemaName}&plotID=${plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`,
+          `/api/validations/updatepassedvalidations?schema=${currentSite?.schemaName}&plotID=${plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`,
           { method: 'GET', signal: abortControllerRef.current?.signal }
         );
       } catch (error: any) {
@@ -260,14 +260,14 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   // Check for failed measurements after validation
   const checkForFailedMeasurements = useCallback(async (): Promise<{ hasFailures: boolean; count: number }> => {
-    if (!currentSite?.schemaName || !plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
       ailogger.warn('Missing required context for checking failed measurements');
       return { hasFailures: false, count: 0 };
     }
 
     try {
       ailogger.info('Checking for failed measurements after validation...');
-      const response = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${plotID}/${currentCensus.dateRanges[0].censusID}`, {
+      const response = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${plotID}/${currentCensus.dateRanges?.[0]?.censusID}`, {
         method: 'GET'
       });
 
@@ -430,7 +430,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               }}
             >
               <DotLottieReact
-                src="/animations/file-check.lottie"
+                src="/api/animations/file-check.lottie"
                 loop
                 autoplay
                 style={{

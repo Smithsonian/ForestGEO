@@ -81,6 +81,13 @@ jobs:
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
+          # Copy .env file to standalone folder for runtime access to server-side env vars
+          cp ./frontend/.env ./frontend/build/standalone/.env
+          # Copy env loader script
+          cp ./frontend/startup.js ./frontend/build/standalone/env-loader.js
+          # Prepend env loader require to server.js
+          echo "require('./env-loader.js');" | cat - ./frontend/build/standalone/server.js > ./frontend/build/standalone/server.js.tmp
+          mv ./frontend/build/standalone/server.js.tmp ./frontend/build/standalone/server.js
 
       - name: Verify build integrity
         id: verify-build
@@ -125,6 +132,44 @@ jobs:
             exit 1
           fi
           echo "✅ server.js present"
+
+          # Check public folder and animations exist
+          if [ ! -d "public" ]; then
+            echo "::error::public folder not found"
+            exit 1
+          fi
+          echo "✅ Public folder present"
+
+          if [ ! -d "public/animations" ]; then
+            echo "::error::animations folder not found in public"
+            exit 1
+          fi
+          ANIMATION_COUNT=$(ls public/animations/*.lottie 2>/dev/null | wc -l | tr -d '[:space:]')
+          if [ "$ANIMATION_COUNT" -lt 1 ]; then
+            echo "::error::No animation files found in public/animations"
+            exit 1
+          fi
+          echo "animation_count=$ANIMATION_COUNT" >> $GITHUB_OUTPUT
+          echo "✅ Animation files: $ANIMATION_COUNT .lottie files"
+
+          # Check web.config for Azure configuration
+          if [ -f "public/web.config" ]; then
+            echo "✅ web.config present (for Azure IIS compatibility)"
+          fi
+
+          # Check env-loader.js exists for env var loading
+          if [ ! -f "env-loader.js" ]; then
+            echo "::error::env-loader.js not found"
+            exit 1
+          fi
+          echo "✅ env-loader.js present"
+
+          # Check .env file exists
+          if [ ! -f ".env" ]; then
+            echo "::error::.env file not found"
+            exit 1
+          fi
+          echo "✅ .env file present"
 
           echo "✅ Build integrity verification passed"
 

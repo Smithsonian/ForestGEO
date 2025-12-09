@@ -253,9 +253,14 @@ export default function Sidebar(props: SidebarProps) {
       setIsClearDropdownOpen(false);
 
       try {
-        await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        const response = await fetch(`/api/clearcensus?schema=${currentSite.schemaName}&censusID=${censusID}&type=${deleteType}`);
+        if (!response.ok) {
+          throw new Error(`Failed to clear census: ${response.status}`);
+        }
         setCensusToDelete(null);
         setManualReset(true);
+      } catch (error: any) {
+        ailogger.error('Failed to delete census:', error);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
@@ -336,8 +341,8 @@ export default function Sidebar(props: SidebarProps) {
       return <Typography className="sidebar-item">Select a Census</Typography>;
     }
 
-    const startDate = currentCensus?.dateRanges[0]?.startDate;
-    const endDate = currentCensus?.dateRanges[0]?.endDate;
+    const startDate = currentCensus?.dateRanges?.[0]?.startDate;
+    const endDate = currentCensus?.dateRanges?.[0]?.endDate;
 
     const hasStartDate = startDate !== undefined && startDate !== null;
     const hasEndDate = endDate !== undefined && endDate !== null;
@@ -411,7 +416,7 @@ export default function Sidebar(props: SidebarProps) {
           .sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
           .map(item => (
             <Option
-              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges[0]?.startDate ? new Date(item.dateRanges[0].startDate).toDateString() : 'No measurements'}` : ''}`}
+              aria-label={`Census ${item?.plotCensusNumber}${item?.dateRanges?.length ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? new Date(item.dateRanges?.[0]?.startDate).toDateString() : 'No measurements'}` : ''}`}
               data-testid={'census-selection-option'}
               key={item?.plotCensusNumber}
               value={item?.plotCensusNumber?.toString()}

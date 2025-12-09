@@ -63,9 +63,13 @@ export function ListSelectionProvider({ children }: Readonly<{ children: React.R
   );
 }
 
-function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null }) {
-  if (!action.firstLoad && currentState) return action.firstLoad;
-  else return currentState;
+function firstLoadReducer(currentState: boolean, action: { firstLoad: boolean }): boolean {
+  // Only allow transition from true to false (first load completed)
+  // Never transition back to true, and never accept null
+  if (action.firstLoad === false && currentState === true) {
+    return false;
+  }
+  return currentState;
 }
 
 export function useFirstLoadContext() {

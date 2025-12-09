@@ -2,12 +2,12 @@
  * SQL Security Utilities
  *
  * Provides shared validation and sanitization functions to prevent SQL injection attacks.
- * All schema names MUST be validated against the whitelist before use in SQL queries.
+ * All schema names MUST be validated before use in SQL queries.
  * IMPORTANT: This module must NOT import mysql2 to remain compatible with client-side code.
  */
 
-// Whitelist of allowed schemas - MUST match production database schemas
-export const ALLOWED_SCHEMAS = [
+// Known static schemas - additional schemas matching the pattern are also valid
+export const KNOWN_SCHEMAS = [
   'forestgeo',
   'forestgeo_testing',
   'forestgeo_testing_alternate',
@@ -18,16 +18,28 @@ export const ALLOWED_SCHEMAS = [
   'catalog'
 ] as const;
 
-export type AllowedSchema = (typeof ALLOWED_SCHEMAS)[number];
+// Backwards compatibility alias
+export const ALLOWED_SCHEMAS = KNOWN_SCHEMAS;
+
+// Pattern for valid ForestGEO schemas: must start with 'forestgeo_' or 'catalog', and contain only safe characters
+// This allows new site schemas (e.g., forestgeo_rabi) without requiring code changes
+const VALID_SCHEMA_PATTERN = /^(forestgeo(_[a-z0-9_]+)?|catalog)$/;
+
+export type AllowedSchema = (typeof KNOWN_SCHEMAS)[number] | string;
 
 /**
- * Validates if a schema name is in the allowed list
+ * Validates if a schema name is valid for use in SQL queries
+ * Accepts:
+ * - Known static schemas (catalog, forestgeo, forestgeo_testing, etc.)
+ * - Dynamic ForestGEO schemas matching pattern: forestgeo_[a-z0-9_]+ (e.g., forestgeo_rabi)
+ *
  * @param schema - Schema name to validate
- * @returns true if schema is allowed, false otherwise
+ * @returns true if schema is valid, false otherwise
  */
 export function isValidSchema(schema: string | null | undefined): schema is AllowedSchema {
   if (!schema) return false;
-  return ALLOWED_SCHEMAS.includes(schema as AllowedSchema);
+  // Check against pattern for dynamic schemas
+  return VALID_SCHEMA_PATTERN.test(schema);
 }
 
 /**

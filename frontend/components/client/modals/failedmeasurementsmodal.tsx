@@ -16,7 +16,7 @@ import {
   Typography
 } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
@@ -40,30 +40,44 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
 
+  // Track mount state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const fetchRecordCounts = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
       return;
     }
 
     try {
       // Get failed measurements count
       const failedResponse = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
         { method: 'GET' }
       );
-      if (failedResponse.ok) {
+      if (failedResponse.ok && isMountedRef.current) {
         const failedData = await failedResponse.json();
-        setFailedCount(failedData.recordCount);
+        if (isMountedRef.current) {
+          setFailedCount(failedData.recordCount);
+        }
       }
 
       // Get temporary measurements count
       const tempResponse = await fetch(
-        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
         { method: 'GET' }
       );
-      if (tempResponse.ok) {
+      if (tempResponse.ok && isMountedRef.current) {
         const tempData = await tempResponse.json();
-        setTempCount(tempData.recordCount);
+        if (isMountedRef.current) {
+          setTempCount(tempData.recordCount);
+        }
       }
     } catch (error: any) {
       ailogger.error('Failed to fetch record counts:', error);
@@ -71,7 +85,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
 
   const handleClearFailedMeasurements = async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
       ailogger.error('Missing required context for clearing failed measurements');
       return;
     }
@@ -79,7 +93,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     setIsClearingFailed(true);
     try {
       const response = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
         { method: 'DELETE' }
       );
 
@@ -108,7 +122,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   };
 
   const handleClearTempMeasurements = async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
       ailogger.error('Missing required context for clearing temporary measurements');
       return;
     }
@@ -116,7 +130,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     setIsClearingTemp(true);
     try {
       const response = await fetch(
-        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        `/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`,
         {
           method: 'DELETE'
         }
@@ -141,7 +155,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   };
 
   const handleReingestAll = async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges[0]?.censusID) {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
       ailogger.error('Missing required context for reingestion');
       return;
     }
@@ -151,7 +165,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
       ailogger.info('Starting bulk reingestion: moving failed measurements to temporary table');
 
       // Move all rows from failedmeasurements to temporarymeasurements
-      const response = await fetch(`/api/reingest/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
+      const response = await fetch(`/api/reingest/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`, {
         method: 'POST' // Changed to POST to indicate this is triggering the modal flow
       });
 
@@ -282,7 +296,11 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
                   size="sm"
                   disabled={isReingesting || isClearingFailed || isClearingTemp || failedCount === 0}
                   onClick={() => {
-                    fetchRecordCounts().then(() => setConfirmClearFailed(true));
+                    fetchRecordCounts().then(() => {
+                      if (isMountedRef.current) {
+                        setConfirmClearFailed(true);
+                      }
+                    });
                   }}
                 >
                   Clear Failed ({failedCount ?? '?'})
@@ -293,7 +311,11 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
                   size="sm"
                   disabled={isReingesting || isClearingFailed || isClearingTemp || tempCount === 0}
                   onClick={() => {
-                    fetchRecordCounts().then(() => setConfirmClearTemp(true));
+                    fetchRecordCounts().then(() => {
+                      if (isMountedRef.current) {
+                        setConfirmClearTemp(true);
+                      }
+                    });
                   }}
                 >
                   Clear Temp ({tempCount ?? '?'})

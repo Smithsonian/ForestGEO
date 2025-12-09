@@ -21,6 +21,18 @@ vi.mock('@/config/datamapper', () => ({
   default: { getMapper: getMapperSpy.mockReturnValue({ mapData: mapDataSpy }) }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  })
+}));
+
+// Mock logger
+vi.mock('@/ailogger', () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
+
 vi.mock('@/config/connectionmanager', async () => {
   const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
   const candidate =
@@ -54,24 +66,23 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     getMapperSpy.mockReturnValue({ mapData: mapDataSpy });
   });
 
-  it('throws if slugs are missing or fewer than 5', async () => {
-    await expect(GET({} as any, makeProps('species', undefined))).rejects.toThrow(/slugs not received/i);
+  it('returns 400 if slugs are missing or fewer than 5', async () => {
+    const res1 = await GET({} as any, makeProps('species', undefined));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
 
-    await expect(GET({} as any, makeProps('species', ['myschema', '0', '25', '101']))).rejects.toThrow(/slugs not received/i);
+    const res2 = await GET({} as any, makeProps('species', ['myschema', '0', '25', '101']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('throws if core slugs schema/page/pageSize are not valid', async () => {
-    await expect(GET({} as any, makeProps('species', [undefined as any, '0', '25', '1', '2']))).rejects.toThrow(
-      /core slugs schema\/page\/pageSize not correctly received/i
-    );
+  it('returns 400 if core slugs schema/page/pageSize are not valid', async () => {
+    const res1 = await GET({} as any, makeProps('species', [undefined as any, '0', '25', '1', '2']));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
 
-    await expect(GET({} as any, makeProps('species', ['myschema', undefined as any, '25', '1', '2']))).rejects.toThrow(
-      /core slugs schema\/page\/pageSize not correctly received/i
-    );
+    const res2 = await GET({} as any, makeProps('species', ['myschema', undefined as any, '25', '1', '2']));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
 
-    await expect(GET({} as any, makeProps('species', ['myschema', '0', 'undefined', '1', '2']))).rejects.toThrow(
-      /core slugs schema\/page\/pageSize not correctly received/i
-    );
+    const res3 = await GET({} as any, makeProps('species', ['myschema', '0', 'undefined', '1', '2']));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
   it('unifiedchangelog: 200 with mapped data, totalCount, finishedQuery; closes connection', async () => {
@@ -149,16 +160,22 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('throws for unknown dataType', async () => {
-    await expect(GET({} as any, makeProps('not-a-table', ['myschema', '0', '25', '1', '1']))).rejects.toThrow(/Unknown dataType/i);
+  it('returns 400 for unknown dataType', async () => {
+    const res = await GET({} as any, makeProps('not-a-table', ['myschema', '0', '25', '1', '1']));
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const body = await res.json();
+    expect(body.error).toMatch(/Invalid data type/i);
   });
 
-  it('propagates DB errors and closes connection', async () => {
+  it('returns 500 on DB errors and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('db down'));
     const close = vi.spyOn(cm, 'closeConnection');
 
-    await expect(GET({} as any, makeProps('species', ['myschema', '0', '25', '1', '1']))).rejects.toThrow(/db down/i);
+    const res = await GET({} as any, makeProps('species', ['myschema', '0', '25', '1', '1']));
+    expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
+    const body = await res.json();
+    expect(body.error).toMatch(/Failed to retrieve data/i);
 
     expect(exec).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);

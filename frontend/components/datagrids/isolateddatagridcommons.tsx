@@ -252,24 +252,28 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber
       );
-      const tempBody = await (
-        await fetch(tempQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel })
-        })
-      ).json();
+      const tempResponse = await fetch(tempQuery, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel })
+      });
+      if (!tempResponse.ok) {
+        throw new Error(`Failed to fetch query: ${tempResponse.status}`);
+      }
+      const tempBody = await tempResponse.json();
       const tempFQuery = tempBody.finishedQuery
         .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
         .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
         .trim();
-      const results = await (
-        await fetch(`/api/query`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tempFQuery)
-        })
-      ).json();
+      const resultsResponse = await fetch(`/api/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tempFQuery)
+      });
+      if (!resultsResponse.ok) {
+        throw new Error(`Failed to execute query: ${resultsResponse.status}`);
+      }
+      const results = await resultsResponse.json();
       const jsonData = JSON.stringify(results, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -290,190 +294,200 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const exportAllCSV = useCallback(async () => {
     setLoading(true);
-    switch (gridType) {
-      case 'attributes':
-        const aResponse = await fetch(
-          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
-          { method: 'GET' }
-        );
-        const aData = await aResponse.json();
-        let aCSVRows =
-          getTableHeaders(FormType.attributes)
-            .map(row => row.label)
-            .join(',') + '\n';
-        aData.forEach((row: Record<string, unknown>) => {
-          const values = getTableHeaders(FormType.attributes)
-            .map(rowHeader => rowHeader.label)
-            .map(header => row[header])
-            .map(value => {
-              if (value === undefined || value === null || value === '') {
-                return null;
-              }
-              if (typeof value === 'number') {
-                return value;
-              }
-              if (typeof value === 'string') {
-                const parsedValue = parseFloat(value);
-                if (!isNaN(parsedValue)) {
-                  return parsedValue;
+    try {
+      switch (gridType) {
+        case 'attributes':
+          const aResponse = await fetch(
+            `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}/${JSON.stringify(filterModel)}`,
+            { method: 'GET' }
+          );
+          if (!aResponse.ok) throw new Error(`Failed to download attributes: ${aResponse.status}`);
+          const aData = await aResponse.json();
+          let aCSVRows =
+            getTableHeaders(FormType.attributes)
+              .map(row => row.label)
+              .join(',') + '\n';
+          aData.forEach((row: Record<string, unknown>) => {
+            const values = getTableHeaders(FormType.attributes)
+              .map(rowHeader => rowHeader.label)
+              .map(header => row[header])
+              .map(value => {
+                if (value === undefined || value === null || value === '') {
+                  return null;
                 }
-                const escapedValue = value.replace(/"/g, '""');
-                return `"${escapedValue}"`;
-              }
-              return String(value);
-            });
-          aCSVRows += values.join(',') + '\n';
-        });
-        const aBlob = new Blob([aCSVRows], {
-          type: 'text/csv;charset=utf-8;'
-        });
-        const aURL = URL.createObjectURL(aBlob);
-        const aLink = document.createElement('a');
-        aLink.href = aURL;
-        aLink.download = `attributesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-        document.body.appendChild(aLink);
-        aLink.click();
-        document.body.removeChild(aLink);
-        break;
-      case 'quadrats':
-        const qResponse = await fetch(
-          `/api/formdownload/quadrats/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
-          { method: 'GET' }
-        );
-        const qData = await qResponse.json();
-        let qCSVRows =
-          getTableHeaders(FormType.quadrats)
-            .map(row => row.label)
-            .join(',') + '\n';
-        qData.forEach((row: Record<string, unknown>) => {
-          const values = getTableHeaders(FormType.quadrats)
-            .map(rowHeader => rowHeader.label)
-            .map(header => row[header])
-            .map(value => {
-              if (value === undefined || value === null || value === '') {
-                return null;
-              }
-              if (typeof value === 'number') {
-                return value;
-              }
-              if (typeof value === 'string') {
-                const parsedValue = parseFloat(value);
-                if (!isNaN(parsedValue)) {
-                  return parsedValue;
+                if (typeof value === 'number') {
+                  return value;
                 }
-                const escapedValue = value.replace(/"/g, '""');
-                return `"${escapedValue}"`;
-              }
-              return String(value);
-            });
-          qCSVRows += values.join(',') + '\n';
-        });
-        const qBlob = new Blob([qCSVRows], {
-          type: 'text/csv;charset=utf-8;'
-        });
-        const qURL = URL.createObjectURL(qBlob);
-        const qLink = document.createElement('a');
-        qLink.href = qURL;
-        qLink.download = `quadratsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-        document.body.appendChild(qLink);
-        qLink.click();
-        document.body.removeChild(qLink);
-        break;
-      case 'personnel':
-        const pResponse = await fetch(
-          `/api/formdownload/personnel/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
-          { method: 'GET' }
-        );
-        const pData = await pResponse.json();
-        let pCSVRows =
-          getTableHeaders(FormType.personnel)
-            .map(row => row.label)
-            .join(',') + '\n';
-        pData.forEach((row: Record<string, unknown>) => {
-          const values = getTableHeaders(FormType.personnel)
-            .map(rowHeader => rowHeader.label)
-            .map(header => row[header])
-            .map(value => {
-              if (value === undefined || value === null || value === '') {
-                return null;
-              }
-              if (typeof value === 'number') {
-                return value;
-              }
-              if (typeof value === 'string') {
-                const parsedValue = parseFloat(value);
-                if (!isNaN(parsedValue)) {
-                  return parsedValue;
+                if (typeof value === 'string') {
+                  const parsedValue = parseFloat(value);
+                  if (!isNaN(parsedValue)) {
+                    return parsedValue;
+                  }
+                  const escapedValue = value.replace(/"/g, '""');
+                  return `"${escapedValue}"`;
                 }
-                const escapedValue = value.replace(/"/g, '""');
-                return `"${escapedValue}"`;
-              }
-              return String(value);
-            });
-          pCSVRows += values.join(',') + '\n';
-        });
-        const pBlob = new Blob([pCSVRows], {
-          type: 'text/csv;charset=utf-8;'
-        });
-        const pURL = URL.createObjectURL(pBlob);
-        const pLink = document.createElement('a');
-        pLink.href = pURL;
-        pLink.download = `personnelform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-        document.body.appendChild(pLink);
-        pLink.click();
-        document.body.removeChild(pLink);
-        break;
-      case 'species':
-      case 'alltaxonomiesview':
-        const sResponse = await fetch(
-          `/api/formdownload/species/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
-          { method: 'GET' }
-        );
-        const sData = await sResponse.json();
-        let sCSVRows =
-          getTableHeaders(FormType.species)
-            .map(row => row.label)
-            .join(',') + '\n';
-        sData.forEach((row: Record<string, unknown>) => {
-          const values = getTableHeaders(FormType.species)
-            .map(rowHeader => rowHeader.label)
-            .map(header => row[header])
-            .map(value => {
-              if (value === undefined || value === null || value === '') {
-                return null;
-              }
-              if (typeof value === 'number') {
-                return value;
-              }
-              if (typeof value === 'string') {
-                const parsedValue = parseFloat(value);
-                if (!isNaN(parsedValue)) {
-                  return parsedValue;
+                return String(value);
+              });
+            aCSVRows += values.join(',') + '\n';
+          });
+          const aBlob = new Blob([aCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const aURL = URL.createObjectURL(aBlob);
+          const aLink = document.createElement('a');
+          aLink.href = aURL;
+          aLink.download = `attributesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(aLink);
+          aLink.click();
+          document.body.removeChild(aLink);
+          break;
+        case 'quadrats':
+          const qResponse = await fetch(
+            `/api/formdownload/quadrats/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}`,
+            { method: 'GET' }
+          );
+          if (!qResponse.ok) throw new Error(`Failed to download quadrats: ${qResponse.status}`);
+          const qData = await qResponse.json();
+          let qCSVRows =
+            getTableHeaders(FormType.quadrats)
+              .map(row => row.label)
+              .join(',') + '\n';
+          qData.forEach((row: Record<string, unknown>) => {
+            const values = getTableHeaders(FormType.quadrats)
+              .map(rowHeader => rowHeader.label)
+              .map(header => row[header])
+              .map(value => {
+                if (value === undefined || value === null || value === '') {
+                  return null;
                 }
-                const escapedValue = value.replace(/"/g, '""');
-                return `"${escapedValue}"`;
-              }
-              return String(value);
-            });
-          sCSVRows += values.join(',') + '\n';
-        });
-        const sBlob = new Blob([sCSVRows], {
-          type: 'text/csv;charset=utf-8;'
-        });
-        const sURL = URL.createObjectURL(sBlob);
-        const sLink = document.createElement('a');
-        sLink.href = sURL;
-        sLink.download = `speciesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-        document.body.appendChild(sLink);
-        sLink.click();
-        document.body.removeChild(sLink);
-        break;
-      case 'viewfulltable':
-        await fetchFullData();
-        break;
+                if (typeof value === 'number') {
+                  return value;
+                }
+                if (typeof value === 'string') {
+                  const parsedValue = parseFloat(value);
+                  if (!isNaN(parsedValue)) {
+                    return parsedValue;
+                  }
+                  const escapedValue = value.replace(/"/g, '""');
+                  return `"${escapedValue}"`;
+                }
+                return String(value);
+              });
+            qCSVRows += values.join(',') + '\n';
+          });
+          const qBlob = new Blob([qCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const qURL = URL.createObjectURL(qBlob);
+          const qLink = document.createElement('a');
+          qLink.href = qURL;
+          qLink.download = `quadratsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(qLink);
+          qLink.click();
+          document.body.removeChild(qLink);
+          break;
+        case 'personnel':
+          const pResponse = await fetch(
+            `/api/formdownload/personnel/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}`,
+            { method: 'GET' }
+          );
+          if (!pResponse.ok) throw new Error(`Failed to download personnel: ${pResponse.status}`);
+          const pData = await pResponse.json();
+          let pCSVRows =
+            getTableHeaders(FormType.personnel)
+              .map(row => row.label)
+              .join(',') + '\n';
+          pData.forEach((row: Record<string, unknown>) => {
+            const values = getTableHeaders(FormType.personnel)
+              .map(rowHeader => rowHeader.label)
+              .map(header => row[header])
+              .map(value => {
+                if (value === undefined || value === null || value === '') {
+                  return null;
+                }
+                if (typeof value === 'number') {
+                  return value;
+                }
+                if (typeof value === 'string') {
+                  const parsedValue = parseFloat(value);
+                  if (!isNaN(parsedValue)) {
+                    return parsedValue;
+                  }
+                  const escapedValue = value.replace(/"/g, '""');
+                  return `"${escapedValue}"`;
+                }
+                return String(value);
+              });
+            pCSVRows += values.join(',') + '\n';
+          });
+          const pBlob = new Blob([pCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const pURL = URL.createObjectURL(pBlob);
+          const pLink = document.createElement('a');
+          pLink.href = pURL;
+          pLink.download = `personnelform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(pLink);
+          pLink.click();
+          document.body.removeChild(pLink);
+          break;
+        case 'species':
+        case 'alltaxonomiesview':
+          const sResponse = await fetch(
+            `/api/formdownload/species/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}`,
+            { method: 'GET' }
+          );
+          if (!sResponse.ok) throw new Error(`Failed to download species: ${sResponse.status}`);
+          const sData = await sResponse.json();
+          let sCSVRows =
+            getTableHeaders(FormType.species)
+              .map(row => row.label)
+              .join(',') + '\n';
+          sData.forEach((row: Record<string, unknown>) => {
+            const values = getTableHeaders(FormType.species)
+              .map(rowHeader => rowHeader.label)
+              .map(header => row[header])
+              .map(value => {
+                if (value === undefined || value === null || value === '') {
+                  return null;
+                }
+                if (typeof value === 'number') {
+                  return value;
+                }
+                if (typeof value === 'string') {
+                  const parsedValue = parseFloat(value);
+                  if (!isNaN(parsedValue)) {
+                    return parsedValue;
+                  }
+                  const escapedValue = value.replace(/"/g, '""');
+                  return `"${escapedValue}"`;
+                }
+                return String(value);
+              });
+            sCSVRows += values.join(',') + '\n';
+          });
+          const sBlob = new Blob([sCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const sURL = URL.createObjectURL(sBlob);
+          const sLink = document.createElement('a');
+          sLink.href = sURL;
+          sLink.download = `speciesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(sLink);
+          sLink.click();
+          document.body.removeChild(sLink);
+          break;
+        case 'viewfulltable':
+          await fetchFullData();
+          break;
+      }
+    } catch (error: any) {
+      ailogger.error('Error exporting CSV:', error);
+      setSnackbar({ children: 'Error exporting data', severity: 'error' });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData]);
+  }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData, setSnackbar]);
 
   const openConfirmationDialog = useCallback(
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
@@ -513,7 +527,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       let fetchProcessQuery =
         gridType !== 'quadrats'
           ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
-          : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
+          : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID);
       if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
       try {
         setLoading(true);
@@ -735,7 +749,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (locked) return;
       if (gridType === 'census') {
         const rowToDelete = rows.find(row => String(row.id) === String(id));
-        if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges[0].censusID) {
+        if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges?.[0]?.censusID) {
           alert('Cannot delete the currently selected census.');
           return;
         }

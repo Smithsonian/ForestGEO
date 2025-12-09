@@ -33,6 +33,18 @@ vi.mock('@/config/macros/coreapifunctions', () => ({
   DELETE: vi.fn()
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  })
+}));
+
+// Mock logger
+vi.mock('@/ailogger', () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+}));
+
 vi.mock('@/config/connectionmanager', async () => {
   // Try to reuse your test setup’s singleton if present
   const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);

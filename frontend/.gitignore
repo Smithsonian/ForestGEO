@@ -41,7 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 .idea/*
 /.swc/
-/public/
+/public/*
+!/public/animations/
+!/public/animations/*
 /.fleet
 /.vscode
 /.idea

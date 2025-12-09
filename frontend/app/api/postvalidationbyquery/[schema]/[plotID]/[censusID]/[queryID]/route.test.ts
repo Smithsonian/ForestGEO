@@ -55,6 +55,16 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => {
+    return query.replace(/\?\?/g, `\`${schema}\``);
+  })
+}));
+
 // ---- Helpers ----
 function makeProps(schema?: string, plotID?: string, censusID?: string, queryID?: string) {
   return {
@@ -79,8 +89,8 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     let res = await GET(dummyReq, makeProps(undefined as any, '10', '20', '5'));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
 
-    // plotID "0" -> parseInt => 0 (falsy)
-    res = await GET(dummyReq, makeProps('myschema', '0', '20', '5'));
+    // plotID invalid (NaN)
+    res = await GET(dummyReq, makeProps('myschema', 'abc', '20', '5'));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
 
     // censusID missing
@@ -104,9 +114,10 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
 
     expect(res.status).toBe(HTTPResponses.NOT_FOUND);
     expect(exec).toHaveBeenCalledTimes(1);
-    const [sql1] = exec.mock.calls[0];
-    expect(String(sql1)).toMatch(/FROM myschema\.postvalidationqueries/i);
-    expect(String(sql1)).toMatch(/WHERE QueryID = 5/i);
+    const [sql1, params1] = exec.mock.calls[0];
+    expect(String(sql1)).toMatch(/FROM `myschema`\.postvalidationqueries/i);
+    expect(String(sql1)).toMatch(/WHERE QueryID = \?/i);
+    expect(params1).toEqual([5]);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -131,18 +142,18 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const res = await GET(dummyReq, makeProps('myschema', '10', '20', '5'));
     expect(res.status).toBe(HTTPResponses.OK);
 
-    // Check second exec call received the replaced SQL
+    // Check second exec call received the replaced SQL (${schema} replaced with raw value, no backticks)
     expect(exec).toHaveBeenCalledTimes(3);
     const formattedSQL = exec.mock.calls[1][0] as string;
     expect(formattedSQL).toMatch(/FROM myschema\.some_table/i);
     expect(formattedSQL).toMatch(/PlotID = 10/i);
     expect(formattedSQL).toMatch(/CensusID = 20/i);
 
-    // Update statement (third call) has params [timestamp, JSON(results)]
+    // Update statement (third call) uses parameterized query
     const [updateSQL, updateParams] = exec.mock.calls[2];
-    expect(String(updateSQL)).toMatch(/UPDATE myschema\.postvalidationqueries/i);
-    expect(String(updateSQL)).toMatch(/LastRunStatus = 'success'/i);
-    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }])]);
+    expect(String(updateSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
+    expect(String(updateSQL)).toMatch(/LastRunStatus = \?/i);
+    expect(updateParams).toEqual(['2025-01-02 03:04:05', JSON.stringify([{ RowID: 1 }, { RowID: 2 }]), 'success', 5]);
 
     expect(_begin).toHaveBeenCalledWith();
     expect(commit).toHaveBeenCalledWith('tx-1');
@@ -166,12 +177,12 @@ describe('GET /api/postvalidationbyquery/[schema]/[plotID]/[censusID]/[queryID]'
     const res = await GET(dummyReq, makeProps('myschema', '10', '20', '5'));
     expect(res.status).toBe(HTTPResponses.OK);
 
-    // failure UPDATE call
+    // failure UPDATE call uses parameterized query
     expect(exec).toHaveBeenCalledTimes(3);
     const [failureSQL, failureParams] = exec.mock.calls[2];
-    expect(String(failureSQL)).toMatch(/UPDATE myschema\.postvalidationqueries/i);
-    expect(String(failureSQL)).toMatch(/LastRunStatus = 'failure'/i);
-    expect(failureParams).toEqual(['2025-01-02 03:04:05']);
+    expect(String(failureSQL)).toMatch(/UPDATE `myschema`\.postvalidationqueries/i);
+    expect(String(failureSQL)).toMatch(/LastRunStatus = \?/i);
+    expect(failureParams).toEqual(['2025-01-02 03:04:05', 'failure', 5]);
 
     expect(begin).toHaveBeenCalledTimes(1);
     expect(rollback).toHaveBeenCalledWith('tx-2');
