@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, Button, Card, CardContent, Divider, Stack, Typography } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
@@ -20,8 +20,18 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
   const [tempCount, setTempCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Track mount state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Extract census ID to satisfy ESLint dependency rules
-  const censusID = currentCensus?.dateRanges[0]?.censusID;
+  const censusID = currentCensus?.dateRanges?.[0]?.censusID;
 
   const fetchCounts = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !censusID) {
@@ -29,27 +39,39 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
       return;
     }
 
-    setIsLoading(true);
+    if (isMountedRef.current) {
+      setIsLoading(true);
+    }
     try {
       // Get failed measurements count
       const failedResponse = await fetch(`/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${censusID}`, { method: 'GET' });
 
-      if (failedResponse.ok) {
+      if (failedResponse.ok && isMountedRef.current) {
         const failedData = await failedResponse.json();
-        setFailedCount(failedData.recordCount || 0);
+        if (isMountedRef.current) {
+          setFailedCount(failedData.recordCount || 0);
+        }
+      } else if (!failedResponse.ok) {
+        ailogger.error(`Failed to fetch failed measurements count: ${failedResponse.status}`);
       }
 
       // Get temporary measurements count
       const tempResponse = await fetch(`/api/admin/clear/temporarymeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${censusID}`, { method: 'GET' });
 
-      if (tempResponse.ok) {
+      if (tempResponse.ok && isMountedRef.current) {
         const tempData = await tempResponse.json();
-        setTempCount(tempData.recordCount || 0);
+        if (isMountedRef.current) {
+          setTempCount(tempData.recordCount || 0);
+        }
+      } else if (!tempResponse.ok) {
+        ailogger.error(`Failed to fetch temporary measurements count: ${tempResponse.status}`);
       }
     } catch (error: any) {
       ailogger.error('Failed to fetch validation error counts:', error);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [currentSite?.schemaName, currentPlot?.plotID, censusID]);
 

@@ -24,7 +24,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
     changeTimestamp: new Date(),
     changedBy: '',
     plotID: currentPlot?.plotID ?? 0,
-    censusID: currentCensus?.dateRanges[0].censusID ?? 0
+    censusID: currentCensus?.dateRanges?.[0]?.censusID ?? 0
   };
   const [refresh, setRefresh] = useState(false);
 

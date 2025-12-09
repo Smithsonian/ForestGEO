@@ -54,6 +54,35 @@ vi.mock('@/ailogger', () => ({
   default: { error: loggerErr, info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  })
+}));
+
+// Mock context validation to allow tests to control schema/plotID/censusID
+vi.mock('@/lib/contextvalidation', () => ({
+  validateContextualValues: vi.fn(async (request: any, _options: any) => {
+    const schema = request.nextUrl.searchParams.get('schema');
+    if (!schema || schema === 'undefined') {
+      return {
+        success: false,
+        response: new Response(JSON.stringify({ error: 'Missing required schema selection' }), { status: 400 })
+      };
+    }
+    // Return mock context values
+    return {
+      success: true,
+      values: {
+        schema: schema,
+        plotID: 42,
+        censusID: 7
+      }
+    };
+  })
+}));
+
 // ========== Helpers ==========
 function makeRequest(schema?: string) {
   const url = new URL('http://localhost/api/fetchall');
@@ -142,7 +171,8 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     // SQL + params sanity: uses stored 42,7
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql, params] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.stems st\s+JOIN myschema\.census c/i);
+    // Route uses JOIN ... ON c.CensusID = st.CensusID and c.IsActive IS TRUE
+    expect(String(sql)).toMatch(/FROM myschema\.stems st[\s\S]*JOIN myschema\.census c/i);
     expect(String(sql)).toMatch(/c\.PlotID = \? AND c\.PlotCensusNumber = \?/i);
     expect(params).toEqual([42, 7]);
 
@@ -161,7 +191,8 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(await res.json()).toEqual([{ TreeID: 9, mapped: true }]);
 
     const [sql] = (cm.executeQuery as any).mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.trees st\s+JOIN myschema\.census c/i);
+    // Route uses multiline query with JOIN
+    expect(String(sql)).toMatch(/FROM myschema\.trees st[\s\S]*JOIN myschema\.census c/i);
   });
 
   it('plots: selects plots with quadrat count; maps results; closes connection', async () => {

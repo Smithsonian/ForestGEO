@@ -292,7 +292,7 @@ export async function processBulkIngestion(props: Readonly<SpecialBulkProcessing
     throw new Error('Process Bulk Ingestion: Missing plotID, censusID, or census date ranges');
   }
 
-  const currentCensusID = census.dateRanges[0].censusID;
+  const currentCensusID = census.dateRanges?.[0]?.censusID;
   const fileID = `bulk-${Date.now()}`;
   const batchID = `batch-${Date.now()}`;
 

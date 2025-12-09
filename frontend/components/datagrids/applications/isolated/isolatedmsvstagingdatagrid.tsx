@@ -15,7 +15,7 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
   const initialMeasurementsSummaryStagingRDSRow: MeasurementsSummaryStagingRDS = {
     id: 0,
     coreMeasurementID: 0,
-    censusID: currentCensus?.dateRanges[0].censusID,
+    censusID: currentCensus?.dateRanges?.[0]?.censusID,
     quadratID: 0,
     plotID: currentPlot?.plotID,
     treeID: 0,

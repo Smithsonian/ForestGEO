@@ -54,7 +54,10 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       setAllSpeciesLimits(await response.json());
     }
 
-    if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(ailogger.error);
+    // Guard: only fetch if all required values are defined
+    if (currentPlot?.plotID && currentCensus?.plotCensusNumber && currentSite?.schemaName && (allSpeciesLimits.length === 0 || refresh)) {
+      fetchLimits().catch(ailogger.error);
+    }
   }, [refresh, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName, allSpeciesLimits.length]);
 
   const handleOpenSpeciesLimitsModal = useCallback((speciesRow: SpeciesRDS) => {

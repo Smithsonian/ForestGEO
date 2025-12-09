@@ -243,16 +243,18 @@ describe('UploadParent - Integration Tests', () => {
     it('should initialize with correct upload form when provided', () => {
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
-      // useUploadState should initialize with measurements form
-      expect(screen.getByTestId('upload-form-value')).toHaveTextContent('measurements');
+      // When overrideUploadForm is provided, skip START and go directly to UPLOAD_FILES
+      // So upload-parse-files should be rendered
+      expect(screen.getByTestId('upload-parse-files')).toBeInTheDocument();
     });
 
-    it('should manage personnel recording state for measurements', async () => {
+    it('should start at START state when no overrideUploadForm', async () => {
       const user = userEvent.setup();
 
-      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
+      render(<UploadParent onReset={mockOnReset} />);
 
-      // Initially no personnel
+      // START state - upload-start should be rendered
+      expect(screen.getByTestId('upload-start')).toBeInTheDocument();
       expect(screen.getByTestId('personnel-value')).toHaveTextContent('none');
 
       // Set personnel via hook
@@ -262,12 +264,12 @@ describe('UploadParent - Integration Tests', () => {
       expect(screen.getByTestId('personnel-value')).toHaveTextContent('Test Personnel');
     });
 
-    it('should transition through review states', async () => {
+    it('should transition through review states from START', async () => {
       const user = userEvent.setup();
 
-      render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} onUploadComplete={mockOnUploadComplete} />);
+      render(<UploadParent onReset={mockOnReset} onUploadComplete={mockOnUploadComplete} />);
 
-      // START state
+      // START state - no overrideUploadForm
       expect(screen.getByTestId('upload-start')).toBeInTheDocument();
 
       // Setup and transition to UPLOAD_FILES
@@ -299,9 +301,8 @@ describe('UploadParent - Integration Tests', () => {
     it('should add files via useFileManagement.addFile', async () => {
       const user = userEvent.setup();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
-
-      await user.click(screen.getByText('Select Measurements'));
 
       // Initial file count should be 0
       expect(screen.getByTestId('file-count')).toHaveTextContent('0');
@@ -320,9 +321,8 @@ describe('UploadParent - Integration Tests', () => {
     it('should remove files via useFileManagement.removeFile', async () => {
       const user = userEvent.setup();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
-
-      await user.click(screen.getByText('Select Measurements'));
 
       // Add two files
       await user.click(screen.getByText('Add File'));
@@ -345,9 +345,9 @@ describe('UploadParent - Integration Tests', () => {
     it('should clear all files when returning to start', async () => {
       const user = userEvent.setup();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
-      await user.click(screen.getByText('Select Measurements'));
       await user.click(screen.getByText('Add File'));
 
       await waitFor(() => {
@@ -380,9 +380,9 @@ describe('UploadParent - Integration Tests', () => {
 
       const user = userEvent.setup();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
-      await user.click(screen.getByText('Select Measurements'));
       await user.click(screen.getByText('Add File'));
       await user.click(screen.getByText('Continue Upload'));
 
@@ -411,9 +411,9 @@ describe('UploadParent - Integration Tests', () => {
         return { default: MockUploadFireSQL };
       });
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
-      await user.click(screen.getByText('Select Measurements'));
       await user.click(screen.getByText('Add File'));
       await user.click(screen.getByText('Continue Upload'));
 
@@ -433,27 +433,24 @@ describe('UploadParent - Integration Tests', () => {
     it('should handle complete upload workflow with all hooks', async () => {
       const user = userEvent.setup();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} onUploadComplete={mockOnUploadComplete} />);
 
-      // 1. Set personnel (useUploadState)
-      await user.click(screen.getByText('Select Measurements'));
-      expect(screen.getByTestId('personnel-value')).toHaveTextContent('Test Personnel');
-
-      // 2. Add file (useFileManagement)
+      // 1. Add file (useFileManagement) - already at UPLOAD_FILES state
       await user.click(screen.getByText('Add File'));
       await waitFor(() => {
         expect(screen.getByTestId('file-count')).toHaveTextContent('1');
       });
 
-      // 3. Start upload (useUploadState.setReviewState)
+      // 2. Start upload (useUploadState.setReviewState)
       await user.click(screen.getByText('Continue Upload'));
 
-      // 4. Process (useUploadState manages state transitions)
+      // 3. Process (useUploadState manages state transitions)
       await waitFor(() => {
         expect(screen.getByTestId('upload-fire-sql')).toBeInTheDocument();
       });
 
-      // 5. Complete (useUploadState.isComplete)
+      // 4. Complete (useUploadState.isComplete)
       await waitFor(
         () => {
           expect(screen.getByTestId('upload-complete')).toBeInTheDocument();
@@ -479,12 +476,12 @@ describe('UploadParent - Integration Tests', () => {
       const user = userEvent.setup();
       const beforeUnloadHandler = vi.fn();
 
+      // With overrideUploadForm, we skip START and go directly to UPLOAD_FILES
       render(<UploadParent onReset={mockOnReset} overrideUploadForm={FormType.measurements} />);
 
       // Add listener to verify beforeunload event
       window.addEventListener('beforeunload', beforeUnloadHandler);
 
-      await user.click(screen.getByText('Select Measurements'));
       await user.click(screen.getByText('Add File'));
       await user.click(screen.getByText('Continue Upload'));
 

@@ -101,7 +101,7 @@ export default function CensusSelector() {
             <Option
               aria-label={`Census ${item?.plotCensusNumber}${
                 item?.dateRanges?.length
-                  ? `, first measurement: ${item.dateRanges[0]?.startDate ? new Date(item.dateRanges[0].startDate).toDateString() : 'No measurements'}`
+                  ? `, first measurement: ${item.dateRanges?.[0]?.startDate ? new Date(item.dateRanges?.[0]?.startDate).toDateString() : 'No measurements'}`
                   : ''
               }`}
               data-testid="census-selection-option"

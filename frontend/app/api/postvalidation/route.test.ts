@@ -34,6 +34,16 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => {
+    return query.replace('??', `\`${schema}\``);
+  })
+}));
+
 // ---- Helpers ----
 function makeRequest(url: string) {
   const req: any = new Request(url);
@@ -73,7 +83,8 @@ describe('GET /api/postvalidation', () => {
 
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/FROM myschema\.postvalidationqueries\b/i);
+    // Schema is now backtick-escaped
+    expect(String(sql)).toMatch(/FROM `myschema`\.postvalidationqueries\b/i);
     expect(String(sql)).toMatch(/IsEnabled IS TRUE/i);
 
     expect(close).toHaveBeenCalledTimes(1);
@@ -99,7 +110,8 @@ describe('GET /api/postvalidation', () => {
 
     expect(exec).toHaveBeenCalledTimes(1);
     const [sql] = exec.mock.calls[0];
-    expect(String(sql)).toMatch(/SELECT QueryID, QueryName, Description FROM myschema\.postvalidationqueries/i);
+    // Schema is now backtick-escaped
+    expect(String(sql)).toMatch(/SELECT QueryID, QueryName, Description FROM `myschema`\.postvalidationqueries/i);
     expect(String(sql)).toMatch(/IsEnabled IS TRUE/i);
 
     expect(close).toHaveBeenCalledTimes(1);

@@ -133,7 +133,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   // Fallback: If upload completed during a previous mount (StrictMode), ensure we transition to COMPLETE
   useEffect(() => {
-    if (hasUploaded.current && !loading) {
+    if (hasUploaded.current && !loading && isMountedRef.current) {
       ailogger.info('[UploadFireAzure] Fallback check: upload already completed, ensuring transition to COMPLETE');
       setReviewState(ReviewStates.COMPLETE);
     }
@@ -177,7 +177,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             }}
           >
             <DotLottieReact
-              src="/animations/uploading.lottie"
+              src="/api/animations/uploading.lottie"
               loop
               autoplay
               style={{
@@ -260,9 +260,11 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             <Button
               variant="solid"
               onClick={() => {
-                setRefreshError(null);
-                setContinueDisabled(true);
-                setReviewState(ReviewStates.COMPLETE);
+                if (isMountedRef.current) {
+                  setRefreshError(null);
+                  setContinueDisabled(true);
+                  setReviewState(ReviewStates.COMPLETE);
+                }
               }}
               disabled={continueDisabled}
             >

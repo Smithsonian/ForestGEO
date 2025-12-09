@@ -186,10 +186,10 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         setProcessedChunks(0);
         chunkProcessStartTime.current = performance.now();
         ailogger.info(
-          `Setting up bulk processor for reingestion - schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges[0].censusID}`
+          `Setting up bulk processor for reingestion - schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges?.[0]?.censusID}`
         );
 
-        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
+        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}`);
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ message: response.statusText }));
           throw new Error(`Failed to setup bulk processor: ${response.status} - ${errorData.message || response.statusText}`);
@@ -231,7 +231,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
             }
 
             const verifyProcessingResponse = await fetch(
-              `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+              `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`
             );
             if (verifyProcessingResponse.ok) {
               const verifyData = await verifyProcessingResponse.json();
@@ -262,7 +262,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
             }
             ailogger.info('Starting collapser for reingestion...');
 
-            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`, {
               method: 'GET',
               headers: { 'Content-Type': 'application/json' }
             });
@@ -357,11 +357,14 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                 })
                 .finally(() => {
                   // Consolidate batch progress tracking to prevent double-counting
-                  setProcessedChunks(prev => {
-                    const newValue = prev + 1;
-                    ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
-                    return newValue;
-                  });
+                  // Check mount state before updating to prevent state updates after unmount
+                  if (isMountedRef.current) {
+                    setProcessedChunks(prev => {
+                      const newValue = prev + 1;
+                      ailogger.info(`Reingestion batch progress: ${newValue}/${totalBatchCount} batches completed`);
+                      return newValue;
+                    });
+                  }
                 })
           );
 
@@ -397,7 +400,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
           }
 
           const verifyProcessingResponse = await fetch(
-            `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+            `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
@@ -428,7 +431,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
           }
           ailogger.info('Starting collapser for reingestion...');
 
-          const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+          const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -499,6 +502,12 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
   useEffect(() => {
     if (processed) {
+      // Check mount state before state transition
+      if (!isMountedRef.current) {
+        ailogger.warn('[REINGESTION] Component unmounted before state transition - skipping');
+        return;
+      }
+
       ailogger.info('[REINGESTION COMPLETE] Reingestion finished successfully - transitioning to VALIDATE state');
       setIsVerifying(false);
       setVerificationStatus('Reingestion completed successfully');
@@ -514,9 +523,10 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
   // Determine which animation to show based on current stage
   // Reingestion skips the upload stage, so we use processing and verification animations
+  // Use API route for reliable serving in standalone mode
   const getStageAnimation = (): string => {
-    if (isVerifying) return '/animations/startup.lottie';
-    return '/animations/data-processing.lottie'; // Processing stage
+    if (isVerifying) return '/api/animations/startup.lottie';
+    return '/api/animations/data-processing.lottie'; // Processing stage
   };
 
   // Calculate overall progress percentage

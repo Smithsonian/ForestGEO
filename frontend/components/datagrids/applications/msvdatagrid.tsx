@@ -75,7 +75,10 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
 
   useEffect(() => {
-    if (openFSM) fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(ailogger.error);
+    // Guard: only call if FSM is open AND schemaName is defined
+    if (openFSM && currentSite?.schemaName) {
+      fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) }).catch(ailogger.error);
+    }
   }, [openFSM, currentSite?.schemaName]);
 
   const addNewRowToGrid = () => {
@@ -86,9 +89,9 @@ export default function MeasurementsSummaryViewDataGrid() {
       coreMeasurementID: 0,
       plotID: currentPlot?.plotID,
       plotName: currentPlot?.plotName,
-      censusID: currentCensus?.dateRanges[0].censusID,
-      censusStartDate: currentCensus?.dateRanges[0]?.startDate,
-      censusEndDate: currentCensus?.dateRanges[0]?.endDate,
+      censusID: currentCensus?.dateRanges?.[0]?.censusID,
+      censusStartDate: currentCensus?.dateRanges?.[0]?.startDate,
+      censusEndDate: currentCensus?.dateRanges?.[0]?.endDate,
       isNew: true
     };
     setRows(oldRows => [...oldRows, newRow]);

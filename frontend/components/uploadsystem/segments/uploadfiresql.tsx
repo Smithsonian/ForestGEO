@@ -58,7 +58,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   } = useUploadSession({
     schema,
     plotId: currentPlot?.plotID ?? -1,
-    censusId: currentCensus?.dateRanges[0]?.censusID ?? -1
+    censusId: currentCensus?.dateRanges?.[0]?.censusID ?? -1
   });
 
   const [totalOperations, setTotalOperations] = useState(0);
@@ -158,7 +158,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       try {
         const failedMeasurementsData = errorRows.map(row => ({
           plotID: currentPlot?.plotID ?? -1,
-          censusID: currentCensus?.dateRanges[0].censusID ?? -1,
+          censusID: currentCensus?.dateRanges?.[0]?.censusID ?? -1,
           tag: row.tag || null,
           stemTag: row.stemtag || null,
           spCode: row.spcode || null,
@@ -174,7 +174,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }));
 
         const response = await fetchWithTimeout(
-          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`,
+          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -925,7 +925,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
 
             const verificationResponse = await fetch(
-              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`
             );
             if (!verificationResponse.ok) {
               throw new Error(`Upload verification failed for ${file.name}: ${verificationResponse.status}`);
@@ -1050,9 +1050,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         });
 
         ailogger.info(
-          `Setting up bulk processor for schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges[0].censusID}`
+          `Setting up bulk processor for schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges?.[0]?.censusID}`
         );
-        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
+        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}`);
         if (!response.ok) {
           throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
         }
@@ -1086,7 +1086,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               ailogger.warn(`Failed to update session state to collapsing: ${err.message}`);
             });
 
-            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+            const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`, {
               method: 'GET',
               headers: { 'Content-Type': 'application/json' }
             });
@@ -1271,7 +1271,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Verifying batch processing completion...');
 
           const verifyProcessingResponse = await fetch(
-            `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`
+            `/api/verifyprocessing?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`
           );
           if (verifyProcessingResponse.ok) {
             const verifyData = await verifyProcessingResponse.json();
@@ -1319,7 +1319,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.warn(`Failed to update session state to collapsing: ${errMsg}`);
           });
 
-          const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`, {
+          const collapserResponse = await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -1362,7 +1362,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
               try {
                 const sessionVerifyResponse = await fetch(
-                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges[0].censusID}&fileID=${encodeURIComponent(fileID)}`
+                  `/api/verifysession?schema=${schema}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}&fileID=${encodeURIComponent(fileID)}`
                 );
 
                 if (sessionVerifyResponse.ok) {
@@ -1482,6 +1482,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     const handleUploadComplete = async () => {
       if (uploadForm === FormType.measurements) {
         if (uploaded && processed) {
+          // Check mount state before proceeding
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted before upload completion - skipping state transition');
+            return;
+          }
+
           // Final synchronization checkpoint: Ensure all verification states are clean
           setIsVerifying(false);
           setVerificationStatus('All operations completed successfully');
@@ -1496,12 +1502,24 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.warn(`Failed to complete upload session: ${err instanceof Error ? err.message : String(err)}`);
           }
 
+          // Check mount state again after async operation
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted after session completion - skipping state transition');
+            return;
+          }
+
           hasUploaded.current = true;
           setReviewState(ReviewStates.VALIDATE);
           setIsDataUnsaved(false);
         }
       } else {
         if (uploaded) {
+          // Check mount state before proceeding
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted before upload completion - skipping state transition');
+            return;
+          }
+
           // Final synchronization checkpoint for non-measurements uploads
           setIsVerifying(false);
           setVerificationStatus('Upload completed successfully');
@@ -1514,6 +1532,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await completeSession();
           } catch (err: unknown) {
             ailogger.warn(`Failed to complete upload session: ${err instanceof Error ? err.message : String(err)}`);
+          }
+
+          // Check mount state again after async operation
+          if (!isMountedRef.current) {
+            ailogger.warn('Component unmounted after session completion - skipping state transition');
+            return;
           }
 
           hasUploaded.current = true;
@@ -1538,11 +1562,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   // Determine which animation to show based on current stage
+  // Use API route for reliable serving in standalone mode
   const getStageAnimation = (): string => {
-    if (!uploaded) return '/animations/growing-plant.lottie';
-    if (uploaded && !processed && !isVerifying) return '/animations/data-processing.lottie';
-    if (isVerifying) return '/animations/startup.lottie';
-    return '/animations/growing-plant.lottie'; // fallback
+    if (!uploaded) return '/api/animations/growing-plant.lottie';
+    if (uploaded && !processed && !isVerifying) return '/api/animations/data-processing.lottie';
+    if (isVerifying) return '/api/animations/startup.lottie';
+    return '/api/animations/growing-plant.lottie'; // fallback
   };
 
   return (

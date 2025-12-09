@@ -85,7 +85,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       // Handle specific fields like PlotID, CensusID that should not be normalized to empty or default
       if (key === 'plotID' || key === 'censusID') {
         // Keep PlotID and CensusID intact or use the default context values
-        acc[key] = value !== null && value !== undefined ? value : key === 'plotID' ? currentPlot?.plotID : currentCensus?.dateRanges[0]?.censusID;
+        acc[key] = value !== null && value !== undefined ? value : key === 'plotID' ? currentPlot?.plotID : currentCensus?.dateRanges?.[0]?.censusID;
       }
       // Handle normal cases for null/undefined values or fields that require normalization
       else if (value === null || value === undefined) {

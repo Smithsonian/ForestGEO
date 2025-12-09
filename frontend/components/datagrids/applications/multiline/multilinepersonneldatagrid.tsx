@@ -40,7 +40,10 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
       );
     }
 
-    getRoles().catch(ailogger.error);
+    // Guard: only fetch if all required context values are defined
+    if (currentPlot?.plotID && currentCensus?.plotCensusNumber && currentSite?.schemaName) {
+      getRoles().catch(ailogger.error);
+    }
   }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
 
   const filter = createFilterOptions<ExtendedRoleRDS>();

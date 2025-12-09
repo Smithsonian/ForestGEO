@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
         'sample_bulk_insert.csv',
         batchID,
         plot.plotID,
-        census.dateRanges[0].censusID,
+        census.dateRanges?.[0]?.censusID,
         row.tag,
         row.stemtag,
         row.spcode,

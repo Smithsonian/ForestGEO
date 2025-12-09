@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
   const formType: string = body.formType;
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
-  const censusCookie = Number((await getCookie('censusID')) ?? census?.dateRanges[0].censusID ?? -1);
+  const censusCookie = Number((await getCookie('censusID')) ?? census?.dateRanges?.[0]?.censusID ?? -1);
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
@@ -492,7 +492,7 @@ export async function POST(request: NextRequest) {
       // Track file upload in unifiedchangelog (single row per file)
       try {
         const batchRowCount = Object.keys(fileRowSet).length;
-        const censusID = census?.dateRanges[0]?.censusID;
+        const censusID = census?.dateRanges?.[0]?.censusID;
 
         // Check if we've already logged this file upload - use format() for schema
         const existingEntrySQL = format(

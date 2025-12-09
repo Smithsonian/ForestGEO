@@ -46,6 +46,17 @@ vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 }));
 
+// Mock schema validation to accept test schemas
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: vi.fn((schema: string) => {
+    return ['myschema', 'testschema'].includes(schema);
+  }),
+  safeFormatQuery: vi.fn((schema: string, query: string) => {
+    // Replace ?? with schema name
+    return query.replace('??', `\`${schema}\``);
+  })
+}));
+
 // --------- Helpers ---------
 function makeProps(view?: string, schema?: string) {
   return { params: Promise.resolve({ view: view as any, schema: schema as any }) } as any;
@@ -56,11 +67,15 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     vi.clearAllMocks();
   });
 
-  it('throws if schema or view is missing/undefined', async () => {
-    await expect(POST(new NextRequest('http://localhost'), makeProps(undefined as any, 'myschema'))).rejects.toThrow(/schema not provided/i);
-    await expect(POST(new NextRequest('http://localhost'), makeProps('viewfulltable', undefined as any))).rejects.toThrow(/schema not provided/i);
-    await expect(POST(new NextRequest('http://localhost'), makeProps('undefined' as any, 'myschema'))).rejects.toThrow(/schema not provided/i);
-    await expect(POST(new NextRequest('http://localhost'), makeProps('viewfulltable', 'undefined' as any))).rejects.toThrow(/schema not provided/i);
+  it('returns 400 if schema or view is missing/undefined', async () => {
+    const res1 = await POST(new NextRequest('http://localhost'), makeProps(undefined as any, 'myschema'));
+    expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res2 = await POST(new NextRequest('http://localhost'), makeProps('viewfulltable', undefined as any));
+    expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res3 = await POST(new NextRequest('http://localhost'), makeProps('undefined' as any, 'myschema'));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res4 = await POST(new NextRequest('http://localhost'), makeProps('viewfulltable', 'undefined' as any));
+    expect(res4.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
   it('viewfulltable: calls RefreshViewFullTable(), commits, and closes', async () => {
@@ -75,7 +90,8 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(begin).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith('CALL myschema.RefreshViewFullTable();');
+    // safeFormatQuery wraps schema in backticks
+    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshViewFullTable()');
     expect(commit).toHaveBeenCalledWith('tx-1');
     expect(rollback).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
@@ -93,29 +109,24 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(begin).toHaveBeenCalledTimes(1);
-    expect(exec).toHaveBeenCalledWith('CALL myschema.RefreshMeasurementsSummary();');
+    // safeFormatQuery wraps schema in backticks
+    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()');
     expect(commit).toHaveBeenCalledWith('tx-2');
     expect(rollback).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('unknown view: calls Refresh() (empty suffix), commits, and closes', async () => {
+  it('unknown view: returns 400 for invalid view name', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
-    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce(undefined);
-    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+    const begin = vi.spyOn(cm, 'beginTransaction');
+    const exec = vi.spyOn(cm, 'executeQuery');
 
+    // Route now validates view against whitelist and rejects unknown views
     const res = await POST(new NextRequest('http://localhost', { method: 'POST' }), makeProps('someotherview', 'myschema'));
 
-    expect(res.status).toBe(HTTPResponses.OK);
-    expect(begin).toHaveBeenCalledTimes(1);
-    // The route builds: `CALL schema.Refresh${''}();` -> `CALL schema.Refresh();`
-    expect(exec).toHaveBeenCalledWith('CALL myschema.Refresh();');
-    expect(commit).toHaveBeenCalledWith('tx-3');
-    expect(rollback).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
+    expect(begin).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it('on error: rolls back with the transaction id and closes', async () => {
