@@ -1,6 +1,7 @@
 'use client';
 import Autocomplete from '@mui/material/Autocomplete';
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { CircularProgress, Popper, TextField, Alert, Box } from '@mui/material';
 import { useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
@@ -19,15 +20,13 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   const [error, setError] = useState<string | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const isMountedRef = useRef<boolean>(true);
+  const { isMountedRef } = useIsMounted();
 
   const currentSite = useSiteContext();
 
-  // Cleanup on unmount
+  // Cleanup abort controller on unmount
   useEffect(() => {
-    isMountedRef.current = true;
     return () => {
-      isMountedRef.current = false;
       // Abort any pending fetch on unmount
       abortControllerRef.current?.abort();
     };

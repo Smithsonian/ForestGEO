@@ -1,5 +1,6 @@
 'use client';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, Button, Card, CardContent, Divider, Stack, Typography } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
@@ -21,14 +22,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
   const [isLoading, setIsLoading] = useState(true);
 
   // Track mount state to prevent state updates after unmount
-  const isMountedRef = useRef(true);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   // Extract census ID to satisfy ESLint dependency rules
   const censusID = currentCensus?.dateRanges?.[0]?.censusID;

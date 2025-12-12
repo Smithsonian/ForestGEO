@@ -1,7 +1,8 @@
 // userstosites.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import {
   Autocomplete,
@@ -102,12 +103,7 @@ export default function UsersToSitesPage() {
   }, [sites]);
 
   // Track mounted state to prevent state updates after unmount
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   // Fetch initial data
   useEffect(() => {

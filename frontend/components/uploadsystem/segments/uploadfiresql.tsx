@@ -1,5 +1,6 @@
 'use client';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
@@ -104,7 +105,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   // refs
   const hasUploaded = useRef(false);
-  const isMountedRef = useRef(true); // Tracks component mount state for async operations
+  const { isMountedRef } = useIsMounted(); // Tracks component mount state for async operations
 
   const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
