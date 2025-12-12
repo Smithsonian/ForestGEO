@@ -80,7 +80,8 @@ jobs:
       - name: Move directories into build/standalone to reduce app load
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
-          mv ./frontend/public ./frontend/build/standalone
+          # Merge public folder contents (standalone may already have a public dir with some assets)
+          cp -r ./frontend/public/* ./frontend/build/standalone/public/
           # Copy .env file to standalone folder for runtime access to server-side env vars
           cp ./frontend/.env ./frontend/build/standalone/.env
           # Copy env loader script

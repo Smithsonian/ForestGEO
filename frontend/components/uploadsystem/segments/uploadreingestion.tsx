@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
@@ -41,8 +42,8 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
   const totalProcessCompletionTimeRef = useRef(0);
   const chunkProcessStartTime = useRef(0);
   const batchProcessingStartedRef = useRef<boolean>(false);
-  // Use a ref for isMounted to survive React 18 Strict Mode's double-effect execution
-  const isMountedRef = useRef<boolean>(true);
+  // Use hook for isMounted to survive React 18 Strict Mode's double-effect execution
+  const { isMountedRef } = useIsMounted();
 
   const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
     const controller = new AbortController();

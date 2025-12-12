@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
 import { Box, Button, Typography, Stack, LinearProgress } from '@mui/joy';
@@ -26,19 +27,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [continueDisabled, setContinueDisabled] = useState<boolean>(true); // To control the Continue button
 
   const hasUploaded = useRef(false);
-  const isMountedRef = useRef(true);
+  const { isMountedRef } = useIsMounted();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-
-  // Cleanup on unmount - reset isMountedRef on mount (important for React StrictMode remounts)
-  useEffect(() => {
-    ailogger.info('[UploadFireAzure] Mount effect running, setting isMountedRef = true');
-    isMountedRef.current = true;
-    return () => {
-      ailogger.info('[UploadFireAzure] Mount effect cleanup, setting isMountedRef = false');
-      isMountedRef.current = false;
-    };
-  }, []);
 
   const uploadToStorage = useCallback(
     async (file: FileWithPath) => {

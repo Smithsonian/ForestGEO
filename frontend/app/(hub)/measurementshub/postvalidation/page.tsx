@@ -2,7 +2,8 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -30,12 +31,7 @@ export default function PostValidationPage() {
   const { setLoading } = useLoading();
 
   // Track mounted state to prevent state updates after unmount
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);

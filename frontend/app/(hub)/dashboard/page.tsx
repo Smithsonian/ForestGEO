@@ -13,6 +13,7 @@ import { useOrgCensusContext, useOrgCensusListContext, useOrgCensusListDispatch,
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -116,12 +117,11 @@ export default function DashboardPage() {
   const changelogAbortControllerRef = useRef<AbortController | null>(null);
 
   // Track mounted state for safe state updates
-  const isMountedRef = useRef(true);
+  const { isMountedRef } = useIsMounted();
 
   // Cleanup timer and abort controllers on unmount
   useEffect(() => {
     return () => {
-      isMountedRef.current = false;
       if (censusCreationTimerRef.current) {
         clearTimeout(censusCreationTimerRef.current);
       }

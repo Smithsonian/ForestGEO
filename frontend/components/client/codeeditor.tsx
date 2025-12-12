@@ -2,6 +2,7 @@
 'use client';
 
 import React, { Dispatch, SetStateAction, useEffect, useState, useRef, useCallback } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { basicSetup } from 'codemirror';
 import { sql } from '@codemirror/lang-sql';
 import { format as sqlFormat } from 'sql-formatter';
@@ -52,14 +53,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
   const [isValidating, setIsValidating] = useState(false);
   const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isMountedRef = useRef(true);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   useEffect(() => {
     try {

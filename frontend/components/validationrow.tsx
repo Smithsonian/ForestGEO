@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { Box, TableCell, TableRow } from '@mui/material';
 import { Cancel, Edit, Save, Download } from '@mui/icons-material';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
@@ -59,15 +60,8 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
     message: '',
     color: 'success'
   });
-  const originalScriptContent = useRef<string>(validation.definition ?? '');
-  const isMountedRef = useRef(true);
-
-  // Cleanup on unmount
-  React.useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const originalScriptContent = React.useRef<string>(validation.definition ?? '');
+  const { isMountedRef } = useIsMounted();
 
   // Sync script content when validation changes
   React.useEffect(() => {

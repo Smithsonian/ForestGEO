@@ -1,5 +1,6 @@
 'use client';
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { tableHeaderSettings } from '@/config/macros';
 import { fileColumns, UploadedFileData } from '@/config/macros/formdetails';
 import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
@@ -86,12 +87,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Track mounted state to prevent state updates after unmount
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   const handleDownload = async (filename: string) => {
     try {

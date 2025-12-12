@@ -16,7 +16,8 @@ import {
   Typography
 } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
 
@@ -41,14 +42,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   const currentSite = useSiteContext();
 
   // Track mount state to prevent state updates after unmount
-  const isMountedRef = useRef(true);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   const fetchRecordCounts = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {

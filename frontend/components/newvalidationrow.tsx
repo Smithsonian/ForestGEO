@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useIsMounted } from '@/app/hooks/useIsMounted';
 import { Box, TableCell, TableRow, TextField } from '@mui/material';
 import { Cancel, Save, Code } from '@mui/icons-material';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
@@ -25,14 +26,7 @@ const NewValidationRow: React.FC<NewValidationRowProps> = ({ validation, onValid
     message: '',
     color: 'success'
   });
-  const isMountedRef = React.useRef(true);
-
-  // Cleanup on unmount
-  React.useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const { isMountedRef } = useIsMounted();
 
   // Default validation query template following corequeries.sql patterns
   const defaultTemplate = `INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
