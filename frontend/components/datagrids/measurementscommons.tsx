@@ -216,6 +216,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const { setLoading } = useLoading();
   // use the session
   const { data: session } = useSession();
+  // Track mounted state for safe state updates in deferred callbacks
+  const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
 
@@ -470,17 +472,27 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
   // helper functions for usage:
-  const handleSortModelChange = (newModel: GridSortModel) => {
-    setSortModel(newModel);
+  const handleSortModelChange = useCallback(
+    (newModel: GridSortModel) => {
+      // Defer state updates to avoid "Cannot update a component while rendering" error
+      // This can happen when DataGrid calls onSortModelChange during its render phase
+      queueMicrotask(() => {
+        // Guard against state updates before mount or after unmount
+        if (!isMountedRef.current) return;
 
-    if (newModel.length > 0) {
-      const { field, sort } = newModel[0];
-      if (field === 'measurementDate') {
-        const sortedRows = sortRowsByMeasurementDate(rows, sort);
-        setRows(sortedRows);
-      }
-    }
-  };
+        setSortModel(newModel);
+
+        if (newModel.length > 0) {
+          const { field, sort } = newModel[0];
+          if (field === 'measurementDate') {
+            const sortedRows = sortRowsByMeasurementDate(rows, sort);
+            setRows(sortedRows);
+          }
+        }
+      });
+    },
+    [rows, isMountedRef]
+  );
 
   const cellHasError = useCallback(
     (colField: string, rowId: GridRowId) => {
