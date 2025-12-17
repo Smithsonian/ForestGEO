@@ -3,8 +3,8 @@
     "baseUrl": ".",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "target": "es2017",
-    "lib": ["dom", "dom.iterable", "esnext", "es2015"],
+    "target": "es2018",
+    "lib": ["dom", "dom.iterable", "esnext", "es2018"],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -28,5 +28,5 @@
     "types": ["cypress", "node"]
   },
   "include": ["types/next-auth.d.ts", "next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "build/types/**/*.ts", "**/*.sql", "**/*.d.ts"],
-  "exclude": ["node_modules", "docs/**/*", "cypress/**/*", "**/*.cy.ts", "**/*.cy.tsx", "**/*.cy.js"]
+  "exclude": ["node_modules", "docs/**/*", "cypress/**/*", "**/*.cy.ts", "**/*.cy.tsx", "**/*.cy.js", "build/standalone/**/*"]
 }

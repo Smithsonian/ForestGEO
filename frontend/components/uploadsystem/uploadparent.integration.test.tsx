@@ -18,7 +18,7 @@ import React from 'react';
 
 // Mock AttributeStatusOptions and HC functions
 vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     AttributeStatusOptions: ['alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'],
@@ -37,7 +37,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
 
 // Mock views HC functions
 vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getAllViewFullTableViewsHCs: () => ({
@@ -72,7 +72,7 @@ vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
 
 // Mock personnel HC functions
 vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getPersonnelHCs: () => ({
@@ -84,7 +84,7 @@ vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
 
 // Mock zones HC functions
 vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getQuadratHCs: () => ({
@@ -97,7 +97,7 @@ vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
 
 // Mock taxonomies HC functions
 vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getSpeciesLimitsHCs: () => ({

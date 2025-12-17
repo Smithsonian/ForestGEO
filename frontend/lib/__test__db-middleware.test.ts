@@ -15,7 +15,7 @@ import {
   withQuery as _withQuery,
   withTransaction as _withTransaction,
   ErrorResponses as _ErrorResponses
-} from '../db-middleware';
+} from './db-middleware';
 
 describe('Database Middleware Verification', () => {
   console.log('\n=== DATABASE MIDDLEWARE IMPLEMENTATION VERIFICATION ===\n');
