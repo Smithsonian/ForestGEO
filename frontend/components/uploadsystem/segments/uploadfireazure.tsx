@@ -8,6 +8,7 @@ import { Box, Button, Typography, Stack, LinearProgress } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
+import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
@@ -30,6 +31,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const { isMountedRef } = useIsMounted();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { getAnimationUrl } = useAnimationCacheContext();
 
   const uploadToStorage = useCallback(
     async (file: FileWithPath) => {
@@ -168,7 +170,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             }}
           >
             <DotLottieReact
-              src="/api/animations/uploading.lottie"
+              src={getAnimationUrl('uploading.lottie')}
               loop
               autoplay
               style={{
