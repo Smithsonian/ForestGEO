@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
-import { AnimationName, getAnimationPath, preloadAnimations } from '@/app/hooks/useAnimationCache';
+import { AnimationName, getAnimationPath, preloadAnimations } from '@/app/hooks/useanimationcache';
 
 /**
  * Animation Cache Context (Simplified)
