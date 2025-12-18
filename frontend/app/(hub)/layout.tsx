@@ -89,34 +89,38 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const fetchSiteListFn = useCallback(async () => {
     const sites = session?.user?.allsites ?? [];
     if (sites.length === 0) {
-      const response = await fetch(`/api/fetchall/sites/0/0?schema=`);
+      const response = await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=`);
       const allsites = await response.json();
       if (siteListDispatch) await siteListDispatch({ siteList: allsites });
     } else {
       if (siteListDispatch) await siteListDispatch({ siteList: sites });
     }
     setSiteListLoaded(true);
-  }, [session?.user?.allsites, siteListDispatch]);
+  }, [session?.user?.allsites, siteListDispatch, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const fetchPlotDataFn = useCallback(async () => {
     if (!currentSite?.schemaName) return;
-    const response = await fetch(`/api/fetchall/plots/0/0?schema=${currentSite.schemaName}`);
+    const response = await fetch(
+      `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+    );
     const plotsData = await response.json();
     if (!plotsData) throw new Error('Failed to load plots data');
     if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
     setPlotListLoaded(true);
-  }, [currentSite?.schemaName, plotListDispatch]);
+  }, [currentSite?.schemaName, plotListDispatch, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const fetchCensusDataFn = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID) return;
-    const response = await fetch(`/api/fetchall/census/0/0?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`);
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
+    );
     const censusRDSLoad = await response.json();
     if (!censusRDSLoad) throw new Error('Failed to load census data');
     const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
     const censusList = await createAndUpdateCensusList(censusArray);
     if (censusListDispatch) await censusListDispatch({ censusList });
     setCensusListLoaded(true);
-  }, [currentSite?.schemaName, currentPlot?.plotID, censusListDispatch]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, censusListDispatch]);
 
   const fetchQuadratDataFn = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.plotCensusNumber) return;
