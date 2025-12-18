@@ -246,17 +246,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const data = await response.json();
       const countsData = data[0];
 
-      setValidCount(countsData.CountValid);
-      setErrorCount(countsData.CountErrors);
-      setPendingCount(countsData.CountPending);
-      setOTCount(countsData.CountOldTrees);
-      setMSCount(countsData.CountMultiStems);
-      setNRCount(countsData.CountNewRecruits);
+      setValidCount(Number(countsData.CountValid) || 0);
+      setErrorCount(Number(countsData.CountErrors) || 0);
+      setPendingCount(Number(countsData.CountPending) || 0);
+      setOTCount(Number(countsData.CountOldTrees) || 0);
+      setMSCount(Number(countsData.CountMultiStems) || 0);
+      setNRCount(Number(countsData.CountNewRecruits) || 0);
 
       const counts = [
-        { count: countsData.CountErrors, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
-        { count: countsData.CountPending, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
-        { count: countsData.CountValid, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
+        { count: Number(countsData.CountErrors) || 0, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
+        { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
       const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
       if (highestCount.count !== null) {
@@ -274,7 +274,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       });
       if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
       const failedData = await failedResponse.json();
-      setFailedCount(failedData[0].CountFailed);
+      setFailedCount(Number(failedData[0].CountFailed) || 0);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error refreshing counts:', errorObj);
