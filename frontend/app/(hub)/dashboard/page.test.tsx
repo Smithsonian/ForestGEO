@@ -37,7 +37,7 @@ vi.mock('@/components/metrics/progresspiechart', () => ({
   default: ({ PopulatedPercent }: any) => <div data-testid="piechart">{PopulatedPercent}%</div>
 }));
 vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getAllViewFullTableViewsHCs: () => ({
@@ -70,7 +70,7 @@ vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
   };
 });
 vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getFailedMeasurementsHCs: () => ({
@@ -86,7 +86,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
   };
 });
 vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getPersonnelHCs: () => ({
@@ -96,7 +96,7 @@ vi.mock('@/config/sqlrdsdefinitions/personnel', async importOriginal => {
   };
 });
 vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getQuadratHCs: () => ({
@@ -107,7 +107,7 @@ vi.mock('@/config/sqlrdsdefinitions/zones', async importOriginal => {
   };
 });
 vi.mock('@/config/sqlrdsdefinitions/taxonomies', async importOriginal => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     getSpeciesLimitsHCs: () => ({

@@ -4,6 +4,7 @@ import { Box, LinearProgress, Typography, CircularProgress, Stack, Chip } from '
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
+import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
@@ -50,6 +51,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { getAnimationUrl } = useAnimationCacheContext();
 
   const plotID = currentPlot?.plotID;
 
@@ -430,7 +432,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
               }}
             >
               <DotLottieReact
-                src="/api/animations/file-check.lottie"
+                src={getAnimationUrl('file-check.lottie')}
                 loop
                 autoplay
                 style={{

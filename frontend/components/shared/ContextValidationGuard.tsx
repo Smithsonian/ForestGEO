@@ -2,7 +2,7 @@
 import React from 'react';
 import { Alert, Box, Button, Typography } from '@mui/joy';
 import { Info as InfoIcon, Warning as WarningIcon } from '@mui/icons-material';
-import { useContextValidation, ContextValidationOptions } from '@/app/hooks/useContextValidation';
+import { useContextValidation, ContextValidationOptions } from '@/app/hooks/usecontextvalidation';
 
 interface ContextValidationGuardProps extends ContextValidationOptions {
   children: React.ReactNode;
