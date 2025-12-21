@@ -1,0 +1,261 @@
+---
+/**
+ * Screenshot Component
+ * Displays annotated screenshots with captions, borders, and optional zoom.
+ * Provides consistent styling for documentation images.
+ */
+
+import { Image } from 'astro:assets';
+
+interface Props {
+  src: ImageMetadata | string;
+  alt: string;
+  caption?: string;
+  width?: number;
+  border?: boolean;
+  shadow?: boolean;
+  rounded?: boolean;
+  zoomable?: boolean;
+  annotation?: string;
+  annotationPosition?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+}
+
+const {
+  src,
+  alt,
+  caption,
+  width,
+  border = true,
+  shadow = true,
+  rounded = true,
+  zoomable = true,
+  annotation,
+  annotationPosition = 'top-right',
+} = Astro.props;
+
+const containerClasses = [
+  'screenshot-container',
+  border && 'has-border',
+  shadow && 'has-shadow',
+  rounded && 'has-rounded',
+  zoomable && 'is-zoomable',
+].filter(Boolean).join(' ');
+---
+
+<figure class={containerClasses}>
+  <div class="screenshot-wrapper">
+    {typeof src === 'string' ? (
+      <img
+        src={src}
+        alt={alt}
+        width={width}
+        loading="lazy"
+        class="screenshot-image"
+      />
+    ) : (
+      <Image
+        src={src}
+        alt={alt}
+        width={width}
+        loading="lazy"
+        class="screenshot-image"
+      />
+    )}
+
+    {annotation && (
+      <span class={`screenshot-annotation ${annotationPosition}`}>
+        {annotation}
+      </span>
+    )}
+  </div>
+
+  {caption && (
+    <figcaption class="screenshot-caption">
+      {caption}
+    </figcaption>
+  )}
+</figure>
+
+<style>
+  .screenshot-container {
+    margin: 1.5rem 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .screenshot-wrapper {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+  }
+
+  .screenshot-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .has-border .screenshot-wrapper {
+    border: 1px solid var(--sl-color-gray-5);
+  }
+
+  .has-shadow .screenshot-wrapper {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .has-rounded .screenshot-wrapper {
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .has-rounded .screenshot-image {
+    border-radius: 8px;
+  }
+
+  .is-zoomable .screenshot-wrapper {
+    cursor: zoom-in;
+    transition: transform 0.3s ease;
+  }
+
+  .is-zoomable .screenshot-wrapper:hover {
+    transform: scale(1.02);
+  }
+
+  .is-zoomable .screenshot-wrapper:active {
+    transform: scale(1.5);
+    z-index: 100;
+    position: relative;
+  }
+
+  .screenshot-annotation {
+    position: absolute;
+    padding: 0.35rem 0.65rem;
+    background: var(--sl-color-accent);
+    color: var(--sl-color-black);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .screenshot-annotation.top-left {
+    top: 8px;
+    left: 8px;
+  }
+
+  .screenshot-annotation.top-right {
+    top: 8px;
+    right: 8px;
+  }
+
+  .screenshot-annotation.bottom-left {
+    bottom: 8px;
+    left: 8px;
+  }
+
+  .screenshot-annotation.bottom-right {
+    bottom: 8px;
+    right: 8px;
+  }
+
+  .screenshot-caption {
+    margin-top: 0.75rem;
+    padding: 0 1rem;
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-2);
+    text-align: center;
+    font-style: italic;
+    max-width: 600px;
+    line-height: 1.4;
+  }
+
+  @media (max-width: 768px) {
+    .is-zoomable .screenshot-wrapper:active {
+      transform: scale(1.2);
+    }
+  }
+</style>
+
+<script>
+  // Enhanced zoom functionality for zoomable screenshots
+  document.querySelectorAll('.is-zoomable .screenshot-wrapper').forEach((wrapper) => {
+    wrapper.addEventListener('click', (e) => {
+      const img = wrapper.querySelector('img');
+      if (!img) return;
+
+      // Create fullscreen overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'screenshot-overlay';
+      overlay.innerHTML = `
+        <div class="overlay-content">
+          <img src="${img.src}" alt="${img.alt}" />
+          <button class="close-btn" aria-label="Close">×</button>
+        </div>
+      `;
+
+      overlay.style.cssText = `
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        cursor: zoom-out;
+        padding: 2rem;
+      `;
+
+      const content = overlay.querySelector('.overlay-content') as HTMLElement;
+      if (content) {
+        content.style.cssText = `
+          position: relative;
+          max-width: 95vw;
+          max-height: 95vh;
+        `;
+      }
+
+      const overlayImg = overlay.querySelector('img') as HTMLElement;
+      if (overlayImg) {
+        overlayImg.style.cssText = `
+          max-width: 100%;
+          max-height: 90vh;
+          object-fit: contain;
+          border-radius: 8px;
+        `;
+      }
+
+      const closeBtn = overlay.querySelector('.close-btn') as HTMLElement;
+      if (closeBtn) {
+        closeBtn.style.cssText = `
+          position: absolute;
+          top: -40px;
+          right: 0;
+          background: none;
+          border: none;
+          color: white;
+          font-size: 2rem;
+          cursor: pointer;
+          padding: 0.5rem;
+          line-height: 1;
+        `;
+      }
+
+      document.body.appendChild(overlay);
+      document.body.style.overflow = 'hidden';
+
+      const closeOverlay = () => {
+        overlay.remove();
+        document.body.style.overflow = '';
+      };
+
+      overlay.addEventListener('click', closeOverlay);
+      closeBtn?.addEventListener('click', closeOverlay);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeOverlay();
+      }, { once: true });
+    });
+  });
+</script>
