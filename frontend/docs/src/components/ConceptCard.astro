@@ -1,0 +1,264 @@
+---
+/**
+ * ConceptCard Component
+ * Standardized concept introduction cards for "Understanding X" guides.
+ * Displays title, description, key points, and optional related links.
+ */
+
+interface RelatedLink {
+  label: string;
+  href: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  keyPoints?: string[];
+  icon?: string;
+  color?: 'blue' | 'green' | 'orange' | 'purple' | 'red';
+  relatedLinks?: RelatedLink[];
+}
+
+const { title, description, keyPoints, icon, color = 'blue', relatedLinks } = Astro.props;
+
+const colorConfig = {
+  blue: {
+    bg: 'var(--sl-color-blue-low)',
+    border: 'var(--sl-color-blue)',
+    accent: 'var(--sl-color-blue-high)',
+  },
+  green: {
+    bg: 'var(--sl-color-green-low)',
+    border: 'var(--sl-color-green)',
+    accent: 'var(--sl-color-green-high)',
+  },
+  orange: {
+    bg: 'var(--sl-color-orange-low)',
+    border: 'var(--sl-color-orange)',
+    accent: 'var(--sl-color-orange-high)',
+  },
+  purple: {
+    bg: 'var(--sl-color-purple-low)',
+    border: 'var(--sl-color-purple)',
+    accent: 'var(--sl-color-purple-high)',
+  },
+  red: {
+    bg: 'var(--sl-color-red-low)',
+    border: 'var(--sl-color-red)',
+    accent: 'var(--sl-color-red-high)',
+  },
+};
+
+const config = colorConfig[color];
+
+// Default icons for common concepts
+const defaultIcons: Record<string, string> = {
+  quadrat: '⊞',
+  species: '🌿',
+  personnel: '👤',
+  stem: '🌲',
+  data: '📊',
+  default: '📚',
+};
+
+const displayIcon = icon || defaultIcons[title.toLowerCase().split(' ')[0]] || defaultIcons.default;
+---
+
+<div class="concept-card" style={`border-color: ${config.border};`}>
+  <div class="card-header" style={`background: ${config.bg};`}>
+    <span class="card-icon" style={`color: ${config.accent};`}>
+      {displayIcon}
+    </span>
+    <div class="card-title-area">
+      <span class="card-label">Understanding</span>
+      <h3 class="card-title">{title}</h3>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <p class="card-description">{description}</p>
+
+    {keyPoints && keyPoints.length > 0 && (
+      <div class="key-points">
+        <span class="points-label">Key Points</span>
+        <ul class="points-list">
+          {keyPoints.map((point) => (
+            <li class="point-item">
+              <span class="point-bullet" style={`background: ${config.border};`}></span>
+              <span class="point-text">{point}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+
+    {relatedLinks && relatedLinks.length > 0 && (
+      <div class="related-links">
+        <span class="links-label">Learn More</span>
+        <div class="links-list">
+          {relatedLinks.map((link) => (
+            <a href={link.href} class="related-link" style={`color: ${config.accent};`}>
+              {link.label}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .concept-card {
+    margin: 1.5rem 0;
+    background: var(--sl-color-gray-7);
+    border-radius: 12px;
+    border: 2px solid;
+    overflow: hidden;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .card-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+
+  .card-title-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .card-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .card-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--sl-color-white);
+    line-height: 1.2;
+  }
+
+  .card-body {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .card-description {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+
+  .key-points {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .points-label,
+  .links-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .points-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .point-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .point-bullet {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-top: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .point-text {
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+  }
+
+  .related-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+  }
+
+  .links-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .related-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .related-link:hover {
+    opacity: 0.8;
+    text-decoration: underline;
+  }
+
+  .related-link svg {
+    opacity: 0.7;
+  }
+
+  @media (max-width: 768px) {
+    .card-header {
+      padding: 1rem 1.25rem;
+    }
+
+    .card-body {
+      padding: 1.25rem;
+    }
+
+    .card-icon {
+      font-size: 1.5rem;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+    }
+  }
+</style>

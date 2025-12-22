@@ -1,0 +1,280 @@
+---
+/**
+ * ProcessFlow Component
+ * Renders visual workflow diagrams with steps, branches, and connections.
+ * Replaces ASCII-art flowcharts with styled visual representations.
+ */
+
+interface FlowStep {
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  status?: 'default' | 'success' | 'warning' | 'error' | 'active';
+}
+
+interface FlowBranch {
+  condition: string;
+  steps: FlowStep[];
+}
+
+interface Props {
+  title?: string;
+  steps: FlowStep[];
+  branch?: FlowBranch;
+  direction?: 'horizontal' | 'vertical';
+  showNumbers?: boolean;
+}
+
+const { title, steps, branch, direction = 'horizontal', showNumbers = true } = Astro.props;
+
+const statusColors = {
+  default: { bg: 'var(--sl-color-gray-6)', border: 'var(--sl-color-gray-4)', text: 'var(--sl-color-white)' },
+  success: { bg: 'var(--sl-color-green-low)', border: 'var(--sl-color-green)', text: 'var(--sl-color-green-high)' },
+  warning: { bg: 'var(--sl-color-orange-low)', border: 'var(--sl-color-orange)', text: 'var(--sl-color-orange-high)' },
+  error: { bg: 'var(--sl-color-red-low)', border: 'var(--sl-color-red)', text: 'var(--sl-color-red-high)' },
+  active: { bg: 'var(--sl-color-accent-low)', border: 'var(--sl-color-accent)', text: 'var(--sl-color-accent-high)' },
+};
+---
+
+<div class={`process-flow ${direction}`}>
+  {title && <h4 class="flow-title">{title}</h4>}
+
+  <div class="flow-container">
+    <div class="main-flow">
+      {steps.map((step, index) => (
+        <div class="flow-item">
+          <div
+            class={`flow-step ${step.status || 'default'}`}
+            style={`background: ${statusColors[step.status || 'default'].bg}; border-color: ${statusColors[step.status || 'default'].border};`}
+          >
+            {showNumbers && <span class="step-number">{index + 1}</span>}
+            <span class="step-label" style={`color: ${statusColors[step.status || 'default'].text};`}>
+              {step.label}
+            </span>
+            {step.description && <span class="step-description">{step.description}</span>}
+          </div>
+
+          {index < steps.length - 1 && (
+            <div class="flow-arrow">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                {direction === 'horizontal' ? (
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                ) : (
+                  <path d="M12 5v14M5 12l7 7 7-7" />
+                )}
+              </svg>
+            </div>
+          )}
+
+          {branch && index === Math.floor(steps.length / 2) - 1 && (
+            <div class="branch-indicator">
+              <div class="branch-arrow">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12l7 7 7-7" />
+                </svg>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+
+    {branch && (
+      <div class="branch-flow">
+        <div class="branch-condition">
+          <span class="condition-label">{branch.condition}</span>
+        </div>
+        <div class="branch-steps">
+          {branch.steps.map((step, index) => (
+            <div class="flow-item">
+              <div
+                class={`flow-step ${step.status || 'default'}`}
+                style={`background: ${statusColors[step.status || 'default'].bg}; border-color: ${statusColors[step.status || 'default'].border};`}
+              >
+                <span class="step-label" style={`color: ${statusColors[step.status || 'default'].text};`}>
+                  {step.label}
+                </span>
+                {step.description && <span class="step-description">{step.description}</span>}
+              </div>
+
+              {index < branch.steps.length - 1 && (
+                <div class="flow-arrow">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                  </svg>
+                </div>
+              )}
+            </div>
+          ))}
+          <div class="branch-rejoin">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .process-flow {
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    background: var(--sl-color-gray-7);
+    border-radius: 12px;
+    border: 1px solid var(--sl-color-gray-5);
+  }
+
+  .flow-title {
+    margin: 0 0 1.25rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .main-flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .process-flow.vertical .main-flow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .flow-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+  }
+
+  .process-flow.vertical .flow-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .flow-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 2px solid;
+    min-width: 100px;
+    text-align: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .flow-step:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .step-number {
+    position: absolute;
+    top: -8px;
+    left: -8px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--sl-color-accent);
+    color: var(--sl-color-black);
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+
+  .step-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .step-description {
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-2);
+    max-width: 120px;
+  }
+
+  .flow-arrow {
+    color: var(--sl-color-gray-3);
+    flex-shrink: 0;
+  }
+
+  .process-flow.vertical .flow-arrow {
+    transform: rotate(90deg);
+  }
+
+  .branch-flow {
+    margin-left: 2rem;
+    padding-left: 1.5rem;
+    border-left: 2px dashed var(--sl-color-orange);
+  }
+
+  .branch-condition {
+    margin-bottom: 0.75rem;
+  }
+
+  .condition-label {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    background: var(--sl-color-orange-low);
+    color: var(--sl-color-orange-high);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .branch-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .branch-indicator {
+    position: absolute;
+    bottom: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .branch-arrow,
+  .branch-rejoin {
+    color: var(--sl-color-orange);
+  }
+
+  .branch-rejoin {
+    margin-left: 0.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .process-flow.horizontal .main-flow,
+    .process-flow.horizontal .branch-steps {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .process-flow.horizontal .flow-arrow {
+      transform: rotate(90deg);
+    }
+
+    .flow-step {
+      min-width: 80px;
+      padding: 0.5rem 0.75rem;
+    }
+  }
+</style>

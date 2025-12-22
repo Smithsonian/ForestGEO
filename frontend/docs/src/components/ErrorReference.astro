@@ -1,0 +1,183 @@
+---
+/**
+ * ErrorReference Component
+ * Displays standardized error tables with Message, Cause, and Fix columns.
+ * Supports severity levels and optional category grouping.
+ */
+
+interface ErrorItem {
+  message: string;
+  cause: string;
+  fix: string;
+  severity?: 'error' | 'warning' | 'info';
+}
+
+interface Props {
+  errors: ErrorItem[];
+  title?: string;
+  category?: string;
+  showSeverity?: boolean;
+}
+
+const { errors, title, category, showSeverity = false } = Astro.props;
+
+const severityColors = {
+  error: { bg: 'var(--sl-color-red-low)', border: 'var(--sl-color-red)', text: 'var(--sl-color-red-high)' },
+  warning: { bg: 'var(--sl-color-orange-low)', border: 'var(--sl-color-orange)', text: 'var(--sl-color-orange-high)' },
+  info: { bg: 'var(--sl-color-blue-low)', border: 'var(--sl-color-blue)', text: 'var(--sl-color-blue-high)' },
+};
+---
+
+<div class="error-reference">
+  {title && <h3 class="error-title">{title}</h3>}
+  {category && <span class="error-category">{category}</span>}
+
+  <div class="error-table-wrapper">
+    <table class="error-table">
+      <thead>
+        <tr>
+          {showSeverity && <th class="severity-col">Severity</th>}
+          <th class="message-col">Error Message</th>
+          <th class="cause-col">Cause</th>
+          <th class="fix-col">How to Fix</th>
+        </tr>
+      </thead>
+      <tbody>
+        {errors.map((error) => (
+          <tr class={`error-row ${error.severity || 'info'}`}>
+            {showSeverity && (
+              <td class="severity-cell">
+                <span
+                  class="severity-badge"
+                  style={`background: ${severityColors[error.severity || 'info'].bg}; color: ${severityColors[error.severity || 'info'].text}; border-color: ${severityColors[error.severity || 'info'].border};`}
+                >
+                  {error.severity || 'info'}
+                </span>
+              </td>
+            )}
+            <td class="message-cell">
+              <code>{error.message}</code>
+            </td>
+            <td class="cause-cell">{error.cause}</td>
+            <td class="fix-cell">{error.fix}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .error-reference {
+    margin: 1.5rem 0;
+  }
+
+  .error-title {
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+    color: var(--sl-color-white);
+  }
+
+  .error-category {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    margin-bottom: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--sl-color-gray-6);
+    border-radius: 4px;
+    color: var(--sl-color-gray-2);
+  }
+
+  .error-table-wrapper {
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+  }
+
+  .error-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .error-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-gray-1);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 2px solid var(--sl-color-gray-5);
+  }
+
+  .error-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    vertical-align: top;
+  }
+
+  .error-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .error-table tbody tr:hover {
+    background: var(--sl-color-gray-7);
+  }
+
+  .severity-col {
+    width: 80px;
+  }
+
+  .message-col {
+    width: 30%;
+  }
+
+  .cause-col {
+    width: 35%;
+  }
+
+  .fix-col {
+    width: 35%;
+  }
+
+  .message-cell code {
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    background: var(--sl-color-gray-6);
+    border-radius: 4px;
+    color: var(--sl-color-red-high);
+    word-break: break-word;
+  }
+
+  .severity-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    border-radius: 4px;
+    border: 1px solid;
+  }
+
+  .cause-cell,
+  .fix-cell {
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+  }
+
+  @media (max-width: 768px) {
+    .error-table {
+      font-size: 0.8rem;
+    }
+
+    .error-table th,
+    .error-table td {
+      padding: 0.5rem;
+    }
+  }
+</style>

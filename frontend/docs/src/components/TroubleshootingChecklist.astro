@@ -1,0 +1,437 @@
+---
+/**
+ * TroubleshootingChecklist Component
+ * Interactive checklist for troubleshooting steps with progress tracking.
+ * Persists state in localStorage for continuity.
+ */
+
+interface ChecklistItem {
+  text: string;
+  hint?: string;
+}
+
+interface Props {
+  title?: string;
+  steps: ChecklistItem[] | string[];
+  persistKey?: string;
+  showProgress?: boolean;
+  resetable?: boolean;
+}
+
+const {
+  title = 'Troubleshooting Checklist',
+  steps,
+  persistKey,
+  showProgress = true,
+  resetable = true,
+} = Astro.props;
+
+// Normalize steps to always have objects
+const normalizedSteps: ChecklistItem[] = steps.map((step) =>
+  typeof step === 'string' ? { text: step } : step
+);
+
+const checklistId = persistKey || `checklist-${Math.random().toString(36).slice(2, 9)}`;
+---
+
+<div class="troubleshooting-checklist" data-checklist-id={checklistId}>
+  <div class="checklist-header">
+    <div class="header-left">
+      <svg class="header-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 11l3 3L22 4" />
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      </svg>
+      <h4 class="checklist-title">{title}</h4>
+    </div>
+
+    <div class="header-right">
+      {showProgress && (
+        <div class="progress-indicator">
+          <span class="progress-text">
+            <span class="completed-count">0</span> / {normalizedSteps.length}
+          </span>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      )}
+
+      {resetable && (
+        <button class="reset-button" aria-label="Reset checklist">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          Reset
+        </button>
+      )}
+    </div>
+  </div>
+
+  <ul class="checklist-items">
+    {normalizedSteps.map((step, index) => (
+      <li class="checklist-item" data-index={index}>
+        <label class="item-label">
+          <input type="checkbox" class="item-checkbox" />
+          <span class="checkbox-custom">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </span>
+          <span class="item-content">
+            <span class="item-number">{index + 1}.</span>
+            <span class="item-text">{step.text}</span>
+          </span>
+        </label>
+        {step.hint && (
+          <span class="item-hint">{step.hint}</span>
+        )}
+      </li>
+    ))}
+  </ul>
+
+  <div class="checklist-footer">
+    <div class="completion-message" style="display: none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+        <path d="M22 4L12 14.01l-3-3" />
+      </svg>
+      All steps completed!
+    </div>
+  </div>
+</div>
+
+<style>
+  .troubleshooting-checklist {
+    margin: 1.5rem 0;
+    background: var(--sl-color-gray-7);
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+    overflow: hidden;
+  }
+
+  .checklist-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--sl-color-gray-6);
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+  }
+
+  .header-icon {
+    color: var(--sl-color-accent);
+    flex-shrink: 0;
+  }
+
+  .checklist-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .progress-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+  }
+
+  .progress-text {
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-2);
+    font-family: var(--sl-font-mono);
+  }
+
+  .completed-count {
+    font-weight: 600;
+    color: var(--sl-color-accent);
+  }
+
+  .progress-bar {
+    width: 60px;
+    height: 6px;
+    background: var(--sl-color-gray-5);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--sl-color-accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .reset-button {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.65rem;
+    background: none;
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 4px;
+    color: var(--sl-color-gray-2);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .reset-button:hover {
+    background: var(--sl-color-gray-5);
+    border-color: var(--sl-color-gray-3);
+    color: var(--sl-color-white);
+  }
+
+  .checklist-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .checklist-item {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    transition: background 0.2s;
+  }
+
+  .checklist-item:last-child {
+    border-bottom: none;
+  }
+
+  .checklist-item:hover {
+    background: var(--sl-color-gray-6);
+  }
+
+  .checklist-item.checked {
+    background: var(--sl-color-green-low);
+  }
+
+  .item-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+  }
+
+  .item-checkbox {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .checkbox-custom {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: var(--sl-color-gray-6);
+    border: 2px solid var(--sl-color-gray-4);
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    transition: all 0.2s;
+  }
+
+  .checkbox-custom svg {
+    opacity: 0;
+    color: white;
+    transition: opacity 0.2s;
+  }
+
+  .checklist-item.checked .checkbox-custom {
+    background: var(--sl-color-green);
+    border-color: var(--sl-color-green);
+  }
+
+  .checklist-item.checked .checkbox-custom svg {
+    opacity: 1;
+  }
+
+  .item-content {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+  }
+
+  .item-number {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--sl-color-gray-3);
+    flex-shrink: 0;
+  }
+
+  .item-text {
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+    transition: color 0.2s;
+  }
+
+  .checklist-item.checked .item-text {
+    color: var(--sl-color-green-high);
+    text-decoration: line-through;
+    text-decoration-color: var(--sl-color-green);
+  }
+
+  .item-hint {
+    display: block;
+    margin: 0 1.25rem 1rem 3.25rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-3);
+    background: var(--sl-color-gray-6);
+    border-radius: 4px;
+    border-left: 2px solid var(--sl-color-gray-4);
+  }
+
+  .checklist-footer {
+    padding: 0;
+  }
+
+  .completion-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: var(--sl-color-green-low);
+    color: var(--sl-color-green-high);
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-top: 1px solid var(--sl-color-green);
+  }
+
+  .completion-message svg {
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 768px) {
+    .checklist-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .progress-indicator {
+      order: -1;
+      width: 100%;
+    }
+
+    .progress-bar {
+      flex: 1;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.troubleshooting-checklist').forEach((checklist) => {
+    const id = checklist.getAttribute('data-checklist-id') || 'default';
+    const storageKey = `checklist-state-${id}`;
+    const items = checklist.querySelectorAll('.checklist-item');
+    const checkboxes = checklist.querySelectorAll('.item-checkbox') as NodeListOf<HTMLInputElement>;
+    const progressFill = checklist.querySelector('.progress-fill') as HTMLElement;
+    const completedCount = checklist.querySelector('.completed-count');
+    const completionMessage = checklist.querySelector('.completion-message') as HTMLElement;
+    const resetButton = checklist.querySelector('.reset-button');
+
+    const totalItems = items.length;
+
+    // Load saved state
+    const loadState = () => {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          const checked = JSON.parse(saved) as number[];
+          checked.forEach((index) => {
+            const checkbox = checkboxes[index];
+            if (checkbox) {
+              checkbox.checked = true;
+              items[index]?.classList.add('checked');
+            }
+          });
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+      updateProgress();
+    };
+
+    // Save state
+    const saveState = () => {
+      const checked: number[] = [];
+      checkboxes.forEach((cb, index) => {
+        if (cb.checked) checked.push(index);
+      });
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(checked));
+      } catch (e) {
+        // Ignore errors
+      }
+    };
+
+    // Update progress
+    const updateProgress = () => {
+      let completed = 0;
+      checkboxes.forEach((cb) => {
+        if (cb.checked) completed++;
+      });
+
+      const percent = (completed / totalItems) * 100;
+
+      if (progressFill) {
+        progressFill.style.width = `${percent}%`;
+      }
+
+      if (completedCount) {
+        completedCount.textContent = String(completed);
+      }
+
+      if (completionMessage) {
+        completionMessage.style.display = completed === totalItems ? 'flex' : 'none';
+      }
+    };
+
+    // Handle checkbox changes
+    checkboxes.forEach((checkbox, index) => {
+      checkbox.addEventListener('change', () => {
+        items[index]?.classList.toggle('checked', checkbox.checked);
+        updateProgress();
+        saveState();
+      });
+    });
+
+    // Handle reset
+    resetButton?.addEventListener('click', () => {
+      checkboxes.forEach((cb, index) => {
+        cb.checked = false;
+        items[index]?.classList.remove('checked');
+      });
+      updateProgress();
+      try {
+        localStorage.removeItem(storageKey);
+      } catch (e) {
+        // Ignore errors
+      }
+    });
+
+    // Initialize
+    loadState();
+  });
+</script>
