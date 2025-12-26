@@ -296,7 +296,27 @@ export async function runValidation(
       attempt++;
       transactionID = await connectionManager.beginTransaction();
 
-      // Dynamically replace SQL variables with actual TypeScript input values
+      // STEP 1: Clear stale validation errors for this specific validation
+      // This removes errors from previous runs where the underlying data may have been fixed.
+      // Only clears errors for measurements that are being re-validated (IsValidated IS NULL)
+      // and scoped to the current census/plot if provided.
+      const cleanupQuery = `
+        DELETE cme FROM ${schema}.cmverrors cme
+        JOIN ${schema}.coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
+        JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+        WHERE cme.ValidationErrorID = ?
+          AND cm.IsValidated IS NULL
+          AND cm.IsActive = TRUE
+          AND (? IS NULL OR cm.CensusID = ?)
+          AND (? IS NULL OR c.PlotID = ?)
+      `;
+      const censusID = params.p_CensusID ?? null;
+      const plotID = params.p_PlotID ?? null;
+      await connectionManager.executeQuery(cleanupQuery, [validationProcedureID, censusID, censusID, plotID, plotID]);
+
+      ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
+
+      // STEP 2: Dynamically replace SQL variables with actual TypeScript input values
       // Use negative lookbehind to prevent replacing already schema-prefixed table names
       // Process longer table names first to avoid substring issues
       const formattedCursorQuery = cursorQuery
@@ -319,7 +339,7 @@ export async function runValidation(
         .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
-      // Execute the cursor query to get the rows that need validation
+      // STEP 3: Execute the validation query to insert new errors
       await connectionManager.executeQuery(formattedCursorQuery);
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;

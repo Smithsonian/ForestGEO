@@ -2,7 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useIsMounted';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import {
   Autocomplete,
@@ -40,11 +40,12 @@ interface UserWithSites extends AdminUserRDS {
 }
 
 // Status badge colors
-const statusColors: Record<string, 'success' | 'primary' | 'warning' | 'neutral'> = {
+const statusColors: Record<string, 'success' | 'primary' | 'warning' | 'neutral' | 'danger'> = {
   global: 'success',
   'db admin': 'primary',
   'lead technician': 'warning',
-  'field crew': 'neutral'
+  'field crew': 'neutral',
+  pending: 'danger'
 };
 
 // Status display names
@@ -52,7 +53,8 @@ const statusLabels: Record<string, string> = {
   global: 'Global',
   'db admin': 'DB Admin',
   'lead technician': 'Lead Tech',
-  'field crew': 'Field Crew'
+  'field crew': 'Field Crew',
+  pending: 'Pending'
 };
 
 // Site icons for visual variety (cycles through these)

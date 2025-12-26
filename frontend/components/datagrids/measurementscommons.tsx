@@ -1,7 +1,7 @@
 // measurementcommons datagrid
 'use client';
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useIsMounted';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { ErrorBoundary } from '@/components/errorboundary';
 import {
   GridActionsCellItem,
@@ -216,6 +216,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const { setLoading } = useLoading();
   // use the session
   const { data: session } = useSession();
+  // Track mounted state for safe state updates in deferred callbacks
+  const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
 
@@ -244,17 +246,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const data = await response.json();
       const countsData = data[0];
 
-      setValidCount(countsData.CountValid);
-      setErrorCount(countsData.CountErrors);
-      setPendingCount(countsData.CountPending);
-      setOTCount(countsData.CountOldTrees);
-      setMSCount(countsData.CountMultiStems);
-      setNRCount(countsData.CountNewRecruits);
+      setValidCount(Number(countsData.CountValid) || 0);
+      setErrorCount(Number(countsData.CountErrors) || 0);
+      setPendingCount(Number(countsData.CountPending) || 0);
+      setOTCount(Number(countsData.CountOldTrees) || 0);
+      setMSCount(Number(countsData.CountMultiStems) || 0);
+      setNRCount(Number(countsData.CountNewRecruits) || 0);
 
       const counts = [
-        { count: countsData.CountErrors, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
-        { count: countsData.CountPending, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
-        { count: countsData.CountValid, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
+        { count: Number(countsData.CountErrors) || 0, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
+        { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
       const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
       if (highestCount.count !== null) {
@@ -272,7 +274,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       });
       if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
       const failedData = await failedResponse.json();
-      setFailedCount(failedData[0].CountFailed);
+      setFailedCount(Number(failedData[0].CountFailed) || 0);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error refreshing counts:', errorObj);
@@ -470,17 +472,27 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
   // helper functions for usage:
-  const handleSortModelChange = (newModel: GridSortModel) => {
-    setSortModel(newModel);
+  const handleSortModelChange = useCallback(
+    (newModel: GridSortModel) => {
+      // Defer state updates to avoid "Cannot update a component while rendering" error
+      // This can happen when DataGrid calls onSortModelChange during its render phase
+      queueMicrotask(() => {
+        // Guard against state updates before mount or after unmount
+        if (!isMountedRef.current) return;
 
-    if (newModel.length > 0) {
-      const { field, sort } = newModel[0];
-      if (field === 'measurementDate') {
-        const sortedRows = sortRowsByMeasurementDate(rows, sort);
-        setRows(sortedRows);
-      }
-    }
-  };
+        setSortModel(newModel);
+
+        if (newModel.length > 0) {
+          const { field, sort } = newModel[0];
+          if (field === 'measurementDate') {
+            const sortedRows = sortRowsByMeasurementDate(rows, sort);
+            setRows(sortedRows);
+          }
+        }
+      });
+    },
+    [rows, isMountedRef]
+  );
 
   const cellHasError = useCallback(
     (colField: string, rowId: GridRowId) => {

@@ -54,7 +54,7 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore } from '@mui/icons-material';
+import { CallSplit, ErrorOutline, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -328,18 +328,37 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             </Button>
             {gridType === 'measurements' && (
               <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
-                <Tooltip title={`Invalid: (${errorControls.count})`}>
-                  <Badge badgeContent={errorControls.count} size={'sm'}>
+                <Tooltip
+                  title={
+                    failedControls.count > 0 && errorControls.count > 0
+                      ? `Invalid: ${errorControls.count + failedControls.count} (${failedControls.count} unsubmitted, ${errorControls.count} validation errors)`
+                      : failedControls.count > 0
+                      ? `Invalid: ${failedControls.count} (unsubmitted - missing required data)`
+                      : `Invalid: ${errorControls.count} (validation errors)`
+                  }
+                >
+                  <Badge badgeContent={errorControls.count + failedControls.count} size={'sm'}>
                     <IconButton
-                      disabled={!errorControls.count}
+                      disabled={!errorControls.count && !failedControls.count}
                       variant="soft"
-                      color={errorControls.show ? 'danger' : 'neutral'}
-                      onClick={() => errorControls.toggle(!errorControls.show)}
-                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
+                      color={errorControls.show || failedControls.count > 0 ? 'danger' : 'neutral'}
+                      onClick={() => {
+                        if (failedControls.count > 0) {
+                          failedControls.trigger();
+                        } else {
+                          errorControls.toggle(!errorControls.show);
+                        }
+                      }}
+                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count + failedControls.count})`}
                       aria-pressed={errorControls.show}
                       data-testid="filter-errors"
+                      sx={{
+                        '& svg': {
+                          color: failedControls.count > 0 ? 'error.main' : errorControls.count > 0 ? 'warning.main' : 'inherit'
+                        }
+                      }}
                     >
-                      <CancelPresentationIcon />
+                      {failedControls.count > 0 ? <ErrorOutline /> : <Warning />}
                     </IconButton>
                   </Badge>
                 </Tooltip>
@@ -416,20 +435,6 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                       data-testid="filter-nr"
                     >
                       <Grass />
-                    </IconButton>
-                  </Badge>
-                </Tooltip>
-                <Tooltip title={`Unsubmitted: ${failedControls.count}`}>
-                  <Badge badgeContent={failedControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!failedControls.count}
-                      color={failedControls.count ? 'primary' : 'neutral'}
-                      onClick={failedControls.trigger}
-                      aria-label={`View unsubmitted measurements (${failedControls.count})`}
-                      data-testid="filter-unsubmitted"
-                    >
-                      <RuleOutlined />
                     </IconButton>
                   </Badge>
                 </Tooltip>

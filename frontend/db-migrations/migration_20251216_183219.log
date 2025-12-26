@@ -1,0 +1,536 @@
+================================================================
+Migration started at Tue Dec 16 18:32:39 EST 2025
+Source database: stable_mpala
+Target database: forestgeo_rabi
+================================================================
+Tue Dec 16 18:32:39 EST 2025: Starting 00a_reset_target_schema.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status	SchemaName	ResetTime
+Target schema reset complete - ALL tables truncated	forestgeo_rabi	2025-12-16 23:32:49
+Info
+Verification - All tables should be empty:
+TableName	RowCount
+coremeasurements	0
+cmattributes	0
+cmverrors	0
+stems	0
+trees	0
+census	0
+quadrats	0
+plots	0
+species	0
+genus	0
+family	0
+attributes	0
+personnel	0
+roles	0
+reference	0
+failedmeasurements	0
+temporarymeasurements	0
+Tue Dec 16 18:32:49 EST 2025: 00a_reset_target_schema.sql completed successfully
+Tue Dec 16 18:32:49 EST 2025: Starting 00b_ensure_table_structures.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+status
+idx_state already exists
+status
+idx_heartbeat already exists
+status
+idx_plot_census already exists
+status
+idx_alerts_uploadid already exists
+status
+idx_alerts_severity already exists
+status
+idx_alerts_type already exists
+status
+idx_uploadmetrics_fileid already exists
+status
+idx_uploadmetrics_status already exists
+status
+FileID column already exists
+status
+BatchID column already exists
+Status	SchemaName	CheckTime
+Table structures verified/created	forestgeo_rabi	2025-12-16 23:32:49
+TABLE_NAME	TABLE_ROWS
+attributes	0
+census	0
+censusactivepersonnel	0
+cmattributes	0
+cmverrors	0
+coremeasurements	0
+failedmeasurements	0
+family	0
+genus	0
+measurementssummary	0
+personnel	0
+plots	1
+postvalidationqueries	12
+quadrats	0
+reference	0
+roles	0
+sitespecificvalidations	14
+species	0
+specieslimits	0
+specimens	0
+stems	0
+temporarymeasurements	0
+trees	0
+unifiedchangelog	0
+upload_sessions	0
+uploadintegrityalerts	0
+uploadmetrics	0
+validationchangelog	0
+viewfulltable	0
+Tue Dec 16 18:32:49 EST 2025: 00b_ensure_table_structures.sql completed successfully
+Tue Dec 16 18:32:49 EST 2025: Starting 01_create_mapping_tables.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status
+Mapping tables created successfully
+Tue Dec 16 18:32:50 EST 2025: 01_create_mapping_tables.sql completed successfully
+Tue Dec 16 18:32:50 EST 2025: Starting 02_migrate_plots.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+PlotID	Raw DimensionX (m)	Converted DimensionX	Unit	Raw DimensionY (m)	Converted DimensionY	Unit	Raw Area (m²)	Converted Area	Unit
+1	2380.00000	2380.000000000	m	480.00000	480.000000000	m	1142400.0000000000	11424.00000000000000	dam2
+Status	PlotCount
+Plot data inserted	1
+Status	MappingCount
+Mapping table populated	1
+Description	TotalPlotsMigrated	SamplePlotName	MaxDimensionX	MaxDimensionY
+Plots Migration Summary	1	Mpala	2380.000000	480.000000
+Description	MappingCount	UniqueOldPlots	UniqueNewPlots
+Mapping Validation	1	1	1
+Tue Dec 16 18:33:04 EST 2025: 02_migrate_plots.sql completed successfully
+Tue Dec 16 18:33:04 EST 2025: Starting 03_migrate_quadrats.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status	QuadratCount
+Quadrat data inserted	2995
+Status	MappingCount
+Mapping table populated	2995
+Description	TotalQuadratsMigrated	SampleQuadratName	PlotsWithQuadrats
+Quadrats Migration Summary	2995	0101	1
+Description	MappingCount	UniqueOldQuadrats	UniqueNewQuadrats
+Mapping Validation	2995	2995	2995
+Warning	Count
+Quadrats with NULL coordinates	0
+Tue Dec 16 18:33:09 EST 2025: 03_migrate_quadrats.sql completed successfully
+Tue Dec 16 18:33:09 EST 2025: Starting 04_migrate_taxonomy.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status	FamilyCount
+Family migration complete	27
+Status	GenusCount
+Genus migration complete	44
+Status	SpeciesCount
+Species migration complete	68
+Description	TotalFamilies	TotalGenera	TotalSpecies
+Taxonomy Migration Summary	27	44	68
+Description	FamilyMappings	GenusMappings	SpeciesMappings
+Mapping Summary	27	44	68
+Check_Type	Family	Genus	SpeciesName	SubspeciesName	SpeciesCode
+Verify hierarchy	Anacardiaceae	Rhus	sp.	NULL	RHUSHL
+Verify hierarchy	Anacardiaceae	Rhus	natalensis	NULL	RHUSNA
+Verify hierarchy	Apocynaceae	Acokanthera	sp.1	NULL	ACOKRB
+Verify hierarchy	Apocynaceae	Acokanthera	sp.2	NULL	ACOKRL
+Verify hierarchy	Apocynaceae	Acokanthera	sp.3	NULL	ACOKSP
+Verify hierarchy	Apocynaceae	Carissa	spinarum	NULL	CARISP
+Verify hierarchy	Asteraceae	Psiadia	punctulata	NULL	PSIAPU
+Verify hierarchy	Boraginaceae	Cordia	sinensis	NULL	CORDSI
+Verify hierarchy	Burseraceae	Commiphora	schimperi	NULL	COMMSP
+Verify hierarchy	Capparaceae	Boscia	angustifolia	NULL	BOSCAN
+Tue Dec 16 18:33:20 EST 2025: 04_migrate_taxonomy.sql completed successfully
+Tue Dec 16 18:33:20 EST 2025: Starting 05_migrate_census.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Description	TotalCensusesMigrated	FirstCensusNumber	LastCensusNumber	EarliestStartDate	LatestEndDate
+Census Migration Summary	2	1	2	2018-03-14	2023-01-19
+Status	MappingCount
+Mapping entries created	2
+PlotName	CensusCount	FirstCensus	LastCensus
+Mpala	2	2018-03-14	2023-01-19
+Tue Dec 16 18:33:20 EST 2025: 05_migrate_census.sql completed successfully
+Tue Dec 16 18:33:20 EST 2025: Starting 06_migrate_trees.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Description	TotalTreesMigrated	UniqueSpecies	UniqueCensuses	SampleTreeTag
+Trees Migration Summary	230427	68	2	   251258
+Status	MappingCount
+Mapping entries created	149521
+SpeciesCode	SpeciesName	TreeCount
+ACACDR	drepanolobium	61317
+CROTDI	dichogamous	41198
+EUCLDI	divinorum	38399
+ACACBR	brevispica	30247
+ACACME	mellifera	13827
+ACACET	etbaica	8418
+ACACGE	gerrardii	4260
+CARISP	spinarum	4042
+GREWSP	kakothamnos	2311
+BALAGL	glaber	2237
+Warning	UnmappedCount
+Unmapped Trees	0
+Tue Dec 16 18:33:37 EST 2025: 06_migrate_trees.sql completed successfully
+Tue Dec 16 18:33:37 EST 2025: Starting 07_migrate_stems.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Description	TotalStemsMigrated	UniqueTreesWithStems	QuadratsWithStems	StemsWithCoordinates	StemsWithoutCoordinates
+Stems Migration Summary	575016	149521	2995	568414	6602
+Status	MappingCount
+Mapping entries created	401188
+QuadratName	PlotName	StemCount
+5118	Mpala	3176
+5025	Mpala	3162
+5023	Mpala	3129
+5024	Mpala	3086
+4925	Mpala	3043
+5123	Mpala	2981
+4924	Mpala	2885
+5122	Mpala	2818
+4923	Mpala	2468
+5120	Mpala	2467
+Warning	Count
+Stems with missing coordinates	6602
+Warning	UnmappedCount
+Unmapped Stems	0
+Tue Dec 16 18:35:09 EST 2025: 07_migrate_stems.sql completed successfully
+Tue Dec 16 18:35:09 EST 2025: Starting 08_migrate_coremeasurements.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Description	TotalMeasurementsMigrated	UniqueStemsWithMeasurements	CensusesWithMeasurements	MeasurementsWithDate	MeasurementsWithoutDate	AvgDBH	MinDBH	MaxDBH
+Core Measurements Migration Summary	520475	401078	2	520475	0	32.2342331524	0.500000	550.000000
+PlotCensusNumber	CensusDescription	MeasurementCount	AvgDBH
+1	NULL	363983	31.0531989131
+2	NULL	156492	34.9811875367
+Warning	NullDBH	NullHOM
+Measurements with NULL values	0	0
+Info	EarliestMeasurement	LatestMeasurement	UniqueDates
+Date Coverage	2010-02-09	2020-12-20	1014
+PlotName	QuadratName	TreeTag	SpeciesCode	SpeciesName	MeasuredDBH	MeasuredHOM	MeasurementDate
+Mpala	6710	671557	CROTDI	dichogamous	23.000000	0.500000	2020-12-20
+Mpala	6710	671566	CROTDI	dichogamous	31.000000	0.500000	2020-12-20
+Mpala	6710	671563	CROTDI	dichogamous	30.000000	0.500000	2020-12-20
+Mpala	6710	671559	CROTDI	dichogamous	26.000000	0.500000	2020-12-20
+Mpala	6710	671567	CROTDI	dichogamous	26.000000	0.500000	2020-12-20
+Mpala	6710	671559	CROTDI	dichogamous	31.000000	0.500000	2020-12-20
+Mpala	6710	671557	CROTDI	dichogamous	25.000000	0.500000	2020-12-20
+Mpala	6710	671559	CROTDI	dichogamous	26.000000	0.500000	2020-12-20
+Mpala	6710	671563	CROTDI	dichogamous	27.000000	0.500000	2020-12-20
+Mpala	6710	671563	CROTDI	dichogamous	34.000000	0.500000	2020-12-20
+Tue Dec 16 18:35:50 EST 2025: 08_migrate_coremeasurements.sql completed successfully
+Tue Dec 16 18:35:50 EST 2025: Starting 09_migrate_attributes.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status	AttributeCount
+Attributes populated	12
+Status	LinkCount
+TSM codes parsed from ListOfTSM	191410
+Status	LinkCount
+Attributes linked to measurements	118349
+Description	TotalAttributes	TotalAttributeLinks	MeasurementsWithAttributes
+Attributes Migration Summary	17	638824	520475
+Code	Description	Status	UsageCount
+ALIVE	Tree/Stem is alive	alive	519753
+M		alive	64383
+Q	stem broken above dkh	alive	40914
+L		alive	5907
+I		alive	5345
+Y		alive	919
+dead	dead	dead	722
+X	stem broken below dkh	alive	592
+D	dead	dead	269
+P		alive	14
+D4	main stem dead, resprout greater than dkh and measurable	alive	5
+D2	dead missing	dead	1
+BROKEN_BEL	Broken below measurement height	broken below	0
+D3	main stem dead, but resprout less than dkh	broken below	0
+STEM_DEAD	Stem is dead	stem dead	0
+OMITTED	Measurement omitted	omitted	0
+MISSING	Tree/Stem is missing	missing	0
+Warning	Count
+Measurements without attributes	0
+PlotName	TreeTag	SpeciesCode	MeasuredDBH	Attributes
+Mpala	010001	ACACDR	27.000000	ALIVE, M
+Mpala	010001	ACACDR	23.000000	ALIVE
+Mpala	010001	ACACDR	14.000000	ALIVE
+Mpala	010004	ACACDR	36.000000	ALIVE
+Mpala	010005	ACACDR	34.000000	ALIVE
+Mpala	010006	ACACDR	47.000000	ALIVE
+Mpala	010007	ACACDR	57.000000	ALIVE
+Mpala	010008	ACACDR	17.000000	ALIVE
+Mpala	010009	ACACDR	61.000000	ALIVE
+Mpala	010010	ACACDR	43.000000	ALIVE
+Mpala	010011	ACACDR	40.000000	ALIVE
+Mpala	010012	ACACDR	26.000000	ALIVE
+Mpala	010013	ACACDR	23.000000	ALIVE
+Mpala	010014	ACACDR	21.000000	ALIVE
+Mpala	010015	ACACDR	25.000000	ALIVE
+Mpala	010016	ACACDR	36.000000	ALIVE
+Mpala	010017	ACACDR	69.000000	ALIVE
+Mpala	010018	ACACDR	69.000000	ALIVE
+Mpala	010019	ACACDR	18.000000	ALIVE, Q
+Mpala	010020	ACACDR	30.000000	ALIVE
+Tue Dec 16 18:36:49 EST 2025: 09_migrate_attributes.sql completed successfully
+Tue Dec 16 18:36:49 EST 2025: Starting 10_validation_queries.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Section
+=== ROW COUNT COMPARISON ===
+Description	Source_ViewFullTable_Rows	Source_Unique_Plots	Source_Unique_Quadrats	Source_Unique_Trees	Source_Unique_Stems	Source_Unique_Measurements	Target_Plots	Target_Quadrats	Target_Trees	Target_Stems	Target_Measurements
+Source vs Target Row Counts	575018	1	2995	149521	401188	575018	1	2995	230427	575016	520475
+Section
+=== TAXONOMY VALIDATION ===
+Check_Type	Source_Families	Target_Families
+Family Counts	27	27
+Check_Type	Source_Genera	Target_Genera
+Genus Counts	44	44
+Check_Type	Source_Species	Target_Species
+Species Counts	68	68
+Check_Type	Count
+Orphaned Genus Records	0
+Check_Type	Count
+Orphaned Species Records	0
+Section
+=== SPATIAL DATA VALIDATION ===
+Check_Type	Count
+Quadrats with NULL Coordinates	0
+Check_Type	Count	Percentage
+Stems with NULL Coordinates	6602	1.15
+Check_Type	Min_LocalX	Max_LocalX	Min_LocalY	Max_LocalY
+Coordinate Ranges	0.000000	19.999400	0.002640	19.998700
+Section
+=== RELATIONSHIP INTEGRITY ===
+Check_Type	Count
+Trees without Species	0
+Check_Type	Count
+Stems without Trees	0
+Check_Type	Count
+Stems without Quadrats	0
+Check_Type	Count
+Measurements without Stems	0
+Check_Type	Count
+Measurements without Census	0
+Section
+=== MEASUREMENT DATA VALIDATION ===
+Check_Type	Total_Measurements	Min_DBH	Max_DBH	Avg_DBH	StdDev_DBH
+DBH Statistics	520475	0.500000	550.000000	32.2342331524	25.426349792115566
+Check_Type	Count
+Suspicious DBH Values	4
+Check_Type	Total_Measurements	Min_HOM	Max_HOM	Avg_HOM
+HOM Statistics	520475	0.060000	1.620000	0.5021786061
+Check_Type	Earliest_Date	Latest_Date	Unique_Dates	Null_Dates
+Measurement Date Coverage	2010-02-09	2020-12-20	1014	0
+Section
+=== ATTRIBUTE VALIDATION ===
+Check_Type	Code	Description	Usage_Count
+Attribute Distribution	ALIVE	Tree/Stem is alive	519753
+Attribute Distribution	M		64383
+Attribute Distribution	Q	stem broken above dkh	40914
+Attribute Distribution	L		5907
+Attribute Distribution	I		5345
+Attribute Distribution	Y		919
+Attribute Distribution	dead	dead	722
+Attribute Distribution	X	stem broken below dkh	592
+Attribute Distribution	D	dead	269
+Attribute Distribution	P		14
+Attribute Distribution	D4	main stem dead, resprout greater than dkh and measurable	5
+Attribute Distribution	D2	dead missing	1
+Attribute Distribution	BROKEN_BEL	Broken below measurement height	0
+Attribute Distribution	D3	main stem dead, but resprout less than dkh	0
+Attribute Distribution	STEM_DEAD	Stem is dead	0
+Attribute Distribution	OMITTED	Measurement omitted	0
+Attribute Distribution	MISSING	Tree/Stem is missing	0
+Check_Type	Count	Percentage
+Measurements without Attributes	0	0.00
+Section
+=== CENSUS COVERAGE ===
+PlotCensusNumber	StartDate	EndDate	Stems_Measured	Total_Measurements	Avg_DBH
+1	NULL	2023-01-19	363983	363983	31.0531989131
+2	2018-03-14	2019-01-31	156490	156492	34.9811875367
+Section
+=== ID MAPPING VERIFICATION ===
+Description	Plot_Mappings	Quadrat_Mappings	Family_Mappings	Genus_Mappings	Species_Mappings	Census_Mappings	Tree_Mappings	Stem_Mappings
+ID Mapping Summary	1	2995	27	44	68	2	149521	401188
+Section
+=== SAMPLE DATA VERIFICATION ===
+PlotName	QuadratName	Family	Genus	SpeciesName	SpeciesCode	TreeTag	StemTag	LocalX	LocalY	MeasuredDBH	MeasuredHOM	MeasurementDate	Attributes
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010001	010001	1.882560	0.565110	27.000000	0.500000	2012-11-14	ALIVE, M
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010001	010003	1.882560	0.565110	14.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010001	010002	1.882560	0.565110	23.000000	0.490000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010001	010002	1.882560	0.565110	29.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010001	010001	1.882560	0.565110	35.000000	0.500000	2018-03-14	ALIVE, M
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010004	010004	3.845290	2.855600	41.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010004	010004	3.845290	2.855600	36.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010005	010005	4.824070	0.571340	42.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010005	010005	4.824070	0.571340	34.000000	0.520000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010006	010006	3.670560	5.402120	47.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010006	010006	3.670560	5.402120	58.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010007	010007	0.510680	8.759440	65.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010007	010007	0.510680	8.759440	57.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010008	010008	8.013210	8.406320	17.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010009	010009	9.384670	6.584310	61.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010010	010010	6.236100	0.654600	43.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010010	010010	6.236100	0.654600	47.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010011	010011	6.257970	2.500650	40.000000	0.500000	2012-11-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010011	010011	6.257970	2.500650	48.000000	0.500000	2018-03-14	ALIVE
+Mpala	0101	Fabaceae-mimosoideae	Acacia	drepanolobium	ACACDR	010012	010012	6.611770	3.023270	26.000000	0.460000	2012-11-14	ALIVE
+Section
+=== MIGRATION SUMMARY ===
+Status	Validation_Time	Total_Plots	Total_Quadrats	Total_Families	Total_Genera	Total_Species	Total_Censuses	Total_Trees	Total_Stems	Total_Measurements	Total_Attribute_Codes	Total_Attribute_Links
+Migration Complete	2025-12-16 23:37:43	1	2995	27	44	68	2	230427	575016	520475	17	638824
+Final_Status
+Validation queries completed successfully!
+Tue Dec 16 18:37:43 EST 2025: 10_validation_queries.sql completed successfully
+Tue Dec 16 18:37:43 EST 2025: Starting 10a_critical_validation.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Genus_Family_Check
+OK: All genus records have valid family
+Species_Genus_Check
+OK: All species records have valid genus
+Trees_Species_Check
+OK: All trees have valid species
+Stems_Trees_Check
+OK: All stems have valid trees
+Stems_Quadrats_Check
+OK: All stems have valid quadrats
+Measurements_Stems_Check
+OK: All measurements have valid stems
+Measurements_Census_Check
+OK: All measurements have valid census
+Plots_Check
+OK: 1 plots migrated
+Quadrats_Check
+OK: 2995 quadrats migrated
+Species_Check
+OK: 68 species migrated
+Trees_Check
+OK: 230427 trees migrated
+Stems_Check
+OK: 575016 stems migrated
+Measurements_Check
+OK: 520475 measurements migrated
+Section
+=== CRITICAL VALIDATION SUMMARY ===
+Total_Critical_Errors	Validation_Result
+0	PASSED - All critical validations passed
+Section	Orphaned_Genus	Orphaned_Species	Trees_No_Species	Stems_No_Trees	Stems_No_Quadrats	Measurements_No_Stems	Measurements_No_Census	No_Plots	No_Quadrats	No_Species	No_Trees	No_Stems	No_Measurements
+Error Breakdown	0	0	0	0	0	0	0	0	0	0	0	0	0
+Final_Status
+Critical validation completed successfully!
+Tue Dec 16 18:37:48 EST 2025: 10a_critical_validation.sql completed successfully
+Tue Dec 16 18:37:48 EST 2025: Starting 11_remove_cmattributes_fk_constraint.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+message
+Constraint does not exist
+result
+Foreign key constraint CMAttributes_Attributes_Code_fk did not exist
+Tue Dec 16 18:37:49 EST 2025: 11_remove_cmattributes_fk_constraint.sql completed successfully
+Tue Dec 16 18:37:49 EST 2025: Starting 12_increase_fileid_column_size.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+COLUMN_NAME	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH
+BatchID	varchar	50
+FileID	varchar	50
+Tue Dec 16 18:37:49 EST 2025: 12_increase_fileid_column_size.sql completed successfully
+Tue Dec 16 18:37:49 EST 2025: Starting 13_add_upload_session_tracking.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+status
+FileID column already exists
+status
+BatchID column already exists
+status
+idx_upload_session index already exists
+status
+idx_plot_census_upload index already exists
+migration_status	details	note
+Upload session tracking migration completed (idempotent)	FileID and BatchID columns verified/added with indexes	coremeasurements will use UserDefinedFields JSON
+Field	Type	Null	Key	Default	Extra
+FailedMeasurementID	int	NO	PRI	NULL	auto_increment
+FileID	varchar(255)	YES	MUL	NULL	
+BatchID	varchar(36)	YES		NULL	
+PlotID	int	YES	MUL	NULL	
+CensusID	int	YES		NULL	
+Tag	varchar(20)	YES		NULL	
+StemTag	varchar(10)	YES		NULL	
+SpCode	varchar(25)	YES		NULL	
+Quadrat	varchar(255)	YES		NULL	
+X	decimal(12,6)	YES		NULL	
+Y	decimal(12,6)	YES		NULL	
+DBH	decimal(12,6)	YES		NULL	
+HOM	decimal(12,6)	YES		NULL	
+Date	date	YES		NULL	
+Codes	varchar(255)	YES		NULL	
+Comments	varchar(255)	YES		NULL	
+FailureReasons	text	YES		NULL	
+hash_id	varchar(32)	YES	UNI	NULL	STORED GENERATED INVISIBLE
+Tue Dec 16 18:37:50 EST 2025: 13_add_upload_session_tracking.sql completed successfully
+Tue Dec 16 18:37:50 EST 2025: Starting 14_add_performance_indexes.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+status
+Created index idx_coremeasurements_census_plot on coremeasurements
+status
+Created index idx_coremeasurements_census_plot_validation on coremeasurements
+status
+Created index idx_stems_censusid on stems
+status
+Created index idx_stems_treeid_censusid on stems
+status
+Created index idx_trees_censusid on trees
+status
+Created index idx_cmverrors_coreMeasurementID on cmverrors
+TABLE_NAME	INDEX_NAME	COLUMNS
+cmverrors	cmverrors_sitespecificvalidations_ValidationID_fk	ValidationErrorID
+cmverrors	idx_cmverrors_coreMeasurementID	CoreMeasurementID
+cmverrors	PRIMARY	CMVErrorID
+cmverrors	unique_cmverrors_cm_valerror	CoreMeasurementID,ValidationErrorID
+coremeasurements	idx_censusid	CensusID
+coremeasurements	idx_cm_stem_cid_date_dbh_hom	StemGUID,CensusID,MeasurementDate,MeasuredDBH,MeasuredHOM
+coremeasurements	idx_coremeasurements_census_plot	CensusID
+coremeasurements	idx_coremeasurements_census_plot_validation	CensusID,IsValidated
+coremeasurements	idx_description	Description
+coremeasurements	idx_isvalidated	IsValidated
+coremeasurements	idx_measureddbh	MeasuredDBH
+coremeasurements	idx_measuredhom	MeasuredHOM
+coremeasurements	idx_measurementdate	MeasurementDate
+coremeasurements	idx_stemid	StemGUID
+coremeasurements	ix_cm_cid_date_dbh_hom	CensusID,MeasurementDate,MeasuredDBH,MeasuredHOM
+coremeasurements	PRIMARY	CoreMeasurementID
+coremeasurements	ux_measure_unique	StemGUID,CensusID,MeasurementDate,MeasuredDBH,MeasuredHOM
+stems	idx_localx	LocalX
+stems	idx_localy	LocalY
+stems	idx_moved	Moved
+stems	idx_quadratid	QuadratID
+stems	idx_s_qid_st	QuadratID,StemTag
+stems	idx_stemdescription	StemDescription
+stems	idx_stemnumber	StemCrossID
+stems	idx_stems_censusid	CensusID
+stems	idx_stems_stemtag_quadratid	StemTag,QuadratID
+stems	idx_stems_treeid_censusid	TreeID,CensusID
+stems	idx_stemtag	StemTag
+stems	idx_treeid	TreeID
+stems	ix_stems_treeid_stemtag_quadratid	TreeID,StemTag,QuadratID
+stems	PRIMARY	StemGUID
+stems	ux_stems_coordinate	StemTag,TreeID,QuadratID,LocalX,LocalY,IsActive,CensusID
+stems	ux_stems_treeid_stemtag_census	TreeID,StemTag,CensusID
+trees	idx_speciesid	SpeciesID
+trees	idx_trees_censusid	CensusID
+trees	PRIMARY	TreeID
+trees	trees_TreeTag_index	TreeTag
+trees	ux_trees_treetag_speciesid_censusid	TreeTag,SpeciesID,CensusID
+upload_sessions	idx_heartbeat	last_heartbeat
+upload_sessions	idx_idempotency	idempotency_key
+upload_sessions	idx_plot_census	plot_id,census_id
+upload_sessions	idx_state	state
+upload_sessions	PRIMARY	session_id
+Tue Dec 16 18:38:04 EST 2025: 14_add_performance_indexes.sql completed successfully
+Tue Dec 16 18:38:04 EST 2025: Starting 15_deploy_bulkingestionprocess.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Tue Dec 16 18:38:04 EST 2025: 15_deploy_bulkingestionprocess.sql completed successfully
+Tue Dec 16 18:38:04 EST 2025: Starting 99_cleanup.sql
+  Source DB: stable_mpala, Target DB: forestgeo_rabi
+Status
+Starting cleanup process...
+Status
+Dropping ID mapping tables...
+Status
+Mapping tables dropped
+Status
+Verifying cleanup...
+Check_Type	Count
+Remaining Mapping Tables	0
+Check_Type	Count
+Remaining Temporary Tables	1
+Status	Timestamp	Schema_Cleaned
+Cleanup Complete	2025-12-16 23:38:05	forestgeo_rabi
+Tue Dec 16 18:38:05 EST 2025: 99_cleanup.sql completed successfully

@@ -6,6 +6,7 @@ import ThemeRegistry from '@/components/themeregistry/themeregistry';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
 import { initializeAppInsights } from '@/applicationinsights';
+import { AnimationCacheProvider } from '@/app/contexts/animationcacheprovider';
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -33,7 +34,9 @@ export function Providers({ children }: Readonly<ProvidersProps>) {
   return (
     <ThemeRegistry>
       <SessionProvider>
-        <LocalizationProvider dateAdapter={AdapterMoment}>{children}</LocalizationProvider>
+        <AnimationCacheProvider>
+          <LocalizationProvider dateAdapter={AdapterMoment}>{children}</LocalizationProvider>
+        </AnimationCacheProvider>
       </SessionProvider>
     </ThemeRegistry>
   );

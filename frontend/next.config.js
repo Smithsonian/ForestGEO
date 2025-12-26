@@ -150,6 +150,21 @@ const nextConfig = withBundleAnalyzer({
   images: {
     unoptimized: true
   },
+  // Cache headers for static assets (animations)
+  async headers() {
+    return [
+      {
+        // Cache Lottie animation files for 1 year (immutable)
+        source: '/animations/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable'
+          }
+        ]
+      }
+    ];
+  },
   output: 'standalone',
   reactStrictMode: true,
   distDir: 'build'

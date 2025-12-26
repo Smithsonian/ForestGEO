@@ -911,8 +911,8 @@ where cm.IsValidated is null and cm.IsActive is true
             '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (8, 'ValidateFindStemsOutsidePlots', 'Flagged;X outside plot OR;Y outside plot',
-            'stemTag;stemLocalX;stemLocalY', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    VALUES (8, 'ValidateFindStemsOutsidePlots', 'Stem coordinates NULL, negative, or outside plot boundaries (both upper and lower bounds)',
+            'stemTag;treeTag;stemLocalX;stemLocalY;quadratStartX;quadratStartY;plotGlobalX;plotGlobalY;plotDimensionX;plotDimensionY', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
@@ -920,14 +920,36 @@ join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsAct
 join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
 join plots p on c.PlotID = p.PlotID
 left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null and e.CoreMeasurementID is null and cm.IsActive is true
-and s.LocalX is not null and s.LocalY is not null
+where cm.IsValidated is null
+and e.CoreMeasurementID is null
+and cm.IsActive is true
+and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+and (@p_PlotID is null or c.PlotID = @p_PlotID)
+-- Skip rows where plot/quadrat metadata is invalid (NULL or negative) - cannot validate stem positions
 and q.StartX is not null and q.StartY is not null
 and p.GlobalX is not null and p.GlobalY is not null
 and p.DimensionX is not null and p.DimensionY is not null
-and ((s.LocalX + q.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)) or ((s.LocalY + q.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY))
-and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+and q.StartX >= 0 and q.StartY >= 0
+and p.GlobalX >= 0 and p.GlobalY >= 0
+and p.DimensionX > 0 and p.DimensionY > 0
+-- Flag if stem coordinates are NULL, negative, or outside boundaries (inclusive boundaries - stems can be on edge)
+and (
+    s.LocalX is null
+    or s.LocalY is null
+    or s.LocalX < 0
+    or s.LocalY < 0
+    or (s.LocalX + q.StartX) < 0
+    or (s.LocalX + q.StartX) > p.DimensionX
+    or (s.LocalY + q.StartY) < 0
+    or (s.LocalY + q.StartY) > p.DimensionY
+)
+-- Do NOT flag dead stems (status = ''dead'' or ''stem dead'') for missing coordinates
+and NOT EXISTS (
+    SELECT 1 FROM cmattributes cma
+    JOIN attributes a ON cma.Code = a.Code
+    WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
+    AND a.Status IN (''dead'', ''stem dead'')
+);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats',
@@ -957,20 +979,31 @@ and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
             '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds',
-            'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+    VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds from specieslimits table',
+            'measuredDBH;speciesCode;speciesLimitMin;speciesLimitMax', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
-         left join cmverrors e
-                   on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null and cm.IsActive is true
-  and e.CoreMeasurementID is null
-  and ((@minDBH is not null and cm.MeasuredDBH < @minDBH)
-    or (@maxDBH is not null and cm.MeasuredDBH > @maxDBH))
-  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+join census c on cm.CensusID = c.CensusID and c.IsActive is true
+join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
+join trees t on s.TreeID = t.TreeID and t.CensusID = c.CensusID and t.IsActive is true
+join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive is true
+join specieslimits sl on sp.SpeciesID = sl.SpeciesID
+    and sl.CensusID = cm.CensusID
+    and sl.LimitType = ''DBH''
+    and sl.IsActive is true
+left join cmverrors e on cm.CoreMeasurementID = e.CoreMeasurementID
+    and e.ValidationErrorID = @validationProcedureID
+where cm.IsValidated is null
+and cm.IsActive is true
+and e.CoreMeasurementID is null
+and cm.MeasuredDBH is not null
+-- Flag if measured DBH is outside species-specific bounds
+and (
+    (sl.LowerBound is not null and cm.MeasuredDBH < sl.LowerBound)
+    or (sl.UpperBound is not null and cm.MeasuredDBH > sl.UpperBound)
+)
+and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
@@ -994,19 +1027,19 @@ where cm.IsValidated is null and cm.IsActive is true
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes',
-            'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
+            'Live stem is missing DBH measurement (HOM is optional)', 'measuredDBH;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a on cma.Code = a.Code and a.IsActive is true
-              and cma.Code = a.Code and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\') and a.IsActive is true
+              and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
          left join cmverrors e
                    on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
-  and ((cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
-    or (cm.MeasuredHOM is null or cm.MeasuredHOM = 0))
+  -- Only flag if DBH is missing - HOM is optional (defaults to standard 1.3m)
+  and (cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
     set foreign_key_checks = 1;

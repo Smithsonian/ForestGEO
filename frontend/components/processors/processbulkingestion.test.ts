@@ -352,8 +352,9 @@ describe('processBulkIngestionCollapser', () => {
 
       try {
         await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error: any) {
+        if (error.message === 'Should have thrown error') throw error;
         expect(error.message).toMatch(/Bulk ingestion collapser failed/);
         expect(error.message).toMatch(/Deadlock detected/);
       }

@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useFileManagement } from './useFileManagement';
+import { useFileManagement } from './usefilemanagement';
 import { FileWithPath } from 'react-dropzone';
 import { vi } from 'vitest';
 

@@ -46,7 +46,12 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
 
   // End an operation
   const endOperation = useCallback((operationId: string) => {
-    setActiveOperations(prev => prev.filter(op => op.id !== operationId));
+    setActiveOperations(prev => {
+      const updated = prev.filter(op => op.id !== operationId);
+      // Synchronously update ref so isOperationActive returns correct value immediately
+      activeOperationsRef.current = updated;
+      return updated;
+    });
 
     // Clear timeout
     const timeoutId = operationTimeoutRefs.current.get(operationId);
@@ -67,7 +72,12 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
         category
       };
 
-      setActiveOperations(prev => [...prev, operation]);
+      setActiveOperations(prev => {
+        const updated = [...prev, operation];
+        // Synchronously update ref so isOperationActive returns correct value immediately
+        activeOperationsRef.current = updated;
+        return updated;
+      });
 
       // Set up automatic timeout (30 seconds for most operations, 5 minutes for uploads)
       const timeoutDuration = category === 'upload' ? 5 * 60 * 1000 : 30 * 1000;
@@ -83,13 +93,11 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
     [generateOperationId, endOperation]
   );
 
-  // Check if operation is active
-  const isOperationActive = useCallback(
-    (operationId: string) => {
-      return activeOperations.some(op => op.id === operationId);
-    },
-    [activeOperations]
-  );
+  // Check if operation is active - use ref to avoid dependency on activeOperations state
+  // This prevents cascading re-renders when operations change
+  const isOperationActive = useCallback((operationId: string) => {
+    return activeOperationsRef.current.some(op => op.id === operationId);
+  }, []);
 
   // Legacy setLoading method for backward compatibility
   const legacyOperationsRef = useRef<Map<string, string>>(new Map()); // message -> operationId
@@ -222,7 +230,12 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
         });
 
         // Only update if something was removed
-        return validOperations.length === prev.length ? prev : validOperations;
+        if (validOperations.length !== prev.length) {
+          // Synchronously update ref
+          activeOperationsRef.current = validOperations;
+          return validOperations;
+        }
+        return prev;
       });
     }, 30000); // Check every 30 seconds
 

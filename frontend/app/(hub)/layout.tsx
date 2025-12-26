@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
@@ -84,112 +84,113 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
 
-  // Create stable async operations that won't cause cascade effects
-  const { execute: executeFetchSiteList } = useAsyncOperation(
-    async () => {
-      if (session && !siteListLoaded && !currentSite) {
-        const sites = session?.user?.allsites ?? [];
-        if (sites.length === 0) {
-          const response = await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=`);
-          const allsites = await response.json();
-          if (siteListDispatch) await siteListDispatch({ siteList: allsites });
-        } else {
-          if (siteListDispatch) await siteListDispatch({ siteList: sites });
-        }
-        setSiteListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading Sites...',
-      category: 'api',
-      preventDuplicates: true
+  // Create stable async functions with useCallback to prevent infinite loops
+  // The async functions must be stable so useAsyncOperation's execute callback doesn't change every render
+  const fetchSiteListFn = useCallback(async () => {
+    const sites = session?.user?.allsites ?? [];
+    if (sites.length === 0) {
+      const response = await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=`);
+      const allsites = await response.json();
+      if (siteListDispatch) await siteListDispatch({ siteList: allsites });
+    } else {
+      if (siteListDispatch) await siteListDispatch({ siteList: sites });
     }
-  );
+    setSiteListLoaded(true);
+  }, [session?.user?.allsites, siteListDispatch, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
-  const { execute: executeLoadPlotData } = useAsyncOperation(
-    async () => {
-      if (currentSite && !plotListLoaded) {
-        const response = await fetch(
-          `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
-        );
-        const plotsData = await response.json();
-        if (!plotsData) throw new Error('Failed to load plots data');
-        if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
-        setPlotListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading plot data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
+  const fetchPlotDataFn = useCallback(async () => {
+    if (!currentSite?.schemaName) return;
+    const response = await fetch(
+      `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+    );
+    const plotsData = await response.json();
+    if (!plotsData) throw new Error('Failed to load plots data');
+    if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
+    setPlotListLoaded(true);
+  }, [currentSite?.schemaName, plotListDispatch, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
-  const { execute: executeLoadCensusData } = useAsyncOperation(
-    async () => {
-      if (currentSite && currentPlot && !censusListLoaded) {
-        const response = await fetch(
-          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot?.plotID ?? 0}`
-        );
-        const censusRDSLoad = await response.json();
-        if (!censusRDSLoad) throw new Error('Failed to load census data');
-        const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
-        const censusList = await createAndUpdateCensusList(censusArray);
-        if (censusListDispatch) await censusListDispatch({ censusList });
-        setCensusListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading census data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
+  const fetchCensusDataFn = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID) return;
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
+    );
+    const censusRDSLoad = await response.json();
+    if (!censusRDSLoad) throw new Error('Failed to load census data');
+    const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
+    const censusList = await createAndUpdateCensusList(censusArray);
+    if (censusListDispatch) await censusListDispatch({ censusList });
+    setCensusListLoaded(true);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, censusListDispatch]);
 
-  const { execute: executeLoadQuadratData } = useAsyncOperation(
-    async () => {
-      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-        const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
-        const quadratsData = await response.json();
-        if (!quadratsData) throw new Error('Failed to load quadrats data');
-        if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
-        setQuadratListLoaded(true);
-      }
-    },
-    {
-      loadingMessage: 'Loading quadrat data...',
-      category: 'api',
-      preventDuplicates: true
-    }
-  );
+  const fetchQuadratDataFn = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.plotCensusNumber) return;
+    const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
+    const quadratsData = await response.json();
+    if (!quadratsData) throw new Error('Failed to load quadrats data');
+    if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
+    setQuadratListLoaded(true);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, quadratListDispatch]);
+
+  // Create async operations with stable function references
+  const { execute: executeFetchSiteList } = useAsyncOperation(fetchSiteListFn, {
+    loadingMessage: 'Loading Sites...',
+    category: 'api',
+    preventDuplicates: true
+  });
+
+  const { execute: executeLoadPlotData } = useAsyncOperation(fetchPlotDataFn, {
+    loadingMessage: 'Loading plot data...',
+    category: 'api',
+    preventDuplicates: true
+  });
+
+  const { execute: executeLoadCensusData } = useAsyncOperation(fetchCensusDataFn, {
+    loadingMessage: 'Loading census data...',
+    category: 'api',
+    preventDuplicates: true
+  });
+
+  const { execute: executeLoadQuadratData } = useAsyncOperation(fetchQuadratDataFn, {
+    loadingMessage: 'Loading quadrat data...',
+    category: 'api',
+    preventDuplicates: true
+  });
 
   // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
-    if (session && !siteListLoaded) {
+    if (session && !siteListLoaded && !currentSite) {
       executeFetchSiteList();
     }
-  }, [session, siteListLoaded, executeFetchSiteList]);
+    // Intentionally exclude executeFetchSiteList from deps to prevent loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, siteListLoaded, currentSite]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
       executeLoadPlotData();
     }
-  }, [currentSite, plotListLoaded, executeLoadPlotData]);
+    // Intentionally exclude executeLoadPlotData from deps to prevent loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSite, plotListLoaded]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
       executeLoadCensusData();
     }
-  }, [currentSite, currentPlot, censusListLoaded, executeLoadCensusData]);
+    // Intentionally exclude executeLoadCensusData from deps to prevent loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSite, currentPlot, censusListLoaded]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
       executeLoadQuadratData();
     }
-  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, executeLoadQuadratData]);
+    // Intentionally exclude executeLoadQuadratData from deps to prevent loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded]);
 
   // Handle manual reset logic
   useEffect(() => {
@@ -336,9 +337,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       >
         <Sidebar setCensusListLoaded={setCensusListLoaded} siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
       </Box>
-      <Box component="header" aria-label="Application header">
-        <Header />
-      </Box>
+      <Header />
       <Box
         component="main"
         className="MainContent"

@@ -13,7 +13,7 @@ import { useOrgCensusContext, useOrgCensusListContext, useOrgCensusListDispatch,
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useIsMounted';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import { SitesRDS as _SitesRDS, PlotRDS as _PlotRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -94,7 +94,7 @@ export default function DashboardPage() {
   // Plot edit modal state
   const [plotToEdit, setPlotToEdit] = useState<Plot | null>(null);
   const [openPlotModal, setOpenPlotModal] = useState(false);
-  const [_manualReset, setManualReset] = useState(false);
+  const [manualReset, setManualReset] = useState(false);
 
   // Census delete confirmation modal state
   const [censusToDelete, setCensusToDelete] = useState<CensusWithStats | OrgCensusRDS | null>(null);
@@ -262,6 +262,15 @@ export default function DashboardPage() {
   const handlePlotEdit = useCallback((plot: PlotWithCensusCount) => {
     setPlotToEdit(plot as Plot);
     setOpenPlotModal(true);
+  }, []);
+
+  // Handler to properly close plot modal and clear state
+  const handleClosePlotModal = useCallback((isOpen: boolean) => {
+    setOpenPlotModal(isOpen);
+    if (!isOpen) {
+      // Clear plotToEdit when modal closes to prevent stale data
+      setPlotToEdit(null);
+    }
   }, []);
 
   const handleAddPlot = useCallback(() => {
@@ -438,6 +447,18 @@ export default function DashboardPage() {
       censusCreationTimerRef.current = setTimeout(() => setIsCreatingCensus(false), 1000);
     }
   }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
+
+  // Handle manual reset after successful plot edit
+  useEffect(() => {
+    if (manualReset) {
+      // Clear modal state
+      setPlotToEdit(null);
+      setOpenPlotModal(false);
+      // Reset the flag and reload the page to fetch updated data
+      setManualReset(false);
+      window.location.reload();
+    }
+  }, [manualReset]);
 
   // Reset all dashboard data when contexts are cleared
   useEffect(() => {
@@ -914,7 +935,7 @@ export default function DashboardPage() {
 
       {/* Plot Edit Modal */}
       {plotToEdit && (
-        <PlotCardModal plot={plotToEdit} openPlotCardModal={openPlotModal} setOpenPlotCardModal={setOpenPlotModal} setManualReset={setManualReset} />
+        <PlotCardModal plot={plotToEdit} openPlotCardModal={openPlotModal} setOpenPlotCardModal={handleClosePlotModal} setManualReset={setManualReset} />
       )}
 
       {/* Census Delete Confirmation Modal */}
