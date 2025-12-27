@@ -1,652 +1,591 @@
-# ForestGEO Database Migration & Site Provisioning Guide
+# ForestGEO Database Migration Guide
 
-## Overview
+## Table of Contents
 
-This directory contains SQL migration scripts and automated provisioning tools to:
-
-1. Migrate data from denormalized `viewfulltable` schemas to normalized ForestGEO schemas
-2. Create new site schemas from historical MySQL dump files
-3. Register sites in the catalog for application access
-
----
-
-## NEW: Automated Site Provisioning System
-
-For creating new sites from MySQL dump files, use the automated provisioning system:
-
-### Quick Start (Shell Script)
-
-```bash
-# Basic migration (run from db-migrations directory)
-./provision_new_site.sh \
-  --source-schema stable_newsite \
-  --target-schema forestgeo_newsite \
-  --site-name "New Site Name"
-
-# With user assignment and schema reset
-./provision_new_site.sh \
-  --source-schema stable_newsite \
-  --target-schema forestgeo_newsite \
-  --site-name "New Site Name" \
-  --user-email admin@example.com \
-  --reset-if-exists
-```
-
-### Quick Start (API - for Admin UI)
-
-```bash
-# 1. Upload dump file
-curl -X POST -F "dumpFile=@/path/to/dump.sql" -F "siteName=New Site" \
-  /api/admin/provision/upload
-
-# 2. Start migration
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"sourceSchema":"stable_new_site","targetSchema":"forestgeo_new_site","siteName":"New Site"}' \
-  /api/admin/provision
-
-# 3. Monitor progress
-curl /api/admin/provision?migrationId=migration_xxx
-```
-
-### Key Features
-
-- **15 Checkpoints**: Progress is saved after each step
-- **Resume on Failure**: Use `--resume` to continue failed migrations
-- **Rollback Support**: Return to any previous checkpoint
-- **Automatic Catalog Registration**: Sites are registered in `catalog.sites`
-- **User Assignment**: Optionally assign sites to users
-
-See the **Automated Site Provisioning** section below for full details.
+1. [Introduction](#introduction)
+2. [Prerequisites](#prerequisites)
+3. [Quick Start](#quick-start)
+4. [Key Concepts](#key-concepts)
+5. [Migration Process](#migration-process)
+6. [Validation & Verification](#validation--verification)
+7. [Troubleshooting](#troubleshooting)
+8. [File Reference](#file-reference)
+9. [Advanced Topics](#advanced-topics)
 
 ---
 
-## Legacy Manual Migration
+## Introduction
 
-This section covers the original SQL migration scripts for manual data migration from `stable_mpala.viewfulltable` to `forestgeo_testing` schema.
+### What This Does
 
-## Source Data
+This migration system converts forest plot data from the legacy CTFS schema (denormalized `viewfulltable`) to the normalized ForestGEO schema used by the web application.
 
-- **Database**: `stable_mpala`
-- **Primary Source**: `viewfulltable` (575,018 rows)
-- **Supporting Tables**: `stem`, `dbh`, `tsmattributes`, `census`, `quadrat`, `coordinates`
+**Source Schema** (legacy): `stable_*` (e.g., `stable_mpala`, `stable_bci`)
+- Single denormalized view: `viewfulltable`
+- Supporting tables: `stem`, `dbh`, `census`, `tsmattributes`
 
-## Target Schema
+**Target Schema** (new): `forestgeo_*` (e.g., `forestgeo_mpala`, `forestgeo_testing`)
+- Normalized tables: `plots`, `quadrats`, `trees`, `stems`, `coremeasurements`
+- Taxonomy: `family` → `genus` → `species`
+- Validation: `cmverrors`, `sitespecificvalidations`
 
-- **Database**: `forestgeo_testing`
-- **Tables**: `plots`, `quadrats`, `family`, `genus`, `species`, `census`, `trees`, `stems`, `coremeasurements`, `attributes`, `cmattributes`
+### Why Migration Is Needed
 
-## Migration Strategy
+The legacy CTFS schema stores all data in a single denormalized view. The new ForestGEO schema:
+- Separates concerns (spatial, taxonomic, measurement data)
+- Tracks data per-census (each census gets its own tree/stem records)
+- Supports validation workflows
+- Enables the web application's features
 
-### Key Features
-
-1. **Preserves Relationships**: All foreign key relationships are maintained through ID mapping tables
-2. **No ID Conflicts**: Old IDs are mapped to new auto-incremented IDs
-3. **Data Integrity**: Comprehensive validation queries ensure data quality
-4. **Coordinates**: Uses actual stem coordinates from `stable_mpala.stem` table (QX, QY)
-5. **Attributes**: Parses `ListOfTSM` field and links attributes to measurements
-
-### Migration Order
-
-Scripts must be executed in this order due to foreign key dependencies:
+### Schema Relationship Diagram
 
 ```
-01. create_mapping_tables.sql    → Create ID mapping tables
-02. migrate_plots.sql            → Migrate plot data
-03. migrate_quadrats.sql         → Migrate quadrat data (depends on plots)
-04. migrate_taxonomy.sql         → Migrate family → genus → species
-05. migrate_census.sql           → Migrate census data (depends on plots)
-06. migrate_trees.sql            → Migrate tree data (depends on species, census)
-07. migrate_stems.sql            → Migrate stem data (depends on trees, quadrats, census)
-08. migrate_coremeasurements.sql → Migrate measurements (depends on stems, census)
-09. migrate_attributes.sql       → Migrate attributes and link to measurements
-10. validation_queries.sql       → Comprehensive validation checks
+SPATIAL                          TAXONOMIC                    MEASUREMENT
+───────                          ────────                     ───────────
+plots                            family
+  │                                │
+  ├── quadrats                   genus
+  │     │                          │
+  └── census ─────────────────── species
+        │                          │
+        └── trees ─────────────────┘
+              │
+              └── stems ──────────────────────── coremeasurements
+                    │                                   │
+                    │                                   └── cmattributes
+                    │                                         │
+                    └─────────────────────────────────── attributes
 ```
+
+---
+
+## Prerequisites
+
+### Required Software
+
+| Software | Version | Check Command |
+|----------|---------|---------------|
+| MySQL client | 8.0+ | `mysql --version` or `mariadb --version` |
+| Bash | 4.0+ | `bash --version` |
+
+### Required Access
+
+- Network access to Azure MySQL server
+- Database credentials (found in `frontend/.env.local`)
+- Read access to source schema (e.g., `stable_mpala`)
+- Write access to target schema (e.g., `forestgeo_mpala`)
+
+### Before You Start
+
+1. **Backup your target database** - migrations are destructive
+2. **Verify source data exists**:
+   ```sql
+   SELECT COUNT(*) FROM stable_mpala.viewfulltable;
+   -- Should return > 0 rows
+   ```
+3. **Check credentials** in `frontend/.env.local`:
+   ```
+   AZURE_SQL_SERVER=forestgeo-mysqldataserver.mysql.database.azure.com
+   AZURE_SQL_USER=azureroot
+   AZURE_SQL_PASSWORD=<password>
+   ```
+
+---
 
 ## Quick Start
 
-### Prerequisites
-
-1. MySQL client installed and accessible via command line
-2. Network access to Azure MySQL server
-3. Credentials for the database (stored in `.env` file)
-4. **IMPORTANT**: Backup your database before running migration!
-
-### Option 1: Automated Migration (Recommended)
-
-Run the master script to execute all migrations in order:
+### Option 1: Interactive Mode (Recommended for First-Time Users)
 
 ```bash
-cd /Users/sambokar/Documents/ForestGEO/frontend/db-migrations
-./00_run_all_migrations.sh
+cd frontend/db-migrations
+./run_migration.sh
 ```
 
-This script will:
+The script will prompt you for:
+- Source schema (e.g., `stable_mpala`)
+- Target schema (e.g., `forestgeo_mpala`)
+- Site name, location, and country
 
-- Execute all migration scripts in order
-- Log all output to a timestamped log file
-- Stop on first error
-- Provide a summary at the end
-
-### Option 2: Manual Migration
-
-Execute scripts individually for better control:
+### Option 2: Command Line (Recommended for Automation)
 
 ```bash
-# Set connection variables
-MYSQL_HOST="forestgeo-mysqldataserver.mysql.database.azure.com"
-MYSQL_USER="azureroot"
-MYSQL_PASSWORD="P@ssw0rd"
-MYSQL_PORT="3306"
-
-# Execute each script
-mysql -h $MYSQL_HOST -u $MYSQL_USER -p$MYSQL_PASSWORD -P $MYSQL_PORT --ssl < 01_create_mapping_tables.sql
-mysql -h $MYSQL_HOST -u $MYSQL_USER -p$MYSQL_PASSWORD -P $MYSQL_PORT --ssl < 02_migrate_plots.sql
-# ... continue with remaining scripts
+cd frontend/db-migrations
+./run_migration.sh \
+  --source stable_mpala \
+  --target forestgeo_mpala \
+  --site "Mpala" \
+  --location "Mpala Research Centre" \
+  --country "Kenya"
 ```
 
-## Migration Details
+### Option 3: Step-by-Step (For Debugging)
 
-### 1. Plots Migration
+```bash
+# 1. Connect to MySQL
+MYSQL_PWD='<password>' mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
+  -u azureroot --ssl -D forestgeo_mpala
 
-- **Source**: `stable_mpala.viewfulltable` (distinct PlotID/PlotName)
-- **Calculations**: Plot dimensions calculated from coordinate extents
-- **Expected**: 1 plot (Mpala)
+# 2. Run scripts in order
+SOURCE frontend/db-migrations/00_migration_framework.sql;
+SOURCE frontend/sqlscripting/resetschema.sql;
 
-### 2. Quadrats Migration
+SET @source_schema = 'stable_mpala';
+SET @location_name = 'Mpala';
+SET @country_name = 'Kenya';
+SOURCE frontend/db-migrations/01_migrate_all_data.sql;
+SOURCE frontend/db-migrations/02_validate_migration.sql;
+SOURCE frontend/db-migrations/03_apply_schema_changes.sql;
+```
 
-- **Source**: `stable_mpala.viewfulltable` + `stable_mpala.coordinates`
-- **Coordinates**: Upper-left corner (PX, PY) from coordinates table
-- **Dimensions**: 20m x 20m (400 sq m area)
-- **Expected**: ~3,750 quadrats
+### Checking Progress
 
-### 3. Taxonomy Migration
+```bash
+# Check migration status
+./run_migration.sh --status --target forestgeo_mpala
 
-- **Family**: Distinct families from viewfulltable
-- **Genus**: Linked to families
-- **Species**: Includes subspecies, uses Mnemonic as SpeciesCode
-- **Expected**: Variable based on data diversity
+# Or in MySQL:
+CALL migration_progress();
+```
 
-### 4. Census Migration
+### Resuming After Failure
 
-- **Source**: `stable_mpala.census`
-- **Dates**: Handles invalid dates (0000-00-00) as NULL
-- **Expected**: 2 censuses
+```bash
+./run_migration.sh --resume --target forestgeo_mpala
+```
 
-### 5. Trees Migration
+---
 
-- **Source**: `stable_mpala.viewfulltable` (distinct TreeID/Tag)
-- **Links**: Species + Census
-- **Expected**: ~100,000+ unique trees
+## Key Concepts
 
-### 6. Stems Migration
+### Census-Aware Mapping
 
-- **Source**: `stable_mpala.stem` (for accurate coordinates)
-- **Coordinates**: QX, QY as LocalX, LocalY (quadrat-local coordinates)
-- **Links**: Trees + Quadrats + Census
-- **Expected**: ~300,000+ stems
+**This is the most important concept to understand.**
 
-### 7. Core Measurements Migration
+In the legacy schema, a tree has ONE TreeID regardless of which census it was measured in:
+```
+TreeID=1234 appears in Census 1 AND Census 2
+```
 
-- **Source**: `stable_mpala.dbh`
-- **Date Logic**: Uses ExactDate when available
-- **Measurements**: DBH (mm), HOM (m)
-- **Expected**: 575,018 measurements
+In the new schema, each tree gets a SEPARATE record per census:
+```
+TreeID=5001 (Census 1, TreeTag='ABC')
+TreeID=5002 (Census 2, TreeTag='ABC')  ← Same physical tree, different record
+```
 
-### 8. Attributes Migration
+**Why this matters**: When migrating measurements, we must link each measurement to the correct census-specific tree/stem. The mapping tables use composite keys:
 
-- **Source**: `stable_mpala.tsmattributes` + `viewfulltable.ListOfTSM` + `viewfulltable.Status`
-- **Parsing**: Splits comma-separated ListOfTSM codes
-- **Linking**: Creates entries in `cmattributes` table
-- **Expected**: Variable based on attribute usage
+```sql
+-- Mapping table structure
+id_map_trees (
+    old_TreeID INT,
+    old_CensusID INT,      -- ← Census is part of the key
+    new_TreeID INT,
+    PRIMARY KEY (old_TreeID, old_CensusID)
+)
+```
 
-## Validation
+**What can go wrong**: If mappings are not census-aware, Census 2 measurements may incorrectly link to Census 1 stems, causing:
+- Missing rows in `measurementssummary`
+- Incorrect data in reports
+- Validation failures
 
-The `10_validation_queries.sql` script performs comprehensive checks:
+### ID Mapping Tables
 
-### Data Integrity Checks
+The migration creates temporary tables to track how old IDs map to new IDs:
 
-- Row count comparisons (source vs target)
-- Taxonomy hierarchy validation
-- Spatial data validation (coordinate ranges)
-- Foreign key relationship integrity
-- Orphaned record detection
+| Mapping Table | Old ID | New ID |
+|---------------|--------|--------|
+| `id_map_plots` | PlotID | PlotID |
+| `id_map_quadrats` | QuadratID | QuadratID |
+| `id_map_family` | FamilyID | FamilyID |
+| `id_map_genus` | GenusID | GenusID |
+| `id_map_species` | SpeciesID | SpeciesID |
+| `id_map_census` | CensusID | CensusID |
+| `id_map_trees` | (TreeID, CensusID) | TreeID |
+| `id_map_stems` | (StemID, CensusID) | StemGUID |
 
-### Data Quality Checks
+**Keep these tables** after migration - they're useful for debugging.
 
-- DBH/HOM value ranges and statistics
-- Suspicious outlier detection
-- Missing coordinate detection
-- Attribute distribution analysis
-- Census coverage analysis
+### Migration State Tracking
 
-### Expected Results
+The migration framework tracks progress in a `migration_state` table:
 
-After successful migration, you should see:
+```sql
+-- View progress
+CALL migration_progress();
 
-- ~575,000 measurements
-- ~300,000 stems
-- ~100,000 trees
-- ~3,750 quadrats
-- 1 plot
-- 2 censuses
-- Complete taxonomy hierarchy
-- All relationships properly linked
+-- Output:
+-- step_order | step_name              | status    | rows_affected
+-- 1          | 01_create_mapping...   | completed | 8
+-- 2          | 02_migrate_plots       | completed | 1
+-- 3          | 03_migrate_quadrats    | completed | 3750
+-- ...
+```
+
+This enables:
+- **Resume**: Continue from where you left off after a failure
+- **Audit**: See how long each step took and how many rows were affected
+- **Idempotency**: Steps that completed won't run again
+
+---
+
+## Migration Process
+
+### What Happens During Migration
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 1: Framework Setup                                              │
+│   Creates migration_state and migration_config tables               │
+│   Installs helper procedures                                         │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 2: Schema Reset                                                 │
+│   Truncates all target tables                                        │
+│   Preserves table structures                                         │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 3: Data Migration (01_migrate_all_data.sql)                     │
+│   3a. Create mapping tables                                          │
+│   3b. Migrate plots (1 row for Mpala)                               │
+│   3c. Migrate quadrats (~3,750 rows)                                │
+│   3d. Migrate taxonomy (family → genus → species)                   │
+│   3e. Migrate census (2 rows for Mpala)                             │
+│   3f. Migrate trees (~100,000 rows per census)                      │
+│   3g. Migrate stems (~300,000 rows per census)                      │
+│   3h. Migrate measurements (~500,000 rows)                          │
+│   3i. Migrate attributes and link to measurements                   │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 4: Validation (02_validate_migration.sql)                       │
+│   Checks for orphaned records                                        │
+│   Verifies census consistency                                        │
+│   Compares row counts                                                │
+│   FAILS if critical issues found                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 5: Schema Changes (03_apply_schema_changes.sql)                 │
+│   Adds performance indexes                                           │
+│   Creates upload tracking tables                                     │
+│   Removes FK constraints for error handling                         │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 6: Stored Procedures                                            │
+│   Deploys bulkingestionprocess, RefreshMeasurementsSummary, etc.    │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Step 7: Refresh Views                                                │
+│   Calls RefreshMeasurementsSummary()                                │
+│   Populates measurementssummary table                               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Expected Row Counts (Mpala Example)
+
+After successful migration, you should see approximately:
+
+| Table | Expected Rows |
+|-------|---------------|
+| plots | 1 |
+| quadrats | ~3,750 |
+| family | ~50 |
+| genus | ~150 |
+| species | ~300 |
+| census | 2 |
+| trees | ~200,000 (combined across censuses) |
+| stems | ~600,000 (combined across censuses) |
+| coremeasurements | ~520,000 |
+| measurementssummary | ~520,000 (should match coremeasurements) |
+
+---
+
+## Validation & Verification
+
+### Automatic Validation
+
+The `02_validate_migration.sql` script runs these checks:
+
+#### Critical Checks (Migration FAILS if any fail)
+
+| Check | What It Validates |
+|-------|-------------------|
+| Orphaned genus | Every genus has a valid family |
+| Orphaned species | Every species has a valid genus |
+| Trees without species | Every tree has a valid species |
+| Stems without trees | Every stem has a valid tree |
+| Stems without quadrats | Every stem has a valid quadrat |
+| Measurements without stems | Every measurement has a valid stem |
+| Measurements without census | Every measurement has a valid census |
+| **Census mismatch (stem)** | Measurement.CensusID = Stem.CensusID |
+| **Census mismatch (tree)** | Stem.CensusID = Tree.CensusID |
+
+#### Data Quality Checks (Warnings only)
+
+- DBH values within reasonable range (10-2000mm)
+- Stems with missing coordinates
+- Measurements with NULL dates
+
+### Manual Verification
+
+After migration, verify key metrics:
+
+```sql
+-- 1. Check total measurements migrated
+SELECT COUNT(*) FROM coremeasurements;
+
+-- 2. Check measurementssummary matches (CRITICAL)
+SELECT
+    (SELECT COUNT(*) FROM coremeasurements) AS measurements,
+    (SELECT COUNT(*) FROM measurementssummary) AS in_summary,
+    (SELECT COUNT(*) FROM coremeasurements) -
+    (SELECT COUNT(*) FROM measurementssummary) AS missing;
+-- "missing" should be 0!
+
+-- 3. Check census consistency (should return 0)
+SELECT COUNT(*)
+FROM coremeasurements cm
+JOIN stems st ON cm.StemGUID = st.StemGUID
+WHERE cm.CensusID != st.CensusID;
+
+-- 4. Check measurements per census
+SELECT
+    c.PlotCensusNumber,
+    COUNT(*) AS measurements
+FROM coremeasurements cm
+JOIN census c ON cm.CensusID = c.CensusID
+GROUP BY c.PlotCensusNumber;
+```
+
+---
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### Issue 1: Foreign Key Constraint Errors
+#### Issue: "MIGRATION VALIDATION FAILED: Critical data integrity issues"
 
-**Cause**: Scripts executed out of order
-**Solution**: Drop all data and re-run from script 01
+**Cause**: One of the critical checks failed.
+
+**Solution**:
+1. Check the validation output for specific failures
+2. Look at the `migration_state` table for the error message
+3. Common fixes:
+   - Reset schema and re-run migration
+   - Check source data for issues
 
 ```sql
-USE forestgeo_testing;
-SET FOREIGN_KEY_CHECKS = 0;
--- Truncate all tables
-TRUNCATE TABLE cmattributes;
-TRUNCATE TABLE attributes;
-TRUNCATE TABLE coremeasurements;
-TRUNCATE TABLE stems;
-TRUNCATE TABLE trees;
-TRUNCATE TABLE census;
-TRUNCATE TABLE species;
-TRUNCATE TABLE genus;
-TRUNCATE TABLE family;
-TRUNCATE TABLE quadrats;
-TRUNCATE TABLE plots;
-SET FOREIGN_KEY_CHECKS = 1;
+-- See what failed
+SELECT * FROM migration_state WHERE status = 'failed';
 ```
 
-#### Issue 2: Duplicate Key Errors
+#### Issue: measurementssummary has fewer rows than coremeasurements
 
-**Cause**: Re-running scripts without clearing previous data
-**Solution**: Clear target tables before re-running
+**Cause**: Census mismatch - measurements are linked to wrong-census stems.
 
-#### Issue 3: Missing Coordinates
+**Solution**: This was the original bug that led to the census-aware mapping fix. Ensure you're using the consolidated migration scripts (`01_migrate_all_data.sql`) which have the fix.
 
-**Cause**: Some stems don't have coordinates in source data
-**Solution**: This is expected - validation query will report count
-
-#### Issue 4: Connection Timeout
-
-**Cause**: Large data volume, slow network
-**Solution**: Increase MySQL timeout settings or run scripts on server
-
-### Validation Failures
-
-If validation queries show discrepancies:
-
-1. **Check mapping table counts**: Should match source distinct IDs
-2. **Review log file**: Check for warnings during migration
-3. **Run sample queries**: Manually verify data transformation
-4. **Check for NULL values**: Some fields may intentionally be NULL
-
-## Post-Migration Steps
-
-1. **Review Validation Results**
-   - Check all validation query outputs
-   - Investigate any warnings or discrepancies
-   - Verify row counts match expectations
-
-2. **Spot Check Data**
-   - Select random samples and compare with source
-   - Verify coordinate transformations
-   - Check taxonomy hierarchy
-   - Validate measurement data
-
-3. **Performance Optimization** (Optional)
-   - Add additional indexes if needed
-   - Update table statistics
-   - Analyze query performance
-
-4. **Clean Up** (Optional)
-   - Drop mapping tables if no longer needed
-   - Archive log files
-   - Document any issues encountered
-
-5. **Update Application Code**
-   - Modify queries to use new schema
-   - Update API endpoints
-   - Test all functionality
-
-## Mapping Tables
-
-The migration creates temporary mapping tables to track ID conversions:
-
-- `id_map_plots`: old_PlotID → new_PlotID
-- `id_map_quadrats`: old_QuadratID → new_QuadratID
-- `id_map_family`: old_FamilyID → new_FamilyID
-- `id_map_genus`: old_GenusID → new_GenusID
-- `id_map_species`: old_SpeciesID → new_SpeciesID
-- `id_map_census`: old_CensusID → new_CensusID
-- `id_map_trees`: old_TreeID → new_TreeID
-- `id_map_stems`: old_StemID → new_StemGUID
-
-**Keep these tables** until you're certain the migration is successful. They're useful for:
-
-- Debugging data issues
-- Tracing records from old to new IDs
-- Incremental updates if needed
-
-## Important Notes
-
-1. **Coordinate System**
-   - **PX, PY**: Plot-level coordinates (upper-left of plot)
-   - **QX, QY**: Quadrat-local coordinates (within 20m x 20m quadrat)
-   - Migration uses QX, QY from `stem` table as LocalX, LocalY
-
-2. **Date Handling**
-   - Uses `ExactDate` from DBH table when available
-   - Invalid dates (0000-00-00) converted to NULL
-
-3. **Subspecies**
-   - Combined with species in the same `species` table
-   - Old SubspeciesID tracked in mapping table
-
-4. **Attributes**
-   - TSM codes from `ListOfTSM` parsed and linked individually
-   - Status field also mapped to attribute codes
-   - Multiple attributes can link to one measurement
-
-## Support
-
-For questions or issues:
-
-1. Review validation query output
-2. Check the migration log file
-3. Verify source data in `stable_mpala` schema
-4. Test with sample data first
-
-## Schema Diagram
-
-```
-plots (PlotID)
-  └── quadrats (QuadratID, PlotID FK)
-  └── census (CensusID, PlotID FK)
-      └── trees (TreeID, SpeciesID FK, CensusID FK)
-          └── stems (StemGUID, TreeID FK, QuadratID FK, CensusID FK)
-              └── coremeasurements (CoreMeasurementID, StemGUID FK, CensusID FK)
-                  └── cmattributes (CoreMeasurementID FK, Code FK)
-                      └── attributes (Code)
-
-family (FamilyID)
-  └── genus (GenusID, FamilyID FK)
-      └── species (SpeciesID, GenusID FK)
-          └── trees (SpeciesID FK)
+```sql
+-- Diagnose the issue
+SELECT
+    cm.CensusID AS measurement_census,
+    st.CensusID AS stem_census,
+    COUNT(*) AS mismatch_count
+FROM coremeasurements cm
+JOIN stems st ON cm.StemGUID = st.StemGUID
+WHERE cm.CensusID != st.CensusID
+GROUP BY cm.CensusID, st.CensusID;
 ```
 
-## Files in This Directory
+#### Issue: "Access denied" or connection errors
 
-### Core Migration Scripts (01-10)
+**Cause**: Invalid credentials or network issues.
 
-- `00_run_all_migrations.sh` - Master automation script
-- `01_create_mapping_tables.sql` - Create ID mapping tables
-- `02_migrate_plots.sql` - Migrate plot data
-- `03_migrate_quadrats.sql` - Migrate quadrat data
-- `04_migrate_taxonomy.sql` - Migrate family/genus/species
-- `05_migrate_census.sql` - Migrate census records
-- `06_migrate_trees.sql` - Migrate tree records
-- `07_migrate_stems.sql` - Migrate stem records
-- `08_migrate_coremeasurements.sql` - Migrate measurements
-- `09_migrate_attributes.sql` - Migrate and link attributes
-- `10_validation_queries.sql` - Comprehensive validation
-- `10_cleanup.sql` - Remove mapping tables
+**Solution**:
+1. Verify credentials in `frontend/.env.local`
+2. Test connection manually:
+   ```bash
+   MYSQL_PWD='<password>' mysql -h forestgeo-mysqldataserver.mysql.database.azure.com \
+     -u azureroot --ssl -e "SELECT 1"
+   ```
+3. If using MariaDB client, use `--skip-ssl-verify-server-cert` instead of `--ssl`
 
-### Post-Migration Scripts (11-14)
+#### Issue: Script stops with "Duplicate entry" error
 
-- `11_remove_cmattributes_fk_constraint.sql` - Remove FK constraint for error handling
-- `12_increase_fileid_column_size.sql` - Increase FileID/BatchID column sizes
-- `13_add_upload_session_tracking.sql` - Add upload session tracking columns
-- `13_update_bulkingestionprocess_with_tracking.sql` - Update bulk ingestion procedure
-- `14_add_performance_indexes.sql` - Add performance optimization indexes
+**Cause**: Re-running migration without resetting schema first.
 
-### Utility Scripts
+**Solution**:
+```bash
+# Reset and start fresh
+./run_migration.sh --reset --source stable_mpala --target forestgeo_mpala ...
+```
 
-- `run-all-migrations.sh` - Alternative migration runner with MariaDB support
-- `provision_new_site.sh` - Automated site provisioning with checkpoints
-- `sync_schema_procedures.sh` - Synchronize stored procedures across schemas
+Or manually:
+```sql
+SOURCE frontend/sqlscripting/resetschema.sql;
+```
 
-### Other Files
+#### Issue: Migration takes too long (> 30 minutes)
 
-- `README.md` - This file
-- `migration-validation.sql` - Additional validation queries
-- `migration_*.log` - Generated log files (after running)
+**Cause**: Large dataset or slow network connection.
+
+**Solution**:
+- Run migration from a machine closer to the database (same Azure region)
+- Increase MySQL timeout: `SET GLOBAL wait_timeout=28800;`
+- Monitor progress: `CALL migration_progress();`
+
+### Getting Help
+
+1. **Check the log file**: `migration_YYYYMMDD_HHMMSS.log`
+2. **Review validation output**: Look for specific error messages
+3. **Check migration state**: `CALL migration_progress();`
+4. **Verify source data**: Ensure source schema has expected data
 
 ---
 
-## Schema Consistency
+## File Reference
 
-### Baseline Schema
+### Consolidated Scripts (Recommended)
 
-The `forestgeo_panama` schema is designated as the baseline schema. All other ForestGEO schemas should match its stored procedures.
+| File | Purpose | When to Use |
+|------|---------|-------------|
+| `run_migration.sh` | Main orchestration script | **Start here** - handles everything |
+| `00_migration_framework.sql` | State tracking, helper procedures | Automatically run by `run_migration.sh` |
+| `01_migrate_all_data.sql` | All data migration | Automatically run by `run_migration.sh` |
+| `02_validate_migration.sql` | Validation checks | Automatically run by `run_migration.sh` |
+| `03_apply_schema_changes.sql` | Post-migration schema mods | Automatically run by `run_migration.sh` |
+| `99_cleanup.sql` | Drop mapping tables | Run manually when migration is verified |
 
-### Target Schemas
+### Supporting Files
 
-All ForestGEO schemas should be kept in sync:
+| File | Purpose |
+|------|---------|
+| `README.md` | This documentation |
+| `migration_*.log` | Generated log files |
 
-- `forestgeo_harvard`
-- `forestgeo_mpala`
-- `forestgeo_panama` (baseline)
-- `forestgeo_serc`
-- `forestgeo_testing`
+### Legacy Scripts (For Reference Only)
 
-### Stored Procedures
+These are the original 19 separate files. Use the consolidated scripts above instead.
 
-Each schema should have these stored procedures:
+<details>
+<summary>Click to expand legacy file list</summary>
 
-1. `bulkingestioncollapser` - Collapse duplicate measurements
-2. `bulkingestionprocess` - Main bulk data ingestion
-3. `clearcensusfull` - Clear all census data
-4. `clearcensusmsmts` - Clear census measurements
-5. `RefreshMeasurementsSummary` - Refresh summary view
-6. `RefreshViewFullTable` - Refresh full table view
-7. `reingestfailedrows` - Re-ingest failed measurements
-8. `reinsertdefaultpostvalidations` - Reset post-validation queries
-9. `reinsertdefaultvalidations` - Reset validation queries
-10. `reviewfailed` - Review failed measurements
+| File | Replaced By |
+|------|-------------|
+| `00_run_all_migrations.sh` | `run_migration.sh` |
+| `00a_reset_target_schema.sql` | `resetschema.sql` |
+| `00b_ensure_table_structures.sql` | `03_apply_schema_changes.sql` |
+| `01_create_mapping_tables.sql` | `01_migrate_all_data.sql` |
+| `02_migrate_plots.sql` | `01_migrate_all_data.sql` |
+| `03_migrate_quadrats.sql` | `01_migrate_all_data.sql` |
+| `04_migrate_taxonomy.sql` | `01_migrate_all_data.sql` |
+| `05_migrate_census.sql` | `01_migrate_all_data.sql` |
+| `06_migrate_trees.sql` | `01_migrate_all_data.sql` |
+| `07_migrate_stems.sql` | `01_migrate_all_data.sql` |
+| `08_migrate_coremeasurements.sql` | `01_migrate_all_data.sql` |
+| `09_migrate_attributes.sql` | `01_migrate_all_data.sql` |
+| `10_validation_queries.sql` | `02_validate_migration.sql` |
+| `10a_critical_validation.sql` | `02_validate_migration.sql` |
+| `11-14_*.sql` | `03_apply_schema_changes.sql` |
+| `15_deploy_bulkingestionprocess.sql` | `storedprocedures.sql` |
 
-### Synchronizing Procedures
+</details>
 
-Use the `sync_schema_procedures.sh` script to compare and synchronize procedures:
+---
+
+## Advanced Topics
+
+### Running Migration for a New Site
+
+If you're setting up a completely new site (not Mpala), you need:
+
+1. **Source data** in a `stable_<sitename>` schema with `viewfulltable`
+2. **Target schema** created (can be empty)
+3. Run migration with appropriate parameters:
 
 ```bash
-# Compare all schemas (no changes)
-./sync_schema_procedures.sh --compare --all
-
-# Sync forestgeo_testing with baseline
-./sync_schema_procedures.sh --target forestgeo_testing
-
-# Sync all schemas
-./sync_schema_procedures.sh --all
-
-# Dry run (show what would change)
-./sync_schema_procedures.sh --target forestgeo_testing --dry-run
+./run_migration.sh \
+  --source stable_newsite \
+  --target forestgeo_newsite \
+  --site "New Site Name" \
+  --location "Location Description" \
+  --country "Country Name"
 ```
 
-### Deploying to All Schemas
+### Deploying Stored Procedures Separately
 
-Use the `DEPLOY_ALL_SCHEMAS.sh` script to deploy stored procedures to all schemas:
+If you only need to update stored procedures (not migrate data):
 
 ```bash
-cd /Users/sambokar/Documents/ForestGEO/frontend
+cd frontend
 ./DEPLOY_ALL_SCHEMAS.sh
 ```
 
-This will:
+Or for a single schema:
+```bash
+MYSQL_PWD='<password>' mysql -h <host> -u <user> --ssl \
+  -D forestgeo_mpala < sqlscripting/storedprocedures.sql
+```
 
-1. Backup existing procedures for each schema
-2. Deploy from `sqlscripting/storedprocedures.sql`
-3. Verify deployment success
-4. Generate a deployment log
+### Schema Synchronization
 
-## License & Credits
+All ForestGEO schemas should have identical stored procedures. To sync:
 
-Created for the ForestGEO project to migrate Mpala plot data from legacy schema to normalized schema.
+```bash
+# Compare schemas
+./sync_schema_procedures.sh --compare --all
+
+# Sync a specific schema with baseline (forestgeo_panama)
+./sync_schema_procedures.sh --target forestgeo_testing
+```
+
+### Keeping Mapping Tables
+
+By default, `99_cleanup.sql` drops the mapping tables. To keep them:
+
+```bash
+./run_migration.sh --skip-cleanup ...
+```
+
+The mapping tables are useful for:
+- Debugging data issues
+- Tracing old IDs to new IDs
+- Running incremental updates
+
+### Understanding the Source Schema (CTFS)
+
+The legacy CTFS schema uses a denormalized `viewfulltable` that joins:
+
+| Source Table | Key Columns |
+|--------------|-------------|
+| `viewfulltable` | TreeID, StemID, SpeciesID, CensusID, QuadratID, PlotID, DBH, HOM, etc. |
+| `stem` | StemID, QX, QY (local coordinates) |
+| `dbh` | DBHID, StemID, CensusID, ExactDate |
+| `census` | CensusID, PlotCensusNumber, StartDate, EndDate |
+| `tsmattributes` | TSMCode, Description, Status |
+
+The migration extracts and normalizes this into the ForestGEO schema.
 
 ---
 
-## Automated Site Provisioning System (Full Documentation)
+## Appendix: Environment Variables
 
-### Overview
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AZURE_SQL_SERVER` | MySQL host | `forestgeo-mysqldataserver.mysql.database.azure.com` |
+| `AZURE_SQL_USER` | MySQL username | `azureroot` |
+| `AZURE_SQL_PASSWORD` | MySQL password | (required) |
+| `AZURE_SQL_PORT` | MySQL port | `3306` |
 
-The `provision_new_site.sh` script automates the complete site creation process:
-
-1. Load dump file into source schema (`stable_<sitename>`)
-2. Create target schema (`forestgeo_<sitename>`)
-3. Deploy table structures, stored procedures, validations
-4. Migrate data through 15 checkpoints
-5. Register in catalog and assign user access
-6. Validate migration success
-
-### Checkpoint System
-
-| Step | Checkpoint                    | Description                   |
-| ---- | ----------------------------- | ----------------------------- |
-| 1    | `01_create_mapping_tables`    | Creates ID mapping tables     |
-| 2    | `02_migrate_plots`            | Migrates plot data            |
-| 3    | `03_migrate_quadrats`         | Migrates quadrat definitions  |
-| 4    | `04_migrate_taxonomy`         | Migrates family/genus/species |
-| 5    | `05_migrate_census`           | Migrates census periods       |
-| 6    | `06_migrate_trees`            | Migrates tree records         |
-| 7    | `07_migrate_stems`            | Migrates stem records         |
-| 8    | `08_migrate_coremeasurements` | Migrates measurements         |
-| 9    | `09_migrate_attributes`       | Migrates attributes           |
-| 10   | `10_cleanup`                  | Removes mapping tables        |
-| 11   | `11_deploy_procedures`        | Deploys stored procedures     |
-| 12   | `12_deploy_validations`       | Deploys validation queries    |
-| 13   | `13_register_catalog`         | Registers in catalog.sites    |
-| 14   | `14_refresh_views`            | Refreshes materialized views  |
-| 15   | `15_final_validation`         | Validates migration success   |
-
-### Shell Script Usage
-
-```bash
-./provision_new_site.sh [OPTIONS]
-
-Required:
-  --source-schema NAME    Source schema (e.g., stable_newsite)
-  --target-schema NAME    Target schema (e.g., forestgeo_newsite)
-  --site-name NAME        Display name for the site
-
-Optional:
-  --user-email EMAIL      Assign site access to user
-  --reset-if-exists       Reset target if it exists
-  --skip-cleanup          Keep mapping tables
-  --resume                Resume from last checkpoint
-  --rollback CHECKPOINT   Rollback to checkpoint
-  --list-checkpoints      Show all checkpoints
-  --help                  Show help
-```
-
-### Failure Recovery
-
-```bash
-# Resume after failure
-./provision_new_site.sh --source-schema stable_x --target-schema forestgeo_x \
-  --site-name "Site X" --resume
-
-# Rollback to specific checkpoint
-./provision_new_site.sh --source-schema stable_x --target-schema forestgeo_x \
-  --site-name "Site X" --rollback 05_migrate_census
-```
-
-### API Endpoints
-
-#### POST /api/admin/provision/upload
-
-Upload MySQL dump file.
-
-**Request:** `multipart/form-data` with `dumpFile` and `siteName`
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "sourceSchema": "stable_new_site",
-  "targetSchema": "forestgeo_new_site",
-  "tablesFound": ["viewfulltable", "stem", ...],
-  "rowCounts": {"viewfulltable": 50000}
-}
-```
-
-#### POST /api/admin/provision
-
-Start migration.
-
-**Request:**
-
-```json
-{
-  "sourceSchema": "stable_new_site",
-  "targetSchema": "forestgeo_new_site",
-  "siteName": "New Site",
-  "userEmail": "admin@example.com",
-  "resetIfExists": true
-}
-```
-
-#### GET /api/admin/provision?migrationId=XXX
-
-Check migration status.
-
-**Response:**
-
-```json
-{
-  "migrationId": "migration_xxx",
-  "status": "running",
-  "currentCheckpoint": "07_migrate_stems",
-  "progress": 7,
-  "totalSteps": 15
-}
-```
-
-#### PUT /api/admin/provision
-
-Resume or cancel migration.
-
-### Environment Variables
-
-| Variable             | Default                      | Description       |
-| -------------------- | ---------------------------- | ----------------- |
-| `AZURE_SQL_SERVER`   | forestgeo-mysqldataserver... | Database host     |
-| `AZURE_SQL_USER`     | azureroot                    | Database user     |
-| `AZURE_SQL_PASSWORD` | (required)                   | Database password |
-| `AZURE_SQL_PORT`     | 3306                         | Database port     |
-
-### Directory Structure
-
-```
-frontend/
-├── db-migrations/
-│   ├── provision_new_site.sh    # Main script
-│   ├── 01-10_*.sql              # Migration scripts
-│   └── .checkpoints/            # Checkpoint state
-├── sqlscripting/
-│   ├── tablestructures.sql      # Schema definitions
-│   ├── storedprocedures.sql     # Stored procedures
-│   └── corequeries.sql          # Validations
-├── app/api/admin/provision/
-│   ├── route.ts                 # Main API
-│   └── upload/route.ts          # Upload API
-└── logs/migrations/             # Migration logs
-```
-
-### Source Data Requirements
-
-The source schema must contain `viewfulltable` with these key columns:
-
-- `TreeID`, `StemID`, `TreeTag`, `StemTag`
-- `SpeciesCode`, `CensusID`, `QuadratID`
-- `DBH`, `HOM`, `ExactDate`
-- `Status`, `ListOfTSM`
-
-Supporting tables (optional but recommended):
-
-- `stem` - For accurate coordinates
-- `dbh` - For measurement dates
-- `census` - For date ranges
-- `tsmattributes` - For attribute definitions
+These are read from `frontend/.env.local` by `run_migration.sh`.
