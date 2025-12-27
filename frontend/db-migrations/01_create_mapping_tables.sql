@@ -3,6 +3,11 @@
 -- ================================================================
 -- Purpose: Create temporary tables to track old ID -> new ID mappings
 -- These tables are essential for preserving relationships during migration
+--
+-- IMPORTANT: Trees and Stems are census-specific in the new schema.
+-- The mapping tables for these entities must include CensusID as part
+-- of the composite primary key to correctly map old IDs to new IDs
+-- for each census.
 -- ================================================================
 
 
@@ -66,20 +71,37 @@ CREATE TABLE id_map_census (
     INDEX idx_new (new_CensusID)
 );
 
--- Tree ID mapping
+-- Tree ID mapping (CENSUS-AWARE)
+-- In the new schema, trees are census-specific: each census has its own tree records.
+-- The same physical tree (old_TreeID) may have different new_TreeID values per census.
 CREATE TABLE id_map_trees (
     old_TreeID INT,
+    old_CensusID INT,
     new_TreeID INT,
-    PRIMARY KEY (old_TreeID),
-    INDEX idx_new (new_TreeID)
+    PRIMARY KEY (old_TreeID, old_CensusID),
+    INDEX idx_new (new_TreeID),
+    INDEX idx_old_tree (old_TreeID),
+    INDEX idx_old_census (old_CensusID)
 );
 
--- Stem ID mapping
+-- Stem ID mapping (CENSUS-AWARE)
+-- In the new schema, stems are census-specific: each census has its own stem records.
+-- The same physical stem (old_StemID) may have different new_StemGUID values per census.
 CREATE TABLE id_map_stems (
     old_StemID INT,
+    old_CensusID INT,
     new_StemGUID INT,
-    PRIMARY KEY (old_StemID),
-    INDEX idx_new (new_StemGUID)
+    PRIMARY KEY (old_StemID, old_CensusID),
+    INDEX idx_new (new_StemGUID),
+    INDEX idx_old_stem (old_StemID),
+    INDEX idx_old_census (old_CensusID)
 );
 
 SELECT 'Mapping tables created successfully' AS Status;
+
+-- Verification: Display table structures
+SELECT 'id_map_trees structure (census-aware):' AS Info;
+DESCRIBE id_map_trees;
+
+SELECT 'id_map_stems structure (census-aware):' AS Info;
+DESCRIBE id_map_stems;

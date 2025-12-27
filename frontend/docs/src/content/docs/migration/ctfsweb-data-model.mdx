@@ -1,0 +1,460 @@
+---
+title: CTFSWeb Data Model Reference
+description: Comprehensive reference for the CTFSWeb database structure, tables, and relationships used in ForestGEO census data management.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This document provides a comprehensive reference for the CTFSWeb data model—the foundation for ForestGEO's census data management system. Whether you're migrating from CTFSWeb or learning how ForestGEO structures forest inventory data, this guide explains the core concepts, table structures, and relationships.
+
+## Core Terminology
+
+| Term | Definition |
+|------|------------|
+| **CTFSWeb** | A web application (MySQL, PHP, JavaScript) for ingesting and organizing census data from ForestGEO sites |
+| **Database** | A collection of related data organized in tables (rows and columns) |
+| **Census** | A complete measurement cycle of all trees in a plot, typically every 5 years |
+| **Plot** | The defined forest area being monitored, divided into quadrats |
+| **Quadrat** | A 20m × 20m subdivision of a plot, identified by column and row numbers |
+| **Tree** | A single tree identified by a unique tag number within a plot |
+| **Stem** | An individual stem of a tree (trees may have multiple stems) |
+| **DBH** | Diameter at Breast Height—the standard measurement taken at 1.3m height |
+
+---
+
+## Data Hierarchy
+
+ForestGEO data follows a strict hierarchical structure. Understanding this hierarchy is essential for working with census data.
+
+```
+Site
+ └── Plot
+      └── Census
+           └── Quadrat
+                └── Tree
+                     └── Stem
+                          └── DBH (Measurement)
+```
+
+### Hierarchy Explained
+
+<CardGrid>
+  <Card title="Site" icon="globe">
+    The research location (e.g., "Barro Colorado Island"). Contains metadata about the forest site including coordinates and area.
+  </Card>
+  <Card title="Census" icon="calendar">
+    A complete measurement event across the plot. Census 1 is the first measurement; subsequent censuses track changes over time.
+  </Card>
+  <Card title="Quadrat" icon="grid">
+    A 20×20 meter square section of the plot. Identified by column (StartX) and row (StartY) coordinates.
+  </Card>
+  <Card title="Tree" icon="tree">
+    An individual tree tracked by a permanent aluminum tag. Trees persist across censuses; measurements are linked by TreeID.
+  </Card>
+  <Card title="Stem" icon="branch">
+    A single stem of a tree. Multi-stemmed trees have one record per stem, each with its own StemTag (e.g., "1", "2", "A", "B").
+  </Card>
+  <Card title="DBH" icon="ruler">
+    The diameter measurement for a stem in a specific census. This is the primary data collected during field work.
+  </Card>
+</CardGrid>
+
+---
+
+## Core Tables Reference
+
+The CTFSWeb data model consists of interconnected tables. Below are the essential tables you'll encounter.
+
+### Site
+
+Stores information about the research forest site.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `SiteID` | Unique identifier | 1 |
+| `Name` | Full site name | "Barro Colorado Island" |
+| `SchemaCode` | Short code for the site | "bci" |
+| `CountryName` | Country location | "Panama" |
+| `Area` | Plot area in hectares | 50 |
+| `GlobalX` | GPS longitude | -79.8461 |
+| `GlobalY` | GPS latitude | 9.1543 |
+| `GlobalZ` | Elevation (meters) | 120 |
+
+### Census
+
+Tracks each measurement cycle of the forest plot.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `CensusID` | Unique identifier | 5 |
+| `PlotID` | Reference to the plot | 1 |
+| `StartDate` | When fieldwork began | 2020-01-15 |
+| `EndDate` | When fieldwork completed | 2020-12-20 |
+| `PlotCensusNumber` | Sequential census number (1, 2, 3...) | 8 |
+| `Description` | Notes about this census | "Eighth census of BCI 50-ha plot" |
+
+### Quadrat
+
+Defines the 20×20 meter grid squares that divide the plot.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `QuadratID` | Unique identifier | 42 |
+| `PlotID` | Reference to the plot | 1 |
+| `QuadratName` | Human-readable name | "0500" |
+| `StartX` | Column position (meters from origin) | 0 |
+| `StartY` | Row position (meters from origin) | 500 |
+| `DimensionX` | Width (usually 20) | 20 |
+| `DimensionY` | Height (usually 20) | 20 |
+
+<Aside type="tip">
+**Quadrat Naming Convention**: The 4-digit QuadratName combines column (first 2 digits) and row (last 2 digits). Example: "0520" = column 05, row 20 = position (100m, 400m).
+</Aside>
+
+### Tree
+
+Represents an individual tree tracked across all censuses.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `TreeID` | Unique identifier | 12345 |
+| `TreeTag` | Physical aluminum tag number | "A1234" |
+| `QuadratID` | Reference to quadrat location | 42 |
+| `SpeciesID` | Reference to species identification | 156 |
+
+<Aside type="note">
+Trees are identified by their **TreeTag** (the physical tag) but tracked internally by **TreeID**. The same tree has the same TreeID across all censuses.
+</Aside>
+
+### Stem
+
+Individual stems belonging to a tree. Multi-stemmed trees have multiple Stem records.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `StemID` | Unique identifier | 54321 |
+| `TreeID` | Reference to parent tree | 12345 |
+| `StemTag` | Stem identifier (for multi-stemmed trees) | "2" |
+| `LocalX` | X position within quadrat (0-20m) | 12.5 |
+| `LocalY` | Y position within quadrat (0-20m) | 8.3 |
+
+### DBH (CoreMeasurement)
+
+The actual diameter measurements recorded during field work.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `DBHID` | Unique identifier | 987654 |
+| `StemID` | Reference to the stem measured | 54321 |
+| `CensusID` | Reference to the census | 5 |
+| `DBH` | Diameter in millimeters | 125.5 |
+| `HOM` | Height of measurement (meters) | 1.30 |
+| `MeasurementDate` | When measured | 2020-03-15 |
+
+---
+
+## Taxonomy Tables
+
+Species identification follows a hierarchical classification system.
+
+### Taxonomy Hierarchy
+
+```
+Family (e.g., Fabaceae)
+ └── Genus (e.g., Tachigali)
+      └── Species (e.g., versicolor)
+           └── Subspecies (if applicable)
+```
+
+### Family
+
+The highest taxonomic level tracked.
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `FamilyID` | Unique identifier | 23 |
+| `Family` | Family name | "Fabaceae" |
+
+### Genus
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `GenusID` | Unique identifier | 156 |
+| `FamilyID` | Reference to family | 23 |
+| `Genus` | Genus name | "Tachigali" |
+| `Authority` | Taxonomic authority | "Aubl." |
+
+### Species
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| `SpeciesID` | Unique identifier | 892 |
+| `GenusID` | Reference to genus | 156 |
+| `SpeciesName` | Species epithet | "versicolor" |
+| `SpeciesCode` | 6-letter mnemonic | "TACHVE" |
+| `IDLevel` | Confidence of identification | "species" |
+| `Authority` | Taxonomic authority | "Standl. & L.O.Williams" |
+
+<Aside type="tip">
+**APG Classification**: ForestGEO follows the Angiosperm Phylogeny Group (APG) system. This ensures consistent taxonomy across all sites and compatibility with global databases.
+</Aside>
+
+---
+
+## Species Codes (Mnemonics)
+
+Each species is assigned a **6-letter mnemonic code** for efficient data entry and display.
+
+### Code Formation Rules
+
+| Component | Letters | Source |
+|-----------|---------|--------|
+| Genus | First 4 | First 4 letters of genus name |
+| Species | Last 2 | First 2 letters of species epithet |
+
+### Examples
+
+| Full Name | Mnemonic | Breakdown |
+|-----------|----------|-----------|
+| *Tachigali versicolor* | TACHVE | TACH (Tachigali) + VE (versicolor) |
+| *Acer rubrum* | ACERRU | ACER (Acer) + RU (rubrum) |
+| *Quercus alba* | QUERAL | QUER (Quercus) + AL (alba) |
+| *Brosimum alicastrum* | BROSAL | BROS (Brosimum) + AL (alicastrum) |
+
+### Handling Conflicts
+
+When two species generate the same code, a distinguishing modifier is added:
+
+| Species | Original Code | Resolved Code |
+|---------|---------------|---------------|
+| *Ficus insipida* | FICUIN | FICUIN |
+| *Ficus involucrata* | FICUIN | FICUIN2 |
+
+---
+
+## Identification Level (IDLevel)
+
+Not all trees can be identified to species level. The `IDLevel` field indicates the precision of identification.
+
+| IDLevel | Meaning | Example Entry |
+|---------|---------|---------------|
+| `species` | Identified to species | *Tachigali versicolor* |
+| `subspecies` | Identified to subspecies/variety | *Quercus rubra* var. *borealis* |
+| `genus` | Only genus known | *Ficus* sp. |
+| `family` | Only family known | Fabaceae indet. |
+| `none` | Completely unidentified | Unknown |
+| `multiple` | Could be one of several species | *Ficus* cf. *insipida* |
+
+<Aside type="caution">
+When `IDLevel` is not "species", the **SpeciesName** field typically contains "sp." or is blank. Always check IDLevel to understand identification confidence.
+</Aside>
+
+---
+
+## Coordinate Systems
+
+ForestGEO uses three coordinate systems at different scales. Understanding these is crucial for spatial analysis.
+
+### Coordinate Types
+
+| Prefix | Name | Reference Point | Units |
+|--------|------|-----------------|-------|
+| **G** | Global | GPS/Earth coordinates | Degrees (lat/lon) or meters (UTM) |
+| **P** | Plot | Plot origin (corner 0,0) | Meters |
+| **Q** | Quadrat | Quadrat corner (0,0) | Meters (0-20 range) |
+
+### Visual Example
+
+```
+Plot Origin (0,0) ─────────────────────────────────►
+│                                          PX (meters)
+│   ┌─────────────────────────────────────┐
+│   │ Quadrat 0000          Quadrat 0100  │
+│   │  QX,QY within         (column 01)   │
+│   │  0-20 range                         │
+│   ├─────────────────────────────────────┤
+│   │ Quadrat 0020          Quadrat 0120  │
+│   │  (row 02)                           │
+│   │                                     │
+│   └─────────────────────────────────────┘
+│
+▼ PY (meters)
+```
+
+### Coordinate Relationships
+
+For a stem at quadrat position (QX=12.5, QY=8.3) in quadrat "0520" (StartX=100, StartY=400):
+
+| Coordinate | Calculation | Value |
+|------------|-------------|-------|
+| QX | Local to quadrat | 12.5 |
+| QY | Local to quadrat | 8.3 |
+| PX | StartX + QX | 100 + 12.5 = 112.5 |
+| PY | StartY + QY | 400 + 8.3 = 408.3 |
+| GX | Global X of plot origin + PX | (site-specific) |
+| GY | Global Y of plot origin + PY | (site-specific) |
+
+---
+
+## Status Codes (TSMAttributes)
+
+Tree and stem status is recorded using standardized codes stored in the `TSMAttributes` table.
+
+### Tree Status Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `A` | Alive | Tree is living |
+| `D` | Dead | Tree has died since last census |
+| `DS` | Dead (standing) | Dead but still standing |
+| `DC` | Dead (fallen) | Dead and fallen |
+| `M` | Missing | Cannot be found (tag lost, removed, etc.) |
+| `P` | Prior | Died in a previous census |
+| `G` | Gone | Completely gone (no evidence remains) |
+
+### Stem Status Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| `A` | Alive | Stem is living |
+| `D` | Dead | Stem has died |
+| `B` | Broken below | Broken below the point of measurement |
+| `M` | Missing | Stem cannot be found |
+| `Q` | Lost/cut | Lost for reasons other than death |
+| `R` | Resprout | New stem from existing root system |
+
+### Measurement Status Codes
+
+| Code | Meaning | Use Case |
+|------|---------|----------|
+| `I` | Ingrowth | First measurement of a new recruit |
+| `P` | Prior measurement | Has previous census data |
+| `NM` | Not measured | Stem exists but wasn't measured this census |
+
+<Aside type="note">
+Status codes may vary slightly between sites. Always check your site's specific code list in the `TSMAttributes` table.
+</Aside>
+
+---
+
+## Report Tables (Views)
+
+Two primary views combine data from multiple tables for analysis.
+
+### ViewFullTable
+
+A denormalized view containing all measurement data with related tree, stem, and species information. This is the primary table used for most analyses.
+
+| Column | Description |
+|--------|-------------|
+| `TreeID` | Tree identifier |
+| `StemID` | Stem identifier |
+| `TreeTag` | Physical tag number |
+| `StemTag` | Stem number for multi-stemmed trees |
+| `SpeciesCode` | 6-letter species mnemonic |
+| `QuadratName` | Quadrat identifier |
+| `QX`, `QY` | Quadrat-local coordinates |
+| `PX`, `PY` | Plot-level coordinates |
+| `DBH` | Diameter measurement (mm) |
+| `HOM` | Height of measurement (m) |
+| `TreeStatus` | Current tree status (A/D/M) |
+| `StemStatus` | Current stem status |
+| `CensusID` | Census reference |
+| `MeasurementDate` | Date of measurement |
+
+### ViewTaxonomy
+
+A denormalized view of taxonomic data combining Family, Genus, and Species tables.
+
+| Column | Description |
+|--------|-------------|
+| `SpeciesID` | Species identifier |
+| `SpeciesCode` | 6-letter mnemonic |
+| `Family` | Family name |
+| `Genus` | Genus name |
+| `Species` | Species epithet |
+| `Authority` | Combined taxonomic authority |
+| `IDLevel` | Identification confidence |
+| `SubspeciesName` | Subspecies if applicable |
+
+---
+
+## Table Relationships Diagram
+
+```
+┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+│   Family    │──────<│   Genus     │──────<│  Species    │
+└─────────────┘       └─────────────┘       └──────┬──────┘
+                                                   │
+                                                   │ SpeciesID
+                                                   ▼
+┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+│    Site     │──────<│   Census    │       │    Tree     │
+└─────────────┘       └──────┬──────┘       └──────┬──────┘
+      │                      │                     │
+      │ PlotID               │ CensusID            │ TreeID
+      ▼                      ▼                     ▼
+┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+│   Quadrat   │<──────│  Tree       │──────>│    Stem     │
+└─────────────┘       └─────────────┘       └──────┬──────┘
+                                                   │
+                                                   │ StemID
+                                                   ▼
+                                            ┌─────────────┐
+                                            │    DBH      │
+                                            │(Measurement)│
+                                            └─────────────┘
+
+Legend: ──────< One-to-Many relationship
+```
+
+---
+
+## Additional Reference Tables
+
+### Personnel
+
+Tracks field workers and their roles during censuses.
+
+| Column | Description |
+|--------|-------------|
+| `PersonnelID` | Unique identifier |
+| `FirstName` | Given name |
+| `LastName` | Family name |
+| `RoleID` | Reference to role type |
+| `CensusID` | Census they participated in |
+
+### RoleReference
+
+Defines personnel roles.
+
+| RoleID | RoleName | Description |
+|--------|----------|-------------|
+| 1 | PI | Principal Investigator |
+| 2 | Lead tech | Lead field technician |
+| 3 | Field tech | Field technician |
+| 4 | Data manager | Data processing staff |
+| 5 | Botanist | Species identification expert |
+
+### TSMAttributes
+
+Stores all valid status codes and their definitions for a site.
+
+| Column | Description |
+|--------|-------------|
+| `Code` | The status code (A, D, M, etc.) |
+| `Description` | Full description of the code |
+| `Status` | Category (tree_status, stem_status, measurement) |
+
+---
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Data Specifications" icon="document">
+    Learn about file formats and data requirements in the [CTFSWeb Data Specifications Guide](/ForestGEO/migration/ctfsweb-data-specs/).
+  </Card>
+  <Card title="Upload Process" icon="upload">
+    Ready to upload data? See the [Upload Process Guide](/ForestGEO/upload-process-breakdown/).
+  </Card>
+</CardGrid>
