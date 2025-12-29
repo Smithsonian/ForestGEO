@@ -206,6 +206,43 @@ The migration creates temporary tables to track how old IDs map to new IDs:
 
 **Keep these tables** after migration - they're useful for debugging.
 
+### StemCrossID: Cross-Census Stem Tracking
+
+**Purpose**: Track the same physical stem across multiple censuses.
+
+Since each census has its own stem records (census-aware mapping), we need a way to link stems that represent the same physical stem measured in different censuses. This is what `StemCrossID` does.
+
+**How it works**:
+
+```
+Census 1: StemGUID=100, StemCrossID=100 (self-reference - first appearance)
+Census 2: StemGUID=200, StemCrossID=100 (links to Census 1 stem)
+Census 3: StemGUID=300, StemCrossID=100 (links to Census 1 stem)
+```
+
+All three records represent the same physical stem. To find all historical measurements of a stem:
+
+```sql
+-- Find all records for the same physical stem
+SELECT s.*, c.PlotCensusNumber
+FROM stems s
+JOIN census c ON s.CensusID = c.CensusID
+WHERE s.StemCrossID = (SELECT StemCrossID FROM stems WHERE StemGUID = 100);
+```
+
+**Algorithm** (matches `bulkingestionprocess` stored procedure):
+
+1. Process censuses in order (earliest first)
+2. For first-census stems: `StemCrossID = StemGUID` (self-reference)
+3. For later-census stems: Find previous census stem with matching `TreeTag + StemTag`
+   - If found: Inherit its `StemCrossID`
+   - If not found: `StemCrossID = StemGUID` (new stem)
+
+**Validation checks**:
+- No NULL StemCrossID on active stems
+- All StemCrossID values reference valid StemGUIDs
+- Stems linked by same StemCrossID have matching TreeTag + StemTag
+
 ### Migration State Tracking
 
 The migration framework tracks progress in a `migration_state` table:
@@ -257,6 +294,7 @@ This enables:
 │   3e. Migrate census (2 rows for Mpala)                             │
 │   3f. Migrate trees (~100,000 rows per census)                      │
 │   3g. Migrate stems (~300,000 rows per census)                      │
+│   3g2. Populate StemCrossID (cross-census stem linking)             │
 │   3h. Migrate measurements (~500,000 rows)                          │
 │   3i. Migrate attributes and link to measurements                   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -330,12 +368,15 @@ The `02_validate_migration.sql` script runs these checks:
 | Measurements without census | Every measurement has a valid census |
 | **Census mismatch (stem)** | Measurement.CensusID = Stem.CensusID |
 | **Census mismatch (tree)** | Stem.CensusID = Tree.CensusID |
+| **StemCrossID null** | Every active stem has StemCrossID populated |
+| **StemCrossID invalid** | Every StemCrossID references a valid StemGUID |
 
 #### Data Quality Checks (Warnings only)
 
 - DBH values within reasonable range (10-2000mm)
 - Stems with missing coordinates
 - Measurements with NULL dates
+- Broken StemCrossID chains (rare)
 
 ### Manual Verification
 
@@ -365,6 +406,26 @@ SELECT
     COUNT(*) AS measurements
 FROM coremeasurements cm
 JOIN census c ON cm.CensusID = c.CensusID
+GROUP BY c.PlotCensusNumber;
+
+-- 5. Check StemCrossID population (should be 0 NULLs)
+SELECT
+    COUNT(*) AS total_active_stems,
+    SUM(CASE WHEN StemCrossID IS NULL THEN 1 ELSE 0 END) AS null_stemcrossid,
+    SUM(CASE WHEN StemCrossID = StemGUID THEN 1 ELSE 0 END) AS self_referenced,
+    SUM(CASE WHEN StemCrossID != StemGUID THEN 1 ELSE 0 END) AS cross_census_linked
+FROM stems WHERE IsActive = 1;
+-- "null_stemcrossid" should be 0!
+
+-- 6. Check cross-census linkage by census
+SELECT
+    c.PlotCensusNumber AS Census,
+    COUNT(*) AS Total_Stems,
+    SUM(CASE WHEN s.StemCrossID = s.StemGUID THEN 1 ELSE 0 END) AS New_In_This_Census,
+    SUM(CASE WHEN s.StemCrossID != s.StemGUID THEN 1 ELSE 0 END) AS Linked_From_Previous
+FROM stems s
+JOIN census c ON s.CensusID = c.CensusID
+WHERE s.IsActive = 1
 GROUP BY c.PlotCensusNumber;
 ```
 

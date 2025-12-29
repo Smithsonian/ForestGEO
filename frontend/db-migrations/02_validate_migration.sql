@@ -289,6 +289,88 @@ FROM stems
 WHERE LocalX IS NULL OR LocalY IS NULL;
 
 -- =====================================================================================
+-- SECTION 8b: STEMCROSSID VALIDATION
+-- =====================================================================================
+-- Validates that StemCrossID is properly populated for cross-census stem tracking
+
+SELECT '=== STEMCROSSID VALIDATION ===' AS Section;
+
+-- Initialize StemCrossID error counters
+SET @stemcrossid_null = 0;
+SET @stemcrossid_invalid_ref = 0;
+SET @stemcrossid_chain_broken = 0;
+
+-- Check 1: NULL StemCrossID on active stems (CRITICAL for stem tracking)
+SELECT COUNT(*) INTO @stemcrossid_null
+FROM stems WHERE StemCrossID IS NULL AND IsActive = 1;
+
+SELECT CASE WHEN @stemcrossid_null > 0
+    THEN CONCAT('CRITICAL: ', @stemcrossid_null, ' active stems have NULL StemCrossID - cross-census tracking broken')
+    ELSE 'OK: All active stems have StemCrossID populated'
+END AS StemCrossID_Null_Check;
+
+-- Check 2: Invalid StemCrossID references (points to non-existent StemGUID)
+SELECT COUNT(*) INTO @stemcrossid_invalid_ref
+FROM stems s
+WHERE s.StemCrossID IS NOT NULL
+  AND s.IsActive = 1
+  AND NOT EXISTS (SELECT 1 FROM stems s2 WHERE s2.StemGUID = s.StemCrossID);
+
+SELECT CASE WHEN @stemcrossid_invalid_ref > 0
+    THEN CONCAT('CRITICAL: ', @stemcrossid_invalid_ref, ' stems have StemCrossID pointing to non-existent StemGUID')
+    ELSE 'OK: All StemCrossID values reference valid stems'
+END AS StemCrossID_Reference_Check;
+
+-- Check 3: Broken chains (StemCrossID points to stem with NULL StemCrossID)
+SELECT COUNT(*) INTO @stemcrossid_chain_broken
+FROM stems s1
+JOIN stems s2 ON s1.StemCrossID = s2.StemGUID
+WHERE s1.IsActive = 1 AND s2.StemCrossID IS NULL;
+
+SELECT CASE WHEN @stemcrossid_chain_broken > 0
+    THEN CONCAT('WARNING: ', @stemcrossid_chain_broken, ' stems have broken StemCrossID chains')
+    ELSE 'OK: No broken StemCrossID chains'
+END AS StemCrossID_Chain_Check;
+
+-- StemCrossID Statistics Summary
+SELECT
+    'StemCrossID Summary' AS Description,
+    COUNT(*) AS Total_Active_Stems,
+    SUM(CASE WHEN StemCrossID IS NOT NULL THEN 1 ELSE 0 END) AS Has_StemCrossID,
+    SUM(CASE WHEN StemCrossID = StemGUID THEN 1 ELSE 0 END) AS Self_Referenced,
+    SUM(CASE WHEN StemCrossID IS NOT NULL AND StemCrossID != StemGUID THEN 1 ELSE 0 END) AS Cross_Census_Linked,
+    COUNT(DISTINCT StemCrossID) AS Unique_Physical_Stems
+FROM stems WHERE IsActive = 1;
+
+-- Cross-census linkage breakdown by census
+SELECT
+    c.PlotCensusNumber AS Census,
+    COUNT(s.StemGUID) AS Total_Stems,
+    SUM(CASE WHEN s.StemCrossID = s.StemGUID THEN 1 ELSE 0 END) AS First_Appearance,
+    SUM(CASE WHEN s.StemCrossID != s.StemGUID THEN 1 ELSE 0 END) AS Linked_From_Previous,
+    ROUND(100.0 * SUM(CASE WHEN s.StemCrossID != s.StemGUID THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS Pct_Linked
+FROM stems s
+JOIN census c ON s.CensusID = c.CensusID
+WHERE s.IsActive = 1
+GROUP BY c.CensusID, c.PlotCensusNumber
+ORDER BY c.PlotCensusNumber;
+
+-- Tag consistency check: stems linked by StemCrossID should have same TreeTag+StemTag
+SELECT
+    'Tag Consistency' AS Check_Type,
+    SUM(CASE WHEN inconsistent_tags > 0 THEN 1 ELSE 0 END) AS Inconsistent_Groups,
+    COUNT(*) AS Total_Physical_Stems
+FROM (
+    SELECT
+        s.StemCrossID,
+        COUNT(DISTINCT CONCAT(t.TreeTag, '|', COALESCE(s.StemTag, ''))) - 1 AS inconsistent_tags
+    FROM stems s
+    JOIN trees t ON s.TreeID = t.TreeID
+    WHERE s.IsActive = 1 AND s.StemCrossID IS NOT NULL
+    GROUP BY s.StemCrossID
+) tag_check;
+
+-- =====================================================================================
 -- SECTION 9: CRITICAL ERROR SUMMARY AND FAILURE SIGNAL
 -- =====================================================================================
 
@@ -309,7 +391,9 @@ SET @total_critical_errors =
     @no_species +
     @no_trees +
     @no_stems +
-    @no_measurements;
+    @no_measurements +
+    @stemcrossid_null +
+    @stemcrossid_invalid_ref;
 
 SELECT
     @total_critical_errors AS Total_Critical_Errors,
@@ -329,7 +413,9 @@ SELECT
     @measurements_no_stems AS Measurements_No_Stems,
     @measurements_no_census AS Measurements_No_Census,
     @census_mismatch_stem AS Census_Mismatch_Stem,
-    @census_mismatch_tree AS Census_Mismatch_Tree;
+    @census_mismatch_tree AS Census_Mismatch_Tree,
+    @stemcrossid_null AS StemCrossID_Null,
+    @stemcrossid_invalid_ref AS StemCrossID_Invalid_Ref;
 
 -- =====================================================================================
 -- SECTION 10: FAIL IF CRITICAL ERRORS EXIST

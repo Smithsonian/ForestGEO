@@ -540,6 +540,273 @@ DEALLOCATE PREPARE stmt;
 CALL migration_step_complete('07_migrate_stems', @stems_inserted);
 
 -- =====================================================================================
+-- STEP 7b: Populate StemCrossID (Census-by-Census Sequential Processing)
+-- =====================================================================================
+-- Purpose: Link stems across censuses to track the same physical stem over time
+-- Algorithm: Exactly mirrors bulkingestionprocess stored procedure logic
+--   - Process censuses in order (earliest first)
+--   - For first-census stems: StemCrossID = StemGUID (self-reference)
+--   - For later-census stems: Inherit StemCrossID from most recent previous census
+--     stem with matching TreeTag + StemTag, or self-reference if no match
+-- =====================================================================================
+
+CALL migration_step_start('07b_populate_stemcrossid');
+
+SELECT '=== POPULATING StemCrossID (Census-by-Census) ===' AS Section;
+
+-- Get ordered list of censuses
+DROP TEMPORARY TABLE IF EXISTS ordered_censuses;
+CREATE TEMPORARY TABLE ordered_censuses AS
+SELECT CensusID, PlotCensusNumber, ROW_NUMBER() OVER (ORDER BY PlotCensusNumber) AS census_order
+FROM census
+WHERE IsActive = 1
+ORDER BY PlotCensusNumber;
+
+CREATE INDEX idx_oc_order ON ordered_censuses(census_order);
+CREATE INDEX idx_oc_censusid ON ordered_censuses(CensusID);
+
+SELECT COUNT(*) INTO @total_censuses FROM ordered_censuses;
+SELECT CONCAT('Processing ', @total_censuses, ' censuses in order...') AS Status;
+
+-- Initialize counters for validation
+SET @total_stems_updated = 0;
+SET @self_referenced_stems = 0;
+SET @inherited_stems = 0;
+
+-- Process each census in order
+SET @current_order = 1;
+
+WHILE @current_order <= @total_censuses DO
+    -- Get current census ID
+    SELECT CensusID, PlotCensusNumber INTO @current_census_id, @current_census_number
+    FROM ordered_censuses
+    WHERE census_order = @current_order;
+
+    SELECT CONCAT('  Processing Census ', @current_census_number, ' (CensusID: ', @current_census_id, ')...') AS Progress;
+
+    -- Count stems in this census before update
+    SELECT COUNT(*) INTO @stems_in_census
+    FROM stems WHERE CensusID = @current_census_id AND StemCrossID IS NULL;
+
+    IF @current_order = 1 THEN
+        -- First census: All stems get StemCrossID = StemGUID (self-reference)
+        UPDATE stems
+        SET StemCrossID = StemGUID
+        WHERE CensusID = @current_census_id AND StemCrossID IS NULL;
+
+        SET @updated_count = ROW_COUNT();
+        SET @self_referenced_stems = @self_referenced_stems + @updated_count;
+        SET @total_stems_updated = @total_stems_updated + @updated_count;
+
+        SELECT CONCAT('    First census: ', @updated_count, ' stems set to self-reference') AS Result;
+    ELSE
+        -- Later censuses: Find matching stem from previous census and inherit StemCrossID
+        -- This exactly mirrors the stored procedure logic
+
+        -- Create temporary mapping table for this census
+        DROP TEMPORARY TABLE IF EXISTS stem_crossid_mapping;
+        CREATE TEMPORARY TABLE stem_crossid_mapping AS
+        SELECT
+            s_curr.StemGUID AS CurrentStemGUID,
+            COALESCE(
+                (
+                    SELECT s_prev.StemCrossID
+                    FROM stems s_prev
+                    INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
+                    INNER JOIN trees t_curr ON t_curr.TreeID = s_curr.TreeID
+                    WHERE t_prev.TreeTag = t_curr.TreeTag
+                      AND s_prev.StemTag = s_curr.StemTag
+                      AND t_prev.CensusID < @current_census_id
+                      AND t_prev.IsActive = 1
+                      AND s_prev.IsActive = 1
+                      AND s_prev.StemCrossID IS NOT NULL
+                    ORDER BY t_prev.CensusID DESC
+                    LIMIT 1
+                ),
+                s_curr.StemGUID  -- Fallback to self-reference if no previous match
+            ) AS NewStemCrossID,
+            CASE
+                WHEN (
+                    SELECT s_prev.StemCrossID
+                    FROM stems s_prev
+                    INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
+                    INNER JOIN trees t_curr ON t_curr.TreeID = s_curr.TreeID
+                    WHERE t_prev.TreeTag = t_curr.TreeTag
+                      AND s_prev.StemTag = s_curr.StemTag
+                      AND t_prev.CensusID < @current_census_id
+                      AND t_prev.IsActive = 1
+                      AND s_prev.IsActive = 1
+                      AND s_prev.StemCrossID IS NOT NULL
+                    ORDER BY t_prev.CensusID DESC
+                    LIMIT 1
+                ) IS NOT NULL THEN 'inherited'
+                ELSE 'self'
+            END AS LinkType
+        FROM stems s_curr
+        WHERE s_curr.CensusID = @current_census_id
+          AND s_curr.StemCrossID IS NULL
+          AND s_curr.IsActive = 1;
+
+        CREATE INDEX idx_scm_stemguid ON stem_crossid_mapping(CurrentStemGUID);
+
+        -- Count inherited vs self-referenced
+        SELECT COUNT(*) INTO @inherited_count FROM stem_crossid_mapping WHERE LinkType = 'inherited';
+        SELECT COUNT(*) INTO @self_count FROM stem_crossid_mapping WHERE LinkType = 'self';
+
+        -- Apply the mapping
+        UPDATE stems s
+        INNER JOIN stem_crossid_mapping scm ON s.StemGUID = scm.CurrentStemGUID
+        SET s.StemCrossID = scm.NewStemCrossID;
+
+        SET @updated_count = ROW_COUNT();
+        SET @inherited_stems = @inherited_stems + @inherited_count;
+        SET @self_referenced_stems = @self_referenced_stems + @self_count;
+        SET @total_stems_updated = @total_stems_updated + @updated_count;
+
+        SELECT CONCAT('    Census ', @current_census_number, ': ', @updated_count, ' stems updated (',
+                      @inherited_count, ' inherited, ', @self_count, ' new stems)') AS Result;
+
+        DROP TEMPORARY TABLE IF EXISTS stem_crossid_mapping;
+    END IF;
+
+    SET @current_order = @current_order + 1;
+END WHILE;
+
+DROP TEMPORARY TABLE IF EXISTS ordered_censuses;
+
+SELECT CONCAT('StemCrossID population complete: ', @total_stems_updated, ' stems updated') AS Summary;
+
+-- =====================================================================================
+-- StemCrossID VALIDATION
+-- =====================================================================================
+
+SELECT '=== StemCrossID VALIDATION ===' AS Section;
+
+-- Initialize validation error counters
+SET @v_null_stemcrossid = 0;
+SET @v_invalid_reference = 0;
+SET @v_census1_not_self = 0;
+SET @v_broken_chain = 0;
+
+-- Validation 1: Check for NULL StemCrossID values (should be zero)
+SELECT COUNT(*) INTO @v_null_stemcrossid
+FROM stems WHERE StemCrossID IS NULL AND IsActive = 1;
+
+SELECT CASE WHEN @v_null_stemcrossid > 0
+    THEN CONCAT('CRITICAL: ', @v_null_stemcrossid, ' active stems have NULL StemCrossID')
+    ELSE CONCAT('OK: All ', (SELECT COUNT(*) FROM stems WHERE IsActive = 1), ' active stems have StemCrossID populated')
+END AS Validation_NullCheck;
+
+-- Validation 2: Check that all StemCrossID values reference valid StemGUIDs
+SELECT COUNT(*) INTO @v_invalid_reference
+FROM stems s
+WHERE s.StemCrossID IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM stems s2 WHERE s2.StemGUID = s.StemCrossID);
+
+SELECT CASE WHEN @v_invalid_reference > 0
+    THEN CONCAT('CRITICAL: ', @v_invalid_reference, ' stems have StemCrossID pointing to non-existent StemGUID')
+    ELSE 'OK: All StemCrossID values reference valid stems'
+END AS Validation_ValidReference;
+
+-- Validation 3: First census stems should have StemCrossID = StemGUID
+SELECT MIN(PlotCensusNumber) INTO @first_census_number FROM census WHERE IsActive = 1;
+SELECT CensusID INTO @first_census_id FROM census WHERE PlotCensusNumber = @first_census_number AND IsActive = 1 LIMIT 1;
+
+SELECT COUNT(*) INTO @v_census1_not_self
+FROM stems
+WHERE CensusID = @first_census_id
+  AND IsActive = 1
+  AND StemCrossID != StemGUID;
+
+SELECT CASE WHEN @v_census1_not_self > 0
+    THEN CONCAT('WARNING: ', @v_census1_not_self, ' first-census stems have StemCrossID != StemGUID')
+    ELSE 'OK: All first-census stems correctly self-reference'
+END AS Validation_FirstCensus;
+
+-- Validation 4: Check for broken chains (StemCrossID points to a stem that itself has NULL StemCrossID)
+SELECT COUNT(*) INTO @v_broken_chain
+FROM stems s1
+JOIN stems s2 ON s1.StemCrossID = s2.StemGUID
+WHERE s1.IsActive = 1 AND s2.StemCrossID IS NULL;
+
+SELECT CASE WHEN @v_broken_chain > 0
+    THEN CONCAT('WARNING: ', @v_broken_chain, ' stems have broken StemCrossID chains')
+    ELSE 'OK: No broken StemCrossID chains detected'
+END AS Validation_ChainIntegrity;
+
+-- Validation 5: Summary statistics
+SELECT
+    'StemCrossID Statistics' AS Description,
+    COUNT(*) AS Total_Active_Stems,
+    SUM(CASE WHEN StemCrossID = StemGUID THEN 1 ELSE 0 END) AS Self_Referenced,
+    SUM(CASE WHEN StemCrossID != StemGUID THEN 1 ELSE 0 END) AS Cross_Census_Linked,
+    COUNT(DISTINCT StemCrossID) AS Unique_Physical_Stems,
+    ROUND(100.0 * SUM(CASE WHEN StemCrossID != StemGUID THEN 1 ELSE 0 END) / COUNT(*), 2) AS Pct_Linked
+FROM stems WHERE IsActive = 1;
+
+-- Validation 6: Cross-census linkage by census
+SELECT
+    c.PlotCensusNumber AS Census,
+    COUNT(s.StemGUID) AS Total_Stems,
+    SUM(CASE WHEN s.StemCrossID = s.StemGUID THEN 1 ELSE 0 END) AS New_Stems,
+    SUM(CASE WHEN s.StemCrossID != s.StemGUID THEN 1 ELSE 0 END) AS Linked_To_Previous,
+    ROUND(100.0 * SUM(CASE WHEN s.StemCrossID != s.StemGUID THEN 1 ELSE 0 END) / COUNT(*), 2) AS Pct_Linked
+FROM stems s
+JOIN census c ON s.CensusID = c.CensusID
+WHERE s.IsActive = 1
+GROUP BY c.CensusID, c.PlotCensusNumber
+ORDER BY c.PlotCensusNumber;
+
+-- Validation 7: Verify chain consistency - all stems with same StemCrossID should have matching TreeTag+StemTag
+SELECT
+    'Chain Consistency Check' AS Description,
+    COUNT(DISTINCT scid_group) AS Total_Physical_Stems,
+    SUM(CASE WHEN tag_count > 1 THEN 1 ELSE 0 END) AS Inconsistent_Chains
+FROM (
+    SELECT
+        s.StemCrossID AS scid_group,
+        COUNT(DISTINCT CONCAT(t.TreeTag, '|', COALESCE(s.StemTag, ''))) AS tag_count
+    FROM stems s
+    JOIN trees t ON s.TreeID = t.TreeID
+    WHERE s.IsActive = 1 AND s.StemCrossID IS NOT NULL
+    GROUP BY s.StemCrossID
+) chain_check;
+
+-- Validation 8: Sample of cross-census linked stems (for manual verification)
+SELECT
+    'Sample Cross-Census Links (first 10)' AS Description,
+    s.StemGUID,
+    s.StemCrossID,
+    s.StemTag,
+    t.TreeTag,
+    c.PlotCensusNumber AS Census,
+    (SELECT c2.PlotCensusNumber FROM stems s2
+     JOIN census c2 ON s2.CensusID = c2.CensusID
+     WHERE s2.StemGUID = s.StemCrossID) AS Linked_To_Census
+FROM stems s
+JOIN trees t ON s.TreeID = t.TreeID
+JOIN census c ON s.CensusID = c.CensusID
+WHERE s.IsActive = 1 AND s.StemCrossID != s.StemGUID
+LIMIT 10;
+
+-- Calculate total validation errors
+SET @total_stemcrossid_errors = @v_null_stemcrossid + @v_invalid_reference;
+SET @total_stemcrossid_warnings = @v_census1_not_self + @v_broken_chain;
+
+SELECT
+    'StemCrossID Validation Summary' AS Section,
+    @total_stemcrossid_errors AS Critical_Errors,
+    @total_stemcrossid_warnings AS Warnings,
+    CASE
+        WHEN @total_stemcrossid_errors > 0 THEN 'FAILED - Critical issues detected'
+        WHEN @total_stemcrossid_warnings > 0 THEN 'PASSED with warnings'
+        ELSE 'PASSED - All validations successful'
+    END AS Overall_Status;
+
+-- Store validation results for later reporting
+CALL migration_step_complete('07b_populate_stemcrossid', @total_stems_updated);
+
+-- =====================================================================================
 -- STEP 8: Migrate Core Measurements (Census-Aware)
 -- =====================================================================================
 
