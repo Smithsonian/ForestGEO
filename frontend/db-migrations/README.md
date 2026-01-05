@@ -8,9 +8,10 @@
 4. [Key Concepts](#key-concepts)
 5. [Migration Process](#migration-process)
 6. [Validation & Verification](#validation--verification)
-7. [Troubleshooting](#troubleshooting)
-8. [File Reference](#file-reference)
-9. [Advanced Topics](#advanced-topics)
+7. [Cleanup](#cleanup)
+8. [Troubleshooting](#troubleshooting)
+9. [File Reference](#file-reference)
+10. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -431,6 +432,66 @@ GROUP BY c.PlotCensusNumber;
 
 ---
 
+## Cleanup
+
+### When to Clean Up
+
+After migration is complete and validated, you should clean up migration artifacts to keep the schema tidy. Wait until:
+1. Migration completed successfully
+2. Validation passed (no critical errors)
+3. Application has been tested with migrated data
+4. You no longer need the mapping tables for debugging
+
+### What Gets Removed
+
+The cleanup process removes **ALL** migration-specific artifacts:
+
+| Category | Items Removed |
+|----------|---------------|
+| **Mapping Tables (8)** | `id_map_plots`, `id_map_quadrats`, `id_map_family`, `id_map_genus`, `id_map_species`, `id_map_census`, `id_map_trees`, `id_map_stems` |
+| **State Tables (2)** | `migration_state`, `migration_config` |
+| **Procedures (10)** | `migration_init`, `migration_step_start`, `migration_step_complete`, `migration_step_fail`, `migration_progress`, `migration_reset`, `migration_get_resume_point`, `add_index_if_not_exists`, `add_column_if_not_exists`, `get_migration_config` |
+
+**Core ForestGEO tables are NOT affected** - only migration scaffolding is removed.
+
+### How to Clean Up
+
+**Option 1: Using the shell script (Recommended)**
+```bash
+./run_migration.sh --cleanup --target forestgeo_mpala
+```
+
+This will:
+1. Show migration status
+2. Ask for confirmation
+3. Drop all migration artifacts
+4. Verify cleanup completed
+
+**Option 2: Manual SQL**
+```sql
+-- Connect to target schema
+SOURCE frontend/db-migrations/99_cleanup.sql;
+```
+
+### Cleanup Verification
+
+After cleanup, verify no migration artifacts remain:
+
+```sql
+-- Should return 0 rows
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = DATABASE()
+  AND (TABLE_NAME LIKE 'id_map_%'
+       OR TABLE_NAME IN ('migration_state', 'migration_config'));
+
+-- Should return 0 rows
+SELECT ROUTINE_NAME FROM INFORMATION_SCHEMA.ROUTINES
+WHERE ROUTINE_SCHEMA = DATABASE()
+  AND ROUTINE_NAME LIKE 'migration_%';
+```
+
+---
+
 ## Troubleshooting
 
 ### Common Issues
@@ -526,7 +587,7 @@ SOURCE frontend/sqlscripting/resetschema.sql;
 | `01_migrate_all_data.sql` | All data migration | Automatically run by `run_migration.sh` |
 | `02_validate_migration.sql` | Validation checks | Automatically run by `run_migration.sh` |
 | `03_apply_schema_changes.sql` | Post-migration schema mods | Automatically run by `run_migration.sh` |
-| `99_cleanup.sql` | Drop mapping tables | Run manually when migration is verified |
+| `99_cleanup.sql` | Remove ALL migration artifacts | Run via `--cleanup` flag when done |
 
 ### Supporting Files
 
