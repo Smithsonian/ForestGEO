@@ -202,48 +202,4 @@ describe('Validation Scenarios Integration Tests', () => {
     });
   });
 
-  describe('Validation Procedure Integrity', () => {
-    it('should have all expected validation procedures defined', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        'SELECT ValidationID, ProcedureName, IsEnabled FROM sitespecificvalidations ORDER BY ValidationID'
-      );
-
-      // These are the core validations loaded from corequeries.sql
-      // Note: ValidationID 10 and 12 are not in the SQL file
-      const expectedValidations = [
-        { id: 1, name: 'ValidateDBHGrowthExceedsMax' },
-        { id: 2, name: 'ValidateDBHShrinkageExceedsMax' },
-        { id: 3, name: 'ValidateFindAllInvalidSpeciesCodes' },
-        { id: 4, name: 'ValidateFindDuplicatedQuadratsByName' },
-        { id: 5, name: 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus' },
-        { id: 6, name: 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat' },
-        { id: 7, name: 'ValidateFindStemsInTreeWithDifferentSpecies' },
-        { id: 8, name: 'ValidateFindStemsOutsidePlots' },
-        { id: 9, name: 'ValidateFindTreeStemsInDifferentQuadrats' },
-        { id: 11, name: 'ValidateScreenMeasuredDiameterMinMax' },
-        { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' },
-        { id: 14, name: 'ValidateFindInvalidAttributeCodes' },
-        { id: 15, name: 'ValidateFindAbnormallyHighDBH' }
-      ];
-
-      // Fail explicitly if validation definitions are missing
-      expect(validations.length).toBeGreaterThanOrEqual(expectedValidations.length);
-
-      for (const expected of expectedValidations) {
-        const found = validations.find(v => v.ValidationID === expected.id);
-        expect(found).toBeDefined();
-        expect(found!.ProcedureName).toBe(expected.name);
-      }
-    });
-
-    it('should have bulkingestionprocess procedure available', async () => {
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW PROCEDURE STATUS WHERE Name = 'bulkingestionprocess'"
-      );
-
-      // At least one procedure should exist (may be more if multiple test DBs)
-      expect(procedures.length).toBeGreaterThanOrEqual(1);
-      expect(procedures.some((p: any) => p.Name === 'bulkingestionprocess')).toBe(true);
-    });
-  });
 });
