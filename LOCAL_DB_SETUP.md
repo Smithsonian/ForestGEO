@@ -22,12 +22,10 @@ docker-compose logs -f mysql
 Once the container is running, you can connect with:
 
 - **Host**: `localhost` (or `127.0.0.1`)
-- **Port**: `3306`
-- **Root User**: `root`
-- **Root Password**: `rootpassword`
+- **Port**: `3306` (configurable via `TEST_DB_PORT` env var)
+- **User**: `root`
+- **Password**: `testpassword` (configurable via `TEST_DB_PASSWORD` env var)
 - **Database**: `forestgeo_local`
-- **User**: `forestgeo_user`
-- **User Password**: `forestgeo_password`
 
 ### 3. Initialize Database Schema
 
@@ -35,10 +33,10 @@ The database `forestgeo_local` is created automatically, but you need to run the
 
 ```bash
 # Connect to MySQL
-docker exec -it forestgeo-mysql-local mysql -uroot -prootpassword
+docker exec -it forestgeo-mysql-local mysql -uroot -ptestpassword
 
 # Or use mysql client from your machine
-mysql -h 127.0.0.1 -P 3306 -u root -prootpassword
+mysql -h 127.0.0.1 -P 3306 -u root -ptestpassword
 ```
 
 Then run the schema setup:
@@ -46,11 +44,11 @@ Then run the schema setup:
 ```sql
 USE forestgeo_local;
 
--- Load table structures
-SOURCE /docker-entrypoint-initdb.d/sqlscripting/tablestructures.sql;
+-- Load table structures (SQL files are mounted at /sqlscripting in the container)
+SOURCE /sqlscripting/tablestructures.sql;
 
 -- Load stored procedures
-SOURCE /docker-entrypoint-initdb.d/sqlscripting/storedprocedures.sql;
+SOURCE /sqlscripting/storedprocedures.sql;
 ```
 
 Or from your local machine:
@@ -60,7 +58,7 @@ Or from your local machine:
 export MYSQL_HOST=localhost
 export MYSQL_PORT=3306
 export MYSQL_USER=root
-export MYSQL_PASSWORD=rootpassword
+export MYSQL_PASSWORD=testpassword
 export MYSQL_DATABASE=forestgeo_local
 
 # Run table structures
@@ -78,7 +76,7 @@ The project already has a test database setup script that can be used locally:
 # Set environment variables for local MySQL
 export TEST_DB_HOST=localhost
 export TEST_DB_USER=root
-export TEST_DB_PASSWORD=rootpassword
+export TEST_DB_PASSWORD=testpassword
 export TEST_DB_PORT=3306
 
 # Run the test setup (creates a test database with schema and sample data)
@@ -102,7 +100,7 @@ If you're developing the Azure Functions locally, create a `local.settings.json`
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AZURE_SQL_USER": "root",
-    "AZURE_SQL_PASSWORD": "rootpassword",
+    "AZURE_SQL_PASSWORD": "testpassword",
     "AZURE_SQL_SERVER": "localhost",
     "AZURE_SQL_PORT": "3306",
     "AZURE_SQL_CATALOG_SCHEMA": "forestgeo_local"
@@ -119,7 +117,7 @@ If you want to run the database migrations locally:
 export MYSQL_HOST=localhost
 export MYSQL_PORT=3306
 export MYSQL_USER=root
-export MYSQL_PASSWORD=rootpassword
+export MYSQL_PASSWORD=testpassword
 export MYSQL_DATABASE=forestgeo_local
 
 # Run migrations in order (from db-migrations directory)
@@ -134,10 +132,10 @@ mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASSWORD $MYSQL_DATA
 
 ```bash
 # Connect and verify
-mysql -h 127.0.0.1 -P 3306 -u root -prootpassword forestgeo_local -e "SHOW TABLES;"
+mysql -h 127.0.0.1 -P 3306 -u root -ptestpassword forestgeo_local -e "SHOW TABLES;"
 
 # Check if stored procedures exist
-mysql -h 127.0.0.1 -P 3306 -u root -prootpassword forestgeo_local -e "SHOW PROCEDURE STATUS WHERE Db = 'forestgeo_local';"
+mysql -h 127.0.0.1 -P 3306 -u root -ptestpassword forestgeo_local -e "SHOW PROCEDURE STATUS WHERE Db = 'forestgeo_local';"
 ```
 
 ## Stopping the Container

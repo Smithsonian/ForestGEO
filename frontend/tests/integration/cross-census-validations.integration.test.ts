@@ -18,13 +18,16 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
   setupTestDatabase,
   teardownTestDatabase,
+  cleanupTestMeasurements,
   insertTestMeasurements,
   insertDirectMeasurements,
   runBulkIngestion,
   getValidationErrors,
   getFailedMeasurements,
   seedStatusAttributes,
-  type TestData
+  setupTwoCensusScenario,
+  type TestData,
+  type CensusInfo
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
@@ -32,26 +35,28 @@ describe('Hard Failure Validation Tests', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
+  let census1: CensusInfo;
+  let census2: CensusInfo;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
     connection = setup.connection;
     testData = setup.testData;
     config = setup.config;
+
+    // Set up two censuses for cross-census tests
+    const scenario = await setupTwoCensusScenario(connection, testData);
+    census1 = scenario.census1;
+    census2 = scenario.census2;
   }, 90000);
 
   afterAll(async () => {
-    await teardownTestDatabase(connection, config as any);
+    await teardownTestDatabase(connection, config);
   });
 
   beforeEach(async () => {
-    await connection.query('DELETE FROM cmverrors');
-    await connection.query('DELETE FROM cmattributes');
-    await connection.query('DELETE FROM coremeasurements');
-    await connection.query('DELETE FROM stems');
-    await connection.query('DELETE FROM trees');
-    await connection.query('DELETE FROM failedmeasurements');
-    await connection.query('DELETE FROM temporarymeasurements');
+    // Clean up and preserve the two census records created in beforeAll
+    await cleanupTestMeasurements(connection, testData, { preserveCensusCount: 2 });
   });
 
   describe('Quadrat Change Between Censuses', () => {
@@ -72,27 +77,8 @@ describe('Hard Failure Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // Create second census
-      const [censusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT MAX(PlotCensusNumber) as maxNum FROM census WHERE PlotID = ?',
-        [testData.plots[0].plotID]
-      );
-      const nextCensusNum = (censusRows[0].maxNum || 0) + 1;
-
-      await connection.query(
-        `INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
-         VALUES (?, ?, '2025-01-01', '2025-12-31', 1)`,
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-
-      const [newCensusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?',
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-      const census2ID = newCensusRows[0].CensusID;
-
       // Census 1: Tree in quadrat1
-      await insertDirectMeasurements(connection, testData, testData.census[0].censusID, [
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
         {
           treeTag: 'MOVTREE001',
           stemTag: 'S001',
@@ -125,7 +111,7 @@ describe('Hard Failure Validation Tests', () => {
             codes: 'A'
           }
         ],
-        { censusID: census2ID }
+        { censusID: census2.censusID }
       );
 
       const result = await runBulkIngestion(connection, fileID, batchID);
@@ -168,27 +154,8 @@ describe('Hard Failure Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // Create second census
-      const [censusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT MAX(PlotCensusNumber) as maxNum FROM census WHERE PlotID = ?',
-        [testData.plots[0].plotID]
-      );
-      const nextCensusNum = (censusRows[0].maxNum || 0) + 1;
-
-      await connection.query(
-        `INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
-         VALUES (?, ?, '2025-01-01', '2025-12-31', 1)`,
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-
-      const [newCensusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?',
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-      const census2ID = newCensusRows[0].CensusID;
-
       // Census 1: Tree in quadratName
-      await insertDirectMeasurements(connection, testData, testData.census[0].censusID, [
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
         {
           treeTag: 'STAYTREE001',
           stemTag: 'S001',
@@ -221,7 +188,7 @@ describe('Hard Failure Validation Tests', () => {
             codes: 'A'
           }
         ],
-        { censusID: census2ID }
+        { censusID: census2.censusID }
       );
 
       const result = await runBulkIngestion(connection, fileID, batchID);
@@ -253,27 +220,8 @@ describe('Hard Failure Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // Create second census
-      const [censusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT MAX(PlotCensusNumber) as maxNum FROM census WHERE PlotID = ?',
-        [testData.plots[0].plotID]
-      );
-      const nextCensusNum = (censusRows[0].maxNum || 0) + 1;
-
-      await connection.query(
-        `INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
-         VALUES (?, ?, '2025-01-01', '2025-12-31', 1)`,
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-
-      const [newCensusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?',
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-      const census2ID = newCensusRows[0].CensusID;
-
       // Census 1: Stem at position (5, 5)
-      await insertDirectMeasurements(connection, testData, testData.census[0].censusID, [
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
         {
           treeTag: 'DRIFT001',
           stemTag: 'S001',
@@ -306,7 +254,7 @@ describe('Hard Failure Validation Tests', () => {
             codes: 'A'
           }
         ],
-        { censusID: census2ID }
+        { censusID: census2.censusID }
       );
 
       const result = await runBulkIngestion(connection, fileID, batchID);
@@ -346,27 +294,8 @@ describe('Hard Failure Validation Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      // Create second census
-      const [censusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT MAX(PlotCensusNumber) as maxNum FROM census WHERE PlotID = ?',
-        [testData.plots[0].plotID]
-      );
-      const nextCensusNum = (censusRows[0].maxNum || 0) + 1;
-
-      await connection.query(
-        `INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
-         VALUES (?, ?, '2025-01-01', '2025-12-31', 1)`,
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-
-      const [newCensusRows] = await connection.query<RowDataPacket[]>(
-        'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?',
-        [testData.plots[0].plotID, nextCensusNum]
-      );
-      const census2ID = newCensusRows[0].CensusID;
-
       // Census 1: Stem at position (5, 5)
-      await insertDirectMeasurements(connection, testData, testData.census[0].censusID, [
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
         {
           treeTag: 'SMALLDRIFT001',
           stemTag: 'S001',
@@ -400,7 +329,7 @@ describe('Hard Failure Validation Tests', () => {
             codes: 'A'
           }
         ],
-        { censusID: census2ID }
+        { censusID: census2.censusID }
       );
 
       const result = await runBulkIngestion(connection, fileID, batchID);
@@ -417,6 +346,132 @@ describe('Hard Failure Validation Tests', () => {
       // ASSERTION: Record should not hard-fail for valid small-drift data
       expect(result.batch_failed).toBe(false);
     });
+
+    /**
+     * BOUNDARY TEST: Coordinate drift of exactly 10.0 meters
+     * sqrt(6^2 + 8^2) = sqrt(36 + 64) = sqrt(100) = 10.0m exactly
+     * Expected: Exactly 10m should NOT trigger (validation is for >10m)
+     */
+    it('should NOT reject when coordinate drift is exactly 10 meters (boundary test)', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      // Census 1: Stem at position (0, 0)
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
+        {
+          treeTag: 'EXACT10M',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 0.0,
+          y: 0.0,
+          dbh: 100.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      // Census 2: Position (6, 8) gives exactly 10m drift
+      // sqrt(6^2 + 8^2) = sqrt(36 + 64) = sqrt(100) = 10.0m exactly
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'EXACT10M',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 6.0,
+            y: 8.0,
+            dbh: 105.0,
+            hom: 1.3,
+            date: '2025-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID: census2.censusID }
+      );
+
+      const result = await runBulkIngestion(connection, fileID, batchID);
+
+      // Check for coordinate drift failure
+      const [failedDetails] = await connection.query<RowDataPacket[]>(
+        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
+        [fileID, '%Coordinate%']
+      );
+
+      // Exactly 10m should NOT trigger - validation is for EXCEEDS (>10m)
+      expect(failedDetails.length).toBe(0);
+      expect(result.batch_failed).toBe(false);
+    });
+
+    /**
+     * BOUNDARY TEST: Coordinate drift of 10.01 meters (just over threshold)
+     * This confirms the validation triggers at the boundary.
+     */
+    it('should reject when coordinate drift is 10.01 meters (just over boundary)', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      // Census 1: Stem at position (0, 0)
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
+        {
+          treeTag: 'OVER10M',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 0.0,
+          y: 0.0,
+          dbh: 100.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      // Census 2: Position (6.005, 8.005) gives ~10.01m drift
+      // sqrt(6.005^2 + 8.005^2) ≈ 10.01m
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'OVER10M',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 6.005,
+            y: 8.005,
+            dbh: 105.0,
+            hom: 1.3,
+            date: '2025-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID: census2.censusID }
+      );
+
+      await runBulkIngestion(connection, fileID, batchID);
+
+      // Check for coordinate drift failure
+      const [failedDetails] = await connection.query<RowDataPacket[]>(
+        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
+        [fileID, '%Coordinate%']
+      );
+
+      // 10.01m SHOULD trigger - just over threshold
+      expect(failedDetails.length).toBeGreaterThan(0);
+    });
   });
 });
 
@@ -430,26 +485,28 @@ describe('Inline Validation Data Tests', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
+  let census1: CensusInfo;
+  let census2: CensusInfo;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
     connection = setup.connection;
     testData = setup.testData;
     config = setup.config;
+
+    // Set up two censuses for cross-census tests
+    const scenario = await setupTwoCensusScenario(connection, testData);
+    census1 = scenario.census1;
+    census2 = scenario.census2;
   }, 90000);
 
   afterAll(async () => {
-    await teardownTestDatabase(connection, config as any);
+    await teardownTestDatabase(connection, config);
   });
 
   beforeEach(async () => {
-    await connection.query('DELETE FROM cmverrors');
-    await connection.query('DELETE FROM cmattributes');
-    await connection.query('DELETE FROM coremeasurements');
-    await connection.query('DELETE FROM stems');
-    await connection.query('DELETE FROM trees');
-    await connection.query('DELETE FROM failedmeasurements');
-    await connection.query('DELETE FROM temporarymeasurements');
+    // Clean up and preserve the two census records created in beforeAll
+    await cleanupTestMeasurements(connection, testData, { preserveCensusCount: 2 });
   });
 
   describe('Invalid Attribute Code (ValidationID: 14)', () => {
@@ -485,6 +542,170 @@ describe('Inline Validation Data Tests', () => {
       // ASSERTION: Non-existent attribute code should trigger ValidationID 14
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(14);
+    });
+  });
+
+  describe('Species Mismatch Cross-Census (ValidationID: 20)', () => {
+    /**
+     * Scenario: Tree is recorded with Species A in census 1, then Species B in census 2.
+     * This is biologically impossible (trees don't change species) and indicates data error.
+     * Expected: Soft validation error (record accepted, flagged in cmverrors)
+     */
+    it('should flag when tree has different species across censuses', async () => {
+      // Need at least 2 species
+      const species1Code = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const species2Code = testData.species[1]?.SpeciesCode || testData.species[1]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!species1Code || !species2Code || !quadratName) {
+        throw new Error('Test setup failed: need at least 2 species and 1 quadrat');
+      }
+
+      // Insert tree with species1 in census 1 (directly into coremeasurements)
+      await insertDirectMeasurements(connection, testData, census1.censusID, [{
+        treeTag: 'SPMISMATCH01',
+        stemTag: 'S001',
+        speciesCode: species1Code,
+        quadratName,
+        x: 8.0,
+        y: 8.0,
+        dbh: 100.0,
+        hom: 1.3,
+        date: '2024-06-15',
+        codes: 'A'
+      }]);
+
+      // Insert same tree with species2 in census 2 (via bulk ingestion)
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, [
+        {
+          treeTag: 'SPMISMATCH01', // Same tree
+          stemTag: 'S001',
+          speciesCode: species2Code, // Different species!
+          quadratName,
+          x: 8.0,
+          y: 8.0,
+          dbh: 120.0,
+          hom: 1.3,
+          date: '2025-06-15',
+          codes: 'A'
+        }
+      ], { censusID: census2.censusID });
+
+      await runBulkIngestion(connection, fileID, batchID);
+
+      // Check for ValidationID 20 error (species mismatch cross-census)
+      const errors = await getValidationErrors(connection, { validationID: 20 });
+
+      // ASSERTION: Different species for same tree across censuses should trigger ValidationID 20
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].ValidationErrorID).toBe(20);
+    });
+  });
+
+  describe('Same-Batch Species Conflict (ValidationID: 21)', () => {
+    /**
+     * Scenario: Same tree tag appears twice in the same batch with different species.
+     * This is definitely a data entry error.
+     * Expected: Soft validation error (flagged in cmverrors)
+     */
+    it('should flag when same tree has different species within same batch', async () => {
+      // Need at least 2 species
+      const species1Code = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const species2Code = testData.species[1]?.SpeciesCode || testData.species[1]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!species1Code || !species2Code || !quadratName) {
+        throw new Error('Test setup failed: need at least 2 species and 1 quadrat');
+      }
+
+      // Insert two measurements for same tree with different species in same batch
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, [
+        {
+          treeTag: 'BATCHCONFLICT01',
+          stemTag: 'S001',
+          speciesCode: species1Code,
+          quadratName,
+          x: 10.0,
+          y: 10.0,
+          dbh: 100.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        },
+        {
+          treeTag: 'BATCHCONFLICT01', // Same tree tag
+          stemTag: 'S002', // Different stem
+          speciesCode: species2Code, // Different species - CONFLICT!
+          quadratName,
+          x: 10.0,
+          y: 10.5,
+          dbh: 80.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await runBulkIngestion(connection, fileID, batchID);
+
+      // Check for ValidationID 21 error (same-batch species conflict)
+      const errors = await getValidationErrors(connection, { validationID: 21 });
+
+      // ASSERTION: Same tree with different species in same batch should trigger ValidationID 21
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].ValidationErrorID).toBe(21);
+    });
+  });
+
+  describe('Invalid Species Code (ValidationID: 3)', () => {
+    /**
+     * Scenario: Measurement uses a species code that doesn't exist in the species table.
+     * Expected: Record is ingested but flagged with ValidationID 3
+     *
+     * NOTE: This may be handled as a hard failure during ingestion (rejected to failedmeasurements)
+     * rather than a soft validation, depending on stored procedure implementation.
+     */
+    it('should flag non-existent species code', async () => {
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!quadratName) {
+        throw new Error('Test setup failed: missing quadrat data');
+      }
+
+      // Insert measurement with non-existent species code
+      const { fileID, batchID } = await insertTestMeasurements(connection, testData, [
+        {
+          treeTag: 'BADSPECIES01',
+          stemTag: 'S001',
+          speciesCode: 'DOESNOTEXIST999', // Invalid species code
+          quadratName,
+          x: 15.0,
+          y: 15.0,
+          dbh: 100.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await runBulkIngestion(connection, fileID, batchID);
+
+      // Check for either: ValidationID 3 error OR hard failure
+      const errors = await getValidationErrors(connection, { validationID: 3 });
+      const failed = await getFailedMeasurements(connection, { fileID });
+
+      // ASSERTION: Invalid species should be flagged (soft) or rejected (hard)
+      const wasHandled = errors.length > 0 || failed.length > 0;
+      expect(wasHandled).toBe(true);
+
+      // If it was a soft error, verify the ValidationID
+      if (errors.length > 0) {
+        expect(errors[0].ValidationErrorID).toBe(3);
+      }
+      // If it was a hard failure, verify failure reason mentions species
+      if (failed.length > 0) {
+        expect(failed[0].FailureReasons?.toLowerCase()).toContain('species');
+      }
     });
   });
 });

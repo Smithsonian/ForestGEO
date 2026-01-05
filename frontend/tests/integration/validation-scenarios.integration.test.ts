@@ -18,6 +18,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import {
   setupTestDatabase,
   teardownTestDatabase,
+  cleanupTestMeasurements,
   insertTestMeasurements,
   runBulkIngestion,
   verifyIngestionResults,
@@ -38,18 +39,19 @@ describe('Validation Scenarios Integration Tests', () => {
   }, 60000); // 60s timeout for DB setup
 
   afterAll(async () => {
-    await teardownTestDatabase(connection, config as any);
+    await teardownTestDatabase(connection, config);
   });
 
   beforeEach(async () => {
-    // Clean up test data between tests
-    await connection.query('DELETE FROM cmverrors');
-    await connection.query('DELETE FROM cmattributes');
-    await connection.query('DELETE FROM coremeasurements');
-    await connection.query('DELETE FROM failedmeasurements');
-    await connection.query('DELETE FROM temporarymeasurements');
+    await cleanupTestMeasurements(connection, testData);
   });
 
+  /**
+   * Hard Failure Tests
+   *
+   * NOTE: Quadrat change and coordinate drift tests are in cross-census-validations.integration.test.ts
+   * with full behavioral testing (positive + negative cases).
+   */
   describe('Hard Failures - Records Rejected', () => {
     it('should reject records with NULL required fields', async () => {
       // Insert measurement with missing TreeTag
@@ -102,130 +104,13 @@ describe('Validation Scenarios Integration Tests', () => {
         expect(failed[0].FailureReasons).toBeDefined();
       }
     });
-
-    it('should reject records when tree changes quadrat between censuses', async () => {
-      // First, we need a previous census with a tree in Quadrat A
-      // Then try to insert the same tree in Quadrat B in the current census
-
-      // This test requires setting up multi-census data
-      // For now, we'll verify the validation logic exists by checking the procedure
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      expect(procedures.length).toBeGreaterThan(0);
-      const procDef = procedures[0]['Create Procedure'];
-      expect(procDef).toContain('quadrat_mismatch_failures');
-      expect(procDef).toContain('Trees cannot change quadrats between censuses');
-    });
-
-    it('should reject records with coordinate drift >10m', async () => {
-      // Verify the coordinate drift validation exists
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      const procDef = procedures[0]['Create Procedure'];
-      expect(procDef).toContain('coordinate_drift_failures');
-      expect(procDef).toContain('Coordinate drift');
-      expect(procDef).toContain('> 10.0');
-    });
   });
 
-  describe('Soft Validations - Flagged in cmverrors', () => {
-    it('should flag DBH growth exceeding 65mm (ValidationID: 1)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 1`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateDBHGrowthExceedsMax');
-      expect(validations[0].Description).toContain('65 mm');
-    });
-
-    it('should flag DBH shrinkage exceeding 5% (ValidationID: 2)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 2`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateDBHShrinkageExceedsMax');
-      expect(validations[0].Description).toContain('5 percent');
-    });
-
-    it('should flag invalid species codes (ValidationID: 3)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 3`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateFindAllInvalidSpeciesCodes');
-      expect(validations[0].Description).toContain('invalid');
-    });
-
-    it('should flag measurements outside census date bounds (ValidationID: 6)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 6`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat');
-      expect(validations[0].Description).toContain('census date bounds');
-    });
-
-    it('should flag stems outside plot boundaries (ValidationID: 8)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 8`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateFindStemsOutsidePlots');
-      expect(validations[0].Description).toContain('outside plot boundaries');
-    });
-
-    it('should flag DBH outside species limits (ValidationID: 11)', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        `SELECT * FROM sitespecificvalidations WHERE ValidationID = 11`
-      );
-
-      expect(validations.length).toBeGreaterThan(0);
-      expect(validations[0].ProcedureName).toBe('ValidateScreenMeasuredDiameterMinMax');
-      expect(validations[0].Description).toContain('species-defined bounds');
-    });
-
-    it('should flag invalid attribute codes (ValidationID: 14)', async () => {
-      // This validation is applied during bulkingestionprocess when attribute codes don't match
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      const procDef = procedures[0]['Create Procedure'];
-      expect(procDef).toContain('14 as ValidationErrorID');
-      expect(procDef).toContain('attributes a ON a.Code = tc.Code');
-    });
-  });
-
-  describe('Cross-Census Validations', () => {
-    it('should flag species mismatch across censuses (ValidationID: 20)', async () => {
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      const procDef = procedures[0]['Create Procedure'];
-      expect(procDef).toContain('species_mismatch_records');
-      expect(procDef).toContain('20 as ValidationErrorID');
-    });
-
-    it('should flag same-batch species conflicts (ValidationID: 21)', async () => {
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      const procDef = procedures[0]['Create Procedure'];
-      expect(procDef).toContain('same_batch_species_conflicts');
-      expect(procDef).toContain('21 as ValidationErrorID');
-    });
-  });
+  /**
+   * NOTE: Behavioral tests for soft validations are in:
+   * - post-ingestion-validations.integration.test.ts (ValidationIDs 1, 2, 6, 8, 11, 15)
+   * - cross-census-validations.integration.test.ts (ValidationIDs 3, 14, 20, 21)
+   */
 
   describe('End-to-End Ingestion Flow', () => {
     it('should successfully ingest valid measurements', async () => {
@@ -323,6 +208,8 @@ describe('Validation Scenarios Integration Tests', () => {
         'SELECT ValidationID, ProcedureName, IsEnabled FROM sitespecificvalidations ORDER BY ValidationID'
       );
 
+      // These are the core validations loaded from corequeries.sql
+      // Note: ValidationID 10 and 12 are not in the SQL file
       const expectedValidations = [
         { id: 1, name: 'ValidateDBHGrowthExceedsMax' },
         { id: 2, name: 'ValidateDBHShrinkageExceedsMax' },
@@ -334,8 +221,9 @@ describe('Validation Scenarios Integration Tests', () => {
         { id: 8, name: 'ValidateFindStemsOutsidePlots' },
         { id: 9, name: 'ValidateFindTreeStemsInDifferentQuadrats' },
         { id: 11, name: 'ValidateScreenMeasuredDiameterMinMax' },
-        { id: 12, name: 'ValidateScreenStemsWithMeasurementsButDeadAttributes' },
-        { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' }
+        { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' },
+        { id: 14, name: 'ValidateFindInvalidAttributeCodes' },
+        { id: 15, name: 'ValidateFindAbnormallyHighDBH' }
       ];
 
       // Fail explicitly if validation definitions are missing
@@ -356,118 +244,6 @@ describe('Validation Scenarios Integration Tests', () => {
       // At least one procedure should exist (may be more if multiple test DBs)
       expect(procedures.length).toBeGreaterThanOrEqual(1);
       expect(procedures.some((p: any) => p.Name === 'bulkingestionprocess')).toBe(true);
-    });
-  });
-});
-
-
-/**
- * Specific Validation Scenario Tests
- *
- * These tests create specific data conditions to verify each validation rule.
- * They require a fully seeded database with all relationships in place.
- */
-describe('Specific Validation Scenario Tests', () => {
-  let connection: Connection;
-  let testData: TestData;
-  let config: { database: string };
-
-  beforeAll(async () => {
-    const setup = await setupTestDatabase();
-    connection = setup.connection;
-    testData = setup.testData;
-    config = setup.config;
-  }, 60000);
-
-  afterAll(async () => {
-    await teardownTestDatabase(connection, config as any);
-  });
-
-  describe('Tree Dead Then Alive Scenario', () => {
-    /**
-     * Scenario: A tree is marked as dead in census N, but appears alive in census N+1
-     *
-     * This is a classic validation error that should be flagged because:
-     * - Dead trees cannot become alive
-     * - This likely indicates a data entry error (wrong tree tag)
-     *
-     * Expected behavior: Should flag as validation error but not reject
-     */
-    it('should detect when dead tree appears alive in subsequent census', async () => {
-      // This is a complex scenario that requires:
-      // 1. Census 1 with tree marked dead
-      // 2. Census 2 with same tree marked alive
-      //
-      // The validation for this would be in the attribute status checks
-      // and cross-census status transition logic
-
-      // For now, verify the relevant tables and structures exist
-      const [attributes] = await connection.query<RowDataPacket[]>(
-        "SELECT * FROM attributes WHERE Status IN ('dead', 'alive') LIMIT 5"
-      );
-
-      // The attributes table should have status classifications
-      expect(attributes).toBeDefined();
-
-      // Check that cmattributes table can link measurements to status codes
-      const [tableInfo] = await connection.query<RowDataPacket[]>(
-        "DESCRIBE cmattributes"
-      );
-      expect(tableInfo.some(col => col.Field === 'CoreMeasurementID')).toBe(true);
-      expect(tableInfo.some(col => col.Field === 'Code')).toBe(true);
-    });
-  });
-
-  describe('DBH Anomaly Detection', () => {
-    it('should have validation for excessive DBH growth (>65mm)', async () => {
-      const [validation] = await connection.query<RowDataPacket[]>(
-        "SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 1"
-      );
-
-      expect(validation.length).toBeGreaterThan(0);
-      const def = validation[0].Definition;
-      expect(def).toContain('65');
-      expect(def).toContain('cm_present');
-      expect(def).toContain('cm_past');
-    });
-
-    it('should have validation for excessive DBH shrinkage (>5%)', async () => {
-      const [validation] = await connection.query<RowDataPacket[]>(
-        "SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 2"
-      );
-
-      expect(validation.length).toBeGreaterThan(0);
-      const def = validation[0].Definition;
-      expect(def).toContain('0.95');
-      expect(def).toContain('cm_present.CensusID <> cm_past.CensusID');
-    });
-  });
-
-  describe('Spatial Validation', () => {
-    it('should validate stems are within plot boundaries', async () => {
-      const [validation] = await connection.query<RowDataPacket[]>(
-        "SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 8"
-      );
-
-      expect(validation.length).toBeGreaterThan(0);
-      const def = validation[0].Definition;
-      expect(def).toContain('LocalX');
-      expect(def).toContain('LocalY');
-      expect(def).toContain('DimensionX');
-      expect(def).toContain('DimensionY');
-    });
-
-    it('should validate coordinate drift threshold of 10m', async () => {
-      const [procedures] = await connection.query<RowDataPacket[]>(
-        "SHOW CREATE PROCEDURE bulkingestionprocess"
-      );
-
-      const procDef = procedures[0]['Create Procedure'];
-      // Verify 10m threshold
-      expect(procDef).toContain('> 10.0');
-      // Verify Euclidean distance calculation
-      expect(procDef).toContain('SQRT');
-      expect(procDef).toContain('POW');
     });
   });
 });
