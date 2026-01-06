@@ -25,6 +25,25 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
+// Logging configuration
+// Set TEST_LOG_LEVEL=debug for verbose output, otherwise only errors are shown
+const LOG_LEVEL = process.env.TEST_LOG_LEVEL || 'error';
+
+export const log = {
+  debug: (msg: string) => {
+    if (LOG_LEVEL === 'debug') console.log(msg);
+  },
+  info: (msg: string) => {
+    if (LOG_LEVEL === 'debug' || LOG_LEVEL === 'info') console.log(msg);
+  },
+  warn: (msg: string) => {
+    if (LOG_LEVEL !== 'silent') console.warn(msg);
+  },
+  error: (msg: string) => {
+    if (LOG_LEVEL !== 'silent') console.error(msg);
+  }
+};
+
 // Configuration
 export interface TestDatabaseConfig {
   host: string;
@@ -35,13 +54,52 @@ export interface TestDatabaseConfig {
   multipleStatements: boolean;
 }
 
+// Type definitions for test data entities
+export interface TestSite {
+  siteID: number;
+  siteName: string;
+}
+
+export interface TestPlot {
+  plotID: number;
+  plotName: string;
+  num_quadrats: number;
+}
+
+export interface TestCensus {
+  censusID: number;
+  plotCensusNumber: number;
+  plotID: number;
+  startDate: string;
+  endDate: string;
+}
+
+export interface TestSpecies {
+  SpeciesCode: string;
+  SpeciesName: string;
+  Mnemonic: string;
+}
+
+export interface TestQuadrat {
+  QuadratName: string;
+  Quadrat: string;
+  StartX: number;
+  StartY: number;
+}
+
+export interface TestAttribute {
+  code: string;
+  description: string;
+  status: string;
+}
+
 export interface TestData {
-  sites: any[];
-  plots: any[];
-  census: any[];
-  species: any[];
-  quadrats: any[];
-  attributes: any[];
+  sites: TestSite[];
+  plots: TestPlot[];
+  census: TestCensus[];
+  species: TestSpecies[];
+  quadrats: TestQuadrat[];
+  attributes: TestAttribute[];
 }
 
 // Default configuration for local testing
@@ -55,27 +113,115 @@ export const DEFAULT_TEST_CONFIG: TestDatabaseConfig = {
   multipleStatements: true
 };
 
+// Retry configuration for database connections
+const CONNECTION_RETRY_CONFIG = {
+  maxRetries: 5,
+  initialDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2
+} as const;
+
 /**
- * Creates a new test database with unique name
+ * Delays execution for the specified number of milliseconds.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Attempts to create a MySQL connection with retry logic.
+ * Uses exponential backoff to handle cases where MySQL is still starting up.
+ *
+ * @param config - Database configuration
+ * @param retryConfig - Optional retry configuration overrides
+ * @returns A MySQL connection
+ * @throws Error if all retry attempts fail
+ */
+async function connectWithRetry(
+  config: TestDatabaseConfig,
+  retryConfig = CONNECTION_RETRY_CONFIG
+): Promise<mysql.Connection> {
+  let lastError: Error | null = null;
+  let currentDelay = retryConfig.initialDelayMs;
+
+  for (let attempt = 1; attempt <= retryConfig.maxRetries; attempt++) {
+    try {
+      const connection = await mysql.createConnection({
+        host: config.host,
+        user: config.user,
+        password: config.password,
+        port: config.port,
+        multipleStatements: true
+      });
+
+      // Verify connection is actually working
+      await connection.ping();
+
+      if (attempt > 1) {
+        log.debug(`Database connection established on attempt ${attempt}`);
+      }
+
+      return connection;
+    } catch (error: any) {
+      lastError = error;
+
+      const isRetryable =
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ENOTFOUND' ||
+        error.code === 'ER_CON_COUNT_ERROR' ||
+        error.message?.includes('Too many connections') ||
+        error.message?.includes('Connection lost');
+
+      if (!isRetryable || attempt === retryConfig.maxRetries) {
+        throw new Error(
+          `Failed to connect to MySQL after ${attempt} attempt(s): ${error.message}. ` +
+            `Ensure MySQL is running: docker compose up -d mysql`
+        );
+      }
+
+      log.warn(
+        `Connection attempt ${attempt}/${retryConfig.maxRetries} failed: ${error.code || error.message}. ` +
+          `Retrying in ${currentDelay}ms...`
+      );
+
+      await delay(currentDelay);
+      currentDelay = Math.min(currentDelay * retryConfig.backoffMultiplier, retryConfig.maxDelayMs);
+    }
+  }
+
+  // This should never be reached, but TypeScript needs it
+  throw lastError || new Error('Connection failed for unknown reason');
+}
+
+/**
+ * Creates a new test database with unique name.
+ * Ensures connection is closed on failure to prevent resource leaks.
+ * Uses retry logic to handle MySQL startup timing issues.
  */
 export async function createTestDatabase(config: TestDatabaseConfig = DEFAULT_TEST_CONFIG): Promise<mysql.Connection> {
-  // Connect without database to create it
-  const connection = await mysql.createConnection({
-    host: config.host,
-    user: config.user,
-    password: config.password,
-    port: config.port,
-    multipleStatements: true
-  });
+  let connection: mysql.Connection | null = null;
 
-  // Create test database
-  await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
-  await connection.query(`CREATE DATABASE \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-  await connection.query(`USE \`${config.database}\``);
+  try {
+    connection = await connectWithRetry(config);
 
-  console.log(`✅ Test database created: ${config.database}`);
+    await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
+    await connection.query(`CREATE DATABASE \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+    await connection.query(`USE \`${config.database}\``);
 
-  return connection;
+    log.debug(` Test database created: ${config.database}`);
+
+    return connection;
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.end();
+      } catch (closeError) {
+        // Ignore close errors during cleanup
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -100,7 +246,7 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
     .filter(s => s.length > 0 && !s.startsWith('--'));
 
   let createdTables = 0;
-  let errors = 0;
+  const criticalErrors: string[] = [];
 
   for (const statement of statements) {
     try {
@@ -109,12 +255,14 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
         createdTables++;
       }
     } catch (error: any) {
-      // Ignore "doesn't exist" errors from DROP statements and "already exists"
-      if (!error.message.includes("doesn't exist") && !error.message.includes('already exists')) {
-        errors++;
-        // Only show first 100 chars of error to avoid noise
-        const shortMsg = error.message.substring(0, 100);
-        console.warn(`Schema error: ${shortMsg}`);
+      // Ignore expected errors: DROP on non-existent tables, CREATE on existing tables
+      const isExpectedError =
+        error.message.includes("doesn't exist") ||
+        error.message.includes('already exists');
+
+      if (!isExpectedError) {
+        // Collect critical errors - these indicate broken schema
+        criticalErrors.push(`${error.message.substring(0, 100)}`);
       }
     }
   }
@@ -122,7 +270,14 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
   // Re-enable foreign key checks
   await connection.query('SET FOREIGN_KEY_CHECKS = 1');
 
-  console.log(`✅ Schema loaded: ${createdTables} tables created${errors > 0 ? `, ${errors} errors` : ''}`);
+  // FAIL FAST: Critical errors mean the schema is broken
+  if (criticalErrors.length > 0) {
+    const errorSummary = criticalErrors.slice(0, 3).join('\n  ');
+    const moreErrors = criticalErrors.length > 3 ? `\n  ... and ${criticalErrors.length - 3} more` : '';
+    throw new Error(`Schema loading failed with ${criticalErrors.length} critical errors:\n  ${errorSummary}${moreErrors}`);
+  }
+
+  log.debug(` Schema loaded: ${createdTables} tables created`);
 }
 
 /**
@@ -133,7 +288,7 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
   const coreQueriesPath = path.join(process.cwd(), 'sqlscripting', 'corequeries.sql');
 
   if (!fs.existsSync(coreQueriesPath)) {
-    console.warn(`Core queries file not found: ${coreQueriesPath} - skipping validation definitions`);
+    log.warn(`Core queries file not found: ${coreQueriesPath} - skipping validation definitions`);
     return;
   }
 
@@ -165,16 +320,26 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
     if (inInsert) {
       currentStatement += '\n' + line;
 
-      // Check if statement is complete (ends with semicolon outside of quotes)
-      // Simple heuristic: line ends with ); or just ;
-      if (trimmed.endsWith(');') || (trimmed === ';')) {
+      // Check if statement is complete
+      // The INSERT statements end with one of these patterns:
+      // 1. ", true);" or ", false);" - the IsEnabled value at end of VALUES clause
+      // 2. "VALUES(IsEnabled);" - end of ON DUPLICATE KEY UPDATE clause
+      // Simple "); check doesn't work because SQL definitions contain "...WHERE x = @p_PlotID);"
+      const isEndOfStatement =
+        /,\s*(true|false)\);$/.test(trimmed) ||  // End of VALUES clause: , true); or , false);
+        /VALUES\s*\(\s*IsEnabled\s*\)\s*;$/.test(trimmed);  // End of ON DUPLICATE KEY UPDATE
+
+      if (isEndOfStatement) {
         try {
-          await connection.query(currentStatement);
+          // Normalize escaping: convert backslash-escaped quotes (\') to standard SQL escaping ('')
+          // This handles inconsistent escaping in the SQL file (some validations use \', others use '')
+          const normalizedStatement = currentStatement.replace(/\\'/g, "''");
+          await connection.query(normalizedStatement);
           insertedCount++;
         } catch (err: any) {
           errorCount++;
           if (errorCount <= 2) {
-            console.warn(`Validation insert error: ${err.message.substring(0, 80)}`);
+            log.warn(`Validation insert error: ${err.message.substring(0, 80)}`);
           }
         }
         currentStatement = '';
@@ -184,10 +349,44 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
   }
 
   if (errorCount > 2) {
-    console.warn(`  ... and ${errorCount - 2} more validation insert errors`);
+    log.warn(`  ... and ${errorCount - 2} more validation insert errors`);
   }
 
-  console.log(`✅ Loaded ${insertedCount} validation definitions${errorCount > 0 ? ` (${errorCount} errors)` : ''}`);
+  // Add inline validation definitions (used by stored procedure during ingestion, not via API)
+  // These are required because cmverrors has FK constraint to sitespecificvalidations.
+  // IMPORTANT: IsEnabled = false because these are INLINE validations executed during
+  // bulkingestionprocess, NOT post-ingestion API validations. The Definition is empty
+  // because the validation logic is embedded in the stored procedure itself.
+  const inlineValidations = [
+    {
+      id: 20,
+      name: 'SpeciesMismatchCrossCensus',
+      desc: 'Tree recorded with different species than previous census (inline validation)'
+    },
+    {
+      id: 21,
+      name: 'SameBatchSpeciesConflict',
+      desc: 'Same tree tag with different species in same batch (inline validation)'
+    }
+  ];
+
+  for (const v of inlineValidations) {
+    try {
+      await connection.query(
+        `INSERT IGNORE INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Definition, IsEnabled)
+         VALUES (?, ?, ?, '', false)`,
+        [v.id, v.name, v.desc]
+      );
+      insertedCount++;
+    } catch (err: any) {
+      // Ignore duplicate key errors
+      if (!err.message.includes('Duplicate')) {
+        log.warn(`Inline validation insert error: ${err.message}`);
+      }
+    }
+  }
+
+  log.debug(` Loaded ${insertedCount} validation definitions${errorCount > 0 ? ` (${errorCount} errors)` : ''}`);
 }
 
 /**
@@ -219,7 +418,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
 
     let loadedCount = 0;
     let dropCount = 0;
-    let errorCount = 0;
+    const criticalErrors: Array<{ error: string; sql: string }> = [];
 
     for (const statement of statements) {
       const trimmed = statement.trim();
@@ -242,23 +441,29 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
           loadedCount++;
         }
       } catch (err: any) {
-        // Ignore "already exists" and "does not exist" errors
-        if (!err.message.includes('already exists') && !err.message.includes('does not exist')) {
-          errorCount++;
-          // Show more detail for debugging
-          if (errorCount <= 3) {
-            const preview = cleaned.substring(0, 80).replace(/\n/g, ' ');
-            console.warn(`Procedure error: ${err.message.substring(0, 60)}... | SQL: ${preview}...`);
-          }
+        // Ignore expected errors: DROP on non-existent, CREATE on existing
+        const isExpectedError =
+          err.message.includes('already exists') ||
+          err.message.includes('does not exist');
+
+        if (!isExpectedError) {
+          const preview = cleaned.substring(0, 60).replace(/\n/g, ' ');
+          criticalErrors.push({ error: err.message.substring(0, 80), sql: preview });
         }
       }
     }
 
-    if (errorCount > 3) {
-      console.warn(`  ... and ${errorCount - 3} more procedure errors`);
+    // FAIL FAST: Critical errors mean stored procedures are broken
+    if (criticalErrors.length > 0) {
+      const errorSummary = criticalErrors
+        .slice(0, 3)
+        .map(e => `${e.error}\n    SQL: ${e.sql}...`)
+        .join('\n  ');
+      const moreErrors = criticalErrors.length > 3 ? `\n  ... and ${criticalErrors.length - 3} more` : '';
+      throw new Error(`Stored procedure loading failed with ${criticalErrors.length} critical errors:\n  ${errorSummary}${moreErrors}`);
     }
 
-    console.log(`✅ Loaded ${loadedCount} stored procedures (${dropCount} drops executed)`);
+    log.debug(` Loaded ${loadedCount} stored procedures (${dropCount} drops executed)`);
 
     // Verify bulkingestionprocess exists
     try {
@@ -267,16 +472,16 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
       if (rows.length > 0) {
         const procedureContent = rows[0]['Create Procedure'];
         if (procedureContent.includes('GROUP_CONCAT')) {
-          console.log('✅ Verified: bulkingestionprocess uses GROUP_CONCAT');
+          log.debug(' Verified: bulkingestionprocess uses GROUP_CONCAT');
         } else {
-          console.warn('⚠️  Warning: bulkingestionprocess may not use GROUP_CONCAT');
+          log.warn('bulkingestionprocess may not use GROUP_CONCAT');
         }
       }
     } catch (err: any) {
-      console.warn('⚠️  Could not verify bulkingestionprocess:', err.message);
+      log.warn(`Could not verify bulkingestionprocess: ${err.message}`);
     }
   } catch (error: any) {
-    console.error('Error loading stored procedures:', error.message);
+    log.error(`Error loading stored procedures: ${error.message}`);
     throw error;
   }
 }
@@ -286,7 +491,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
  */
 export function parseSampleDataFile(filePath: string): any[] {
   if (!fs.existsSync(filePath)) {
-    console.warn(`Sample data file not found: ${filePath}`);
+    log.warn(`Sample data file not found: ${filePath}`);
     return [];
   }
 
@@ -353,10 +558,10 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
       );
       testData.species.push({ SpeciesCode: species.code, SpeciesName: species.name, Mnemonic: species.code });
     } catch (err: any) {
-      console.warn(`Warning inserting species: ${err.message}`);
+      log.warn(`Warning inserting species: ${err.message}`);
     }
   }
-  console.log(`✅ Loaded ${testData.species.length} species`);
+  log.debug(` Loaded ${testData.species.length} species`);
 
   // Create test attributes inline
   const testAttributes = [
@@ -377,10 +582,10 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
       );
       testData.attributes.push(attr);
     } catch (err: any) {
-      console.warn(`Warning inserting attribute: ${err.message}`);
+      log.warn(`Warning inserting attribute: ${err.message}`);
     }
   }
-  console.log(`✅ Loaded ${testData.attributes.length} attributes`);
+  log.debug(` Loaded ${testData.attributes.length} attributes`);
 
   // Create test plot (no sites table in schema)
   try {
@@ -392,7 +597,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
     const [plotRows] = await connection.query<mysql.RowDataPacket[]>('SELECT PlotID FROM plots WHERE PlotName = ?', ['Test Plot']);
     const plotID = plotRows[0].PlotID;
     testData.plots = [{ plotID, plotName: 'Test Plot', num_quadrats: 10 }];
-    console.log(`✅ Created test plot (ID: ${plotID})`);
+    log.debug(` Created test plot (ID: ${plotID})`);
 
     // Create test quadrats
     for (let i = 0; i < 10; i++) {
@@ -407,7 +612,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
       );
       testData.quadrats.push({ QuadratName: quadratName, Quadrat: quadratName, StartX: startX, StartY: startY });
     }
-    console.log(`✅ Created ${testData.quadrats.length} quadrats`);
+    log.debug(` Created ${testData.quadrats.length} quadrats`);
 
     // Create test census
     await connection.query(
@@ -430,58 +635,180 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
         endDate: '2024-12-31'
       }
     ];
-    console.log(`✅ Created test census (ID: ${censusID})`);
+    log.debug(` Created test census (ID: ${censusID})`);
   } catch (err: any) {
-    console.error(`Error creating test data: ${err.message}`);
+    log.error(`Error creating test data: ${err.message}`);
     throw err;
   }
 
-  console.log('✅ Sample data seeded successfully');
+  log.debug(' Sample data seeded successfully');
 
   return testData;
 }
 
 /**
- * Complete setup of test database with schema, procedures, and data
+ * Complete setup of test database with schema, procedures, and data.
+ * Ensures cleanup on any failure during setup to prevent resource leaks.
  */
 export async function setupTestDatabase(config: TestDatabaseConfig = DEFAULT_TEST_CONFIG): Promise<{
   connection: mysql.Connection;
   testData: TestData;
   config: TestDatabaseConfig;
 }> {
-  console.log('\n🔧 Setting up test database...');
+  log.info('Setting up test database...');
 
-  const connection = await createTestDatabase(config);
-  await loadSchema(connection);
-  await loadStoredProcedures(connection);
-  await loadValidationDefinitions(connection);
-  const testData = await seedSampleData(connection);
+  let connection: mysql.Connection | null = null;
 
-  console.log('✅ Test database setup complete\n');
+  try {
+    connection = await createTestDatabase(config);
+    await loadSchema(connection);
+    await loadStoredProcedures(connection);
+    await loadValidationDefinitions(connection);
+    const testData = await seedSampleData(connection);
 
-  return { connection, testData, config };
+    log.debug(' Test database setup complete\n');
+
+    return { connection, testData, config };
+  } catch (error) {
+    log.error('Test database setup failed, cleaning up...');
+    if (connection) {
+      try {
+        await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
+      } catch (dropError) {
+        // Ignore drop errors during cleanup
+      }
+      try {
+        await connection.end();
+      } catch (closeError) {
+        // Ignore close errors during cleanup
+      }
+    }
+    throw error;
+  }
 }
 
 /**
- * Teardown and cleanup test database
+ * Teardown and cleanup test database.
+ * Handles all edge cases: null connection, already-closed connection, missing database.
+ *
+ * @param connection - The database connection (can be null/undefined if setup failed)
+ * @param config - Only needs `database` field; other fields use defaults
  */
-export async function teardownTestDatabase(connection: mysql.Connection, config: TestDatabaseConfig = DEFAULT_TEST_CONFIG): Promise<void> {
-  console.log('\n🧹 Cleaning up test database...');
+export async function teardownTestDatabase(
+  connection: mysql.Connection | null | undefined,
+  config: Pick<TestDatabaseConfig, 'database'> = DEFAULT_TEST_CONFIG
+): Promise<void> {
+  log.info('Cleaning up test database...');
 
-  // If connection is undefined (failed to establish), skip cleanup
   if (!connection) {
-    console.log('⚠️  No connection to clean up (database was not available)\n');
+    log.warn('No connection to clean up');
     return;
   }
 
   try {
     await connection.query(`DROP DATABASE IF EXISTS \`${config.database}\``);
-    console.log(`✅ Test database dropped: ${config.database}`);
+    log.debug(` Test database dropped: ${config.database}`);
   } catch (error: any) {
-    console.warn(`Warning during cleanup: ${error.message}`);
-  } finally {
+    // Connection may already be closed or database may not exist
+    if (!error.message.includes('PROTOCOL_CONNECTION_LOST') && !error.message.includes("doesn't exist")) {
+      log.warn(`Warning during database drop: ${error.message}`);
+    }
+  }
+
+  try {
     await connection.end();
-    console.log('✅ Connection closed\n');
+    log.debug(' Connection closed\n');
+  } catch (error: any) {
+    // Connection may already be closed
+    if (!error.message.includes('PROTOCOL_CONNECTION_LOST') && !error.message.includes('already been closed')) {
+      log.warn(`Warning during connection close: ${error.message}`);
+    } else {
+      log.debug(' Connection already closed\n');
+    }
+  }
+}
+
+/**
+ * Tables to clean between tests, in FK-safe deletion order.
+ * Order: leaf tables first (no children), then parent tables.
+ *
+ * FK chain:
+ *   cmverrors → coremeasurements
+ *   cmattributes → coremeasurements
+ *   coremeasurements → stems → trees
+ *   stems → quadrats (preserved)
+ *   trees → species (preserved), census
+ */
+const MEASUREMENT_TABLES_DELETE_ORDER = [
+  'cmverrors',           // Leaf: depends on coremeasurements
+  'cmattributes',        // Leaf: depends on coremeasurements
+  'coremeasurements',    // Parent of cmverrors, cmattributes; child of stems
+  'stems',               // Parent of coremeasurements; child of trees, quadrats
+  'trees',               // Parent of stems; child of species, census
+  'failedmeasurements',  // Standalone (no FKs)
+  'temporarymeasurements' // Standalone (no FKs)
+] as const;
+
+/**
+ * Cleans up measurement-related tables between tests.
+ * Preserves seed data: plots, quadrats, species, attributes.
+ *
+ * Use this in beforeEach() to ensure test isolation:
+ * ```typescript
+ * beforeEach(async () => {
+ *   await cleanupTestMeasurements(connection, testData);
+ * });
+ * ```
+ *
+ * @param connection - Database connection
+ * @param testData - Test data containing initial census to preserve
+ * @param options - Optional configuration:
+ *   - additionalTables: extra tables to delete
+ *   - preserveCensusCount: number of census records to keep (default: all from testData.census)
+ */
+export async function cleanupTestMeasurements(
+  connection: mysql.Connection,
+  testData?: TestData,
+  options: {
+    additionalTables?: string[];
+    preserveCensusCount?: number;
+  } = {}
+): Promise<void> {
+  const { additionalTables = [] } = options;
+
+  // Delete from measurement tables in FK-safe order
+  for (const table of MEASUREMENT_TABLES_DELETE_ORDER) {
+    await connection.query(`DELETE FROM ${table}`);
+  }
+
+  // Delete any additional tables specified
+  for (const table of additionalTables) {
+    await connection.query(`DELETE FROM ${table}`);
+  }
+
+  // Clean up dynamically created census records if testData is provided
+  // This prevents test isolation issues when tests create census records mid-test
+  if (testData?.plots?.[0]?.plotID) {
+    const plotID = testData.plots[0].plotID;
+
+    // Determine how many census records to preserve
+    const preserveCount = options.preserveCensusCount ?? testData.census?.length ?? 1;
+
+    if (preserveCount > 0 && testData.census?.length > 0) {
+      // Get the IDs of census records we want to keep (the first N from testData)
+      const censusIDsToKeep = testData.census
+        .slice(0, preserveCount)
+        .map(c => c.censusID)
+        .filter(id => id != null);
+
+      if (censusIDsToKeep.length > 0) {
+        // Delete any census records not in our preserve list
+        await connection.query(
+          `DELETE FROM census WHERE PlotID = ? AND CensusID NOT IN (${censusIDsToKeep.join(',')})`,
+          [plotID]
+        );
+      }
+    }
   }
 }
 
@@ -922,7 +1249,7 @@ export async function seedStatusAttributes(connection: mysql.Connection): Promis
     );
   }
 
-  console.log(`✅ Seeded ${statusCodes.length} status attribute codes`);
+  log.debug(` Seeded ${statusCodes.length} status attribute codes`);
 }
 
 /**
@@ -978,7 +1305,7 @@ export async function seedSpeciesWithLimits(
     testData.species.push({ SpeciesCode: sp.speciesCode, SpeciesName: sp.speciesName, Mnemonic: sp.speciesCode });
   }
 
-  console.log(`✅ Seeded ${species.length} species with DBH limits`);
+  log.debug(` Seeded ${species.length} species with DBH limits`);
 }
 
 // =============================================================================
@@ -995,10 +1322,32 @@ export interface MeasurementFactoryOptions {
   quadratName?: string;
   dbhRange?: { min: number; max: number };
   dateRange?: { start: string; end: string };
+  /** Seed for deterministic random generation. Default: 12345 */
+  seed?: number;
+}
+
+/**
+ * Simple seeded pseudo-random number generator (Mulberry32).
+ * Provides deterministic "random" values for reproducible tests.
+ */
+function seededRandom(seed: number): () => number {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 /**
  * Generates an array of test measurements for bulk testing.
+ *
+ * IMPORTANT: Uses a seeded random generator for DETERMINISTIC results.
+ * This ensures tests are reproducible and don't become flaky due to
+ * DBH/date values drifting into failure thresholds.
+ *
+ * @param testData - Test data containing species and quadrats
+ * @param options - Generation options including optional seed for reproducibility
  */
 export function generateTestMeasurements(
   testData: TestData,
@@ -1010,20 +1359,24 @@ export function generateTestMeasurements(
     speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic || 'TESTSP',
     quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat || 'Q001',
     dbhRange = { min: 50, max: 500 },
-    dateRange = { start: '2024-01-01', end: '2024-12-31' }
+    dateRange = { start: '2024-01-01', end: '2024-12-31' },
+    seed = 12345 // Default seed for reproducibility
   } = options;
+
+  // Use seeded random for deterministic test data
+  const random = seededRandom(seed);
 
   const measurements: DirectMeasurement[] = [];
 
   for (let i = 1; i <= count; i++) {
-    const dbh = dbhRange.min + Math.random() * (dbhRange.max - dbhRange.min);
-    const x = Math.random() * 20; // Within typical quadrat dimensions
-    const y = Math.random() * 20;
+    const dbh = dbhRange.min + random() * (dbhRange.max - dbhRange.min);
+    const x = random() * 20; // Within typical quadrat dimensions
+    const y = random() * 20;
 
     // Generate a date within the range
     const startMs = new Date(dateRange.start).getTime();
     const endMs = new Date(dateRange.end).getTime();
-    const dateMs = startMs + Math.random() * (endMs - startMs);
+    const dateMs = startMs + random() * (endMs - startMs);
     const date = new Date(dateMs).toISOString().split('T')[0];
 
     measurements.push({
@@ -1077,11 +1430,18 @@ export async function runValidationForTest(
 ): Promise<boolean> {
   const validation = await getValidationDefinition(connection, validationID);
   if (!validation) {
-    console.warn(`Validation ${validationID} not found or not enabled`);
+    log.warn(`Validation ${validationID} not found or not enabled`);
     return false;
   }
 
   const { ProcedureName, Definition } = validation;
+
+  // Safety check: Skip validations with empty definitions
+  // (Inline validations 20/21 have empty Definition because they run during ingestion, not via API)
+  if (!Definition || Definition.trim() === '') {
+    log.warn(`Validation ${ProcedureName} has empty Definition - skipping (this is an inline validation)`);
+    return false;
+  }
 
   // Clear stale validation errors for this validation
   const cleanupQuery = `
@@ -1109,7 +1469,7 @@ export async function runValidationForTest(
     await connection.query(formattedQuery);
     return true;
   } catch (error: any) {
-    console.error(`Validation ${ProcedureName} failed:`, error.message);
+    log.error(`Validation ${ProcedureName} failed:`, error.message);
     return false;
   }
 }
@@ -1211,7 +1571,16 @@ export async function insertCrossCensusMeasurements(
     const [treeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
     const treeID = treeRows[0].TreeID;
 
-    // Create stem ONCE - this StemGUID will be used for measurements in BOTH censuses
+    // Create stem ONCE - this StemGUID will be used for measurements in BOTH censuses.
+    //
+    // DESIGN NOTE: stems.CensusID represents when the stem was FIRST RECORDED, not a
+    // constraint on which census measurements can reference this stem. In ForestGEO:
+    // - Physical stems persist across multiple censuses
+    // - The same StemGUID is used for measurements in different censuses
+    // - Validation queries join on StemGUID across censuses to compare measurements
+    //   Example: cm_present.StemGUID = cm_past.StemGUID AND cm_present.CensusID <> cm_past.CensusID
+    //
+    // This correctly models real ingestion where stems are re-measured each census period.
     await connection.query(
       `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
        VALUES (?, ?, ?, ?, ?, ?, 1)`,

@@ -24,6 +24,7 @@ import {
   seedSpeciesWithLimits,
   runValidationForTest,
   runAllValidationsForTest,
+  log,
   type TestData,
   type CensusInfo
 } from '../setup/local-db-setup';
@@ -96,7 +97,7 @@ describe('Post-Ingestion Validation Tests', () => {
       const enabledValidations = rows.filter((r) => r.IsEnabled);
       expect(enabledValidations.length).toBeGreaterThanOrEqual(10);
 
-      console.log('Loaded validations:', rows.map((r) => `${r.ValidationID}: ${r.ProcedureName}`));
+      log.debug('Loaded validations:', rows.map((r) => `${r.ValidationID}: ${r.ProcedureName}`));
     });
 
     it('should successfully run all enabled validations', async () => {
@@ -106,7 +107,7 @@ describe('Post-Ingestion Validation Tests', () => {
       });
 
       expect(ranValidations.length).toBeGreaterThan(0);
-      console.log('Successfully executed validations:', ranValidations);
+      log.debug('Successfully executed validations:', ranValidations);
 
       expect(ranValidations).toContain(VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX);
       expect(ranValidations).toContain(VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX);
@@ -159,7 +160,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX);
 
-      console.log(
+      log.debug(
         `ValidationID ${VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX}: Detected ${expectedGrowth}mm growth (threshold: ${DBH_GROWTH_THRESHOLD_MM}mm)`
       );
     });
@@ -340,7 +341,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX);
 
-      console.log(
+      log.debug(
         `ValidationID ${VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX}: Detected ${shrinkagePercent}% shrinkage (threshold: ${DBH_SHRINKAGE_THRESHOLD_PERCENT}%)`
       );
     });
@@ -738,7 +739,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.ABNORMALLY_HIGH_DBH);
 
-      console.log(
+      log.debug(
         `ValidationID ${VALIDATION_IDS.ABNORMALLY_HIGH_DBH}: Detected DBH=${extremeDBH}mm (threshold: ${ABSOLUTE_MAX_DBH_MM}mm)`
       );
     });
@@ -1029,7 +1030,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES);
 
-      console.log(`ValidationID ${VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES}: Detected duplicate quadrat name '${duplicateQuadratName}' (QuadratIDs: ${origQuadratID}, ${newQuadratID})`);
+      log.debug(`ValidationID ${VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES}: Detected duplicate quadrat name '${duplicateQuadratName}' (QuadratIDs: ${origQuadratID}, ${newQuadratID})`);
     });
 
     it('should NOT flag measurements when all quadrat names are unique', async () => {
@@ -1163,7 +1164,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS);
 
-      console.log(`ValidationID ${VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS}: Detected duplicate TreeTag='DUPTAG01' + StemTag='S001' (species: ${species1Code}, ${species2Code})`);
+      log.debug(`ValidationID ${VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS}: Detected duplicate TreeTag='DUPTAG01' + StemTag='S001' (species: ${species1Code}, ${species2Code})`);
     });
 
     it('should NOT flag when TreeTag+StemTag combinations are unique', async () => {
@@ -1307,7 +1308,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DIFFERENT_SPECIES_SAME_TREE);
 
-      console.log(`ValidationID ${VALIDATION_IDS.DIFFERENT_SPECIES_SAME_TREE}: Detected TreeTag='DIFFSP01' with species '${species1Code}' and '${species2Code}'`);
+      log.debug(`ValidationID ${VALIDATION_IDS.DIFFERENT_SPECIES_SAME_TREE}: Detected TreeTag='DIFFSP01' with species '${species1Code}' and '${species2Code}'`);
     });
 
     it('should NOT flag when all stems of same tree have same species', async () => {
@@ -1431,7 +1432,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.STEMS_IN_DIFFERENT_QUADRATS);
 
-      console.log(`ValidationID ${VALIDATION_IDS.STEMS_IN_DIFFERENT_QUADRATS}: Detected TreeID=${treeID} with stems in '${quadrat1Name}' and '${quadrat2Name}'`);
+      log.debug(`ValidationID ${VALIDATION_IDS.STEMS_IN_DIFFERENT_QUADRATS}: Detected TreeID=${treeID} with stems in '${quadrat1Name}' and '${quadrat2Name}'`);
     });
 
     it('should NOT flag when all stems of same tree are in same quadrat', async () => {
