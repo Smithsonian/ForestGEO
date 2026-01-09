@@ -190,7 +190,7 @@ export default function DashboardPage() {
       setError(errorMessage);
       ailogger.error('Aggregated dashboard metrics error:', e);
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite, currentPlot, currentCensus, isMountedRef]);
 
   const loadChangelogHistory = useCallback(async () => {
     if (!currentSite || !currentPlot || !currentCensus) {
@@ -245,7 +245,7 @@ export default function DashboardPage() {
         setIsLoading(false);
       }
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite, currentPlot, currentCensus, isMountedRef]);
 
   // Memoized event handlers to prevent unnecessary re-renders
   const handleFeedbackKeyDown = useCallback(

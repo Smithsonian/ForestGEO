@@ -803,7 +803,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       uploadToSql,
       setCompletedChunks,
       pushErrorRowsToFailedMeasurements,
-      waitForAllOperationsToComplete
+      waitForAllOperationsToComplete,
+      isMountedRef
     ]
   );
 

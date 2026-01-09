@@ -76,7 +76,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     } catch (error: any) {
       ailogger.error('Failed to fetch record counts:', error);
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges, isMountedRef]);
 
   const handleClearFailedMeasurements = async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {

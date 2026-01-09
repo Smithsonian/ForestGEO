@@ -113,7 +113,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
         if (isMountedRef.current) setIsValidating(false);
       }
     },
-    [enableValidation, schema]
+    [enableValidation, schema, isMountedRef]
   );
 
   // Debounced validation on value change

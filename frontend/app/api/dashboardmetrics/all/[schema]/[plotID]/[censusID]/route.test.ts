@@ -287,7 +287,7 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
   describe('error handling', () => {
     it('returns 500 on database error and rolls back transaction', async () => {
       const cm = (ConnectionManager as any).getInstance();
-      const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('DB connection failed'));
+      const _exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('DB connection failed'));
       vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
       const rollbackTx = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValue(undefined);
 

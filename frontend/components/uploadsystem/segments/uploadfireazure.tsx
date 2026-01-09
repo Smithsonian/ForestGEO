@@ -71,7 +71,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         }
       }
     },
-    [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user]
+    [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user, isMountedRef]
   );
 
   useEffect(() => {
@@ -128,7 +128,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       ailogger.info('[UploadFireAzure] Fallback check: upload already completed, ensuring transition to COMPLETE');
       setReviewState(ReviewStates.COMPLETE);
     }
-  }, [loading, setReviewState]);
+  }, [loading, setReviewState, isMountedRef]);
 
   const progressPercent = totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
 

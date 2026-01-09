@@ -73,7 +73,7 @@ export default function PostValidationPage() {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error loading queries:', errorObj);
     }
-  }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
+  }, [currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName, isMountedRef]);
 
   function saveResultsToFile() {
     if (selectedResults.length === 0) {
@@ -134,7 +134,7 @@ export default function PostValidationPage() {
     if (postValidations.length > 0 && currentSite?.schemaName) {
       fetchSchema();
     }
-  }, [postValidations, currentSite?.schemaName]);
+  }, [postValidations, currentSite?.schemaName, isMountedRef]);
 
   const handleExpandClick = (queryID: number) => {
     setExpandedQuery(expandedQuery === queryID ? null : queryID);

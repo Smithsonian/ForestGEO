@@ -80,7 +80,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
           }
         });
     },
-    [dataType, currentSite?.schemaName]
+    [dataType, currentSite?.schemaName, isMountedRef]
   );
 
   // Initial fetch on mount (only if site is selected)

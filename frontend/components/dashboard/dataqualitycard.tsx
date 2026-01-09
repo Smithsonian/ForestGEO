@@ -239,8 +239,8 @@ const PLACEHOLDER_STATS: DataQualityStats = {
 
 export default function DataQualityCard({
   schema,
-  plotID,
-  censusID,
+  plotID: _plotID,
+  censusID: _censusID,
   isLoading = false,
   stats: preloadedStats,
   onRefresh: _onRefresh,

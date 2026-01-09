@@ -59,7 +59,7 @@ describe('GET /api/postvalidation', () => {
 
   it('returns 400 if schema is missing', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+    const _close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const req = makeRequest('http://localhost/api/postvalidation'); // no ?schema=
     const res = await GET(req);

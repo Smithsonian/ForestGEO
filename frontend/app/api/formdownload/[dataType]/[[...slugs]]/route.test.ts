@@ -288,7 +288,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
   it('returns 500 on errors during columns discovery and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('columns fail'));
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+    const _close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const res = await GET({} as any, makeProps('attributes', ['myschema', '1', '2', fm({})]));
 

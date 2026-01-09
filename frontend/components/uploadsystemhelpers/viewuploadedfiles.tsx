@@ -178,7 +178,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setOpenSnackbar(true);
       }
     }
-  }, [currentPlot, currentCensus]);
+  }, [currentPlot, currentCensus, isMountedRef]);
 
   // Handle refresh file list - use ref to track previous state to avoid infinite rerender
   const previousRefreshFileList = useRef(refreshFileList);

@@ -3,7 +3,8 @@ title: Adding Historical Data
 description: Learn how to add historical data to the ForestGEO application through file uploads.
 ---
 
-When you first start using the application, you'll need to add historical data from previous censuses. This guide explains the data types, file formats, and upload process.
+When you first start using the application, you'll need to add historical data from previous censuses. 
+This guide explains the data types, file formats, and upload process.
 
 ---
 
@@ -16,22 +17,34 @@ Adding historical data involves:
 3. **Uploading Measurements** for each census
 
 :::note
-You must complete the Fixed Data uploads before you can upload measurements. The measurements form references Fixed Data records.
+You must complete the Fixed Data uploads before you can upload measurements. 
+The measurements form references Fixed Data records.
 :::
 
 ---
 
-## Understanding the Forms
+## Required Data and Formatting of Files for Upload
 
-The app accepts file uploads (called `forms`) in either **CSV** or **TSV** format.
+There are **three** core data types that are required before you can upload measurements for a census. 
+The app is designed to accept file uploads (called `forms`) in either CSV or TSV format.
+
+> **Fixed Data is not census-dependent!**
+
+They are:
+- **Stem Codes**: A list of shorthand codes designating attributes that can be assigned to a tree/stem object
+- **Personnel**: A list of personnel working on the census. Optionally, you can also add/designate roles to each user to better denote job distribution across the census.
+- **Quadrats**: A breakdown of the plot into smaller area segments
+- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow quick assignment when performing collection
+
+## Understanding the Forms
 
 A "complete" census comprises the following data types:
 
 | Form Type                   | Description                      | Census-Dependent   |
 | --------------------------- | -------------------------------- | ------------------ |
 | **Attributes** (Stem Codes) | Codes describing stem conditions | No                 |
-| **Personnel**               | Field staff for the census       | Yes (can rollover) |
-| **Quadrats**                | Plot subdivisions                | Yes (can rollover) |
+| **Personnel**               | Field staff for the census       | No                 |
+| **Quadrats**                | Plot subdivisions                | No                 |
 | **Species**                 | Species inventory                | No                 |
 | **Measurements**            | DBH measurements and dates       | Yes                |
 

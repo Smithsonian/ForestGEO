@@ -9,7 +9,7 @@
  * - Connection cleanup
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe } from 'vitest';
 import {
   withDatabase as _withDatabase,
   withQuery as _withQuery,

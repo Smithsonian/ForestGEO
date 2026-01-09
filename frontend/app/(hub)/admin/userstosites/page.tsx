@@ -144,7 +144,7 @@ export default function UsersToSitesPage() {
       }
     }
     fetchData();
-  }, []);
+  }, [isMountedRef]);
 
   // Build user-to-sites mapping
   const usersWithSites = useMemo((): UserWithSites[] => {

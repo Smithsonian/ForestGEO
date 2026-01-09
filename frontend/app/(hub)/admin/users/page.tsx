@@ -84,7 +84,7 @@ export default function UserSettingsPage() {
     }
 
     fetchUsers();
-  }, []);
+  }, [isMountedRef]);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {
     setUsers(prev =>

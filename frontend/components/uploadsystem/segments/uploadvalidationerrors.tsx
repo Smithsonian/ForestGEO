@@ -67,7 +67,7 @@ export default function UploadValidationErrors({ setReviewState, isReingestion =
         setIsLoading(false);
       }
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, censusID]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, censusID, isMountedRef]);
 
   useEffect(() => {
     fetchCounts();
