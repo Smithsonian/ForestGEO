@@ -1,0 +1,441 @@
+---
+title: CTFSWeb Data Specifications Guide
+description: File formats, data requirements, and validation rules for ForestGEO census data submission.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+This guide details the file formats, column specifications, and data quality standards used in the CTFSWeb system. Use this reference when preparing census data for upload or validating existing datasets.
+
+---
+
+## Fixed Data Files
+
+Before uploading census measurements, certain **fixed data files** must be established. These define the reference data (species, personnel, quadrats, etc.) that measurement data links to.
+
+### Required Files Overview
+
+| File | Purpose | Typical Records |
+|------|---------|-----------------|
+| `codes.txt` | Status codes and attributes | 20-50 |
+| `role.txt` | Personnel role definitions | 5-10 |
+| `personnel.txt` | Field workers for each census | 10-100 |
+| `species.txt` | Species list with taxonomy | 100-500+ |
+| `quadrat.txt` | Grid definitions | 1,250 (for 50-ha plot) |
+| `census.txt` | Census metadata | 1 per census |
+
+---
+
+## File Format Specifications
+
+All files use **tab-delimited format** with the following conventions:
+
+- First row contains column headers (exact names required)
+- One record per row
+- Tab character (`\t`) separates columns
+- No quotes around text fields (unless containing special characters)
+- UTF-8 encoding for special characters
+- Dates in `YYYY-MM-DD` format
+
+<Aside type="caution">
+**Common Format Errors**:
+- Using commas instead of tabs as delimiters
+- Including trailing whitespace in text fields
+- Using Excel's default date formats (must be YYYY-MM-DD)
+- Missing required columns or misspelled headers
+</Aside>
+
+---
+
+## codes.txt (TSMAttributes)
+
+Defines all valid status codes used for trees, stems, and measurements.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `Code` | Text | Yes | Short code (1-4 characters) |
+| `Description` | Text | Yes | Full description of the code |
+| `Status` | Text | Yes | Category: `tree_status`, `stem_status`, or `measurement` |
+
+### Example Content
+
+```
+Code	Description	Status
+A	Alive	tree_status
+D	Dead	tree_status
+M	Missing	tree_status
+A	Alive	stem_status
+D	Dead	stem_status
+B	Broken below	stem_status
+I	Ingrowth	measurement
+P	Prior	measurement
+```
+
+<Aside type="note">
+The same code (like "A" or "D") can appear multiple times with different Status values. The combination of Code + Status must be unique.
+</Aside>
+
+---
+
+## role.txt (RoleReference)
+
+Defines roles that can be assigned to personnel.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `RoleID` | Integer | Yes | Unique identifier |
+| `RoleName` | Text | Yes | Short role name |
+| `Description` | Text | No | Full description |
+
+### Standard Roles
+
+```
+RoleID	RoleName	Description
+1	PI	Principal Investigator
+2	Lead tech	Lead field technician
+3	Field tech	Field technician
+4	Data manager	Data processing specialist
+5	Botanist	Species identification specialist
+6	Crew leader	Field crew supervisor
+```
+
+---
+
+## personnel.txt
+
+Lists all personnel involved in data collection.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `PersonnelID` | Integer | Yes | Unique identifier |
+| `FirstName` | Text | Yes | Given name |
+| `LastName` | Text | Yes | Family name |
+| `RoleID` | Integer | Yes | Reference to role.txt |
+| `CensusID` | Integer | No | Census they participated in (can be null for all) |
+
+### Example Content
+
+```
+PersonnelID	FirstName	LastName	RoleID	CensusID
+1	Maria	Garcia	2	5
+2	James	Wilson	3	5
+3	Sarah	Chen	5	5
+4	David	Thompson	3	5
+```
+
+---
+
+## species.txt
+
+Master list of all species recorded at the site.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `SpeciesID` | Integer | Yes | Unique identifier |
+| `SpeciesCode` | Text | Yes | 6-letter mnemonic |
+| `Family` | Text | Yes | Family name |
+| `Genus` | Text | Yes | Genus name |
+| `Species` | Text | Yes | Species epithet (or "sp." if unknown) |
+| `IDLevel` | Text | Yes | Identification level |
+| `Authority` | Text | No | Taxonomic authority |
+| `SubspeciesName` | Text | No | Subspecies/variety if applicable |
+| `SubspeciesAuthority` | Text | No | Subspecies authority |
+
+### Example Content
+
+```
+SpeciesID	SpeciesCode	Family	Genus	Species	IDLevel	Authority
+1	TACHVE	Fabaceae	Tachigali	versicolor	species	Standl. & L.O.Williams
+2	BROSAL	Moraceae	Brosimum	alicastrum	species	Sw.
+3	FICUSP	Moraceae	Ficus	sp.	genus
+4	UNIDEN	Unknown	Unknown	unknown	none
+```
+
+### IDLevel Values
+
+| Value | When to Use |
+|-------|-------------|
+| `species` | Full species identification confirmed |
+| `subspecies` | Subspecies or variety identified |
+| `genus` | Only genus known; Species = "sp." |
+| `family` | Only family known; Genus = "Unknown" |
+| `none` | Completely unidentified |
+| `multiple` | Could be one of several species |
+
+---
+
+## quadrat.txt
+
+Defines the grid structure of the plot.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `QuadratID` | Integer | Yes | Unique identifier |
+| `QuadratName` | Text | Yes | 4-digit name (XXYY format) |
+| `StartX` | Numeric | Yes | X coordinate of quadrat corner (meters) |
+| `StartY` | Numeric | Yes | Y coordinate of quadrat corner (meters) |
+| `DimensionX` | Numeric | No | Width in meters (default: 20) |
+| `DimensionY` | Numeric | No | Height in meters (default: 20) |
+| `Area` | Numeric | No | Area in square meters (default: 400) |
+| `Unit` | Text | No | Measurement unit (default: "m") |
+
+### Example Content
+
+```
+QuadratID	QuadratName	StartX	StartY	DimensionX	DimensionY
+1	0000	0	0	20	20
+2	0100	20	0	20	20
+3	0200	40	0	20	20
+4	0020	0	20	20	20
+5	0120	20	20	20	20
+```
+
+<Aside type="tip">
+**QuadratName Convention**: For a standard 20m grid:
+- First two digits = column number × 20 (X position ÷ 20)
+- Last two digits = row number × 20 (Y position ÷ 20)
+- Example: Position (100, 400) → Column 05, Row 20 → "0520"
+</Aside>
+
+---
+
+## census.txt
+
+Metadata about each census event.
+
+### Required Columns
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `CensusID` | Integer | Yes | Unique identifier |
+| `PlotID` | Integer | Yes | Reference to plot |
+| `PlotCensusNumber` | Integer | Yes | Sequential census number (1, 2, 3...) |
+| `StartDate` | Date | Yes | First day of fieldwork (YYYY-MM-DD) |
+| `EndDate` | Date | Yes | Last day of fieldwork (YYYY-MM-DD) |
+| `Description` | Text | No | Notes about this census |
+
+### Example Content
+
+```
+CensusID	PlotID	PlotCensusNumber	StartDate	EndDate	Description
+5	1	8	2020-01-15	2020-12-20	Eighth census of BCI 50-ha plot
+```
+
+---
+
+## Census Data Requirements
+
+The primary census data file contains tree/stem measurements. This is the main data uploaded after fixed data files are established.
+
+### Required Columns
+
+| Column | Type | Required | Description | Example |
+|--------|------|----------|-------------|---------|
+| `Tag` | Text | Yes | Tree tag number | "A1234" |
+| `StemTag` | Text | No | Stem number (blank = main stem) | "2" |
+| `SpeciesCode` | Text | Yes | 6-letter mnemonic | "TACHVE" |
+| `QuadratName` | Text | Yes | 4-digit quadrat ID | "0520" |
+| `QX` | Numeric | Yes | X within quadrat (0-20) | 12.5 |
+| `QY` | Numeric | Yes | Y within quadrat (0-20) | 8.3 |
+| `DBH` | Numeric | Yes* | Diameter in mm | 125.5 |
+| `HOM` | Numeric | No | Height of measurement in m | 1.30 |
+| `TreeStatus` | Text | Yes | Tree status code | "A" |
+| `StemStatus` | Text | Yes | Stem status code | "A" |
+| `MeasurementDate` | Date | Yes | Date measured (YYYY-MM-DD) | 2020-03-15 |
+| `PersonnelID` | Integer | No | Who measured | 3 |
+| `Comments` | Text | No | Field notes | "Buttress" |
+
+<Aside type="note">
+**DBH is required** except when TreeStatus or StemStatus indicates the tree is dead, missing, or broken below—in which case DBH may be blank or null.
+</Aside>
+
+### Example Census Data
+
+```
+Tag	StemTag	SpeciesCode	QuadratName	QX	QY	DBH	HOM	TreeStatus	StemStatus	MeasurementDate
+A1234		TACHVE	0520	12.5	8.3	125.5	1.30	A	A	2020-03-15
+A1234	2	TACHVE	0520	12.8	8.5	45.2	1.30	A	A	2020-03-15
+A1235		BROSAL	0520	15.2	12.1	234.0	1.30	A	A	2020-03-15
+B0089		FICUSP	0520	3.1	18.7		1.30	D	D	2020-03-16
+```
+
+---
+
+## Data Quality Standards
+
+CTFSWeb performs automated validation on all uploaded data. Errors are classified as **fatal** (must be fixed) or **non-fatal** (warnings).
+
+### Fatal Errors
+
+These errors must be resolved before data can be processed.
+
+| Error Type | Description | Resolution |
+|------------|-------------|------------|
+| **Duplicate tags** | Same tree tag appears twice in same census | Verify field sheets; assign unique tags |
+| **Invalid species code** | Species code not in species.txt | Add species to master list or correct code |
+| **Invalid quadrat** | Quadrat not in quadrat.txt | Add quadrat or correct name |
+| **Invalid status code** | Status not in codes.txt | Add code or correct value |
+| **Missing required field** | Required column is blank | Fill in missing data from field sheets |
+| **DBH without status** | Measurement exists but no status | Add appropriate status code |
+| **Coordinates out of range** | QX or QY outside 0-20 | Verify and correct coordinates |
+
+### Non-Fatal Errors (Warnings)
+
+These are flagged but don't prevent processing. Review and correct if possible.
+
+| Warning Type | Description | Common Cause |
+|--------------|-------------|--------------|
+| **Coordinate anomaly** | Large position change from previous census | Tree near quadrat boundary; re-measured position |
+| **DBH decrease** | Diameter smaller than previous census | Measurement error; different HOM; bark loss |
+| **Status inconsistency** | Status doesn't match measurement | Dead tree with DBH; alive tree without DBH |
+| **Date range issue** | Date outside census period | Data entry error |
+| **HOM change** | Height of measurement differs | Buttress growth; measurement protocol change |
+| **Large DBH increase** | Unusually rapid growth | Fast-growing species; verify measurement |
+| **Species change** | Different species than previous census | Re-identification; correction |
+
+<Aside type="caution">
+**Critical Validation Rules**:
+1. Every tree must have exactly one main stem (blank StemTag)
+2. All stems of a tree must be in the same quadrat
+3. Dead trees must have had a prior alive measurement
+4. New recruits (ingrowth) must be ≥10mm DBH at first measurement
+</Aside>
+
+---
+
+## Growth Thresholds
+
+Standard thresholds for flagging potential measurement errors:
+
+| Metric | Warning Threshold | Error Threshold |
+|--------|-------------------|-----------------|
+| DBH decrease | > 5% of previous | > 25% of previous |
+| DBH increase per year | > 75mm/year | > 150mm/year |
+| Position change | > 2m from previous | > 5m from previous |
+
+---
+
+## ViewFullTable Structure
+
+The denormalized report view combines data from all tables. This is the primary format for data analysis and export.
+
+### Complete Column List
+
+| Column | Source Table | Description |
+|--------|--------------|-------------|
+| `TreeID` | Tree | Internal tree identifier |
+| `StemID` | Stem | Internal stem identifier |
+| `TreeTag` | Tree | Physical tag number |
+| `StemTag` | Stem | Stem identifier (blank = main) |
+| `SpeciesID` | Tree | Species reference |
+| `SpeciesCode` | Species | 6-letter mnemonic |
+| `Family` | Family | Family name |
+| `Genus` | Genus | Genus name |
+| `Species` | Species | Species epithet |
+| `Subspecies` | Species | Subspecies if applicable |
+| `IDLevel` | Species | Identification confidence |
+| `QuadratID` | Tree | Quadrat reference |
+| `QuadratName` | Quadrat | 4-digit quadrat name |
+| `QX` | Stem | X position in quadrat (m) |
+| `QY` | Stem | Y position in quadrat (m) |
+| `PX` | Computed | Plot-level X coordinate (m) |
+| `PY` | Computed | Plot-level Y coordinate (m) |
+| `GX` | Computed | Global X coordinate |
+| `GY` | Computed | Global Y coordinate |
+| `CensusID` | DBH | Census reference |
+| `PlotCensusNumber` | Census | Sequential census number |
+| `DBH` | DBH | Diameter in mm |
+| `HOM` | DBH | Height of measurement (m) |
+| `ExactDate` | DBH | Measurement date |
+| `TreeStatus` | DBH | Tree status code |
+| `StemStatus` | DBH | Stem status code |
+| `MeasurementStatus` | DBH | Measurement type (I/P) |
+
+---
+
+## ViewTaxonomy Structure
+
+Comprehensive taxonomic information for species lookup.
+
+### Complete Column List
+
+| Column | Description |
+|--------|-------------|
+| `SpeciesID` | Unique species identifier |
+| `SpeciesCode` | 6-letter mnemonic |
+| `SpeciesName` | Species epithet |
+| `SubspeciesName` | Subspecies/variety name |
+| `SubspeciesAuthority` | Subspecies author citation |
+| `IDLevel` | Identification level |
+| `GenusID` | Genus reference |
+| `Genus` | Genus name |
+| `GenusAuthority` | Genus author citation |
+| `FamilyID` | Family reference |
+| `Family` | Family name |
+| `FullScientificName` | Complete binomial with authority |
+
+---
+
+## Data Submission Checklist
+
+<Steps>
+
+1. **Prepare fixed data files**
+
+   Ensure species.txt, quadrat.txt, personnel.txt, and codes.txt are complete and validated.
+
+2. **Format census data**
+
+   Convert to tab-delimited format with required columns and proper date formatting (YYYY-MM-DD).
+
+3. **Run preliminary validation**
+
+   Check for duplicate tags, invalid codes, and missing required fields locally before upload.
+
+4. **Upload fixed data first**
+
+   Fixed data must be ingested before census measurements.
+
+5. **Upload census data**
+
+   Submit measurement file and review validation report.
+
+6. **Resolve fatal errors**
+
+   Fix all fatal errors before data can be committed.
+
+7. **Review warnings**
+
+   Examine non-fatal warnings and correct where appropriate.
+
+8. **Verify ingestion**
+
+   Confirm record counts match expected totals.
+
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Data Model Reference" icon="database">
+    Understand table structures and relationships in the [CTFSWeb Data Model Reference](/ForestGEO/migration/ctfsweb-data-model/).
+  </Card>
+  <Card title="Upload Process" icon="upload">
+    Ready to upload? Follow the [Upload Process Guide](/ForestGEO/upload-process-breakdown/).
+  </Card>
+  <Card title="Error Guide" icon="warning">
+    Encountering issues? Check the [Error Guide](/ForestGEO/errors/error-guide-overview/).
+  </Card>
+</CardGrid>

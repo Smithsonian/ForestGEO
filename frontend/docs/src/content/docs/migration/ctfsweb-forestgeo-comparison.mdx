@@ -1,0 +1,482 @@
+---
+title: CTFSWeb vs ForestGEO Comparison
+description: Comprehensive comparison of architectural, structural, and workflow differences between CTFSWeb and the new ForestGEO application.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem, Badge } from '@astrojs/starlight/components';
+
+This document provides a detailed comparison between the legacy CTFSWeb system and the new ForestGEO application, highlighting key differences in architecture, data structures, workflows, and features.
+
+---
+
+## Executive Summary
+
+| Aspect | CTFSWeb | ForestGEO |
+|--------|---------|-----------|
+| **Architecture** | PHP/MySQL monolith, per-site installation | Next.js/TypeScript, multi-tenant cloud |
+| **Database** | Single schema per site | Multi-schema with shared infrastructure |
+| **Data Model** | Tree-centric hierarchy | Stem-centric with census isolation |
+| **Validation** | Batch screening after upload | Real-time + configurable stored procedures |
+| **Audit Trail** | Manual changelog files | Automatic partitioned changelog table |
+| **Upload Process** | Fixed file formats, manual ingestion | Flexible CSV/TSV with auto-detection |
+| **User Interface** | PHP-rendered pages | Modern React SPA with datagrids |
+
+---
+
+## Architectural Differences
+
+### Technology Stack
+
+<Tabs>
+  <TabItem label="CTFSWeb">
+    - **Frontend**: PHP-rendered HTML, JavaScript
+    - **Backend**: PHP scripts
+    - **Database**: MySQL (local or remote)
+    - **Deployment**: Per-site XAMPP/LAMP installation
+    - **Authentication**: Basic PHP sessions
+  </TabItem>
+  <TabItem label="ForestGEO">
+    - **Frontend**: Next.js 14, React, TypeScript
+    - **Backend**: Next.js API routes, Azure Functions
+    - **Database**: Azure MySQL with SSL
+    - **Deployment**: Azure App Service, containerized
+    - **Authentication**: Microsoft Entra ID (Azure AD)
+    - **Storage**: Azure Blob Storage for file backups
+  </TabItem>
+</Tabs>
+
+### Multi-Tenancy
+
+| CTFSWeb | ForestGEO |
+|---------|-----------|
+| Each site has separate installation | Single application, multiple database schemas |
+| Data isolated by installation | Data isolated by schema (`forestgeo_[sitename]`) |
+| No cross-site data access | Centralized catalog schema for site metadata |
+| Manual data migration between sites | Unified migration tooling |
+
+---
+
+## Data Model Comparison
+
+### Core Hierarchy
+
+Both systems share the same fundamental hierarchy, but ForestGEO introduces key refinements:
+
+```
+CTFSWeb:                          ForestGEO:
+Site                              Plot
+ └── Census                        └── Census
+      └── Quadrat                       └── Quadrat
+           └── Tree                          └── Tree
+                └── Stem                          └── Stem
+                     └── DBH                           └── CoreMeasurement
+                                                            ├── CMAttributes
+                                                            └── CMVErrors
+```
+
+### Key Structural Changes
+
+<CardGrid>
+  <Card title="Census Isolation" icon="calendar">
+    **CTFSWeb**: Trees/Stems shared across censuses, measurements link to census
+
+    **ForestGEO**: Trees and Stems are census-specific (have CensusID). Same physical tree creates new TreeID per census, linked via TreeTag.
+  </Card>
+  <Card title="Stem as Primary Entity" icon="branch">
+    **CTFSWeb**: Tree is the primary entity, stems are secondary
+
+    **ForestGEO**: Stems are the primary measurement entity (StemGUID). All measurements attach to stems, not trees.
+  </Card>
+  <Card title="Measurement Attributes" icon="tag">
+    **CTFSWeb**: Status stored directly in DBH table as single field
+
+    **ForestGEO**: Many-to-many relationship via CMAttributes. Measurements can have multiple status codes.
+  </Card>
+  <Card title="Validation Errors" icon="warning">
+    **CTFSWeb**: Errors stored in screening reports, separate from data
+
+    **ForestGEO**: CMVErrors table links validation failures directly to measurements.
+  </Card>
+</CardGrid>
+
+---
+
+## Table-by-Table Comparison
+
+### Core Tables
+
+| CTFSWeb Table | ForestGEO Table | Key Differences |
+|---------------|-----------------|-----------------|
+| `Site` | `plots` | ForestGEO adds unit configuration (DefaultDBHUnits, DefaultHOMUnits, etc.) |
+| `Census` | `census` | Adds IsActive/DeletedAt for soft deletes |
+| `Quadrat` | `quadrats` | Adds QuadratShape, soft delete support, composite uniqueness |
+| `Tree` | `trees` | **Major change**: Now includes CensusID (census-specific), simplified structure |
+| `Stem` | `stems` | **Major change**: Includes CensusID, adds StemCrossID for cross-census linking, StemGUID as primary key |
+| `DBH` | `coremeasurements` | Renamed, adds IsValidated flag, UserDefinedFields (JSON), soft deletes |
+
+### Taxonomy Tables
+
+| CTFSWeb Table | ForestGEO Table | Key Differences |
+|---------------|-----------------|-----------------|
+| `Family` | `family` | Adds ReferenceID for literature citations, soft deletes |
+| `Genus` | `genus` | Adds GenusAuthority field |
+| `Species` | `species` | Adds ValidCode, FieldFamily, SubspeciesAuthority, soft deletes |
+| `TSMAttributes` | `attributes` | Status now ENUM ('alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing', 'alive-not measured') |
+
+### New Tables in ForestGEO
+
+<Aside type="tip" title="Tables Not in CTFSWeb">
+These tables are entirely new to ForestGEO:
+</Aside>
+
+| Table | Purpose |
+|-------|---------|
+| `cmattributes` | Many-to-many: Links measurements to attribute codes |
+| `cmverrors` | Many-to-many: Links measurements to validation errors |
+| `sitespecificvalidations` | Configurable validation procedures per site |
+| `postvalidationqueries` | Custom post-validation SQL queries |
+| `validationchangelog` | Audit log of validation runs |
+| `specieslimits` | Per-species DBH bounds by plot/census |
+| `reference` | Literature references for taxonomy |
+| `specimens` | Herbarium specimen records |
+| `temporarymeasurements` | Staging table for file uploads |
+| `failedmeasurements` | Records that failed validation |
+| `upload_sessions` | Upload lifecycle tracking |
+| `uploadintegrityalerts` | Data quality alerts during ingestion |
+| `uploadmetrics` | Performance metrics for uploads |
+| `measurementssummary` | Denormalized cache table |
+| `viewfulltable` | Materialized complete data view |
+| `unifiedchangelog` | Partitioned audit log (24 partitions) |
+
+---
+
+## Attribute/Status Code Comparison
+
+### Status Categories
+
+<Tabs>
+  <TabItem label="CTFSWeb">
+    **Tree Status**: A (alive), D (dead), M (missing), P (prior), G (gone)
+
+    **Stem Status**: A, D, B (broken below), M, Q (lost), R (resprout)
+
+    **Measurement**: I (ingrowth), P (prior), NM (not measured)
+  </TabItem>
+  <TabItem label="ForestGEO">
+    **Unified Status ENUM**:
+    - `alive` - Living tree/stem
+    - `alive-not measured` - Alive but not measured this census
+    - `dead` - Entire tree dead
+    - `stem dead` - Individual stem dead
+    - `broken below` - Broken below measurement point
+    - `omitted` - Intentionally excluded
+    - `missing` - Cannot be located
+
+    **Current Attribute Codes** (from database):
+    - Living: LI (living), DY (dying), RS (resprout), TD (top dead)
+    - Dead: DTR (entire tree dead)
+    - Stem Dead: DC (down and dead), DN (missing), DT (tag found), SL (stem lost)
+    - Broken: R (broken below 1.3m)
+    - Condition: B, BT, CWD, F, G, H, I, IR, L, MA, MT, MU, Q, SEC, SP, TC, V50, WDBH, WTAG, X, XY
+  </TabItem>
+</Tabs>
+
+<Aside type="note">
+ForestGEO maintains backward compatibility with CTFSWeb codes while adding structured status categories via the Status ENUM.
+</Aside>
+
+---
+
+## Validation System Comparison
+
+### CTFSWeb Screening
+
+| Check | Description |
+|-------|-------------|
+| Duplicate tags | Same TreeTag in census |
+| Invalid species | Species code not in master list |
+| Invalid status | Status code not recognized |
+| Coordinate range | QX/QY outside 0-20m |
+| DBH decrease | Shrinkage > threshold |
+| DBH increase | Growth > threshold |
+
+### ForestGEO Validations
+
+ForestGEO implements **13 configurable stored procedures** that run during ingestion:
+
+| ID | Procedure | Description |
+|----|-----------|-------------|
+| 1 | `ValidateDBHGrowthExceedsMax` | DBH growth > 65mm flagged |
+| 2 | `ValidateDBHShrinkageExceedsMax` | Shrinkage > 5% flagged |
+| 3 | `ValidateFindAllInvalidSpeciesCodes` | Species code not in species table |
+| 4 | `ValidateFindDuplicatedQuadratsByName` | Quadrat name collision |
+| 5 | `ValidateFindDuplicateStemTreeTagCombinationsPerCensus` | Duplicate tree+stem tags |
+| 6 | `ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat` | Dates outside census window |
+| 7 | `ValidateFindStemsInTreeWithDifferentSpecies` | Species mismatch across stems |
+| 8 | `ValidateFindStemsOutsidePlots` | Coordinates null, negative, or out of bounds |
+| 9 | `ValidateFindTreeStemsInDifferentQuadrats` | Stems of same tree in different quadrats |
+| 11 | `ValidateScreenMeasuredDiameterMinMax` | DBH outside species-specific limits |
+| 12 | `ValidateScreenStemsWithMeasurementsButDeadAttributes` | Dead stem has DBH/HOM values |
+| 13 | `ValidateScreenStemsWithMissingMeasurementsButLiveAttributes` | Live stem missing DBH |
+| 14 | `ValidateFindInvalidAttributeCodes` | Attribute code not in attributes table |
+| 15 | `ValidateFindAbnormallyHighDBH` | DBH > 3500mm absolute max |
+
+<Aside type="tip">
+Validations can be enabled/disabled per site via the `IsEnabled` flag. Sites can also add custom `postvalidationqueries` for site-specific rules.
+</Aside>
+
+---
+
+## Upload/Ingestion Process Comparison
+
+### CTFSWeb Process
+
+```
+1. Prepare fixed files (codes, species, quadrats, etc.)
+2. Prepare census data file in exact format
+3. Use ctfsweb interface to upload files
+4. Run screening procedures manually
+5. Review screening reports
+6. Fix errors in source files
+7. Re-upload corrected files
+8. Run final validation
+9. Commit to production
+```
+
+### ForestGEO Process
+
+```
+1. Fixed data managed in-app via datagrids
+2. Upload CSV/TSV with auto-delimiter detection
+   └── Files stored in Azure Blob Storage
+3. Chunked upload with progress tracking
+   └── upload_sessions tracks state
+4. Automatic staging to temporarymeasurements
+5. Bulk ingestion via stored procedure
+   └── bulkingestionprocess handles all logic
+6. Real-time validation during ingestion
+   └── Errors stored in cmverrors
+   └── Failed records → failedmeasurements
+7. Review failed measurements in-app
+8. Re-ingest failed rows without re-uploading
+   └── reingestfailedrows procedure
+9. Post-validation queries for additional checks
+```
+
+### Key Workflow Improvements
+
+| CTFSWeb Limitation | ForestGEO Solution |
+|-------------------|-------------------|
+| Fixed file formats only | Auto-detecting CSV/TSV parser |
+| Manual file preparation | In-app datagrid editing |
+| Re-upload entire file for corrections | Re-ingest only failed rows |
+| Screening reports are separate files | Errors linked to measurements in database |
+| No upload progress visibility | Real-time progress via upload_sessions |
+| No file backup | Automatic Azure Blob Storage backup |
+| Manual changelog | Automatic unifiedchangelog table |
+
+---
+
+## Coordinate System Comparison
+
+Both systems use the same three-level coordinate system:
+
+| Level | CTFSWeb Column | ForestGEO Column | Description |
+|-------|----------------|------------------|-------------|
+| Global | GX, GY | PlotGlobalX, PlotGlobalY | GPS/Earth coordinates |
+| Plot | PX, PY | (computed) | Distance from plot origin |
+| Quadrat | QX, QY | LocalX, LocalY | Position within 20×20m quadrat |
+
+<Aside type="note">
+ForestGEO stores only LocalX/LocalY (quadrat-relative) in the stems table. Plot-level coordinates are computed by combining stem local coordinates with quadrat StartX/StartY.
+</Aside>
+
+---
+
+## Denormalized Views Comparison
+
+### CTFSWeb ViewFullTable
+
+A database VIEW that JOINs all tables on-demand.
+
+### ForestGEO ViewFullTable
+
+A **materialized table** (not a view) that is refreshed via stored procedure:
+
+```sql
+CALL RefreshViewFullTable();
+```
+
+**Additional fields in ForestGEO ViewFullTable**:
+- `IsValidated` - Boolean validation status
+- `PlotDefaultDimensionUnits` - Unit configuration
+- `PlotDefaultCoordinateUnits`
+- `PlotDefaultAreaUnits`
+- `PlotDefaultDBHUnits`
+- `PlotDefaultHOMUnits`
+- `UserDefinedFields` - JSON for site-specific data
+- `Attributes` - Concatenated attribute codes
+
+---
+
+## Audit Trail Comparison
+
+### CTFSWeb
+
+- Manual changelog files maintained by data managers
+- No automatic tracking of changes
+- Changes tracked in documentation, not database
+
+### ForestGEO
+
+**Partitioned `unifiedchangelog` table** (24 partitions by TableName):
+
+| Column | Description |
+|--------|-------------|
+| `ChangeID` | Auto-increment ID |
+| `TableName` | Which table was modified |
+| `RecordID` | Primary key of affected record |
+| `Operation` | INSERT, UPDATE, or DELETE |
+| `OldRowState` | JSON snapshot before change |
+| `NewRowState` | JSON snapshot after change |
+| `ChangeTimestamp` | When change occurred |
+| `ChangedBy` | User who made change |
+| `PlotID` | Plot context |
+| `CensusID` | Census context |
+
+**Additional audit tables**:
+- `validationchangelog` - Tracks validation procedure runs
+- `uploadintegrityalerts` - Data quality issues during upload
+- `uploadmetrics` - Performance metrics for uploads
+
+---
+
+## Key Migration Considerations
+
+### Data Mapping
+
+| CTFSWeb Concept | ForestGEO Mapping |
+|-----------------|-------------------|
+| TreeID (persistent) | TreeTag (used to link across censuses) |
+| StemID (persistent) | StemTag + TreeTag combination |
+| Single DBH record | CoreMeasurement with CMAttributes |
+| Status field | Multiple CMAttributes records |
+| Screening errors | CMVErrors linked to measurements |
+
+### Breaking Changes
+
+<Aside type="caution" title="Important Migration Notes">
+
+1. **Trees are census-specific**: The same physical tree will have different TreeIDs in each census. Use TreeTag to track across censuses.
+
+2. **Stems are census-specific**: Similarly, stems get new StemGUID per census. Use StemTag + TreeTag combination.
+
+3. **Multiple attributes**: A measurement can now have multiple attribute codes (via cmattributes join table).
+
+4. **Soft deletes**: Data is never physically deleted. Check `IsActive = 1` to get active records.
+
+5. **Unit flexibility**: DBH, HOM, coordinates all have configurable units per plot.
+
+</Aside>
+
+### Query Translation Examples
+
+<Tabs>
+  <TabItem label="Get All Trees">
+    **CTFSWeb**:
+    ```sql
+    SELECT * FROM Tree WHERE CensusID = 5;
+    ```
+
+    **ForestGEO**:
+    ```sql
+    SELECT * FROM trees
+    WHERE CensusID = 5 AND IsActive = 1;
+    ```
+  </TabItem>
+  <TabItem label="Get Measurements">
+    **CTFSWeb**:
+    ```sql
+    SELECT t.TreeTag, s.StemTag, d.DBH, d.Status
+    FROM Tree t
+    JOIN Stem s ON t.TreeID = s.TreeID
+    JOIN DBH d ON s.StemID = d.StemID
+    WHERE d.CensusID = 5;
+    ```
+
+    **ForestGEO**:
+    ```sql
+    SELECT TreeTag, StemTag, MeasuredDBH, Attributes
+    FROM viewfulltable
+    WHERE CensusID = 5;
+    ```
+
+    Or with explicit joins:
+    ```sql
+    SELECT t.TreeTag, s.StemTag, cm.MeasuredDBH,
+           GROUP_CONCAT(cma.Code) as Attributes
+    FROM trees t
+    JOIN stems s ON t.TreeID = s.TreeID
+    JOIN coremeasurements cm ON s.StemGUID = cm.StemGUID
+    LEFT JOIN cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+    WHERE cm.CensusID = 5 AND t.IsActive = 1
+    GROUP BY cm.CoreMeasurementID;
+    ```
+  </TabItem>
+  <TabItem label="Get Validation Errors">
+    **CTFSWeb**: Parse screening report files
+
+    **ForestGEO**:
+    ```sql
+    SELECT cm.CoreMeasurementID,
+           s.StemTag, t.TreeTag,
+           ssv.ProcedureName, ssv.Description
+    FROM cmverrors cve
+    JOIN coremeasurements cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
+    JOIN stems s ON cm.StemGUID = s.StemGUID
+    JOIN trees t ON s.TreeID = t.TreeID
+    JOIN sitespecificvalidations ssv ON cve.ValidationErrorID = ssv.ValidationID
+    WHERE cm.CensusID = 5;
+    ```
+  </TabItem>
+</Tabs>
+
+---
+
+## Feature Comparison Summary
+
+| Feature | CTFSWeb | ForestGEO |
+|---------|:-------:|:---------:|
+| Multi-site from single install | - | + |
+| Cloud deployment | - | + |
+| Azure AD authentication | - | + |
+| Automatic file backup | - | + |
+| Chunked file upload | - | + |
+| Upload progress tracking | - | + |
+| Real-time validation | - | + |
+| Configurable validations | - | + |
+| Re-ingest failed rows | - | + |
+| JSON custom fields | - | + |
+| Soft delete / audit trail | - | + |
+| Partitioned changelog | - | + |
+| Multi-attribute per measurement | - | + |
+| Unit configuration per plot | - | + |
+| Species-specific DBH limits | - | + |
+| Post-validation queries | - | + |
+| Materialized summary views | - | + |
+
+---
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Data Model Reference" icon="database">
+    Review complete table structures in the [CTFSWeb Data Model Reference](/ForestGEO/migration/ctfsweb-data-model/).
+  </Card>
+  <Card title="Data Specifications" icon="document">
+    Understand file format requirements in the [Data Specifications Guide](/ForestGEO/migration/ctfsweb-data-specs/).
+  </Card>
+  <Card title="Upload Process" icon="upload">
+    Learn the new upload workflow in the [Upload Process Guide](/ForestGEO/upload-process-breakdown/).
+  </Card>
+</CardGrid>

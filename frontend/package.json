@@ -22,7 +22,10 @@
     "test:component": "cypress run --component",
     "test:e2e": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
     "test:all": "npm run test:unit && npm run test:component && npm run test:e2e",
-    "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts"
+    "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
+    "docs": "npm run dev --prefix docs",
+    "docs:build": "npm run build --prefix docs",
+    "docs:preview": "npm run preview --prefix docs"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
