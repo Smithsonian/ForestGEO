@@ -433,7 +433,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       if (!expectedHeaders || !requiredHeaders) {
         ailogger.error(`No headers defined for form type: ${uploadForm}`);
-        setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+        if (isMountedRef.current) {
+          setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+        }
         return;
       }
 
@@ -999,8 +1001,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         cancelSession().catch(cancelErr => {
           ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
         });
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
+
+        // CRITICAL: Only update state if component is still mounted
+        // Updating state after unmount can cause React error #310
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setReviewState(ReviewStates.ERRORS);
+        } else {
+          ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
+        }
       });
     }
     return () => {
@@ -1457,8 +1466,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
         });
 
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
+        // CRITICAL: Only update state if component is still mounted
+        // Updating state after unmount can cause React error #310
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setReviewState(ReviewStates.ERRORS);
+        } else {
+          ailogger.warn('Component unmounted during batch processing error handling - skipping state updates to prevent React error #310');
+        }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- acceptedFiles, cancelSession, updateState intentionally excluded to prevent re-renders; batchProcessingStartedRef guards execution

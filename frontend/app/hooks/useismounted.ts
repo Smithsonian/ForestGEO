@@ -40,9 +40,12 @@ export function useIsMounted(): {
   isMountedRef: React.MutableRefObject<boolean>;
   isMounted: () => boolean;
 } {
-  const isMountedRef = useRef<boolean>(true);
+  // Start as false - will be set to true after first render/mount
+  // This prevents state updates during the initial render phase
+  const isMountedRef = useRef<boolean>(false);
 
   useEffect(() => {
+    // Component has mounted - safe to update state now
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;

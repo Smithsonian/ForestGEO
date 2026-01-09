@@ -45,8 +45,8 @@ export default function UnauthenticatedSidebar() {
         />
 
         <Box
-          role="banner" // Branding landmark
-          aria-label="Application name"
+          role="img" // Branding/logo region (not a banner since it's inside navigation)
+          aria-label="ForestGEO application logo"
           sx={{ display: 'flex', gap: 1, alignItems: 'center' }}
         >
           <Typography level="h1" component="h1">

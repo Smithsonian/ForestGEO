@@ -1,0 +1,9 @@
+{
+  "name": "ForestGEO",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {},
+  "dependencies": {
+    "next": "^16.0.7"
+  }
+}

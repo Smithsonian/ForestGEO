@@ -1,25 +1,52 @@
 import { BlobServiceClient, BlobUploadCommonResponse, ContainerClient } from '@azure/storage-blob';
 import ailogger from '@/ailogger';
 
-export async function getContainerClient(containerName: string): Promise<ContainerClient | undefined> {
-  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
-  // console.log('Connection String:', storageAccountConnectionString);
-  // console.log(`container name: ${containerName.toLowerCase()}`);
+export async function getContainerClient(containerName: string): Promise<ContainerClient> {
+  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!storageAccountConnectionString) {
     const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING environment variable is not set';
     ailogger.error(errorMsg);
     throw new Error(errorMsg);
   }
-  // create client pointing to AZ storage system from connection string from Azure portal
-  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) ailogger.error('blob service client creation failed');
-  else ailogger.info('blob service client created & connected');
+
+  // Validate connection string format before attempting to use it
+  if (!storageAccountConnectionString.includes('AccountName=') || !storageAccountConnectionString.includes('AccountKey=')) {
+    const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING appears to be invalid (missing AccountName or AccountKey)';
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  let blobServiceClient: BlobServiceClient;
+  try {
+    // BlobServiceClient.fromConnectionString throws on invalid connection string
+    blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+  } catch (error: any) {
+    const errorMsg = `Failed to create BlobServiceClient: ${error.message}`;
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  ailogger.info('blob service client created & connected');
+
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
-  if (!(await containerClient.createIfNotExists())) ailogger.error('container client createifnotexists failure');
-  else {
-    return containerClient;
+
+  try {
+    // createIfNotExists returns { succeeded: true } if created, { succeeded: false } if already exists
+    // Both cases are valid - we just need the container to exist
+    const createResult = await containerClient.createIfNotExists();
+    if (createResult.succeeded) {
+      ailogger.info(`Container '${containerName.toLowerCase()}' created successfully`);
+    } else {
+      ailogger.info(`Container '${containerName.toLowerCase()}' already exists`);
+    }
+  } catch (error: any) {
+    const errorMsg = `Failed to create/access container '${containerName.toLowerCase()}': ${error.message}`;
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
   }
+
+  return containerClient;
 }
 
 /**
@@ -46,10 +73,18 @@ export async function uploadValidFileAsBuffer(
   user: string,
   formType: string,
   fileRowErrors: FileRowErrors[] = []
-): Promise<BlobUploadCommonResponse | undefined> {
-  const buffer = Buffer.from(await file.arrayBuffer());
+): Promise<BlobUploadCommonResponse> {
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await file.arrayBuffer());
+  } catch (error: any) {
+    const errorMsg = `Failed to read file buffer for ${file.name}: ${error.message}`;
+    ailogger.error(errorMsg);
+    throw new Error(errorMsg);
+  }
+
   // New function to generate the filename with an incremented suffix
-  const generateNewFileName = async (fileName: string) => {
+  const generateNewFileName = async (fileName: string): Promise<string> => {
     let newFileName = fileName;
     let match;
     let index = 0;
@@ -93,23 +128,27 @@ export async function uploadValidFileAsBuffer(
   };
 
   // Retry mechanism for the upload
+  let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, { metadata });
+      // Use the generated unique filename (newFileName), not the original file.name
+      const uploadResponse = await containerClient.getBlockBlobClient(newFileName).uploadData(buffer, { metadata });
 
-      // If upload is successful, return the response
-      if (uploadResponse) {
-        return uploadResponse;
-      }
+      // uploadData always returns a response on success
+      ailogger.info(`Upload successful for ${newFileName} on attempt ${attempt}`);
+      return uploadResponse;
     } catch (error: any) {
+      lastError = error;
+      ailogger.warn(`Upload attempt ${attempt}/${MAX_RETRIES} failed for ${newFileName}: ${error.message}`);
       if (attempt < MAX_RETRIES) {
-        ailogger.info(`Upload attempt ${attempt} failed for ${file.name}, retrying in ${RETRY_DELAY_MS}ms...`);
+        ailogger.info(`Retrying in ${RETRY_DELAY_MS}ms...`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-      } else {
-        // If all attempts fail, rethrow the error
-        ailogger.error(`All upload attempts failed for ${file.name}`);
-        throw error;
       }
     }
   }
+
+  // If we get here, all retries failed
+  const errorMsg = `All ${MAX_RETRIES} upload attempts failed for ${newFileName}`;
+  ailogger.error(errorMsg, lastError ?? undefined);
+  throw new Error(`${errorMsg}: ${lastError?.message || 'Unknown error'}`);
 }
