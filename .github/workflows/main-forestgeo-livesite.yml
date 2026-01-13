@@ -13,7 +13,7 @@ jobs:
   build-app-production:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: development_temp
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
           echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
-          echo NODE_ENV=development >> frontend/.env
+          echo NODE_ENV=production >> frontend/.env
           echo NEXT_RUNTIME=nodejs >> frontend/.env
           echo OTEL_LOG_LEVEL=debug >> frontend/.env
           echo REACT_EDITOR=code >> frontend/.env
