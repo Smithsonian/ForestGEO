@@ -1,0 +1,60 @@
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: forestgeo-mysql-local
+    restart: unless-stopped
+    environment:
+      # Root password for test setup (local-db-setup.ts uses root by default)
+      MYSQL_ROOT_PASSWORD: ${TEST_DB_PASSWORD:-testpassword}
+      # Allow empty password for easier local testing (optional)
+      MYSQL_ALLOW_EMPTY_PASSWORD: "no"
+      # Create a default database (tests create their own isolated DBs)
+      MYSQL_DATABASE: forestgeo_local
+    ports:
+      - "${TEST_DB_PORT:-3306}:3306"
+    volumes:
+      # Persist data between container restarts
+      - mysql_data:/var/lib/mysql
+      # Mount SQL scripts for reference (not auto-executed; local-db-setup.ts loads them)
+      - ./frontend/sqlscripting:/sqlscripting:ro
+      - ./frontend/db-migrations:/migrations:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # Use mysql_native_password for compatibility
+      - --default-authentication-plugin=mysql_native_password
+      # Increase GROUP_CONCAT limit for stored procedures (default 1024 is too small)
+      - --group_concat_max_len=1048576
+      # Performance settings for testing
+      - --max_connections=200
+      - --innodb_buffer_pool_size=256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TEST_DB_PASSWORD:-testpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Optional: Run integration tests in a container
+  test-runner:
+    image: node:20-slim
+    container_name: forestgeo-test-runner
+    working_dir: /app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      TEST_DB_HOST: mysql
+      TEST_DB_PORT: 3306
+      TEST_DB_USER: root
+      TEST_DB_PASSWORD: ${TEST_DB_PASSWORD:-testpassword}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: ["npm", "run", "test:integration"]
+    profiles:
+      - test
+
+volumes:
+  mysql_data:
+
