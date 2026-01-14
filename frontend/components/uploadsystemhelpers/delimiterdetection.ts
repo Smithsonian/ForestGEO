@@ -321,17 +321,30 @@ function validateDelimiterContent(content: string, delimiter: string, expectedHe
 
   // Check if headers match expected ones (if provided)
   if (expectedHeaders && expectedHeaders.length > 0) {
-    const headersLower = headers.map(h => h.toLowerCase().trim());
-    const expectedLower = expectedHeaders.map(h => h.toLowerCase().trim());
+    // Filter out empty headers before comparison (empty strings match everything with includes())
+    const headersLower = headers.map(h => h.toLowerCase().trim()).filter(h => h.length > 0);
+    const expectedLower = expectedHeaders.map(h => h.toLowerCase().trim()).filter(h => h.length > 0);
 
-    const missingHeaders = expectedLower.filter(expected => !headersLower.some(actual => actual.includes(expected) || expected.includes(actual)));
+    // Find missing required headers using fuzzy matching
+    const missingHeaders = expectedLower.filter(expected => {
+      // Check if any actual header matches this expected header
+      return !headersLower.some(actual => {
+        // Both actual and expected must be non-empty for includes() to be meaningful
+        if (actual.length === 0 || expected.length === 0) return false;
+        return actual.includes(expected) || expected.includes(actual);
+      });
+    });
 
     if (missingHeaders.length > 0) {
-      issues.push(`Missing expected headers: ${missingHeaders.join(', ')}`);
+      // Capitalize first letter of each missing header for display
+      const formattedMissing = missingHeaders.map(h => h.charAt(0).toUpperCase() + h.slice(1));
+      issues.push(`Missing required columns: ${formattedMissing.join(', ')}`);
     }
 
-    if (headers.length < expectedHeaders.length * 0.7) {
-      issues.push(`Too few columns detected (${headers.length}) compared to expected (${expectedHeaders.length})`);
+    // Count only non-empty headers for the column count check
+    const nonEmptyHeaderCount = headers.filter(h => h.trim().length > 0).length;
+    if (nonEmptyHeaderCount < expectedHeaders.length * 0.7) {
+      issues.push(`Too few columns detected (${nonEmptyHeaderCount}) compared to expected (${expectedHeaders.length})`);
     }
   }
 

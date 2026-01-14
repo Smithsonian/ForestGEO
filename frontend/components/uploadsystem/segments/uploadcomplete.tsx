@@ -37,30 +37,50 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const setCensusStore = useAppStore(state => state.setCensus);
 
   const loadCensusData = useCallback(async () => {
-    if (!currentPlot || !censusDispatch) return;
-
-    setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-    const response = await fetch(
-      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
-    );
-    const censusRDSLoad = await response.json();
-
-    setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
-    const censusList = await createAndUpdateCensusList(censusRDSLoad);
-
-    // Update both context provider AND Zustand store to keep them in sync
-    if (censusListDispatch) {
-      await censusListDispatch({ censusList });
+    if (!currentPlot || !censusDispatch) {
+      // Skip census load but mark as complete to prevent hanging
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census data skipped (no plot/dispatch).' }));
+      return;
     }
-    setCensusListStore(censusList); // Also update Zustand store
 
-    const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
-    if (existingCensus) {
-      await censusDispatch({ census: existingCensus });
-      setCensusStore(existingCensus); // Also update Zustand store
+    try {
+      setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
+      const response = await fetch(
+        `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+      );
+      const censusRDSLoad = await response.json();
+
+      // Validate that we received an array before processing
+      if (!Array.isArray(censusRDSLoad)) {
+        ailogger.warn('Census data response is not an array:', censusRDSLoad);
+        setProgress(prev => ({ ...prev, census: 100 }));
+        setProgressText(prev => ({ ...prev, census: 'Census data loaded (no changes).' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
+      const censusList = await createAndUpdateCensusList(censusRDSLoad);
+
+      // Update both context provider AND Zustand store to keep them in sync
+      if (censusListDispatch) {
+        await censusListDispatch({ censusList });
+      }
+      setCensusListStore(censusList); // Also update Zustand store
+
+      const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
+      if (existingCensus) {
+        await censusDispatch({ census: existingCensus });
+        setCensusStore(existingCensus); // Also update Zustand store
+      }
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading census data:', error instanceof Error ? error : new Error(String(error)));
+      // Mark as complete even on error to prevent hanging
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census data load failed.' }));
     }
-    setProgress(prev => ({ ...prev, census: 100 }));
-    setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
   }, [
     currentPlot,
     censusDispatch,
@@ -73,37 +93,69 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   ]);
 
   const loadPlotsData = useCallback(async () => {
-    if (!currentSite) return;
-
-    setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
-    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
-    const plotsData = await plotsResponse.json();
-    if (!plotsData) return;
-
-    setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
-    if (plotListDispatch) {
-      await plotListDispatch({ plotList: plotsData });
+    if (!currentSite) {
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plots data skipped (no site).' }));
+      return;
     }
-    setProgress(prev => ({ ...prev, plots: 100 }));
-    setProgressText(prev => ({ ...prev, plots: 'Plot list information loaded.' }));
+
+    try {
+      setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
+      const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+      const plotsData = await plotsResponse.json();
+
+      if (!plotsData || !Array.isArray(plotsData)) {
+        ailogger.warn('Plots data response is not valid:', plotsData);
+        setProgress(prev => ({ ...prev, plots: 100 }));
+        setProgressText(prev => ({ ...prev, plots: 'Plots data loaded (no changes).' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
+      if (plotListDispatch) {
+        await plotListDispatch({ plotList: plotsData });
+      }
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plot list information loaded.' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading plots data:', error instanceof Error ? error : new Error(String(error)));
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plots data load failed.' }));
+    }
   }, [currentSite, plotListDispatch]);
 
   const loadQuadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus) return;
-
-    setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
-    const quadratsResponse = await fetch(
-      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
-    );
-    const quadratsData = await quadratsResponse.json();
-    if (!quadratsData) return;
-
-    setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
-    if (quadratListDispatch) {
-      await quadratListDispatch({ quadratList: quadratsData });
+    if (!currentPlot || !currentCensus) {
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats data skipped (no plot/census).' }));
+      return;
     }
-    setProgress(prev => ({ ...prev, quadrats: 100 }));
-    setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
+
+    try {
+      setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
+      const quadratsResponse = await fetch(
+        `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
+      );
+      const quadratsData = await quadratsResponse.json();
+
+      if (!quadratsData || !Array.isArray(quadratsData)) {
+        ailogger.warn('Quadrats data response is not valid:', quadratsData);
+        setProgress(prev => ({ ...prev, quadrats: 100 }));
+        setProgressText(prev => ({ ...prev, quadrats: 'Quadrats data loaded (no changes).' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
+      if (quadratListDispatch) {
+        await quadratListDispatch({ quadratList: quadratsData });
+      }
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading quadrats data:', error instanceof Error ? error : new Error(String(error)));
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats data load failed.' }));
+    }
   }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
   useEffect(() => {
