@@ -1,5 +1,6 @@
 'use client';
 import {
+  Alert,
   Box,
   Button as JoyButton,
   Card,
@@ -23,6 +24,13 @@ import { FileWithPath } from 'react-dropzone';
 import { RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+
+export interface FileValidationStatus {
+  fileName: string;
+  isValid: boolean;
+  issues: string[];
+}
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
   const {
@@ -40,6 +48,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
   const [showHeaderHelp, setShowHeaderHelp] = useState<boolean>(false);
+  const [fileValidationStatuses, setFileValidationStatuses] = useState<Record<string, FileValidationStatus>>({});
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -61,6 +70,40 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     },
     [setSelectedDelimiters]
   );
+
+  const handleValidationStatusChange = useCallback((fileName: string, isValid: boolean, issues: string[]) => {
+    setFileValidationStatuses(prev => ({
+      ...prev,
+      [fileName]: { fileName, isValid, issues }
+    }));
+  }, []);
+
+  // Check if all files have been validated and are valid
+  const allFilesValid = useMemo(() => {
+    if (acceptedFiles.length === 0) return false;
+    // All files must have validation status and all must be valid
+    return acceptedFiles.every(file => {
+      const status = fileValidationStatuses[file.name];
+      return status && status.isValid;
+    });
+  }, [acceptedFiles, fileValidationStatuses]);
+
+  // Get all validation issues across all files
+  const allValidationIssues = useMemo(() => {
+    const issues: { fileName: string; issues: string[] }[] = [];
+    acceptedFiles.forEach(file => {
+      const status = fileValidationStatuses[file.name];
+      if (status && !status.isValid && status.issues.length > 0) {
+        issues.push({ fileName: file.name, issues: status.issues });
+      }
+    });
+    return issues;
+  }, [acceptedFiles, fileValidationStatuses]);
+
+  // Check if any file is still being analyzed (no validation status yet)
+  const isAnalyzing = useMemo(() => {
+    return acceptedFiles.some(file => !fileValidationStatuses[file.name]);
+  }, [acceptedFiles, fileValidationStatuses]);
 
   const expectedHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
@@ -124,19 +167,53 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             <Stack spacing={3} sx={{ height: '100%' }}>
               <DropzoneCompact onChange={handleFileChange} hasFiles={acceptedFiles.length > 0} />
               {acceptedFiles.length > 0 && (
-                <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                  <JoyButton
-                    variant="solid"
-                    color="primary"
-                    size="lg"
-                    disabled={acceptedFiles.length === 0}
-                    onClick={handleInitialSubmit}
-                    startDecorator={<CheckCircleIcon />}
-                    sx={{ flex: 1, maxWidth: 250 }}
-                  >
-                    Continue Upload ({acceptedFiles.length} {acceptedFiles.length === 1 ? 'file' : 'files'})
-                  </JoyButton>
-                </Box>
+                <Stack spacing={2}>
+                  {/* Validation Error Alert */}
+                  {allValidationIssues.length > 0 && (
+                    <Alert
+                      color="danger"
+                      variant="soft"
+                      startDecorator={<ErrorOutlineIcon />}
+                      sx={{ textAlign: 'left' }}
+                    >
+                      <Box>
+                        <Typography level="title-sm" color="danger">
+                          Missing Required Columns
+                        </Typography>
+                        {allValidationIssues.map(({ fileName, issues }) => (
+                          <Box key={fileName} sx={{ mt: 1 }}>
+                            <Typography level="body-sm" sx={{ fontWeight: 'bold' }}>
+                              {fileName}:
+                            </Typography>
+                            {issues.map((issue, idx) => (
+                              <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
+                                • {issue}
+                              </Typography>
+                            ))}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Alert>
+                  )}
+
+                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                    <JoyButton
+                      variant="solid"
+                      color={allFilesValid ? 'primary' : 'neutral'}
+                      size="lg"
+                      disabled={acceptedFiles.length === 0 || !allFilesValid || isAnalyzing}
+                      onClick={handleInitialSubmit}
+                      startDecorator={allFilesValid ? <CheckCircleIcon /> : <ErrorOutlineIcon />}
+                      sx={{ flex: 1, maxWidth: 300 }}
+                    >
+                      {isAnalyzing
+                        ? 'Analyzing files...'
+                        : allFilesValid
+                          ? `Continue Upload (${acceptedFiles.length} ${acceptedFiles.length === 1 ? 'file' : 'files'})`
+                          : 'Fix validation errors to continue'}
+                    </JoyButton>
+                  </Box>
+                </Stack>
               )}
 
               <Card variant="soft" sx={{ mt: 'auto' }}>
@@ -170,6 +247,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 onDelimiterChange={handleDelimiterChange}
                 selectedDelimiters={selectedDelimiters}
                 onRemoveFile={handleRemoveFile}
+                onValidationStatusChange={handleValidationStatusChange}
               />
             </Box>
           </Box>

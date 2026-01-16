@@ -539,9 +539,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           return mappedHeader;
         }
 
-        // If no mapping found, return original trimmed header
-        ailogger.warn(`No mapping found for header: "${header}". Using as-is.`);
-        return header.trim();
+        // If no mapping found, return normalized header (lowercase, no underscores/spaces/hyphens)
+        // This ensures consistent key names for processPersonnel, processSpecies, etc.
+        ailogger.info(`Header normalized: "${header}" -> "${normalizedHeader}"`);
+        return normalizedHeader;
       };
       const validateRow = (row: FileRow): boolean => {
         const errors: string[] = [];
