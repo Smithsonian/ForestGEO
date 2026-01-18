@@ -1,4 +1,184 @@
 ---
 title: Quick Start Guide
-description: 
+description: A one-stop shop for all of the info you'll need to get started!
 ---
+
+###### A one-stop shop for all of the info you'll need to get started!
+
+---
+
+### Getting Access
+
+Get prepped for the application by ensuring you've done the following:
+
+1. Created an Outlook account using a new or existing email
+2. Receive and accept an invite to the SIOCIORC tenant (Coordinate with the site administrator to do this!)
+3. Verify that your account information has been added to the application server
+4. Verify that you have been assigned at least one site
+
+:::caution[Before you get started]{icon="warning"}
+If you're starting a new site **on the app**, make sure you send any preexisting data you have to the site admin to ensure that you don't lose any data!
+:::
+
+### Accessing the Site
+
+Use the [main site](https://forestgeo-livesite.azurewebsite.net/) to access the **production** website! 
+
+:::tip[If you're **testing** the app]
+Use the [development site](https://forestgeo-development.azurewebsites.net/) to access the in-development version of the site to review features! 
+:::
+
+When you reach the login page, use the **sidebar** on the left side of the window and click on the **login** button!
+
+Logging in will prompt you to sign in to your Outlook account! Once done, you'll reach the home page of the application, which will present a series of cards and an updated sidebar.
+
+import { Steps } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. Review and select a **Site**!
+
+   You can see the sites you're assigned to on the main screen as a sequence of cards. Use the sidebar to select the site you need! 
+
+2. Review and select a **Plot**!
+3. Review and select **OR** create a **Census**!
+
+</Steps>
+
+### Uploading Supporting Data
+
+In order to complete a census upload, you'll need to upload all of the **supporting data** required for measurements to be uploaded!
+
+There are four types of supporting data accepted, but **only three types are required** for measurements to be accepted.
+
+<Steps>
+
+1. Stem Codes
+
+2. Personnel: <br />
+This is the only data type that is **not required** for measurements upload!
+
+3. Quadrats
+
+4. Species List
+
+</Steps>
+
+### Uploading Forms
+
+Ensure that you have a file that either **tab-separated** or **comma-separated**, ending in `.tsv`, `.csv`, or `.txt`!
+
+#### Uploading Stem Codes
+
+Your file **must** specify the following headers:
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="code" variant="note" />
+<Badge text="description" variant="note" />
+<Badge text="status" variant="note" />
+
+###### code
+
+10 or less characters to represent the **attribute** you're defining.
+
+###### description
+
+Explain what your code is describing. If your description contains commas or new lines, please ensure you wrap the full text in **quotes** within the file.
+
+This field is **optional**!
+
+###### status
+
+Select from the following statuses:
+
+- alive
+- alive-not measured
+- dead
+- missing
+- broken below
+- stem dead
+
+This field is **optional**!
+
+---
+
+#### Personnel - Upload Form
+
+<Badge text="firstname" variant="note" />
+<Badge text="lastname" variant="note" />
+<Badge text="role" variant="note" />
+<Badge text="roledescription" variant="note" />
+
+###### firstname | lastname
+
+###### role
+
+Name the role the user is performing
+
+###### roledescription
+
+Describe the role the user is performing
+
+---
+
+#### Quadrats - Upload Form
+
+<Badge text="quadrat" variant="note"/>
+<Badge text="startx" variant="note"/>
+<Badge text="starty" variant="note"/>
+<Badge text="area" variant="note"/>
+<Badge text="dimx" variant="note"/>
+<Badge text="dimy" variant="note"/>
+<Badge text="quadratshape" variant="note"/>
+
+###### quadrat
+
+The unique name assigned to the quadrat
+
+###### startx | starty | area
+
+The coordinates for the upper-left corner of the quadrat and the area the quadrat covers
+
+###### dimx | dimy
+
+The dimensions of the quadrat
+
+###### quadratshape
+
+Describe the rough shape of the quadrat
+
+---
+
+#### Species List - Upload Form
+
+<Badge text="spcode" variant="note"/>
+<Badge text="family" variant="note"/>
+<Badge text="genus" variant="note"/>
+<Badge text="species" variant="note"/>
+<Badge text="subspecies" variant="note"/>
+<Badge text="idlevel" variant="note"/>
+<Badge text="authority" variant="note"/>
+<Badge text="subspeciesauthority" variant="note"/>
+
+###### spcode
+
+The (up to) 25 character code identifying the species
+
+###### family | genus 
+
+The family and genus taxons of the species
+
+###### species | subspecies
+
+###### idlevel
+
+The deepest taxonomic level known for the species
+
+###### authority | subspeciesauthority
+
+The person or entity responsible for the species/subspecies classification
+
+---
+
+### Uploading Measurements Information
