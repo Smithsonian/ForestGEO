@@ -480,6 +480,47 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         case 'viewfulltable':
           await fetchFullData();
           break;
+        case 'failedmeasurements':
+          // Fetch all failed measurements (no pagination)
+          const fmQuery =
+            `/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}` +
+            `/0/999999/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}`;
+          const fmResponse = await fetch(fmQuery, { method: 'GET' });
+          if (!fmResponse.ok) throw new Error(`Failed to download failed measurements: ${fmResponse.status}`);
+          const fmData = await fmResponse.json();
+
+          // Define headers for export (matching FailedMeasurementsGridColumns)
+          const fmHeaders = ['tag', 'stemTag', 'spCode', 'quadrat', 'x', 'y', 'dbh', 'hom', 'date', 'codes', 'failureReasons'];
+
+          let fmCSVRows = fmHeaders.join(',') + '\n';
+          fmData.output.forEach((row: Record<string, unknown>) => {
+            const values = fmHeaders.map(header => {
+              const value = row[header];
+              if (value === undefined || value === null || value === '') return '';
+              if (typeof value === 'number') return value;
+              if (value instanceof Date) return moment(value).format('YYYY-MM-DD');
+              if (typeof value === 'string') {
+                // Handle date strings
+                if (header === 'date') return moment(value).format('YYYY-MM-DD');
+                // Escape quotes in strings
+                const escapedValue = value.replace(/"/g, '""');
+                return `"${escapedValue}"`;
+              }
+              return String(value);
+            });
+            fmCSVRows += values.join(',') + '\n';
+          });
+
+          const fmBlob = new Blob([fmCSVRows], { type: 'text/csv;charset=utf-8;' });
+          const fmURL = URL.createObjectURL(fmBlob);
+          const fmLink = document.createElement('a');
+          fmLink.href = fmURL;
+          fmLink.download = `failedmeasurements_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(fmLink);
+          fmLink.click();
+          document.body.removeChild(fmLink);
+          URL.revokeObjectURL(fmURL);
+          break;
       }
     } catch (error: any) {
       ailogger.error('Error exporting CSV:', error);
