@@ -142,7 +142,7 @@ async function connectWithRetry(
   retryConfig = CONNECTION_RETRY_CONFIG
 ): Promise<mysql.Connection> {
   let lastError: Error | null = null;
-  let currentDelay = retryConfig.initialDelayMs;
+  let currentDelay: number = retryConfig.initialDelayMs;
 
   for (let attempt = 1; attempt <= retryConfig.maxRetries; attempt++) {
     try {
@@ -961,6 +961,7 @@ export async function verifyIngestionResults(
 export interface CensusInfo {
   censusID: number;
   plotCensusNumber: number;
+  plotID: number;
   startDate: string;
   endDate: string;
 }
@@ -995,6 +996,7 @@ export async function createAdditionalCensus(
   const censusInfo: CensusInfo = {
     censusID: rows[0].CensusID,
     plotCensusNumber: options.plotCensusNumber,
+    plotID,
     startDate: options.startDate,
     endDate: options.endDate
   };
@@ -1469,7 +1471,7 @@ export async function runValidationForTest(
     await connection.query(formattedQuery);
     return true;
   } catch (error: any) {
-    log.error(`Validation ${ProcedureName} failed:`, error.message);
+    log.error(`Validation ${ProcedureName} failed: ${error.message}`);
     return false;
   }
 }
@@ -1636,6 +1638,7 @@ export async function setupTwoCensusScenario(
   const census1: CensusInfo = {
     censusID: testData.census[0].censusID,
     plotCensusNumber: testData.census[0].plotCensusNumber,
+    plotID: testData.census[0].plotID,
     startDate: testData.census[0].startDate,
     endDate: testData.census[0].endDate
   };
