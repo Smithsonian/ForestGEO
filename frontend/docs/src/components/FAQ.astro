@@ -1,0 +1,229 @@
+---
+/**
+ * FAQ Component
+ * Accordion-style Q&A sections with expandable items.
+ * Supports single or multiple open items.
+ */
+
+interface FAQItem {
+  question: string;
+  answer: string;
+  category?: string;
+}
+
+interface Props {
+  items: FAQItem[];
+  title?: string;
+  allowMultiple?: boolean;
+  defaultOpen?: number[];
+}
+
+const { items, title, allowMultiple = true, defaultOpen = [] } = Astro.props;
+
+// Group items by category if categories exist
+const hasCategories = items.some((item) => item.category);
+const groupedItems = hasCategories
+  ? items.reduce((acc, item) => {
+      const cat = item.category || 'General';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(item);
+      return acc;
+    }, {} as Record<string, FAQItem[]>)
+  : { '': items };
+---
+
+<div class="faq-container" data-allow-multiple={allowMultiple}>
+  {title && <h3 class="faq-title">{title}</h3>}
+
+  {Object.entries(groupedItems).map(([category, categoryItems]) => (
+    <div class="faq-group">
+      {category && hasCategories && (
+        <h4 class="faq-category">{category}</h4>
+      )}
+
+      <div class="faq-list">
+        {categoryItems.map((item, index) => {
+          const globalIndex = items.indexOf(item);
+          const isOpen = defaultOpen.includes(globalIndex);
+          return (
+            <div class={`faq-item ${isOpen ? 'open' : ''}`}>
+              <button class="faq-question" aria-expanded={isOpen}>
+                <span class="question-text">{item.question}</span>
+                <span class="question-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </span>
+              </button>
+              <div class="faq-answer">
+                <div class="answer-content">
+                  {item.answer}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ))}
+</div>
+
+<style>
+  .faq-container {
+    margin: 1.5rem 0;
+  }
+
+  .faq-title {
+    margin: 0 0 1.25rem 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .faq-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .faq-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .faq-category {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .faq-item {
+    background: var(--sl-color-gray-7);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .faq-item:hover {
+    border-color: var(--sl-color-gray-4);
+  }
+
+  .faq-item.open {
+    border-color: var(--sl-color-accent);
+  }
+
+  .faq-question {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--sl-color-white);
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.4;
+    transition: background 0.2s;
+  }
+
+  .faq-question:hover {
+    background: var(--sl-color-gray-6);
+  }
+
+  .question-text {
+    flex: 1;
+  }
+
+  .question-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    color: var(--sl-color-gray-3);
+    transition: transform 0.2s, color 0.2s;
+  }
+
+  .faq-item.open .question-icon {
+    transform: rotate(180deg);
+    color: var(--sl-color-accent);
+  }
+
+  .faq-answer {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease;
+  }
+
+  .faq-item.open .faq-answer {
+    grid-template-rows: 1fr;
+  }
+
+  .answer-content {
+    overflow: hidden;
+    padding: 0 1.25rem;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+
+  .faq-item.open .answer-content {
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  @media (max-width: 768px) {
+    .faq-question {
+      padding: 0.875rem 1rem;
+      font-size: 0.9rem;
+    }
+
+    .answer-content {
+      padding: 0 1rem;
+    }
+
+    .faq-item.open .answer-content {
+      padding: 0 1rem 1rem;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.faq-container').forEach((container) => {
+    const allowMultiple = container.getAttribute('data-allow-multiple') === 'true';
+
+    container.querySelectorAll('.faq-question').forEach((question) => {
+      question.addEventListener('click', () => {
+        const item = question.closest('.faq-item');
+        if (!item) return;
+
+        const isOpen = item.classList.contains('open');
+
+        // Close others if not allowing multiple
+        if (!allowMultiple && !isOpen) {
+          container.querySelectorAll('.faq-item.open').forEach((openItem) => {
+            openItem.classList.remove('open');
+            openItem.querySelector('.faq-question')?.setAttribute('aria-expanded', 'false');
+          });
+        }
+
+        // Toggle current
+        item.classList.toggle('open');
+        question.setAttribute('aria-expanded', String(!isOpen));
+      });
+    });
+  });
+</script>

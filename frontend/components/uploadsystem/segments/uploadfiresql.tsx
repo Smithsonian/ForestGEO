@@ -1,6 +1,6 @@
 'use client';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useIsMounted';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
@@ -10,10 +10,11 @@ import moment from 'moment';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { useSession } from 'next-auth/react';
+import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 import { v4 } from 'uuid';
 import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
-import { useUploadSession } from '@/app/hooks/useUploadSession';
+import { useUploadSession } from '@/app/hooks/useuploadsession';
 import { ETACalculator, formatTimeRemaining, createTransactionAwareQueue } from '@/components/uploadsystemhelpers/uploadprocessingutils';
 
 /**
@@ -538,9 +539,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           return mappedHeader;
         }
 
-        // If no mapping found, return original trimmed header
-        ailogger.warn(`No mapping found for header: "${header}". Using as-is.`);
-        return header.trim();
+        // If no mapping found, return normalized header (lowercase, no underscores/spaces/hyphens)
+        // This ensures consistent key names for processPersonnel, processSpecies, etc.
+        ailogger.info(`Header normalized: "${header}" -> "${normalizedHeader}"`);
+        return normalizedHeader;
       };
       const validateRow = (row: FileRow): boolean => {
         const errors: string[] = [];
@@ -1569,6 +1571,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const { palette: _palette } = useTheme();
 
+  // Get cached animation URLs for reliable loading in production
+  const { getAnimationUrl } = useAnimationCacheContext();
+
   // Get current phase description for user
   const getCurrentPhaseDescription = (): string => {
     if (isVerifying) return 'Finalizing upload...';
@@ -1578,12 +1583,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   // Determine which animation to show based on current stage
-  // Use API route for reliable serving in standalone mode
+  // Uses cached blob URLs from IndexedDB for reliable loading in production
   const getStageAnimation = (): string => {
-    if (!uploaded) return '/api/animations/growing-plant.lottie';
-    if (uploaded && !processed && !isVerifying) return '/api/animations/data-processing.lottie';
-    if (isVerifying) return '/api/animations/startup.lottie';
-    return '/api/animations/growing-plant.lottie'; // fallback
+    if (!uploaded) return getAnimationUrl('growing-plant.lottie');
+    if (uploaded && !processed && !isVerifying) return getAnimationUrl('data-processing.lottie');
+    if (isVerifying) return getAnimationUrl('startup.lottie');
+    return getAnimationUrl('growing-plant.lottie'); // fallback
   };
 
   return (

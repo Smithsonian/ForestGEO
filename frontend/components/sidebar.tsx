@@ -113,7 +113,8 @@ function MenuRenderToggle(
 interface SidebarProps {
   siteListLoaded: boolean;
   coreDataLoaded: boolean;
-  setCensusListLoaded: Dispatch<SetStateAction<boolean>>;
+  /** @deprecated This prop is unused and will be removed in a future version */
+  setCensusListLoaded: () => void;
   setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 

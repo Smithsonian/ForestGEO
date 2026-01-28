@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { FileListProps } from '@/config/macros/formdetails';
 import { Box, Button, Card, CardContent, Chip, Divider, Stack, Tab, TabList, TabPanel, Tabs, Typography } from '@mui/joy';
 import FilePreviewCompact from './filepreviewcompact';
@@ -13,10 +13,12 @@ interface FileListEnhancedProps extends FileListProps {
   onDelimiterChange: (fileName: string, delimiter: string) => void;
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
+  onValidationStatusChange?: (fileName: string, isValid: boolean, issues: string[]) => void;
 }
 
 export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
-  const { acceptedFiles, dataViewActive, setDataViewActive, expectedHeaders, onDelimiterChange, selectedDelimiters, onRemoveFile } = props;
+  const { acceptedFiles, dataViewActive, setDataViewActive, expectedHeaders, onDelimiterChange, selectedDelimiters, onRemoveFile, onValidationStatusChange } =
+    props;
 
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
 
@@ -170,6 +172,9 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                     onDelimiterChange={delimiter => onDelimiterChange(file.name, delimiter)}
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}
+                    onValidationStatusChange={
+                      onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined
+                    }
                   />
                 </Stack>
               </Stack>

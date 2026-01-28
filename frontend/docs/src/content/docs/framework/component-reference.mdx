@@ -1,0 +1,492 @@
+---
+title: Custom Component Reference
+description: Usage guide for ForestGEO documentation custom components.
+---
+
+import ErrorReference from '../../../components/ErrorReference.astro';
+import ProcessFlow from '../../../components/ProcessFlow.astro';
+import ValidationRule from '../../../components/ValidationRule.astro';
+import Screenshot from '../../../components/Screenshot.astro';
+import SideBySide from '../../../components/SideBySide.astro';
+import Scenario from '../../../components/Scenario.astro';
+import FAQ from '../../../components/FAQ.astro';
+import ConceptCard from '../../../components/ConceptCard.astro';
+import TableReference from '../../../components/TableReference.astro';
+import TroubleshootingChecklist from '../../../components/TroubleshootingChecklist.astro';
+
+This page documents all custom components available for ForestGEO documentation. Each component includes usage examples and prop descriptions.
+
+---
+
+## Phase 1: Critical Components
+
+### ErrorReference
+
+Displays standardized error tables with Message, Cause, and Fix columns.
+
+```mdx
+<ErrorReference
+  title="File Parsing Errors"
+  category="upload"
+  showSeverity={true}
+  errors={[
+    {
+      message: "File reading was aborted",
+      cause: "Browser interrupted file read",
+      fix: "Refresh the page and try again",
+      severity: "error"
+    }
+  ]}
+/>
+```
+
+<ErrorReference
+  title="File Parsing Errors"
+  category="upload"
+  showSeverity={true}
+  errors={[
+    {
+      message: "File reading was aborted",
+      cause: "Browser interrupted the file reading process",
+      fix: "Refresh the page and try uploading again",
+      severity: "error"
+    },
+    {
+      message: "No valid headers found",
+      cause: "CSV file is missing required column headers",
+      fix: "Ensure your file has headers in the first row",
+      severity: "warning"
+    },
+    {
+      message: "Delimiter detection failed",
+      cause: "Could not determine CSV delimiter",
+      fix: "Use comma or tab-separated values",
+      severity: "info"
+    }
+  ]}
+/>
+
+**Props:**
+- `errors` (required): Array of `{ message, cause, fix, severity? }`
+- `title`: Optional section title
+- `category`: Optional category badge
+- `showSeverity`: Show severity column (default: false)
+
+---
+
+### ProcessFlow
+
+Renders visual workflow diagrams with steps, branches, and connections.
+
+```mdx
+<ProcessFlow
+  title="Upload Workflow"
+  steps={[
+    { id: "1", label: "Select File", status: "success" },
+    { id: "2", label: "Parse & Preview", status: "success" },
+    { id: "3", label: "Upload", status: "active" },
+    { id: "4", label: "Validate", status: "default" },
+    { id: "5", label: "Complete", status: "default" }
+  ]}
+/>
+```
+
+<ProcessFlow
+  title="Upload Workflow"
+  steps={[
+    { id: "1", label: "Select File", status: "success" },
+    { id: "2", label: "Parse & Preview", status: "success" },
+    { id: "3", label: "Upload", status: "active" },
+    { id: "4", label: "Validate", status: "default" },
+    { id: "5", label: "Complete", status: "default" }
+  ]}
+/>
+
+**With Branch:**
+
+<ProcessFlow
+  title="Validation Flow with Error Handling"
+  steps={[
+    { id: "1", label: "Upload" },
+    { id: "2", label: "Validate" },
+    { id: "3", label: "Complete", status: "success" }
+  ]}
+  branch={{
+    condition: "If validation fails",
+    steps: [
+      { id: "b1", label: "Review Errors", status: "warning" },
+      { id: "b2", label: "Fix Data" },
+      { id: "b3", label: "Reingest" }
+    ]
+  }}
+/>
+
+**Props:**
+- `steps` (required): Array of `{ id, label, description?, status? }`
+- `title`: Optional title
+- `branch`: Optional branch with `{ condition, steps }`
+- `direction`: "horizontal" (default) or "vertical"
+- `showNumbers`: Show step numbers (default: true)
+
+---
+
+### ValidationRule
+
+Displays structured validation rule cards with consistent formatting.
+
+```mdx
+<ValidationRule
+  id="1"
+  name="DBH Growth Exceeds Maximum"
+  checks="DBH growth between measurements exceeds 65mm"
+  severity="warning"
+  reasoning="Extreme growth rates indicate potential measurement error"
+  fixSteps={[
+    "Review the DBH values for both measurements",
+    "Check if tree was measured at correct height",
+    "Verify no data entry errors occurred"
+  ]}
+  relatedRules={["2", "5"]}
+/>
+```
+
+<ValidationRule
+  id="1"
+  name="DBH Growth Exceeds Maximum"
+  checks="DBH growth between measurements exceeds 65mm"
+  severity="warning"
+  reasoning="Extreme growth rates typically indicate measurement error rather than actual tree growth. The threshold of 65mm is based on biological limits for most tree species."
+  fixSteps={[
+    "Review the DBH values for both measurements",
+    "Check if tree was measured at correct height (1.3m)",
+    "Verify no data entry errors occurred",
+    "If growth is confirmed valid, add a note explaining the anomaly"
+  ]}
+  relatedRules={["2", "5"]}
+/>
+
+**Props:**
+- `id` (required): Rule identifier
+- `name` (required): Rule name
+- `checks` (required): What the rule validates
+- `severity` (required): "error" | "warning" | "info"
+- `reasoning`: Why the rule exists
+- `fixSteps`: Array of fix steps
+- `relatedRules`: Array of related rule IDs
+
+---
+
+## Phase 2: High Value Components
+
+### Screenshot
+
+Displays annotated screenshots with captions and zoom functionality.
+
+```mdx
+<Screenshot
+  src="/path/to/image.png"
+  alt="Dashboard overview"
+  caption="The main dashboard showing census selection"
+  annotation="NEW"
+  annotationPosition="top-right"
+/>
+```
+
+**Props:**
+- `src` (required): Image path or import
+- `alt` (required): Alt text
+- `caption`: Optional caption
+- `width`: Optional width constraint
+- `border`: Show border (default: true)
+- `shadow`: Show shadow (default: true)
+- `rounded`: Rounded corners (default: true)
+- `zoomable`: Click to zoom (default: true)
+- `annotation`: Optional annotation text
+- `annotationPosition`: "top-left" | "top-right" | "bottom-left" | "bottom-right"
+
+---
+
+### SideBySide
+
+Displays before/after or comparison images side by side.
+
+```mdx
+<SideBySide
+  title="UI Update Comparison"
+  before={{
+    src: "/old-interface.png",
+    alt: "Old interface",
+    label: "Before",
+    version: "v1.0"
+  }}
+  after={{
+    src: "/new-interface.png",
+    alt: "New interface",
+    label: "After",
+    version: "v2.0"
+  }}
+  caption="The redesigned upload interface"
+/>
+```
+
+**Props:**
+- `before` (required): `{ src, alt, label?, version? }`
+- `after` (required): `{ src, alt, label?, version? }`
+- `title`: Optional title
+- `caption`: Optional caption
+- `layout`: "horizontal" (default) or "vertical"
+- `showLabels`: Show before/after labels (default: true)
+
+---
+
+### Scenario
+
+Displays troubleshooting case studies with title, cause, and solution steps.
+
+```mdx
+<Scenario
+  title="SpCode invalid for multiple records"
+  cause="Species code doesn't exist in the Species List"
+  icon="warning"
+  steps={[
+    "Note the invalid species code(s) from the error message",
+    "Navigate to Fixed Data > Species List",
+    "Add the missing species with correct SpCode",
+    "Return to Failed Measurements and click Reingest All"
+  ]}
+  outcome="Records will be reprocessed with valid species codes"
+/>
+```
+
+<Scenario
+  title="SpCode invalid for multiple records"
+  cause="The species code referenced in the measurements doesn't exist in the Species List for this site."
+  icon="warning"
+  steps={[
+    "Note the invalid species code(s) from the error message",
+    "Navigate to Fixed Data > Species List",
+    "Add the missing species with the correct SpCode",
+    "Return to Failed Measurements and click Reingest All"
+  ]}
+  outcome="Records will be reprocessed and should pass validation with the correct species codes"
+/>
+
+**Props:**
+- `title` (required): Scenario title
+- `cause` (required): What caused the issue
+- `steps` (required): Array of solution steps
+- `outcome`: Expected result after following steps
+- `icon`: "warning" (default) | "error" | "success" | "info"
+- `collapsible`: Make the scenario collapsible (default: false)
+
+---
+
+## Phase 3: Nice-to-Have Components
+
+### FAQ
+
+Accordion-style Q&A sections with expandable items.
+
+```mdx
+<FAQ
+  title="Common Questions"
+  allowMultiple={true}
+  items={[
+    {
+      question: "Is my data lost if an error occurs?",
+      answer: "No, your data is preserved...",
+      category: "Data Safety"
+    }
+  ]}
+/>
+```
+
+<FAQ
+  title="Common Questions"
+  allowMultiple={true}
+  defaultOpen={[0]}
+  items={[
+    {
+      question: "Is my data lost if an error occurs?",
+      answer: "No, your data is preserved. The system maintains the original file and any partially processed records. You can always re-upload or recover from the Failed Measurements view.",
+      category: "Data Safety"
+    },
+    {
+      question: "Can I undo a validation?",
+      answer: "Post-validation changes cannot be directly undone, but you can export your data, make corrections, and re-upload with the corrected values.",
+      category: "Data Safety"
+    },
+    {
+      question: "How do I contact support?",
+      answer: "Email the ForestGEO data team or use the GitHub issues page for technical problems.",
+      category: "Support"
+    }
+  ]}
+/>
+
+**Props:**
+- `items` (required): Array of `{ question, answer, category? }`
+- `title`: Optional section title
+- `allowMultiple`: Allow multiple open items (default: true)
+- `defaultOpen`: Array of indices to open by default
+
+---
+
+### ConceptCard
+
+Standardized concept introduction cards for "Understanding X" guides.
+
+```mdx
+<ConceptCard
+  title="Quadrats"
+  description="A quadrat is a subdivision of a plot..."
+  color="blue"
+  keyPoints={[
+    "Each has specific coordinates",
+    "Named using codes (e.g., 0322)"
+  ]}
+  relatedLinks={[
+    { label: "Managing Quadrats", href: "/quadrats" }
+  ]}
+/>
+```
+
+<ConceptCard
+  title="Quadrats"
+  description="A quadrat is a subdivision of a plot used to organize tree measurements. Each quadrat represents a specific area within the forest plot and helps researchers locate and track individual trees."
+  color="blue"
+  keyPoints={[
+    "Each quadrat has specific X/Y coordinates within the plot",
+    "Named using standardized codes (e.g., 0322 = column 03, row 22)",
+    "Trees are assigned to quadrats based on their location",
+    "Quadrat boundaries help organize field work"
+  ]}
+  relatedLinks={[
+    { label: "Managing Quadrats", href: "/starting/understanding-quadrats" },
+    { label: "Upload Process", href: "/upload-process-breakdown" }
+  ]}
+/>
+
+**Props:**
+- `title` (required): Concept name
+- `description` (required): Concept description
+- `keyPoints`: Array of key points
+- `icon`: Custom icon (emoji or text)
+- `color`: "blue" (default) | "green" | "orange" | "purple" | "red"
+- `relatedLinks`: Array of `{ label, href }`
+
+---
+
+### TableReference
+
+Enhanced reference tables with search, sort, and sticky headers.
+
+```mdx
+<TableReference
+  title="Navigation Paths"
+  searchable={true}
+  sortable={true}
+  columns={[
+    { key: "feature", label: "Feature", sortable: true },
+    { key: "path", label: "Navigation Path" }
+  ]}
+  data={[
+    { feature: "Species List", path: "Fixed Data > Species" },
+    { feature: "Quadrats", path: "Fixed Data > Quadrats" }
+  ]}
+/>
+```
+
+<TableReference
+  title="Navigation Paths"
+  searchable={true}
+  sortable={true}
+  columns={[
+    { key: "feature", label: "Feature", sortable: true },
+    { key: "path", label: "Navigation Path" },
+    { key: "access", label: "Access Level" }
+  ]}
+  data={[
+    { feature: "Species List", path: "Fixed Data > Species", access: "All Users" },
+    { feature: "Quadrats", path: "Fixed Data > Quadrats", access: "All Users" },
+    { feature: "Personnel", path: "Fixed Data > Personnel", access: "All Users" },
+    { feature: "User Management", path: "Admin > Users", access: "Admin Only" },
+    { feature: "Site Settings", path: "Admin > Sites", access: "Admin Only" }
+  ]}
+/>
+
+**Props:**
+- `columns` (required): Array of `{ key, label, width?, align?, sortable? }`
+- `data` (required): Array of row objects
+- `title`: Optional title
+- `searchable`: Enable search (default: false)
+- `sortable`: Enable column sorting (default: false)
+- `stickyHeader`: Sticky header on scroll (default: true)
+- `striped`: Striped rows (default: true)
+- `compact`: Compact mode (default: false)
+- `maxHeight`: Max height with scroll (e.g., "400px")
+
+---
+
+### TroubleshootingChecklist
+
+Interactive checklist with progress tracking and localStorage persistence.
+
+```mdx
+<TroubleshootingChecklist
+  title="Upload Troubleshooting"
+  persistKey="upload-troubleshoot"
+  steps={[
+    { text: "Check internet connection", hint: "Try loading another website" },
+    { text: "Verify file format is CSV or TSV" },
+    { text: "Confirm file size is under 50MB" }
+  ]}
+/>
+```
+
+<TroubleshootingChecklist
+  title="Upload Troubleshooting"
+  persistKey="upload-troubleshoot-demo"
+  showProgress={true}
+  resetable={true}
+  steps={[
+    { text: "Check your internet connection", hint: "Try loading another website to verify connectivity" },
+    { text: "Verify the file format is CSV or TSV" },
+    { text: "Confirm file size is under 50MB" },
+    { text: "Ensure the file has a header row" },
+    { text: "Check that required columns are present" },
+    { text: "Try refreshing the page and re-uploading" }
+  ]}
+/>
+
+**Props:**
+- `steps` (required): Array of strings or `{ text, hint? }`
+- `title`: Checklist title (default: "Troubleshooting Checklist")
+- `persistKey`: LocalStorage key for state persistence
+- `showProgress`: Show progress bar (default: true)
+- `resetable`: Show reset button (default: true)
+
+---
+
+## Import Patterns
+
+### Single Component
+
+```mdx
+import ErrorReference from '../../../components/ErrorReference.astro';
+```
+
+### Multiple Components
+
+```mdx
+import ErrorReference from '../../../components/ErrorReference.astro';
+import ProcessFlow from '../../../components/ProcessFlow.astro';
+import Scenario from '../../../components/Scenario.astro';
+```
+
+### With Starlight Components
+
+```mdx
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import ErrorReference from '../../../components/ErrorReference.astro';
+```

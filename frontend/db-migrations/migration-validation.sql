@@ -115,31 +115,33 @@ SELECT
         ELSE 'FAIL'
     END AS Status;
 
--- Tree counts
+-- Tree counts (CENSUS-AWARE: Trees are per-census in new schema)
+-- Source count uses DISTINCT (TreeID, CensusID) combinations
 INSERT INTO temp_validation_results
 SELECT
     'Biological' AS Category,
-    'Trees' AS Entity,
-    (SELECT COUNT(DISTINCT TreeID) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL) AS Source_Count,
+    'Trees (per-census)' AS Entity,
+    (SELECT COUNT(DISTINCT CONCAT(TreeID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL AND Tag IS NOT NULL) AS Source_Count,
     (SELECT COUNT(*) FROM trees) AS Target_Count,
-    (SELECT COUNT(*) FROM trees) - (SELECT COUNT(DISTINCT TreeID) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL) AS Difference,
-    ROUND(100.0 * (SELECT COUNT(*) FROM trees) / NULLIF((SELECT COUNT(DISTINCT TreeID) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL), 0), 2) AS Percent_Migrated,
+    (SELECT COUNT(*) FROM trees) - (SELECT COUNT(DISTINCT CONCAT(TreeID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL AND Tag IS NOT NULL) AS Difference,
+    ROUND(100.0 * (SELECT COUNT(*) FROM trees) / NULLIF((SELECT COUNT(DISTINCT CONCAT(TreeID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL AND Tag IS NOT NULL), 0), 2) AS Percent_Migrated,
     CASE
-        WHEN (SELECT COUNT(*) FROM trees) >= (SELECT COUNT(DISTINCT TreeID) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL) * 0.99 THEN 'PASS'
+        WHEN (SELECT COUNT(*) FROM trees) >= (SELECT COUNT(DISTINCT CONCAT(TreeID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL AND Tag IS NOT NULL) * 0.99 THEN 'PASS'
         ELSE 'FAIL'
     END AS Status;
 
--- Stem counts
+-- Stem counts (CENSUS-AWARE: Stems are per-census in new schema)
+-- Source count uses DISTINCT (StemID, CensusID) combinations
 INSERT INTO temp_validation_results
 SELECT
     'Biological' AS Category,
-    'Stems' AS Entity,
-    (SELECT COUNT(DISTINCT StemID) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) AS Source_Count,
+    'Stems (per-census)' AS Entity,
+    (SELECT COUNT(DISTINCT CONCAT(StemID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) AS Source_Count,
     (SELECT COUNT(*) FROM stems) AS Target_Count,
-    (SELECT COUNT(*) FROM stems) - (SELECT COUNT(DISTINCT StemID) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) AS Difference,
-    ROUND(100.0 * (SELECT COUNT(*) FROM stems) / NULLIF((SELECT COUNT(DISTINCT StemID) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL), 0), 2) AS Percent_Migrated,
+    (SELECT COUNT(*) FROM stems) - (SELECT COUNT(DISTINCT CONCAT(StemID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) AS Difference,
+    ROUND(100.0 * (SELECT COUNT(*) FROM stems) / NULLIF((SELECT COUNT(DISTINCT CONCAT(StemID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL), 0), 2) AS Percent_Migrated,
     CASE
-        WHEN (SELECT COUNT(*) FROM stems) >= (SELECT COUNT(DISTINCT StemID) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) * 0.99 THEN 'PASS'
+        WHEN (SELECT COUNT(*) FROM stems) >= (SELECT COUNT(DISTINCT CONCAT(StemID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL) * 0.99 THEN 'PASS'
         ELSE 'FAIL'
     END AS Status;
 
@@ -180,28 +182,34 @@ FROM temp_validation_results
 WHERE Difference < 0
 ORDER BY ABS(Difference) DESC;
 
--- Check for unmapped records
+-- Check for unmapped records (CENSUS-AWARE)
 SELECT 'Checking for unmapped records...' AS Info;
 
--- Unmapped Trees
+-- Unmapped Tree-Census Combinations
 SELECT
-    'Unmapped Trees' AS Check_Type,
-    COUNT(DISTINCT v.TreeID) AS Count,
-    ROUND(100.0 * COUNT(DISTINCT v.TreeID) / (SELECT COUNT(DISTINCT TreeID) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL), 2) AS Percent_Of_Source
-FROM stable_mpala.viewfulltable v
-LEFT JOIN id_map_trees t_map ON v.TreeID = t_map.old_TreeID
-WHERE v.TreeID IS NOT NULL
-  AND t_map.new_TreeID IS NULL;
+    'Unmapped Tree-Census Combinations' AS Check_Type,
+    COUNT(*) AS Count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(DISTINCT CONCAT(TreeID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE TreeID IS NOT NULL AND Tag IS NOT NULL), 2) AS Percent_Of_Source
+FROM (
+    SELECT DISTINCT v.TreeID, v.CensusID
+    FROM stable_mpala.viewfulltable v
+    WHERE v.TreeID IS NOT NULL AND v.Tag IS NOT NULL
+) src
+LEFT JOIN id_map_trees t_map ON src.TreeID = t_map.old_TreeID AND src.CensusID = t_map.old_CensusID
+WHERE t_map.new_TreeID IS NULL;
 
--- Unmapped Stems
+-- Unmapped Stem-Census Combinations
 SELECT
-    'Unmapped Stems' AS Check_Type,
-    COUNT(DISTINCT v.StemID) AS Count,
-    ROUND(100.0 * COUNT(DISTINCT v.StemID) / (SELECT COUNT(DISTINCT StemID) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL), 2) AS Percent_Of_Source
-FROM stable_mpala.viewfulltable v
-LEFT JOIN id_map_stems s_map ON v.StemID = s_map.old_StemID
-WHERE v.StemID IS NOT NULL
-  AND s_map.new_StemGUID IS NULL;
+    'Unmapped Stem-Census Combinations' AS Check_Type,
+    COUNT(*) AS Count,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(DISTINCT CONCAT(StemID, '-', CensusID)) FROM stable_mpala.viewfulltable WHERE StemID IS NOT NULL), 2) AS Percent_Of_Source
+FROM (
+    SELECT DISTINCT v.StemID, v.CensusID
+    FROM stable_mpala.viewfulltable v
+    WHERE v.StemID IS NOT NULL
+) src
+LEFT JOIN id_map_stems s_map ON src.StemID = s_map.old_StemID AND src.CensusID = s_map.old_CensusID
+WHERE s_map.new_StemGUID IS NULL;
 
 -- ================================================================
 -- SECTION 3: Data Integrity Checks
@@ -240,6 +248,79 @@ SELECT
 FROM coremeasurements cm
 LEFT JOIN stems st ON cm.StemGUID = st.StemGUID
 WHERE st.StemGUID IS NULL;
+
+-- ================================================================
+-- CRITICAL: Census Consistency Checks
+-- These checks validate the fix for the census mismatch issue
+-- ================================================================
+SELECT '' AS '';
+SELECT 'CENSUS CONSISTENCY CHECKS (Critical):' AS Info;
+
+-- Measurement-Stem Census Consistency
+-- This was the ROOT CAUSE of the original issue
+SELECT
+    'Measurement-Stem Census Mismatch' AS Integrity_Check,
+    SUM(CASE WHEN cm.CensusID != st.CensusID THEN 1 ELSE 0 END) AS Count,
+    CASE WHEN SUM(CASE WHEN cm.CensusID != st.CensusID THEN 1 ELSE 0 END) = 0 THEN 'PASS' ELSE 'FAIL' END AS Status
+FROM coremeasurements cm
+JOIN stems st ON cm.StemGUID = st.StemGUID;
+
+-- Stem-Tree Census Consistency
+SELECT
+    'Stem-Tree Census Mismatch' AS Integrity_Check,
+    SUM(CASE WHEN st.CensusID != t.CensusID THEN 1 ELSE 0 END) AS Count,
+    CASE WHEN SUM(CASE WHEN st.CensusID != t.CensusID THEN 1 ELSE 0 END) = 0 THEN 'PASS' ELSE 'FAIL' END AS Status
+FROM stems st
+JOIN trees t ON st.TreeID = t.TreeID;
+
+-- Measurements that will be excluded from MeasurementsSummary
+SELECT
+    'Measurements Excluded from MeasurementsSummary' AS Integrity_Check,
+    (SELECT COUNT(*) FROM coremeasurements) -
+    (SELECT COUNT(*)
+     FROM coremeasurements cm
+     JOIN census c ON cm.CensusID = c.CensusID
+     JOIN stems st ON cm.StemGUID = st.StemGUID AND st.CensusID = c.CensusID
+     JOIN trees t ON t.TreeID = st.TreeID AND t.CensusID = c.CensusID
+     JOIN species sp ON t.SpeciesID = sp.SpeciesID
+     JOIN quadrats q ON q.QuadratID = st.QuadratID) AS Count,
+    CASE
+        WHEN (SELECT COUNT(*) FROM coremeasurements) =
+             (SELECT COUNT(*)
+              FROM coremeasurements cm
+              JOIN census c ON cm.CensusID = c.CensusID
+              JOIN stems st ON cm.StemGUID = st.StemGUID AND st.CensusID = c.CensusID
+              JOIN trees t ON t.TreeID = st.TreeID AND t.CensusID = c.CensusID
+              JOIN species sp ON t.SpeciesID = sp.SpeciesID
+              JOIN quadrats q ON q.QuadratID = st.QuadratID)
+        THEN 'PASS'
+        ELSE 'FAIL'
+    END AS Status;
+
+-- Unique ID Checks
+SELECT '' AS '';
+SELECT 'UNIQUE ID VALIDATION:' AS Info;
+
+-- StemGUID uniqueness
+SELECT
+    'StemGUID Uniqueness' AS Integrity_Check,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT StemGUID) THEN 0 ELSE COUNT(*) - COUNT(DISTINCT StemGUID) END AS Count,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT StemGUID) THEN 'PASS' ELSE 'FAIL' END AS Status
+FROM stems;
+
+-- TreeID uniqueness
+SELECT
+    'TreeID Uniqueness' AS Integrity_Check,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT TreeID) THEN 0 ELSE COUNT(*) - COUNT(DISTINCT TreeID) END AS Count,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT TreeID) THEN 'PASS' ELSE 'FAIL' END AS Status
+FROM trees;
+
+-- CoreMeasurementID uniqueness
+SELECT
+    'CoreMeasurementID Uniqueness' AS Integrity_Check,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT CoreMeasurementID) THEN 0 ELSE COUNT(*) - COUNT(DISTINCT CoreMeasurementID) END AS Count,
+    CASE WHEN COUNT(*) = COUNT(DISTINCT CoreMeasurementID) THEN 'PASS' ELSE 'FAIL' END AS Status
+FROM coremeasurements;
 
 -- ================================================================
 -- SECTION 4: Summary Statistics

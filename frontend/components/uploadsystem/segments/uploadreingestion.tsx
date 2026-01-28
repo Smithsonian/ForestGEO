@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useIsMounted } from '@/app/hooks/useIsMounted';
+import { useIsMounted } from '@/app/hooks/useismounted';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
@@ -8,6 +8,7 @@ import moment from 'moment';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
+import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 
 interface UploadReingestionProps {
   schema: string;
@@ -522,12 +523,15 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
 
   const { palette: _palette } = useTheme();
 
+  // Get cached animation URLs for reliable loading in production
+  const { getAnimationUrl } = useAnimationCacheContext();
+
   // Determine which animation to show based on current stage
   // Reingestion skips the upload stage, so we use processing and verification animations
-  // Use API route for reliable serving in standalone mode
+  // Uses cached blob URLs from IndexedDB for reliable loading in production
   const getStageAnimation = (): string => {
-    if (isVerifying) return '/api/animations/startup.lottie';
-    return '/api/animations/data-processing.lottie'; // Processing stage
+    if (isVerifying) return getAnimationUrl('startup.lottie');
+    return getAnimationUrl('data-processing.lottie'); // Processing stage
   };
 
   // Calculate overall progress percentage

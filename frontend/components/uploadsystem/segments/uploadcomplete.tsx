@@ -2,7 +2,8 @@
 
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
-import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
+import { Alert, Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
+import WarningIcon from '@mui/icons-material/Warning';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
@@ -12,10 +13,17 @@ import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
 import ailogger from '@/ailogger';
 
+type LoadStatus = 'pending' | 'success' | 'warning' | 'error' | 'skipped';
+
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, uploadForm } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
+  const [loadStatus, setLoadStatus] = useState<{ census: LoadStatus; plots: LoadStatus; quadrats: LoadStatus }>({
+    census: 'pending',
+    plots: 'pending',
+    quadrats: 'pending'
+  });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
   const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
 
@@ -37,31 +45,65 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const setCensusStore = useAppStore(state => state.setCensus);
 
   const loadCensusData = useCallback(async () => {
-    if (!currentPlot || !censusDispatch) return;
-
-    setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-    const response = await fetch(
-      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
-    );
-    const censusRDSLoad = await response.json();
-
-    setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
-    const censusList = await createAndUpdateCensusList(censusRDSLoad);
-
-    // Update both context provider AND Zustand store to keep them in sync
-    if (censusListDispatch) {
-      await censusListDispatch({ censusList });
+    // Only refresh census data for measurements uploads
+    // Personnel, species, attributes, and quadrats don't affect census data
+    if (uploadForm !== FormType.measurements) {
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census refresh skipped (not applicable for this upload type).' }));
+      setLoadStatus(prev => ({ ...prev, census: 'skipped' }));
+      return;
     }
-    setCensusListStore(censusList); // Also update Zustand store
 
-    const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
-    if (existingCensus) {
-      await censusDispatch({ census: existingCensus });
-      setCensusStore(existingCensus); // Also update Zustand store
+    if (!currentPlot || !censusDispatch) {
+      // Skip census load but mark as complete to prevent hanging
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census refresh skipped (no active plot).' }));
+      setLoadStatus(prev => ({ ...prev, census: 'skipped' }));
+      return;
     }
-    setProgress(prev => ({ ...prev, census: 100 }));
-    setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
+
+    try {
+      setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
+      const response = await fetch(
+        `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+      );
+      const censusRDSLoad = await response.json();
+
+      // Validate that we received an array before processing
+      if (!Array.isArray(censusRDSLoad)) {
+        ailogger.warn('Census data response is not an array:', censusRDSLoad);
+        setProgress(prev => ({ ...prev, census: 100 }));
+        setProgressText(prev => ({ ...prev, census: 'Census refresh failed (invalid server response).' }));
+        setLoadStatus(prev => ({ ...prev, census: 'warning' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
+      const censusList = await createAndUpdateCensusList(censusRDSLoad);
+
+      // Update both context provider AND Zustand store to keep them in sync
+      if (censusListDispatch) {
+        await censusListDispatch({ censusList });
+      }
+      setCensusListStore(censusList); // Also update Zustand store
+
+      const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
+      if (existingCensus) {
+        await censusDispatch({ census: existingCensus });
+        setCensusStore(existingCensus); // Also update Zustand store
+      }
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census data refreshed.' }));
+      setLoadStatus(prev => ({ ...prev, census: 'success' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading census data:', error instanceof Error ? error : new Error(String(error)));
+      // Mark as complete even on error to prevent hanging
+      setProgress(prev => ({ ...prev, census: 100 }));
+      setProgressText(prev => ({ ...prev, census: 'Census refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, census: 'error' }));
+    }
   }, [
+    uploadForm,
     currentPlot,
     censusDispatch,
     currentCensus?.plotCensusNumber,
@@ -73,37 +115,77 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   ]);
 
   const loadPlotsData = useCallback(async () => {
-    if (!currentSite) return;
-
-    setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
-    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
-    const plotsData = await plotsResponse.json();
-    if (!plotsData) return;
-
-    setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
-    if (plotListDispatch) {
-      await plotListDispatch({ plotList: plotsData });
+    if (!currentSite) {
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plots refresh skipped (no active site).' }));
+      setLoadStatus(prev => ({ ...prev, plots: 'skipped' }));
+      return;
     }
-    setProgress(prev => ({ ...prev, plots: 100 }));
-    setProgressText(prev => ({ ...prev, plots: 'Plot list information loaded.' }));
+
+    try {
+      setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
+      const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+      const plotsData = await plotsResponse.json();
+
+      if (!plotsData || !Array.isArray(plotsData)) {
+        ailogger.warn('Plots data response is not valid:', plotsData);
+        setProgress(prev => ({ ...prev, plots: 100 }));
+        setProgressText(prev => ({ ...prev, plots: 'Plots refresh failed (invalid server response).' }));
+        setLoadStatus(prev => ({ ...prev, plots: 'warning' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
+      if (plotListDispatch) {
+        await plotListDispatch({ plotList: plotsData });
+      }
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plot data refreshed.' }));
+      setLoadStatus(prev => ({ ...prev, plots: 'success' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading plots data:', error instanceof Error ? error : new Error(String(error)));
+      setProgress(prev => ({ ...prev, plots: 100 }));
+      setProgressText(prev => ({ ...prev, plots: 'Plots refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, plots: 'error' }));
+    }
   }, [currentSite, plotListDispatch]);
 
   const loadQuadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus) return;
-
-    setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
-    const quadratsResponse = await fetch(
-      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
-    );
-    const quadratsData = await quadratsResponse.json();
-    if (!quadratsData) return;
-
-    setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
-    if (quadratListDispatch) {
-      await quadratListDispatch({ quadratList: quadratsData });
+    if (!currentPlot || !currentCensus) {
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats refresh skipped (no active plot/census).' }));
+      setLoadStatus(prev => ({ ...prev, quadrats: 'skipped' }));
+      return;
     }
-    setProgress(prev => ({ ...prev, quadrats: 100 }));
-    setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
+
+    try {
+      setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
+      const quadratsResponse = await fetch(
+        `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
+      );
+      const quadratsData = await quadratsResponse.json();
+
+      if (!quadratsData || !Array.isArray(quadratsData)) {
+        ailogger.warn('Quadrats data response is not valid:', quadratsData);
+        setProgress(prev => ({ ...prev, quadrats: 100 }));
+        setProgressText(prev => ({ ...prev, quadrats: 'Quadrats refresh failed (invalid server response).' }));
+        setLoadStatus(prev => ({ ...prev, quadrats: 'warning' }));
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
+      if (quadratListDispatch) {
+        await quadratListDispatch({ quadratList: quadratsData });
+      }
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrat data refreshed.' }));
+      setLoadStatus(prev => ({ ...prev, quadrats: 'success' }));
+    } catch (error: unknown) {
+      ailogger.error('Error loading quadrats data:', error instanceof Error ? error : new Error(String(error)));
+      setProgress(prev => ({ ...prev, quadrats: 100 }));
+      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, quadrats: 'error' }));
+    }
   }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
   useEffect(() => {
@@ -137,6 +219,23 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
   // Calculate overall progress as average of the three data loads
   const overallProgress = (progress.census + progress.plots + progress.quadrats) / 3;
+
+  // Check if any loads had issues
+  const hasErrors = Object.values(loadStatus).some(status => status === 'error');
+  const hasWarnings = Object.values(loadStatus).some(status => status === 'warning');
+  const hasIssues = hasErrors || hasWarnings;
+
+  // Get list of failed/warning refreshes for display
+  const issueMessages: string[] = [];
+  if (loadStatus.census === 'error' || loadStatus.census === 'warning') {
+    issueMessages.push(progressText.census);
+  }
+  if (loadStatus.plots === 'error' || loadStatus.plots === 'warning') {
+    issueMessages.push(progressText.plots);
+  }
+  if (loadStatus.quadrats === 'error' || loadStatus.quadrats === 'warning') {
+    issueMessages.push(progressText.quadrats);
+  }
 
   return (
     <Box
@@ -195,16 +294,55 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         </Stack>
       ) : (
         <Stack spacing={3} sx={{ alignItems: 'center', textAlign: 'center', mt: 4, width: '100%' }}>
-          <Typography level="h2" color="success">
-            Upload Complete!
+          <Typography level="h2" color={hasIssues ? 'warning' : 'success'}>
+            {hasIssues ? 'Upload Complete (with warnings)' : 'Upload Complete!'}
           </Typography>
-          <Typography level="body-lg">Your data has been processed and uploaded successfully.</Typography>
+          <Typography level="body-lg">
+            {hasIssues
+              ? 'Your data has been uploaded, but some background refreshes encountered issues.'
+              : 'Your data has been processed and uploaded successfully.'}
+          </Typography>
+
+          {/* Show warning alert if any refreshes failed */}
+          {hasIssues && (
+            <Alert
+              color="warning"
+              variant="soft"
+              startDecorator={<WarningIcon />}
+              sx={{ width: '100%', textAlign: 'left' }}
+            >
+              <Box>
+                <Typography level="title-sm" color="warning">
+                  Data Refresh Issues
+                </Typography>
+                <Typography level="body-sm" sx={{ mt: 0.5 }}>
+                  Some application data could not be refreshed. You may need to refresh the page to see all updates.
+                </Typography>
+                {issueMessages.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    {issueMessages.map((msg, idx) => (
+                      <Typography key={idx} level="body-xs" sx={{ ml: 1 }}>
+                        • {msg}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            </Alert>
+          )}
+
           {uploadForm === FormType.measurements && (
             <Typography level="body-md" color="neutral">
               Any rows with errors have been moved to the failed measurements table for review.
             </Typography>
           )}
-          <Button variant="solid" color="success" size="lg" onClick={() => setOpenUploadConfirmModal(true)} sx={{ mt: 2 }}>
+          <Button
+            variant="solid"
+            color={hasIssues ? 'warning' : 'success'}
+            size="lg"
+            onClick={() => setOpenUploadConfirmModal(true)}
+            sx={{ mt: 2 }}
+          >
             Close
           </Button>
         </Stack>

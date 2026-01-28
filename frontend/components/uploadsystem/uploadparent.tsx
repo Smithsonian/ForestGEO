@@ -19,9 +19,9 @@ import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
-import { useFileManagement } from '@/app/hooks/useFileManagement';
-import { useUploadState } from '@/app/hooks/useUploadState';
-import { useErrorHandling } from '@/app/hooks/useErrorHandling';
+import { useFileManagement } from '@/app/hooks/usefilemanagement';
+import { useUploadState } from '@/app/hooks/useuploadstate';
+import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 
 export interface CMIDRow {
@@ -94,6 +94,19 @@ function UploadParentInner(props: UploadParentProps) {
     }
   }, [uploadState.state.reviewState, onUploadComplete]);
 
+  // Handle invalid state: if no upload form is set but we're not at START, reset to start
+  // This must be in useEffect, not during render, to avoid React error #185 (Maximum update depth exceeded)
+  useEffect(() => {
+    if (!uploadState.state.uploadForm && uploadState.state.reviewState !== ReviewStates.START) {
+      // Reset to start state when in invalid state
+      uploadState.resetToStart();
+      fileManagement.clearFiles();
+      setParsedData({});
+      setIsReingestionMode(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
+
   function _areHeadersValid(actualHeaders: string[]): {
     isValid: boolean;
     missingHeaders: string[];
@@ -163,9 +176,8 @@ function UploadParentInner(props: UploadParentProps) {
   }, [skipToProcessing, uploadState.state.uploadForm, uploadState.setReviewState]);
 
   const renderStateContent = () => {
-    if (!uploadState.state.uploadForm && uploadState.state.reviewState !== ReviewStates.START) {
-      handleReturnToStart().catch(ailogger.error);
-    }
+    // Note: Invalid state handling (uploadForm undefined when not at START)
+    // is now handled in useEffect above to avoid React error #185
     switch (uploadState.state.reviewState) {
       case ReviewStates.START:
         return (

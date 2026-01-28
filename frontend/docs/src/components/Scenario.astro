@@ -1,0 +1,244 @@
+---
+/**
+ * Scenario Component
+ * Displays troubleshooting case studies with title, cause, and solution steps.
+ * Useful for documenting common problems and their resolutions.
+ */
+
+interface Props {
+  title: string;
+  cause: string;
+  steps: string[];
+  outcome?: string;
+  icon?: 'warning' | 'error' | 'success' | 'info';
+  collapsible?: boolean;
+}
+
+const { title, cause, steps, outcome, icon = 'warning', collapsible = false } = Astro.props;
+
+const iconConfig = {
+  warning: { symbol: '⚠', color: 'var(--sl-color-orange)' },
+  error: { symbol: '✕', color: 'var(--sl-color-red)' },
+  success: { symbol: '✓', color: 'var(--sl-color-green)' },
+  info: { symbol: 'ℹ', color: 'var(--sl-color-blue)' },
+};
+
+const config = iconConfig[icon];
+---
+
+<div class={`scenario ${collapsible ? 'collapsible' : ''}`}>
+  <div class="scenario-header" style={`border-left-color: ${config.color};`}>
+    <span class="scenario-icon" style={`color: ${config.color};`}>
+      {config.symbol}
+    </span>
+    <h4 class="scenario-title">{title}</h4>
+    {collapsible && (
+      <button class="collapse-toggle" aria-label="Toggle scenario details">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+    )}
+  </div>
+
+  <div class="scenario-body">
+    <div class="scenario-section cause-section">
+      <span class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4M12 8h.01" />
+        </svg>
+        Cause
+      </span>
+      <p class="section-content">{cause}</p>
+    </div>
+
+    <div class="scenario-section solution-section">
+      <span class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        Solution
+      </span>
+      <ol class="solution-steps">
+        {steps.map((step, index) => (
+          <li class="step-item">
+            <span class="step-number">{index + 1}</span>
+            <span class="step-text">{step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    {outcome && (
+      <div class="scenario-section outcome-section">
+        <span class="section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <path d="M22 4L12 14.01l-3-3" />
+          </svg>
+          Expected Outcome
+        </span>
+        <p class="section-content outcome-content">{outcome}</p>
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .scenario {
+    margin: 1.25rem 0;
+    background: var(--sl-color-gray-7);
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+    overflow: hidden;
+  }
+
+  .scenario-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background: var(--sl-color-gray-6);
+    border-left: 4px solid;
+  }
+
+  .scenario-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+  }
+
+  .scenario-title {
+    flex: 1;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+    line-height: 1.3;
+  }
+
+  .collapse-toggle {
+    background: none;
+    border: none;
+    padding: 0.25rem;
+    cursor: pointer;
+    color: var(--sl-color-gray-3);
+    transition: transform 0.2s, color 0.2s;
+  }
+
+  .collapse-toggle:hover {
+    color: var(--sl-color-white);
+  }
+
+  .collapsible.collapsed .collapse-toggle {
+    transform: rotate(-90deg);
+  }
+
+  .collapsible.collapsed .scenario-body {
+    display: none;
+  }
+
+  .scenario-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .scenario-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .section-label svg {
+    opacity: 0.7;
+  }
+
+  .section-content {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+  }
+
+  .solution-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: var(--sl-color-accent-low);
+    color: var(--sl-color-accent-high);
+    border-radius: 50%;
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .step-text {
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+    padding-top: 0.1rem;
+  }
+
+  .outcome-section {
+    padding-top: 1rem;
+    border-top: 1px dashed var(--sl-color-gray-5);
+  }
+
+  .outcome-content {
+    padding: 0.75rem;
+    background: var(--sl-color-green-low);
+    border-radius: 6px;
+    color: var(--sl-color-green-high);
+    border: 1px solid var(--sl-color-green);
+  }
+
+  @media (max-width: 768px) {
+    .scenario-header {
+      padding: 0.75rem 1rem;
+    }
+
+    .scenario-body {
+      padding: 1rem;
+    }
+  }
+</style>
+
+<script>
+  // Collapsible functionality
+  document.querySelectorAll('.scenario.collapsible .collapse-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const scenario = toggle.closest('.scenario');
+      scenario?.classList.toggle('collapsed');
+    });
+  });
+</script>

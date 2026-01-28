@@ -1,0 +1,236 @@
+---
+/**
+ * ValidationRule Component
+ * Displays structured validation rule cards with consistent formatting.
+ * Shows rule ID, name, what it checks, severity, reasoning, and fix steps.
+ */
+
+interface Props {
+  id: string | number;
+  name: string;
+  checks: string;
+  severity: 'error' | 'warning' | 'info';
+  reasoning?: string;
+  fixSteps?: string[];
+  relatedRules?: string[];
+  expandable?: boolean;
+}
+
+const { id, name, checks, severity, reasoning, fixSteps, relatedRules, expandable = true } = Astro.props;
+
+const severityConfig = {
+  error: {
+    label: 'Error',
+    bg: 'var(--sl-color-red-low)',
+    border: 'var(--sl-color-red)',
+    text: 'var(--sl-color-red-high)',
+    icon: '✕',
+  },
+  warning: {
+    label: 'Warning',
+    bg: 'var(--sl-color-orange-low)',
+    border: 'var(--sl-color-orange)',
+    text: 'var(--sl-color-orange-high)',
+    icon: '⚠',
+  },
+  info: {
+    label: 'Info',
+    bg: 'var(--sl-color-blue-low)',
+    border: 'var(--sl-color-blue)',
+    text: 'var(--sl-color-blue-high)',
+    icon: 'ℹ',
+  },
+};
+
+const config = severityConfig[severity];
+---
+
+<div class="validation-rule" style={`border-left-color: ${config.border};`}>
+  <div class="rule-header">
+    <div class="rule-id">
+      <span class="id-label">Rule</span>
+      <span class="id-value">#{id}</span>
+    </div>
+    <h4 class="rule-name">{name}</h4>
+    <span
+      class="severity-badge"
+      style={`background: ${config.bg}; color: ${config.text}; border-color: ${config.border};`}
+    >
+      <span class="severity-icon">{config.icon}</span>
+      {config.label}
+    </span>
+  </div>
+
+  <div class="rule-body">
+    <div class="rule-section checks">
+      <span class="section-label">What it checks</span>
+      <p class="section-content">{checks}</p>
+    </div>
+
+    {reasoning && (
+      <div class="rule-section reasoning">
+        <span class="section-label">Why it exists</span>
+        <p class="section-content">{reasoning}</p>
+      </div>
+    )}
+
+    {fixSteps && fixSteps.length > 0 && (
+      <div class="rule-section fix-steps">
+        <span class="section-label">How to fix</span>
+        <ol class="fix-list">
+          {fixSteps.map((step) => (
+            <li>{step}</li>
+          ))}
+        </ol>
+      </div>
+    )}
+
+    {relatedRules && relatedRules.length > 0 && (
+      <div class="rule-section related">
+        <span class="section-label">Related rules</span>
+        <div class="related-tags">
+          {relatedRules.map((rule) => (
+            <span class="related-tag">#{rule}</span>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+
+<style>
+  .validation-rule {
+    margin: 1.25rem 0;
+    padding: 1.25rem;
+    background: var(--sl-color-gray-7);
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+    border-left: 4px solid;
+  }
+
+  .rule-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .rule-id {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.35rem 0.6rem;
+    background: var(--sl-color-gray-6);
+    border-radius: 6px;
+  }
+
+  .id-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .id-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--sl-color-white);
+  }
+
+  .rule-name {
+    flex: 1;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .severity-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 4px;
+    border: 1px solid;
+  }
+
+  .severity-icon {
+    font-size: 0.8rem;
+  }
+
+  .rule-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .rule-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .section-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .section-content {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.5;
+  }
+
+  .fix-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-2);
+  }
+
+  .fix-list li {
+    margin-bottom: 0.35rem;
+    line-height: 1.4;
+  }
+
+  .fix-list li:last-child {
+    margin-bottom: 0;
+  }
+
+  .related-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .related-tag {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-accent);
+    border-radius: 4px;
+  }
+
+  @media (max-width: 768px) {
+    .rule-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .severity-badge {
+      align-self: flex-start;
+    }
+  }
+</style>

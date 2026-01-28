@@ -3,8 +3,9 @@
 
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { useSession } from 'next-auth/react';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import { useAppStore } from '@/config/store/appstore';
 
 /**
  * siteName?: string;
@@ -64,6 +65,21 @@ const columns = standardizeGridColumns([
 export default function CatalogSitesDatagrid() {
   const { data: session } = useSession();
   const [refresh, setRefresh] = useState(false);
+  const setSiteList = useAppStore(state => state.setSiteList);
+
+  // Refresh the global site list in the store after any site data changes
+  const handleDataUpdate = useCallback(async () => {
+    try {
+      const response = await fetch('/api/administrative/fetch/sites');
+      if (response.ok) {
+        const updatedSites = await response.json();
+        setSiteList(updatedSites);
+      }
+    } catch (error) {
+      console.error('Failed to refresh site list:', error);
+    }
+  }, [setSiteList]);
+
   return (
     <IsolatedDataGridCommons
       gridType={'sites'}
@@ -83,6 +99,7 @@ export default function CatalogSitesDatagrid() {
       }}
       fieldToFocus={'siteName'}
       adminEmail={session?.user?.email}
+      onDataUpdate={handleDataUpdate}
     />
   );
 }

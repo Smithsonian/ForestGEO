@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Alert, Box, Chip, Divider, Option, Select, Sheet, Stack, Typography } from '@mui/joy';
 import { useFilePreviewAnalysis, DELIMITER_OPTIONS } from './useFilePreviewAnalysis';
 
@@ -9,15 +9,54 @@ interface FilePreviewCompactProps {
   onDelimiterChange: (delimiter: string) => void;
   initialDelimiter?: string;
   showPreview?: boolean;
+  onValidationStatusChange?: (isValid: boolean, issues: string[]) => void;
 }
 
-export default function FilePreviewCompact({ file, expectedHeaders, onDelimiterChange, initialDelimiter, showPreview = false }: FilePreviewCompactProps) {
+export default function FilePreviewCompact({
+  file,
+  expectedHeaders,
+  onDelimiterChange,
+  initialDelimiter,
+  showPreview = false,
+  onValidationStatusChange
+}: FilePreviewCompactProps) {
   const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, handleDelimiterChange } = useFilePreviewAnalysis({
     file,
     expectedHeaders,
     onDelimiterChange,
     initialDelimiter
   });
+
+  // Track last reported validation to prevent infinite loops
+  const lastReportedValidation = useRef<{ isValid: boolean; issuesKey: string } | null>(null);
+  // Use ref to store callback to avoid dependency on callback reference changes
+  const onValidationStatusChangeRef = useRef(onValidationStatusChange);
+  onValidationStatusChangeRef.current = onValidationStatusChange;
+
+  // Extract stable primitive values from validation result for dependency tracking
+  const validationIsValid = validationResult?.isValid ?? null;
+  const validationIssuesKey = validationResult?.issues?.join('|') ?? '';
+
+  // Report validation status changes to parent (only when values actually change)
+  useEffect(() => {
+    const callback = onValidationStatusChangeRef.current;
+    if (callback && !isAnalyzing && validationIsValid !== null && validationResult) {
+      const current = { isValid: validationIsValid, issuesKey: validationIssuesKey };
+
+      // Only call callback if validation result actually changed
+      if (
+        !lastReportedValidation.current ||
+        lastReportedValidation.current.isValid !== current.isValid ||
+        lastReportedValidation.current.issuesKey !== current.issuesKey
+      ) {
+        lastReportedValidation.current = current;
+        callback(validationIsValid, validationResult.issues);
+      }
+    }
+    // Note: validationIssuesKey is derived from validationResult.issues, so we use it instead
+    // of the array reference to prevent infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validationIsValid, validationIssuesKey, isAnalyzing]);
 
   const getStatusColor = () => {
     if (isAnalyzing) return 'neutral';

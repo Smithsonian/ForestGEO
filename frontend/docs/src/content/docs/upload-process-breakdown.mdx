@@ -15,6 +15,16 @@ The upload cycle follows this general flow:
 [Select File] → [Parse & Preview] → [Upload to Database] → [Validate] → [Azure Backup] → [Complete]
                                           ↓
                              [Failed Rows] → [Review & Fix] → [Reingest]
+
+[Select File]
+      ↓
+[Parse & Preview]
+      ↓
+[Upload to Database]
+      ↓
+[Azure Backup]
+      ↓
+[Complete]
 ```
 
 The core cycle is the same for all data types, but **measurements** have additional processing steps due to their complexity.

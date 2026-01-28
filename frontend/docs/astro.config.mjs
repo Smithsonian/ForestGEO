@@ -55,6 +55,15 @@ export default defineConfig({
           ]
         },
         {
+          label: 'CTFSWeb Migration',
+          collapsed: true,
+          items: [
+            { label: 'CTFSWeb vs ForestGEO Comparison', slug: 'migration/ctfsweb-forestgeo-comparison' },
+            { label: 'Data Model Reference', slug: 'migration/ctfsweb-data-model' },
+            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' }
+          ]
+        },
+        {
           label: 'Documentation Framework',
           collapsed: true,
           items: [

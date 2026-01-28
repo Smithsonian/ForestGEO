@@ -1,0 +1,257 @@
+---
+/**
+ * SideBySide Component
+ * Displays before/after or comparison images side by side.
+ * Responsive layout that stacks on mobile.
+ */
+
+import { Image } from 'astro:assets';
+
+interface ComparisonItem {
+  src: ImageMetadata | string;
+  alt: string;
+  label?: string;
+  version?: string;
+}
+
+interface Props {
+  before: ComparisonItem;
+  after: ComparisonItem;
+  title?: string;
+  caption?: string;
+  layout?: 'horizontal' | 'vertical';
+  showLabels?: boolean;
+}
+
+const {
+  before,
+  after,
+  title,
+  caption,
+  layout = 'horizontal',
+  showLabels = true,
+} = Astro.props;
+---
+
+<div class={`side-by-side ${layout}`}>
+  {title && <h4 class="comparison-title">{title}</h4>}
+
+  <div class="comparison-container">
+    <div class="comparison-item before">
+      {showLabels && (
+        <div class="item-header">
+          <span class="item-label before-label">
+            {before.label || 'Before'}
+          </span>
+          {before.version && (
+            <span class="item-version">{before.version}</span>
+          )}
+        </div>
+      )}
+      <div class="item-image-wrapper">
+        {typeof before.src === 'string' ? (
+          <img src={before.src} alt={before.alt} loading="lazy" class="item-image" />
+        ) : (
+          <Image src={before.src} alt={before.alt} loading="lazy" class="item-image" />
+        )}
+      </div>
+    </div>
+
+    <div class="comparison-divider">
+      <div class="divider-line"></div>
+      <div class="divider-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14M12 5l7 7-7 7" />
+        </svg>
+      </div>
+      <div class="divider-line"></div>
+    </div>
+
+    <div class="comparison-item after">
+      {showLabels && (
+        <div class="item-header">
+          <span class="item-label after-label">
+            {after.label || 'After'}
+          </span>
+          {after.version && (
+            <span class="item-version">{after.version}</span>
+          )}
+        </div>
+      )}
+      <div class="item-image-wrapper">
+        {typeof after.src === 'string' ? (
+          <img src={after.src} alt={after.alt} loading="lazy" class="item-image" />
+        ) : (
+          <Image src={after.src} alt={after.alt} loading="lazy" class="item-image" />
+        )}
+      </div>
+    </div>
+  </div>
+
+  {caption && (
+    <p class="comparison-caption">{caption}</p>
+  )}
+</div>
+
+<style>
+  .side-by-side {
+    margin: 1.5rem 0;
+    padding: 1.25rem;
+    background: var(--sl-color-gray-7);
+    border-radius: 12px;
+    border: 1px solid var(--sl-color-gray-5);
+  }
+
+  .comparison-title {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+    text-align: center;
+  }
+
+  .comparison-container {
+    display: flex;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .side-by-side.vertical .comparison-container {
+    flex-direction: column;
+  }
+
+  .comparison-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding: 0 0.25rem;
+  }
+
+  .item-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+  }
+
+  .before-label {
+    background: var(--sl-color-red-low);
+    color: var(--sl-color-red-high);
+  }
+
+  .after-label {
+    background: var(--sl-color-green-low);
+    color: var(--sl-color-green-high);
+  }
+
+  .item-version {
+    font-size: 0.7rem;
+    color: var(--sl-color-gray-3);
+    font-family: var(--sl-font-mono);
+  }
+
+  .item-image-wrapper {
+    flex: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+  }
+
+  .item-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .comparison-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .side-by-side.horizontal .comparison-divider {
+    flex-direction: column;
+    padding: 0 0.5rem;
+  }
+
+  .side-by-side.vertical .comparison-divider {
+    flex-direction: row;
+    padding: 0.5rem 0;
+  }
+
+  .divider-line {
+    flex: 1;
+    background: var(--sl-color-gray-5);
+  }
+
+  .side-by-side.horizontal .divider-line {
+    width: 2px;
+    min-height: 20px;
+  }
+
+  .side-by-side.vertical .divider-line {
+    height: 2px;
+    min-width: 20px;
+  }
+
+  .divider-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--sl-color-gray-6);
+    border: 2px solid var(--sl-color-gray-5);
+    border-radius: 50%;
+    color: var(--sl-color-accent);
+    flex-shrink: 0;
+  }
+
+  .side-by-side.vertical .divider-icon svg {
+    transform: rotate(90deg);
+  }
+
+  .comparison-caption {
+    margin: 1rem 0 0 0;
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-2);
+    text-align: center;
+    font-style: italic;
+    line-height: 1.4;
+  }
+
+  @media (max-width: 768px) {
+    .side-by-side.horizontal .comparison-container {
+      flex-direction: column;
+    }
+
+    .side-by-side.horizontal .comparison-divider {
+      flex-direction: row;
+      padding: 0.5rem 0;
+    }
+
+    .side-by-side.horizontal .divider-line {
+      width: auto;
+      height: 2px;
+      min-width: 20px;
+      min-height: 0;
+    }
+
+    .side-by-side.horizontal .divider-icon svg {
+      transform: rotate(90deg);
+    }
+  }
+</style>

@@ -35,7 +35,7 @@ import Filter1Icon from '@mui/icons-material/Filter1';
 export default function PlotCardModal(props: {
   plot: Plot;
   openPlotCardModal: boolean;
-  setOpenPlotCardModal: Dispatch<SetStateAction<boolean>>;
+  setOpenPlotCardModal: (isOpen: boolean) => void;
   setManualReset: Dispatch<SetStateAction<boolean>>;
 }) {
   const { plot, openPlotCardModal, setOpenPlotCardModal, setManualReset } = props;
@@ -46,6 +46,11 @@ export default function PlotCardModal(props: {
   const [editablePlot, setEditablePlot] = useState<Plot>({ ...plot });
   const [countdown, setCountdown] = useState(5);
   const currentSite = useSiteContext();
+
+  // Sync editablePlot state when plot prop changes
+  useEffect(() => {
+    setEditablePlot({ ...plot });
+  }, [plot]);
 
   const handleEditToggle = () => {
     setIsEditing(!isEditing);
@@ -63,22 +68,32 @@ export default function PlotCardModal(props: {
 
   const handleSave = async () => {
     setSubmitting(true);
-    if (!editablePlot) throw new Error('Editable plot is undefined');
+    if (!editablePlot) {
+      setSnackbarMessage('Error: No plot data to save.');
+      setOpenSnackbar(true);
+      setCountdown(5);
+      return;
+    }
 
-    const { numQuadrats, usesSubquadrats, ...filteredPlot } = editablePlot;
-    const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', 'plots', 'plotID');
+    try {
+      const { numQuadrats, usesSubquadrats, ...filteredPlot } = editablePlot;
+      const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', 'plots', 'plotID');
 
-    const response = await fetch(fetchProcessQuery, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oldRow: plot, newRow: filteredPlot })
-    });
+      const response = await fetch(fetchProcessQuery, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: plot, newRow: filteredPlot })
+      });
 
-    if (response.ok) {
-      setSnackbarMessage('Update successful! System will now reload. Please wait...');
-    } else {
-      // if response fails, then reset should not occur.
-      setSnackbarMessage('Update failed. Please try again.');
+      if (response.ok) {
+        setSnackbarMessage('Update successful! System will now reload. Please wait...');
+      } else {
+        // if response fails, then reset should not occur.
+        setSnackbarMessage('Update failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Failed to save plot:', error);
+      setSnackbarMessage('Network error. Please check your connection and try again.');
     }
     setOpenSnackbar(true);
     setCountdown(5);
@@ -176,7 +191,7 @@ export default function PlotCardModal(props: {
                         aria-labelledby={'plot-shape-input'}
                         placeholder="Plot Shape..."
                         name="plotShape"
-                        value={editablePlot?.plotShape ?? 'Plot Shape'}
+                        value={editablePlot?.plotShape ?? ''}
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
@@ -190,7 +205,7 @@ export default function PlotCardModal(props: {
                         sx={{ display: 'flex', flex: 1, width: '100%' }}
                         placeholder="Plot Description..."
                         name="plotDescription"
-                        value={editablePlot?.plotDescription ?? 'Plot Description'}
+                        value={editablePlot?.plotDescription ?? ''}
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />
@@ -252,7 +267,7 @@ export default function PlotCardModal(props: {
                         aria-labelledby={'plot-x-dim'}
                         placeholder="X dimension..."
                         name="dimensionX"
-                        value={isEditing ? (editablePlot?.dimensionX ?? '') : Number(editablePlot?.dimensionY ?? 0).toFixed(2)}
+                        value={isEditing ? (editablePlot?.dimensionX ?? '') : Number(editablePlot?.dimensionX ?? 0).toFixed(2)}
                         onChange={handleInputChange}
                         disabled={!isEditing}
                       />

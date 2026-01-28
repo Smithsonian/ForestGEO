@@ -1,0 +1,390 @@
+---
+/**
+ * TableReference Component
+ * Enhanced reference tables with optional search, sort, and sticky headers.
+ * Ideal for navigation paths, validation IDs, HTTP codes, etc.
+ */
+
+interface Column {
+  key: string;
+  label: string;
+  width?: string;
+  align?: 'left' | 'center' | 'right';
+  sortable?: boolean;
+}
+
+interface Props {
+  title?: string;
+  columns: Column[];
+  data: Record<string, string | number>[];
+  searchable?: boolean;
+  sortable?: boolean;
+  stickyHeader?: boolean;
+  striped?: boolean;
+  compact?: boolean;
+  maxHeight?: string;
+}
+
+const {
+  title,
+  columns,
+  data,
+  searchable = false,
+  sortable = false,
+  stickyHeader = true,
+  striped = true,
+  compact = false,
+  maxHeight,
+} = Astro.props;
+
+const tableId = `table-${Math.random().toString(36).slice(2, 9)}`;
+---
+
+<div class="table-reference" data-table-id={tableId}>
+  {(title || searchable) && (
+    <div class="table-header">
+      {title && <h4 class="table-title">{title}</h4>}
+      {searchable && (
+        <div class="table-search">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Search..."
+            aria-label="Search table"
+          />
+          <button class="search-clear" aria-label="Clear search" style="display: none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  )}
+
+  <div
+    class={`table-wrapper ${stickyHeader ? 'sticky-header' : ''}`}
+    style={maxHeight ? `max-height: ${maxHeight};` : ''}
+  >
+    <table class={`reference-table ${striped ? 'striped' : ''} ${compact ? 'compact' : ''}`}>
+      <thead>
+        <tr>
+          {columns.map((col) => (
+            <th
+              class={`${sortable && col.sortable !== false ? 'sortable' : ''}`}
+              style={`${col.width ? `width: ${col.width};` : ''} text-align: ${col.align || 'left'};`}
+              data-key={col.key}
+            >
+              <span class="th-content">
+                {col.label}
+                {sortable && col.sortable !== false && (
+                  <span class="sort-icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 5v14M5 12l7 7 7-7" />
+                    </svg>
+                  </span>
+                )}
+              </span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {data.map((row) => (
+          <tr>
+            {columns.map((col) => (
+              <td style={`text-align: ${col.align || 'left'};`}>
+                {row[col.key]}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  {searchable && (
+    <div class="table-footer">
+      <span class="result-count">
+        Showing <span class="count-value">{data.length}</span> of {data.length} entries
+      </span>
+    </div>
+  )}
+</div>
+
+<style>
+  .table-reference {
+    margin: 1.5rem 0;
+    background: var(--sl-color-gray-7);
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+    overflow: hidden;
+  }
+
+  .table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+  }
+
+  .table-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .table-search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    background: var(--sl-color-gray-7);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 6px;
+    transition: border-color 0.2s;
+  }
+
+  .table-search:focus-within {
+    border-color: var(--sl-color-accent);
+  }
+
+  .search-icon {
+    color: var(--sl-color-gray-3);
+    flex-shrink: 0;
+  }
+
+  .search-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--sl-color-white);
+    font-size: 0.85rem;
+    width: 150px;
+  }
+
+  .search-input::placeholder {
+    color: var(--sl-color-gray-4);
+  }
+
+  .search-clear {
+    background: none;
+    border: none;
+    padding: 0.2rem;
+    cursor: pointer;
+    color: var(--sl-color-gray-3);
+    transition: color 0.2s;
+  }
+
+  .search-clear:hover {
+    color: var(--sl-color-white);
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .table-wrapper.sticky-header {
+    overflow-y: auto;
+  }
+
+  .reference-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .reference-table.compact {
+    font-size: 0.8rem;
+  }
+
+  .reference-table th {
+    padding: 0.75rem 1rem;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-gray-1);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 2px solid var(--sl-color-gray-5);
+    white-space: nowrap;
+  }
+
+  .reference-table.compact th {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .sticky-header .reference-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .th-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .sortable:hover {
+    background: var(--sl-color-gray-5);
+  }
+
+  .sort-icon {
+    opacity: 0.4;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  .sortable:hover .sort-icon {
+    opacity: 0.7;
+  }
+
+  .sortable.asc .sort-icon {
+    opacity: 1;
+    transform: rotate(180deg);
+  }
+
+  .sortable.desc .sort-icon {
+    opacity: 1;
+  }
+
+  .reference-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    color: var(--sl-color-gray-2);
+    vertical-align: top;
+  }
+
+  .reference-table.compact td {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .reference-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .reference-table.striped tbody tr:nth-child(odd) {
+    background: var(--sl-color-gray-6);
+  }
+
+  .reference-table tbody tr:hover {
+    background: var(--sl-color-gray-5);
+  }
+
+  .reference-table tbody tr.hidden {
+    display: none;
+  }
+
+  .table-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+  }
+
+  .result-count {
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .count-value {
+    font-weight: 600;
+    color: var(--sl-color-gray-2);
+  }
+
+  @media (max-width: 768px) {
+    .table-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .search-input {
+      width: 100%;
+    }
+
+    .reference-table th,
+    .reference-table td {
+      padding: 0.5rem 0.75rem;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.table-reference').forEach((container) => {
+    const searchInput = container.querySelector('.search-input') as HTMLInputElement;
+    const searchClear = container.querySelector('.search-clear') as HTMLButtonElement;
+    const tbody = container.querySelector('tbody');
+    const rows = tbody?.querySelectorAll('tr');
+    const countValue = container.querySelector('.count-value');
+    const sortableHeaders = container.querySelectorAll('th.sortable');
+
+    // Search functionality
+    if (searchInput && rows) {
+      searchInput.addEventListener('input', () => {
+        const query = searchInput.value.toLowerCase();
+        let visibleCount = 0;
+
+        rows.forEach((row) => {
+          const text = row.textContent?.toLowerCase() || '';
+          const matches = query === '' || text.includes(query);
+          row.classList.toggle('hidden', !matches);
+          if (matches) visibleCount++;
+        });
+
+        if (countValue) {
+          countValue.textContent = String(visibleCount);
+        }
+
+        if (searchClear) {
+          searchClear.style.display = query ? 'block' : 'none';
+        }
+      });
+
+      searchClear?.addEventListener('click', () => {
+        searchInput.value = '';
+        searchInput.dispatchEvent(new Event('input'));
+      });
+    }
+
+    // Sort functionality
+    sortableHeaders.forEach((header) => {
+      header.addEventListener('click', () => {
+        const key = header.getAttribute('data-key');
+        const isAsc = header.classList.contains('asc');
+
+        // Remove sort from other headers
+        sortableHeaders.forEach((h) => h.classList.remove('asc', 'desc'));
+
+        // Toggle sort direction
+        header.classList.add(isAsc ? 'desc' : 'asc');
+
+        if (!rows || !key) return;
+
+        const rowsArray = Array.from(rows);
+        const colIndex = Array.from(header.parentElement?.children || []).indexOf(header);
+
+        rowsArray.sort((a, b) => {
+          const aVal = a.children[colIndex]?.textContent || '';
+          const bVal = b.children[colIndex]?.textContent || '';
+          const comparison = aVal.localeCompare(bVal, undefined, { numeric: true });
+          return isAsc ? -comparison : comparison;
+        });
+
+        rowsArray.forEach((row) => tbody?.appendChild(row));
+      });
+    });
+  });
+</script>
