@@ -490,7 +490,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           const fmData = await fmResponse.json();
 
           // Define headers for export (matching FailedMeasurementsGridColumns)
-          const fmHeaders = ['tag', 'stemTag', 'spCode', 'quadrat', 'x', 'y', 'dbh', 'hom', 'date', 'codes', 'failureReasons'];
+          const fmHeaders = [
+            'tag',
+            'stemTag',
+            'spCode',
+            'quadrat',
+            'x',
+            'y',
+            'dbh',
+            'hom',
+            'date',
+            'codes',
+            'currentFailureReasons',
+            'originalFailureReasons',
+            'failureReasons',
+            'lastValidatedAt'
+          ];
 
           let fmCSVRows = fmHeaders.join(',') + '\n';
           fmData.output.forEach((row: Record<string, unknown>) => {

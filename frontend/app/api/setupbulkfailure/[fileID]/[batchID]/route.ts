@@ -24,7 +24,7 @@ export async function GET(
   try {
     transactionID = await connectionManager.beginTransaction();
     let query = `
-    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments)
+    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
     select distinct FileID,
                     BatchID,
                     PlotID,
@@ -39,7 +39,10 @@ export async function GET(
                     nullif(HOM, 0)                        as HOM,
                     nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
                     nullif(Codes, '')                     as Codes,
-                    nullif(Comments, '')                  as Comments
+                    nullif(Comments, '')                  as Comments,
+                    'Batch moved after max attempts'      as OriginalFailureReasons,
+                    null                                  as CurrentFailureReasons,
+                    null                                  as FailureReasons
     from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?
     `;
     await connectionManager.executeQuery(query, [fileID, batchID], transactionID);

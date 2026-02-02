@@ -55,7 +55,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   errorRows = errorRows.map(row => ({
     ...row,
     plotID,
-    censusID
+    censusID,
+    originalFailureReasons: row.originalFailureReasons ?? row.failureReasons ?? null,
+    currentFailureReasons: row.currentFailureReasons ?? row.failureReasons ?? null
   }));
 
   const connectionManager = connectionmanager.getInstance();
@@ -67,9 +69,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   try {
     await connectionManager.executeQuery(insertQuery);
 
-    // Populate failure reasons for the newly inserted failed measurements
-    const reviewFailedQuery = `CALL ${schema}.reviewfailed()`;
-    await connectionManager.executeQuery(reviewFailedQuery);
+    // Refresh current failure reasons for the affected plot/census
+    const refreshFailedQuery = `CALL ${schema}.refresh_failedmeasurements_current(?, ?)`;
+    await connectionManager.executeQuery(refreshFailedQuery, [plotID, censusID]);
 
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {

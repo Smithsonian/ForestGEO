@@ -150,8 +150,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(undefined) // INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // DELETE failedmeasurements
         .mockResolvedValueOnce(undefined) // CALL bulkingestionprocess
-        .mockResolvedValueOnce([{ remaining: 2 }]) // Count remaining failures
-        .mockResolvedValueOnce(undefined); // CALL reviewfailed
+        .mockResolvedValueOnce([{ remaining: 2 }]); // Count remaining failures
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -167,9 +166,6 @@ describe('reingest API routes', () => {
       const bulkIngestionCall = calls.find((call: any) => call[0]?.includes('bulkingestionprocess'));
       expect(bulkIngestionCall).toBeDefined();
 
-      // Verify reviewfailed was called
-      const reviewFailedCall = calls.find((call: any) => call[0]?.includes('reviewfailed'));
-      expect(reviewFailedCall).toBeDefined();
     });
 
     it('returns 200 with 0 processed when no failed measurements exist', async () => {
@@ -192,8 +188,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(undefined) // INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // DELETE failedmeasurements
         .mockResolvedValueOnce(undefined) // CALL bulkingestionprocess
-        .mockResolvedValueOnce([{ remaining: 0 }]) // All successful
-        .mockResolvedValueOnce(undefined); // CALL reviewfailed
+        .mockResolvedValueOnce([{ remaining: 0 }]); // All successful
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -205,7 +200,7 @@ describe('reingest API routes', () => {
       expect(body.remainingFailures).toBe(0);
     });
 
-    it('rolls back and tries to run reviewfailed on error', async () => {
+    it('rolls back on error', async () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce([{ total: 5 }])
         .mockResolvedValueOnce(undefined)
@@ -218,10 +213,6 @@ describe('reingest API routes', () => {
       const body = await res.json();
       expect(body.error).toBe('Bulk ingestion failed');
       expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
-
-      // Should attempt to run reviewfailed even after error
-      const reviewFailedCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => call[0]?.includes('reviewfailed'));
-      expect(reviewFailedCall).toBeDefined();
     });
   });
 
@@ -272,25 +263,19 @@ describe('reingest API routes', () => {
       expect(insertCall[0]).toContain('fm.Codes'); // Maps from failedmeasurements
     });
 
-    it('should call reviewfailed after successful GET reingestion', async () => {
+    it('should complete GET reingestion without extra validation calls', async () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce([{ total: 5 }])
         .mockResolvedValueOnce(undefined) // DELETE temporarymeasurements
         .mockResolvedValueOnce(undefined) // INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // DELETE failedmeasurements
         .mockResolvedValueOnce(undefined) // CALL bulkingestionprocess
-        .mockResolvedValueOnce([{ remaining: 0 }]) // Count remaining
-        .mockResolvedValueOnce(undefined); // CALL reviewfailed
+        .mockResolvedValueOnce([{ remaining: 0 }]); // Count remaining
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
 
       expect(res.status).toBe(200);
-
-      // Verify reviewfailed was called to update failure reasons
-      const reviewFailedCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => call[0]?.includes('reviewfailed'));
-
-      expect(reviewFailedCall).toBeDefined();
     });
 
     it('should handle rows with codes correctly in bulk ingestion', async () => {
@@ -303,8 +288,7 @@ describe('reingest API routes', () => {
         .mockResolvedValueOnce(undefined) // INSERT temp
         .mockResolvedValueOnce(undefined) // DELETE failed
         .mockResolvedValueOnce(undefined) // bulkingestionprocess
-        .mockResolvedValueOnce([{ remaining: 0 }]) // Count remaining - all succeeded
-        .mockResolvedValueOnce(undefined); // reviewfailed
+        .mockResolvedValueOnce([{ remaining: 0 }]); // Count remaining - all succeeded
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());

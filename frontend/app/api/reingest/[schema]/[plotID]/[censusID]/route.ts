@@ -235,10 +235,6 @@ export async function GET(
     const remainingFailures = remainingFailuresResult[0]?.remaining || 0;
     const successfulReingestions = totalRows - remainingFailures;
 
-    // Step 5: Update failure reasons for any remaining failures
-    const reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
-    await connectionManager.executeQuery(reviewFailedSQL, [], transactionID);
-
     await connectionManager.commitTransaction(transactionID);
 
     return new NextResponse(
@@ -254,14 +250,6 @@ export async function GET(
     ailogger.error('Reingestion failed:', e);
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
-    }
-
-    // Try to run reviewfailed to update any failure reasons
-    try {
-      const reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
-      await connectionManager.executeQuery(reviewFailedSQL);
-    } catch (reviewError: any) {
-      ailogger.error('Failed to update failure reasons:', reviewError);
     }
 
     return new NextResponse(

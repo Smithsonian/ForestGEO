@@ -127,11 +127,6 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
         json: async () => ({ message: 'Update successful', updatedIDs: { failedmeasurements: 123 } })
       });
 
-      // Mock successful reviewfailed call
-      (global.fetch as any).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true })
-      });
 
       // Mock loadSelectableOptions
       const { loadSelectableOptions } = await import('@/components/client/clientmacros');
@@ -146,7 +141,7 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       // Call the onDataUpdate callback
       await (window as any).testOnDataUpdate(mockNewRow, mockOldRow);
 
-      // CRITICAL: Verify PATCH was called BEFORE reviewfailed
+      // Verify PATCH was called to save edits
       await waitFor(() => {
         const fetchCalls = (global.fetch as any).mock.calls;
 
@@ -154,9 +149,6 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
         expect(fetchCalls[0][0]).toContain('/api/fixeddata/failedmeasurements/testschema/123');
         expect(fetchCalls[0][1].method).toBe('PATCH');
         expect(fetchCalls[0][1].body).toContain('newspecies'); // New value is being saved
-
-        // Second call should be reviewfailed to update validation reasons
-        expect(fetchCalls[1][1].body).toContain('reviewfailed');
       });
     });
 

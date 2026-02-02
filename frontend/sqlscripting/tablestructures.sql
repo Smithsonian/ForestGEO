@@ -42,6 +42,9 @@ create table if not exists failedmeasurements
     Codes               varchar(255)   null,
     Comments            varchar(255)   null,
     FailureReasons      text           null,
+    OriginalFailureReasons text        null,
+    CurrentFailureReasons  text        null,
+    LastValidatedAt     datetime       null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
                                                       `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`,
                                                       `Codes`))) stored invisible,
@@ -1097,4 +1100,3 @@ create index idx_uploadmetrics_starttime
 
 create index idx_uploadmetrics_batch_census_status
     on uploadmetrics (batchID, censusID, status) comment 'Composite index for idempotency check in bulkingestionprocess';
-

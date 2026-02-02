@@ -16,6 +16,8 @@ import moment from 'moment/moment';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
+import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -32,6 +34,9 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   });
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [rowsWithNoFailures, setRowsWithNoFailures] = useState(0);
+  const [validationModalOpen, setValidationModalOpen] = useState(false);
+  const [validationResults, setValidationResults] = useState<any>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -57,7 +62,10 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     date: null,
     codes: '',
     description: '',
-    failureReasons: ''
+    failureReasons: '',
+    originalFailureReasons: '',
+    currentFailureReasons: '',
+    lastValidatedAt: null
   };
 
   const fieldToReasons = useMemo(() => {
@@ -164,7 +172,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   const onRowSave = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
       const reasons = computeFailureReasons(newRow);
-      const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons };
+      const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
       const failedMeasurementID = newRow.failedMeasurementID ?? oldRow.failedMeasurementID;
 
       try {
@@ -192,15 +200,6 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
           if (onRowReingested) {
             onRowReingested();
           }
-        } else {
-          const reviewResponse = await fetch(`/api/query`, {
-            method: 'POST',
-            body: JSON.stringify(`CALL ${currentSite?.schemaName}.reviewfailed();`)
-          });
-          if (!reviewResponse.ok) {
-            const errorData = await reviewResponse.json().catch(() => ({ message: `HTTP ${reviewResponse.status}` }));
-            throw new Error(errorData.message || `Failed to update validation reasons: ${reviewResponse.status}`);
-          }
         }
 
         // Trigger refresh immediately - no arbitrary delay needed
@@ -216,7 +215,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
 
   const displayFailureReason = useCallback(
     (params: any, column: GridColDef) => {
-      const storedReasons = params.row.failureReasons ?? '';
+      const storedReasons = params.row.currentFailureReasons ?? params.row.failureReasons ?? '';
 
       // Check if stored reasons contain actual failure messages (not just status like "Ready for reingestion")
       const actualFailureKeys = Object.keys(failureErrorMapping);
@@ -263,13 +262,43 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     [fieldToReasons, computeFailureReasons]
   );
 
+  const handleCheckIfReady = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) return;
+    setIsValidating(true);
+    try {
+      const response = await fetch(
+        `/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(errorData.error || `Validation check failed: ${response.status}`);
+      }
+      const results = await response.json();
+      setValidationResults(results);
+      setValidationModalOpen(true);
+      setRefresh(true);
+    } catch (error: any) {
+      ailogger.error('Validation check failed:', error);
+    } finally {
+      setIsValidating(false);
+    }
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+
   const columns: GridColDef[] = useMemo(() => {
     return [
       ...FailedMeasurementsGridColumns.map(column => {
+        const isReasonColumn = ['currentFailureReasons', 'originalFailureReasons', 'failureReasons', 'lastValidatedAt'].includes(column.field);
         return {
           ...column,
-          editable: true,
+          editable: !isReasonColumn,
           renderCell: (params: any) => {
+            if (isReasonColumn) {
+              return (
+                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                  {params.value === '' || params.value === null || params.value === undefined ? 'null' : String(params.value)}
+                </Typography>
+              );
+            }
             return (
               <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', width: '100%', marginY: 0.5 }}>
@@ -303,6 +332,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             );
           },
           renderEditCell: (params: GridRenderEditCellParams) => {
+            if (isReasonColumn) return null;
             if (column.field === 'date') {
               return (
                 <Box sx={{ width: '100%', height: '100%' }}>
@@ -366,7 +396,14 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         setRefresh={setRefresh}
         initialRow={initialFailedMeasurementsRow}
         fieldToFocus={'tag'}
-        dynamicButtons={[]}
+        dynamicButtons={[
+          {
+            label: isValidating ? 'Checking...' : 'Check if Ready',
+            onClick: handleCheckIfReady,
+            tooltip: 'Recompute current validation reasons for failed measurements',
+            icon: <CheckCircleOutlineIcon />
+          }
+        ]}
         defaultHideEmpty={false}
         apiRef={apiRef as RefObject<GridApiCommunity>}
         onDataUpdate={onRowSave}
@@ -387,6 +424,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
           Rows&quot; or save individual rows to process them.
         </Alert>
       </Snackbar>
+      <ValidationCheckModal open={validationModalOpen} onClose={() => setValidationModalOpen(false)} results={validationResults} />
     </>
   ) : (
     <CircularProgress />

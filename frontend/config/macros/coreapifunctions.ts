@@ -235,7 +235,13 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         if (dataType === 'failedmeasurements') {
           const { Hash_ID, ...failedTrimmed } = newRowData;
-          failedTrimmed['FailureReasons'] = '';
+          if (failedTrimmed['CurrentFailureReasons'] == null && failedTrimmed['FailureReasons'] != null) {
+            failedTrimmed['CurrentFailureReasons'] = failedTrimmed['FailureReasons'];
+          }
+          if (failedTrimmed['FailureReasons'] == null && failedTrimmed['CurrentFailureReasons'] != null) {
+            failedTrimmed['FailureReasons'] = failedTrimmed['CurrentFailureReasons'];
+          }
+          failedTrimmed['LastValidatedAt'] = null;
           // Convert Date from ISO format to MySQL format (YYYY-MM-DD)
           if (failedTrimmed['Date']) {
             const date = new Date(failedTrimmed['Date']);

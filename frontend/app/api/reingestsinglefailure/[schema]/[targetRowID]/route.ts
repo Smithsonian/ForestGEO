@@ -22,7 +22,7 @@ export async function GET(
   }
 
   // Validate schema to prevent SQL injection
-  let shiftQuery: string, clearQuery: string, bulkProcessSQL: string, reviewFailedSQL: string;
+  let shiftQuery: string, clearQuery: string, bulkProcessSQL: string;
   try {
     shiftQuery = safeFormatQuery(
       schema,
@@ -32,7 +32,6 @@ export async function GET(
     );
     clearQuery = safeFormatQuery(schema, 'DELETE FROM ??.failedmeasurements WHERE FailedMeasurementID = ?');
     bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-    reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
   } catch (error: any) {
     ailogger.error(`Invalid schema in reingestsinglefailure: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -52,12 +51,6 @@ export async function GET(
     ailogger.error('Failed to reingest single failure:', e);
     if (transactionID) {
       await connectionManager.rollbackTransaction(transactionID);
-    }
-    // reinsert into table in case removed
-    try {
-      await connectionManager.executeQuery(reviewFailedSQL);
-    } catch (reviewError: any) {
-      ailogger.error('Failed to run reviewfailed after error:', reviewError);
     }
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
