@@ -10,7 +10,35 @@ import ailogger from '@/ailogger';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
+type RouteProps = { params: Promise<{ dataType: string; slugs?: string[] }> };
+
+async function parseFilterModel(request: NextRequest, slugs?: string[], body?: any) {
+  if (body?.filterModel) {
+    return body.filterModel;
+  }
+
+  const urlFilter = request.nextUrl.searchParams.get('filterModel');
+  if (urlFilter) {
+    try {
+      return JSON.parse(urlFilter);
+    } catch (error: any) {
+      return { error: `Invalid filterModel query param: ${error.message}` };
+    }
+  }
+
+  const filterModelParam = slugs?.[3];
+  if (filterModelParam && filterModelParam !== 'undefined') {
+    try {
+      return JSON.parse(filterModelParam);
+    } catch (error: any) {
+      return { error: `Invalid filterModel path param: ${error.message}` };
+    }
+  }
+
+  return undefined;
+}
+
+async function handleRequest(request: NextRequest, props: RouteProps, body?: any) {
   const params = await props.params;
   const { dataType, slugs } = params;
   if (!dataType || !slugs) {
@@ -18,7 +46,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
       status: HTTPResponses.INVALID_REQUEST
     });
   }
-  const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
+  const [schema, plotIDParam, censusIDParam] = slugs;
   if (!schema) {
     return new NextResponse(JSON.stringify({ error: 'no schema provided' }), {
       status: HTTPResponses.INVALID_REQUEST
@@ -26,7 +54,12 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
   }
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
-  const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
+  const filterModel = await parseFilterModel(request, slugs, body);
+  if (filterModel?.error) {
+    return new NextResponse(JSON.stringify({ error: filterModel.error }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
   const connectionManager = ConnectionManager.getInstance();
   let query = '';
   let results: any[] = [];
@@ -46,6 +79,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                      AND COLUMN_NAME NOT LIKE '%_id' `;
     const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
     columns = results.map((row: any) => row.COLUMN_NAME);
+    if (params.dataType === 'failedmeasurements') {
+      columns = Array.from(new Set([...columns, 'FileID', 'BatchID']));
+    }
   } catch (e: any) {
     ailogger.error('Error fetching columns in formdownload:', e);
     return new NextResponse(JSON.stringify({ error: e.message }), {
@@ -210,6 +246,44 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           errors: row.Errors
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
+      case 'failedmeasurements':
+        query = `SELECT
+                  fm.FailedMeasurementID AS failedmeasurementid,
+                  fm.FileID              AS fileid,
+                  fm.BatchID             AS batchid,
+                  fm.Tag                 AS tag,
+                  fm.StemTag             AS stemtag,
+                  fm.SpCode              AS spcode,
+                  fm.Quadrat             AS quadrat,
+                  fm.X                   AS lx,
+                  fm.Y                   AS ly,
+                  fm.DBH                 AS dbh,
+                  fm.HOM                 AS hom,
+                  fm.Date                AS date,
+                  fm.Codes               AS codes,
+                  fm.FailureReasons      AS failureReasons
+              FROM ${schema}.failedmeasurements fm
+              WHERE fm.PlotID = ? AND fm.CensusID = ?
+              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
+              ORDER BY fm.FailedMeasurementID ASC`;
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
+        formMappedResults = results.map((row: any) => ({
+          failedmeasurementid: row.failedmeasurementid,
+          fileid: row.fileid,
+          batchid: row.batchid,
+          tag: row.tag,
+          stemtag: row.stemtag,
+          spcode: row.spcode,
+          quadrat: row.quadrat,
+          lx: row.lx,
+          ly: row.ly,
+          dbh: row.dbh,
+          hom: row.hom,
+          date: row.date,
+          codes: row.codes,
+          failureReasons: row.failureReasons
+        }));
+        return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:
         return new NextResponse(JSON.stringify({ error: 'incorrect data type passed in' }), {
           status: HTTPResponses.INVALID_REQUEST
@@ -223,4 +297,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
   } finally {
     await connectionManager.closeConnection();
   }
+}
+
+export async function GET(request: NextRequest, props: RouteProps) {
+  return handleRequest(request, props);
+}
+
+export async function POST(request: NextRequest, props: RouteProps) {
+  let body: any = undefined;
+  try {
+    body = await request.json();
+  } catch (error: any) {
+    body = undefined;
+  }
+  return handleRequest(request, props, body);
 }

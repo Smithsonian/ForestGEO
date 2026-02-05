@@ -52,6 +52,33 @@ import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
 
+const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  let strValue = String(value);
+  if (options?.isDate) {
+    const parsedDate = moment(strValue);
+    if (parsedDate.isValid()) {
+      strValue = parsedDate.format('YYYY-MM-DD');
+    }
+  }
+  const needsFormulaEscape =
+    strValue.startsWith('=') ||
+    strValue.startsWith('+') ||
+    strValue.startsWith('-') ||
+    strValue.startsWith('@') ||
+    strValue.startsWith('\t');
+  const safeValue = needsFormulaEscape ? `'${strValue}` : strValue;
+  if (safeValue.includes(',') || safeValue.includes('"') || safeValue.includes('\n')) {
+    return `"${safeValue.replace(/"/g, '""')}"`;
+  }
+  return safeValue;
+};
+
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
   fetchPaginatedData: () => Promise<void>;
@@ -311,23 +338,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.attributes)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             aCSVRows += values.join(',') + '\n';
           });
           const aBlob = new Blob([aCSVRows], {
@@ -356,23 +367,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.quadrats)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             qCSVRows += values.join(',') + '\n';
           });
           const qBlob = new Blob([qCSVRows], {
@@ -401,23 +396,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.personnel)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             pCSVRows += values.join(',') + '\n';
           });
           const pBlob = new Blob([pCSVRows], {
@@ -447,23 +426,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.species)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             sCSVRows += values.join(',') + '\n';
           });
           const sBlob = new Blob([sCSVRows], {
@@ -479,6 +442,51 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           break;
         case 'viewfulltable':
           await fetchFullData();
+          break;
+        case 'failedmeasurements':
+          const fmResponse = await fetch(
+            `/api/formdownload/failedmeasurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filterModel })
+            }
+          );
+          if (!fmResponse.ok) throw new Error(`Failed to download failed measurements: ${fmResponse.status}`);
+          const fmData = await fmResponse.json();
+          const fmHeaders = [
+            'failedmeasurementid',
+            'fileid',
+            'batchid',
+            'tag',
+            'stemtag',
+            'spcode',
+            'quadrat',
+            'lx',
+            'ly',
+            'dbh',
+            'hom',
+            'date',
+            'codes',
+            'failureReasons'
+          ];
+          let fmCSVRows = fmHeaders.join(',') + '\n';
+          fmData.forEach((row: Record<string, unknown>) => {
+            const values = fmHeaders.map(header => {
+              return sanitizeCsvValue(row[header], { isDate: header === 'date' });
+            });
+            fmCSVRows += values.join(',') + '\n';
+          });
+          const fmBlob = new Blob([fmCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const fmURL = URL.createObjectURL(fmBlob);
+          const fmLink = document.createElement('a');
+          fmLink.href = fmURL;
+          fmLink.download = `failedmeasurements_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(fmLink);
+          fmLink.click();
+          document.body.removeChild(fmLink);
           break;
       }
     } catch (error: any) {
