@@ -725,6 +725,8 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(12, 6)          null,
     Description       varchar(255)            null,
     UserDefinedFields json                    null,
+    UploadFileID      varchar(255)            null,
+    UploadBatchID     varchar(36)             null,
     IsActive          tinyint(1) default 1    not null,
     DeletedAt         datetime                null,
     constraint ux_measure_unique
@@ -796,6 +798,9 @@ create index idx_stemid
 
 create index ix_cm_cid_date_dbh_hom
     on coremeasurements (CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
+
+create index idx_cm_uploadbatch_census
+    on coremeasurements (UploadBatchID, CensusID);
 
 create table if not exists specimens
 (

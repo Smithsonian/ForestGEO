@@ -1101,7 +1101,8 @@ end $$
 create
     definer = azureroot@`%` procedure refresh_failedmeasurements_current(IN pPlotID int, IN pCensusID int)
 begin
-    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_reasons, fm_reason_agg, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
+    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_candidates_copy, fm_reasons, fm_reason_agg,
+        fm_dup_keys, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
 
     CREATE TEMPORARY TABLE fm_candidates AS
     SELECT FailedMeasurementID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments
@@ -1183,9 +1184,19 @@ begin
     WHERE HOM IS NOT NULL AND HOM < 0;
 
     INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing X'
+    FROM fm_candidates
+    WHERE X IS NULL;
+
+    INSERT INTO fm_reasons
     SELECT FailedMeasurementID, CONCAT('Invalid LocalX: ', X)
     FROM fm_candidates
     WHERE X IS NOT NULL AND X < 0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing Y'
+    FROM fm_candidates
+    WHERE Y IS NULL;
 
     INSERT INTO fm_reasons
     SELECT FailedMeasurementID, CONCAT('Invalid LocalY: ', Y)
@@ -1217,15 +1228,20 @@ begin
       );
 
     -- Duplicate detection within failed measurements (same key fields)
+    -- MySQL temp tables can't be reopened in a subquery; use a copy + key table.
+    CREATE TEMPORARY TABLE fm_candidates_copy AS
+    SELECT * FROM fm_candidates;
+
+    CREATE TEMPORARY TABLE fm_dup_keys AS
+    SELECT Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date
+    FROM fm_candidates_copy
+    GROUP BY Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date
+    HAVING COUNT(*) > 1;
+
     CREATE TEMPORARY TABLE fm_dups AS
     SELECT c.FailedMeasurementID
     FROM fm_candidates c
-    JOIN (
-        SELECT Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, COUNT(*) as dup_count
-        FROM fm_candidates
-        GROUP BY Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date
-        HAVING COUNT(*) > 1
-    ) d ON c.Tag <=> d.Tag
+    INNER JOIN fm_dup_keys d ON c.Tag <=> d.Tag
         AND c.StemTag <=> d.StemTag
         AND c.SpCode <=> d.SpCode
         AND c.Quadrat <=> d.Quadrat
@@ -1348,7 +1364,8 @@ begin
     WHERE (pPlotID IS NULL OR fm.PlotID = pPlotID)
       AND (pCensusID IS NULL OR fm.CensusID = pCensusID);
 
-    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_reasons, fm_reason_agg, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
+    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_candidates_copy, fm_reasons, fm_reason_agg,
+        fm_dup_keys, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
 end $$
 
 create
@@ -1546,9 +1563,13 @@ BEGIN
                 THEN CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)')
             WHEN tm.HOM < 0
                 THEN CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)')
-            WHEN tm.LocalX IS NOT NULL AND tm.LocalX < 0
+            WHEN tm.LocalX IS NULL
+                THEN 'Missing X'
+            WHEN tm.LocalX < 0
                 THEN CONCAT('Invalid LocalX: ', tm.LocalX)
-            WHEN tm.LocalY IS NOT NULL AND tm.LocalY < 0
+            WHEN tm.LocalY IS NULL
+                THEN 'Missing Y'
+            WHEN tm.LocalY < 0
                 THEN CONCAT('Invalid LocalY: ', tm.LocalY)
             WHEN tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = '')
                 THEN 'Missing measurement data: DBH and HOM both 0 with no codes'
@@ -1662,7 +1683,7 @@ BEGIN
            CASE WHEN tq.QuadratID IS NULL OR ts.SpeciesID IS NULL THEN false ELSE true END as Valid,
            tq.QuadratID, ts.SpeciesID
     FROM initial_dup_filter i
-    LEFT JOIN quadrats tq ON tq.QuadratName = i.QuadratName AND tq.IsActive = 1
+    LEFT JOIN quadrats tq ON tq.QuadratName = i.QuadratName AND tq.PlotID = i.PlotID AND tq.IsActive = 1
     LEFT JOIN species ts ON ts.SpeciesCode = i.SpeciesCode AND ts.IsActive = 1;
 
     CREATE INDEX idx_validity_valid ON filter_validity (Valid);
@@ -1888,7 +1909,6 @@ BEGIN
             AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
         WHERE existing.TreeID IS NULL
     );
-    SET @before_tree_count = (SELECT COUNT(*) FROM trees WHERE CensusID = vCurrentCensusID);
 
     INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
     SELECT uti.TreeTag, uti.SpeciesID, uti.CensusID
@@ -1897,8 +1917,7 @@ BEGIN
         AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
     WHERE existing.TreeID IS NULL;
 
-    SET @after_tree_count = (SELECT COUNT(*) FROM trees WHERE CensusID = vCurrentCensusID);
-    SET @actual_tree_inserts = @after_tree_count - @before_tree_count;
+    SET @actual_tree_inserts = ROW_COUNT();
     SET @dropped_trees = @expected_tree_inserts - @actual_tree_inserts;
 
     IF @dropped_trees > 0 THEN
@@ -1930,7 +1949,6 @@ BEGIN
         INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
             AND t.CensusID = vCurrentCensusID AND t.IsActive = 1
     );
-    SET @before_stem_count = (SELECT COUNT(*) FROM stems WHERE CensusID = vCurrentCensusID);
 
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
     SELECT t.TreeID, usi.QuadratID, vCurrentCensusID, NULL,
@@ -1942,8 +1960,7 @@ BEGIN
     INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
         AND t.CensusID = vCurrentCensusID AND t.IsActive = 1;
 
-    SET @after_stem_count = (SELECT COUNT(*) FROM stems WHERE CensusID = vCurrentCensusID);
-    SET @actual_stem_inserts = @after_stem_count - @before_stem_count;
+    SET @actual_stem_inserts = ROW_COUNT();
     SET @dropped_stems = @expected_stem_inserts - @actual_stem_inserts;
 
     IF @dropped_stems > 0 THEN
@@ -1996,13 +2013,13 @@ BEGIN
             SELECT 1 FROM coremeasurements cm_check
             WHERE cm_check.StemGUID = s.StemGUID
               AND cm_check.CensusID = f.CensusID
-              AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+              AND (cm_check.UploadBatchID = vBatchID
+                   OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
         )
     );
-    SET @before_cm_count = (SELECT COUNT(*) FROM coremeasurements WHERE CensusID = vCurrentCensusID);
 
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                         Description, UserDefinedFields, IsActive)
+                                         Description, UserDefinedFields, UploadFileID, UploadBatchID, IsActive)
     SELECT f.CensusID, s.StemGUID, null,
            COALESCE(f.MeasurementDate, '1900-01-01'),
            CASE WHEN f.DBH = 0 THEN NULL ELSE f.DBH END,
@@ -2019,7 +2036,10 @@ BEGIN
                    'fileID', vFileID,
                    'batchID', vBatchID
                )
-           ), 1
+           ),
+           vFileID,
+           vBatchID,
+           1
     FROM filtered f
     INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
         AND t.CensusID = f.CensusID AND t.IsActive = 1
@@ -2030,11 +2050,11 @@ BEGIN
         SELECT 1 FROM coremeasurements cm_check
         WHERE cm_check.StemGUID = s.StemGUID
           AND cm_check.CensusID = f.CensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+          AND (cm_check.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
     );
 
-    SET @after_cm_count = (SELECT COUNT(*) FROM coremeasurements WHERE CensusID = vCurrentCensusID);
-    SET @actual_cm_inserts = @after_cm_count - @before_cm_count;
+    SET @actual_cm_inserts = ROW_COUNT();
     SET @dropped_cm = @expected_cm_inserts - @actual_cm_inserts;
     SET vProcessedCount = @actual_cm_inserts;
 
@@ -2056,7 +2076,9 @@ BEGIN
         MeasuredDBH = NULLIF(MeasuredDBH, 0),
         MeasuredHOM = NULLIF(MeasuredHOM, 0),
         Description = NULLIF(Description, '')
-    WHERE CensusID = vCurrentCensusID;
+    WHERE CensusID = vCurrentCensusID
+      AND (UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
 
     IF EXISTS(SELECT 1 FROM filtered WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
         CREATE TEMPORARY TABLE tempcodes AS
@@ -2067,7 +2089,9 @@ BEGIN
         INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
             AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
         INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
-            AND cm.CensusID = f.CensusID AND cm.IsActive = 1,
+            AND cm.CensusID = f.CensusID AND cm.IsActive = 1
+            AND (cm.UploadBatchID = vBatchID
+                 OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID),
         json_table(
             if(f.Codes = '' or trim(f.Codes) = '', '[]',
                concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
@@ -2120,7 +2144,9 @@ BEGIN
         AND prev_tree.PrevSpeciesID != t.SpeciesID  -- Different species
     INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
     WHERE cm.CensusID = vCurrentCensusID
-      AND cm.IsActive = 1;
+      AND cm.IsActive = 1
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
 
     INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
     SELECT DISTINCT CoreMeasurementID, 20 as ValidationErrorID
@@ -2168,6 +2194,8 @@ BEGIN
     ) first_occurrence ON t.TreeTag = first_occurrence.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
       AND sp.SpeciesCode != first_occurrence.SpeciesCode;
 
     INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
@@ -2213,9 +2241,11 @@ BEGIN
         FROM coremeasurements cm
         JOIN stems s ON cm.StemGUID = s.StemGUID AND s.IsActive = 1
         JOIN trees t ON s.TreeID = t.TreeID AND t.IsActive = 1
-        WHERE cm.CensusID = vCurrentCensusID
-          AND cm.MeasurementDate IS NOT NULL
-          AND cm.MeasuredDBH IS NOT NULL
+    WHERE cm.CensusID = vCurrentCensusID
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+      AND cm.MeasurementDate IS NOT NULL
+      AND cm.MeasuredDBH IS NOT NULL
         GROUP BY t.TreeTag, s.StemTag, cm.MeasurementDate
         HAVING dbh_count > 1
     ) dups
@@ -2235,6 +2265,8 @@ BEGIN
            vBatchRowCount, vProcessedCount, 0, 0
     FROM coremeasurements cm
     WHERE cm.CensusID = vCurrentCensusID
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
       AND cm.MeasurementDate > DATE_ADD(NOW(), INTERVAL 10 YEAR)
     HAVING COUNT(*) > 0;
 
@@ -2259,6 +2291,8 @@ BEGIN
             AND prev.MeasurementDate < curr.MeasurementDate
             AND prev.MeasuredDBH IS NOT NULL
         WHERE curr.CensusID = vCurrentCensusID
+          AND (curr.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(curr.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
           AND curr.MeasuredDBH IS NOT NULL
           AND curr.MeasurementDate IS NOT NULL
         ORDER BY curr.StemGUID, prev.MeasurementDate DESC
@@ -2279,7 +2313,8 @@ BEGIN
     SET @final_success = (
         SELECT COUNT(*) FROM coremeasurements cm
         WHERE cm.CensusID = vCurrentCensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+          AND (cm.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
     );
     SET @final_failed = (
         SELECT COUNT(*) FROM failedmeasurements
