@@ -5,6 +5,7 @@ drop procedure if exists RefreshMeasurementsSummary;
 drop procedure if exists RefreshViewFullTable;
 drop procedure if exists reingestfailedrows;
 drop procedure if exists reviewfailed;
+drop procedure if exists refresh_failedmeasurements_current;
 drop procedure if exists reinsertdefaultvalidations;
 drop procedure if exists reinsertdefaultpostvalidations;
 
@@ -217,6 +218,9 @@ create
 begin
     DECLARE vErrorMessage TEXT DEFAULT '';
     DECLARE vErrorCode VARCHAR(10) DEFAULT '';
+    DECLARE vPlotID INT DEFAULT 0;
+    DECLARE vStemDateDupCount INT DEFAULT 0;
+    DECLARE vTreeStemTagDupCount INT DEFAULT 0;
 
     -- Error handler with proper rollback for transaction atomicity
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -235,6 +239,9 @@ begin
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = vErrorMessage;
     END;
 
+    -- Get PlotID for alert logging
+    SELECT PlotID INTO vPlotID FROM census WHERE CensusID = vCensusID LIMIT 1;
+
     -- Start atomic transaction - all changes succeed or all fail together
     START TRANSACTION;
 
@@ -251,6 +258,15 @@ begin
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0 AND CensusID = vCensusID;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0 AND CensusID = vCensusID;
 
+    -- Count duplicates BEFORE deletion (StemGUID + MeasurementDate duplicates)
+    SELECT COUNT(*) INTO vStemDateDupCount
+    FROM coremeasurements cm1
+    INNER JOIN coremeasurements cm2
+    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+      AND cm1.StemGUID = cm2.StemGUID
+      AND cm1.MeasurementDate = cm2.MeasurementDate
+      AND cm1.CensusID = vCensusID;
+
     -- Remove duplicates based on StemGUID and MeasurementDate
     DELETE cm1
     FROM coremeasurements cm1
@@ -259,6 +275,31 @@ begin
       AND cm1.StemGUID = cm2.StemGUID
       AND cm1.MeasurementDate = cm2.MeasurementDate
       AND cm1.CensusID = vCensusID;
+
+    -- Log StemGUID+Date deduplication if any rows were removed
+    IF vStemDateDupCount > 0 THEN
+        INSERT INTO uploadintegrityalerts
+            (plotID, censusID, type, message, severity, failedRecords)
+        VALUES
+            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+             CONCAT('Removed ', vStemDateDupCount, ' duplicate rows (same StemGUID+MeasurementDate)'),
+             'info', vStemDateDupCount);
+    END IF;
+
+    -- Count duplicates BEFORE deletion (TreeTag + StemTag duplicates)
+    SELECT COUNT(*) INTO vTreeStemTagDupCount
+    FROM coremeasurements cm1
+    INNER JOIN stems s1 ON cm1.StemGUID = s1.StemGUID
+    INNER JOIN trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
+    INNER JOIN coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
+    INNER JOIN stems s2 ON cm2.StemGUID = s2.StemGUID
+    INNER JOIN trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+      AND t1.TreeTag = t2.TreeTag
+      AND s1.StemTag = s2.StemTag
+      AND cm1.CensusID = vCensusID
+      AND t1.CensusID = vCensusID
+      AND s1.CensusID = vCensusID;
 
     -- Remove duplicates based on TreeTag/StemTag combinations within the same census
     DELETE cm1
@@ -275,11 +316,23 @@ begin
       AND t1.CensusID = vCensusID
       AND s1.CensusID = vCensusID;
 
+    -- Log TreeTag+StemTag deduplication if any rows were removed
+    IF vTreeStemTagDupCount > 0 THEN
+        INSERT INTO uploadintegrityalerts
+            (plotID, censusID, type, message, severity, failedRecords)
+        VALUES
+            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+             CONCAT('Removed ', vTreeStemTagDupCount, ' duplicate rows (same TreeTag+StemTag in census)'),
+             'info', vTreeStemTagDupCount);
+    END IF;
+
     -- Commit all changes atomically
     COMMIT;
 
-    -- Return success message
-    SELECT CONCAT('Census ', vCensusID, ' collapsed successfully') as message;
+    -- Return success message with deduplication counts
+    SELECT CONCAT('Census ', vCensusID, ' collapsed successfully. Deduplication: ',
+                  vStemDateDupCount, ' StemGUID+Date duplicates, ',
+                  vTreeStemTagDupCount, ' TreeTag+StemTag duplicates removed.') as message;
 end $$
 
 create
@@ -1046,56 +1099,297 @@ where cm.IsValidated is null and cm.IsActive is true
 end $$
 
 create
+    definer = azureroot@`%` procedure refresh_failedmeasurements_current(IN pPlotID int, IN pCensusID int)
+begin
+    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_candidates_copy, fm_reasons, fm_reason_agg,
+        fm_dup_keys, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
+
+    CREATE TEMPORARY TABLE fm_candidates AS
+    SELECT FailedMeasurementID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments
+    FROM failedmeasurements
+    WHERE (pPlotID IS NULL OR PlotID = pPlotID)
+      AND (pCensusID IS NULL OR CensusID = pCensusID);
+
+    CREATE TEMPORARY TABLE fm_reasons (
+        FailedMeasurementID int,
+        Reason text
+    );
+
+    -- Required field checks
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing required field: TreeTag'
+    FROM fm_candidates
+    WHERE Tag IS NULL OR TRIM(Tag) = '';
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing required field: StemTag'
+    FROM fm_candidates
+    WHERE StemTag IS NULL OR TRIM(StemTag) = '';
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing required field: SpeciesCode'
+    FROM fm_candidates
+    WHERE SpCode IS NULL OR TRIM(SpCode) = '';
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing required field: QuadratName'
+    FROM fm_candidates
+    WHERE Quadrat IS NULL OR TRIM(Quadrat) = '';
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing required field: MeasurementDate'
+    FROM fm_candidates
+    WHERE Date IS NULL OR Date = '1900-01-01';
+
+    -- String length validations
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID,
+           CONCAT('TreeTag exceeds maximum length of 20 characters: \"', LEFT(Tag, 25), '...\" (', LENGTH(Tag), ' chars)')
+    FROM fm_candidates
+    WHERE Tag IS NOT NULL AND LENGTH(Tag) > 20;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID,
+           CONCAT('StemTag exceeds maximum length of 10 characters: \"', StemTag, '\" (', LENGTH(StemTag), ' chars)')
+    FROM fm_candidates
+    WHERE StemTag IS NOT NULL AND LENGTH(StemTag) > 10;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID,
+           CONCAT('SpeciesCode exceeds maximum length of 25 characters: \"', SpCode, '\" (', LENGTH(SpCode), ' chars)')
+    FROM fm_candidates
+    WHERE SpCode IS NOT NULL AND LENGTH(SpCode) > 25;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID,
+           CONCAT('Comments exceed maximum length of 255 characters (', LENGTH(Comments), ' chars, truncated)')
+    FROM fm_candidates
+    WHERE Comments IS NOT NULL AND LENGTH(Comments) > 255;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID,
+           CONCAT('Codes exceed maximum length of 255 characters (', LENGTH(Codes), ' chars, truncated)')
+    FROM fm_candidates
+    WHERE Codes IS NOT NULL AND LENGTH(Codes) > 255;
+
+    -- Numeric validations
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, CONCAT('Invalid DBH: ', DBH, ' (must be >= 0 or NULL)')
+    FROM fm_candidates
+    WHERE DBH IS NOT NULL AND DBH < 0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, CONCAT('Invalid HOM: ', HOM, ' (must be >= 0 or NULL)')
+    FROM fm_candidates
+    WHERE HOM IS NOT NULL AND HOM < 0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing X'
+    FROM fm_candidates
+    WHERE X IS NULL;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, CONCAT('Invalid LocalX: ', X)
+    FROM fm_candidates
+    WHERE X IS NOT NULL AND X < 0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing Y'
+    FROM fm_candidates
+    WHERE Y IS NULL;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, CONCAT('Invalid LocalY: ', Y)
+    FROM fm_candidates
+    WHERE Y IS NOT NULL AND Y < 0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Missing measurement data: DBH and HOM both 0 with no codes'
+    FROM fm_candidates
+    WHERE COALESCE(DBH, 0) = 0 AND COALESCE(HOM, 0) = 0 AND (Codes IS NULL OR TRIM(Codes) = '');
+
+    -- Referential integrity checks
+    INSERT INTO fm_reasons
+    SELECT c.FailedMeasurementID, CONCAT('Invalid quadrat name: \"', c.Quadrat, '\" not found in database')
+    FROM fm_candidates c
+    WHERE c.Quadrat IS NOT NULL AND TRIM(c.Quadrat) != ''
+      AND NOT EXISTS (
+          SELECT 1 FROM quadrats q
+          WHERE q.QuadratName = c.Quadrat AND q.PlotID = c.PlotID AND q.IsActive = 1
+      );
+
+    INSERT INTO fm_reasons
+    SELECT c.FailedMeasurementID, CONCAT('Invalid species code: \"', c.SpCode, '\" not found in database')
+    FROM fm_candidates c
+    WHERE c.SpCode IS NOT NULL AND TRIM(c.SpCode) != ''
+      AND NOT EXISTS (
+          SELECT 1 FROM species s
+          WHERE s.SpeciesCode = c.SpCode AND s.IsActive = 1
+      );
+
+    -- Duplicate detection within failed measurements (same key fields)
+    -- MySQL temp tables can't be reopened in a subquery; use a copy + key table.
+    CREATE TEMPORARY TABLE fm_candidates_copy AS
+    SELECT * FROM fm_candidates;
+
+    CREATE TEMPORARY TABLE fm_dup_keys AS
+    SELECT Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date
+    FROM fm_candidates_copy
+    GROUP BY Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date
+    HAVING COUNT(*) > 1;
+
+    CREATE TEMPORARY TABLE fm_dups AS
+    SELECT c.FailedMeasurementID
+    FROM fm_candidates c
+    INNER JOIN fm_dup_keys d ON c.Tag <=> d.Tag
+        AND c.StemTag <=> d.StemTag
+        AND c.SpCode <=> d.SpCode
+        AND c.Quadrat <=> d.Quadrat
+        AND c.X <=> d.X
+        AND c.Y <=> d.Y
+        AND c.DBH <=> d.DBH
+        AND c.HOM <=> d.HOM
+        AND c.Date <=> d.Date;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, 'Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date'
+    FROM fm_dups;
+
+    -- Cross-census validation checks
+    CREATE TEMPORARY TABLE fm_old_trees AS
+    SELECT DISTINCT c.*
+    FROM fm_candidates c
+    WHERE c.Tag IS NOT NULL AND c.StemTag IS NOT NULL
+      AND EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = c.Tag AND t.CensusID < c.CensusID AND t.IsActive = 1)
+      AND EXISTS (SELECT 1 FROM trees t JOIN stems s ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+                  WHERE t.TreeTag = c.Tag AND s.StemTag = c.StemTag
+                    AND t.CensusID < c.CensusID AND t.IsActive = 1 AND s.IsActive = 1);
+
+    CREATE TEMPORARY TABLE fm_quadrat_mismatch AS
+    SELECT DISTINCT f.FailedMeasurementID,
+           CONCAT('Quadrat mismatch: Previous census quadrat was \"', prev_stem.PrevQuadratName,
+                  '\", current is \"', f.Quadrat,
+                  '\". Trees cannot change quadrats between censuses. Please verify TreeTag is correct or contact administrator if tree was genuinely moved.')
+           as FailureReason
+    FROM fm_old_trees f
+    INNER JOIN (
+        SELECT t.TreeTag, s.StemTag, q.QuadratName as PrevQuadratName
+        FROM stems s
+        INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+        INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
+        INNER JOIN (
+            SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) as MaxCensusID
+            FROM trees t2
+            JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+            WHERE t2.CensusID < pCensusID
+              AND t2.IsActive = 1
+              AND s2.IsActive = 1
+            GROUP BY t2.TreeTag, s2.StemTag
+        ) max_census ON t.TreeTag = max_census.TreeTag
+            AND s.StemTag = max_census.StemTag
+            AND t.CensusID = max_census.MaxCensusID
+        WHERE t.IsActive = 1 AND s.IsActive = 1
+    ) prev_stem ON prev_stem.TreeTag = f.Tag
+        AND prev_stem.StemTag = f.StemTag
+    WHERE prev_stem.PrevQuadratName != f.Quadrat;
+
+    CREATE TEMPORARY TABLE fm_coordinate_drift AS
+    SELECT DISTINCT f.FailedMeasurementID,
+           CONCAT('Coordinate drift: ',
+                  ROUND(SQRT(POW(f.X - prev_stem.PrevX, 2) + POW(f.Y - prev_stem.PrevY, 2)), 2),
+                  'm from previous census (>10m threshold). Previous: (', prev_stem.PrevX, ', ', prev_stem.PrevY,
+                  '), Current: (', f.X, ', ', f.Y,
+                  '). Please verify coordinates or mark as approved if tree genuinely moved.')
+           as FailureReason
+    FROM fm_old_trees f
+    INNER JOIN (
+        SELECT t.TreeTag, s.StemTag, s.LocalX as PrevX, s.LocalY as PrevY, q.QuadratName as PrevQuadratName
+        FROM stems s
+        INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+        INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
+        INNER JOIN (
+            SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) as MaxCensusID
+            FROM trees t2
+            JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+            WHERE t2.CensusID < pCensusID
+              AND t2.IsActive = 1
+              AND s2.IsActive = 1
+              AND s2.LocalX IS NOT NULL
+              AND s2.LocalY IS NOT NULL
+            GROUP BY t2.TreeTag, s2.StemTag
+        ) max_census ON t.TreeTag = max_census.TreeTag
+            AND s.StemTag = max_census.StemTag
+            AND t.CensusID = max_census.MaxCensusID
+        WHERE t.IsActive = 1 AND s.IsActive = 1
+    ) prev_stem ON prev_stem.TreeTag = f.Tag
+        AND prev_stem.StemTag = f.StemTag
+        AND prev_stem.PrevQuadratName = f.Quadrat
+    WHERE f.X IS NOT NULL
+      AND f.Y IS NOT NULL
+      AND SQRT(POW(f.X - prev_stem.PrevX, 2) + POW(f.Y - prev_stem.PrevY, 2)) > 10.0;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, FailureReason
+    FROM fm_quadrat_mismatch;
+
+    INSERT INTO fm_reasons
+    SELECT FailedMeasurementID, FailureReason
+    FROM fm_coordinate_drift;
+
+    CREATE TEMPORARY TABLE fm_reason_agg AS
+    SELECT FailedMeasurementID,
+           TRIM(BOTH '|' FROM GROUP_CONCAT(DISTINCT Reason ORDER BY Reason SEPARATOR ' | ')) as Reasons
+    FROM fm_reasons
+    GROUP BY FailedMeasurementID;
+
+    UPDATE failedmeasurements fm
+    LEFT JOIN fm_reason_agg fr ON fm.FailedMeasurementID = fr.FailedMeasurementID
+    SET fm.CurrentFailureReasons = fr.Reasons,
+        fm.LastValidatedAt = NOW(),
+        fm.FailureReasons = CASE
+            WHEN fr.Reasons IS NULL OR fr.Reasons = '' THEN 'Ready for reingestion'
+            ELSE fr.Reasons
+        END
+    WHERE (pPlotID IS NULL OR fm.PlotID = pPlotID)
+      AND (pCensusID IS NULL OR fm.CensusID = pCensusID);
+
+    UPDATE failedmeasurements fm
+    SET fm.OriginalFailureReasons = CASE
+        WHEN (fm.OriginalFailureReasons IS NULL OR fm.OriginalFailureReasons = '')
+             AND fm.FailureReasons IS NOT NULL
+             AND fm.FailureReasons <> 'Ready for reingestion'
+        THEN fm.FailureReasons
+        ELSE fm.OriginalFailureReasons
+    END
+    WHERE (pPlotID IS NULL OR fm.PlotID = pPlotID)
+      AND (pCensusID IS NULL OR fm.CensusID = pCensusID);
+
+    DROP TEMPORARY TABLE IF EXISTS fm_candidates, fm_candidates_copy, fm_reasons, fm_reason_agg,
+        fm_dup_keys, fm_dups, fm_old_trees, fm_quadrat_mismatch, fm_coordinate_drift;
+end $$
+
+create
     definer = azureroot@`%` procedure reviewfailed()
 begin
-    -- Simple, reliable failure detection
-    UPDATE failedmeasurements fm
-    SET FailureReasons = TRIM(BOTH '|' FROM CONCAT_WS('|',
-        -- SpCode validation
-                                                      CASE
-                                                          WHEN fm.SpCode IS NULL OR fm.SpCode = '' THEN 'SpCode missing'
-                                                          WHEN NOT EXISTS(SELECT 1 FROM species s WHERE s.SpeciesCode = fm.SpCode)
-                                                              THEN 'SpCode invalid'
-                                                          ELSE NULL
-                                                          END,
+    DECLARE vPlotID int;
+    DECLARE vCensusID int;
+    DECLARE done int default 0;
 
-        -- Quadrat validation
-                                                      CASE
-                                                          WHEN fm.Quadrat IS NULL OR fm.Quadrat = ''
-                                                              THEN 'Quadrat missing'
-                                                          WHEN NOT EXISTS(SELECT 1
-                                                                          FROM quadrats q
-                                                                          WHERE q.QuadratName = fm.Quadrat
-                                                                            AND q.PlotID = fm.PlotID)
-                                                              THEN 'Quadrat invalid'
-                                                          ELSE NULL
-                                                          END,
+    DECLARE cur CURSOR FOR
+        SELECT DISTINCT PlotID, CensusID
+        FROM failedmeasurements
+        WHERE PlotID IS NOT NULL AND CensusID IS NOT NULL;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
 
-        -- Coordinate validation
-                                                      IF(fm.X IS NULL OR fm.X IN (0, -1), 'Missing X', NULL),
-                                                      IF(fm.Y IS NULL OR fm.Y IN (0, -1), 'Missing Y', NULL),
-
-        -- DBH and Codes validation (need at least one)
-                                                      IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND
-                                                         (fm.DBH IS NULL OR fm.DBH IN (0, -1)), 'Missing Codes and DBH',
-                                                         NULL),
-                                                      IF((fm.Codes IS NULL OR TRIM(fm.Codes) = '') AND
-                                                         (fm.HOM IS NULL OR fm.HOM IN (0, -1)), 'Missing Codes and HOM',
-                                                         NULL),
-
-        -- Date validation
-                                                      IF(fm.Date IS NULL OR fm.Date = '1900-01-01', 'Missing Date', NULL),
-
-        -- Tag validation (required fields)
-                                                      IF(fm.Tag IS NULL OR fm.Tag = '', 'Missing Tag', NULL),
-                                                      IF(fm.StemTag IS NULL OR fm.StemTag = '', 'Missing StemTag', NULL)
-                                            ));
-
-    -- Mark rows with empty failure reasons as ready for reingestion
-    UPDATE failedmeasurements
-    SET FailureReasons = 'Ready for reingestion'
-    WHERE FailureReasons IS NULL
-       OR FailureReasons = '';
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO vPlotID, vCensusID;
+        IF done = 1 THEN
+            LEAVE read_loop;
+        END IF;
+        CALL refresh_failedmeasurements_current(vPlotID, vCensusID);
+    END LOOP;
+    CLOSE cur;
 
 end $$
 
@@ -1161,11 +1455,13 @@ BEGIN
 
             -- Move all batch to failedmeasurements
             INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                                   Date, Codes, Comments, FailureReasons)
+                                                   Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
             SELECT vFileID, vBatchID, PlotID, CensusID,
                    NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-                   NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+                   LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150))
             FROM temporarymeasurements
             WHERE FileID = vFileID AND BatchID = vBatchID;
@@ -1267,9 +1563,13 @@ BEGIN
                 THEN CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)')
             WHEN tm.HOM < 0
                 THEN CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)')
-            WHEN tm.LocalX IS NOT NULL AND tm.LocalX < 0
+            WHEN tm.LocalX IS NULL
+                THEN 'Missing X'
+            WHEN tm.LocalX < 0
                 THEN CONCAT('Invalid LocalX: ', tm.LocalX)
-            WHEN tm.LocalY IS NOT NULL AND tm.LocalY < 0
+            WHEN tm.LocalY IS NULL
+                THEN 'Missing Y'
+            WHEN tm.LocalY < 0
                 THEN CONCAT('Invalid LocalY: ', tm.LocalY)
             WHEN tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = '')
                 THEN 'Missing measurement data: DBH and HOM both 0 with no codes'
@@ -1283,12 +1583,12 @@ BEGIN
         SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-               NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM validation_failures;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -1326,19 +1626,21 @@ BEGIN
         SET @dup_count = (SELECT SUM(duplicate_count - 1) FROM initial_dup_filter WHERE duplicate_count > 1);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, tm.PlotID, tm.CensusID,
                NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-               NULLIF(tm.LocalX, 0), NULLIF(tm.LocalY, 0), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
+               tm.LocalX, tm.LocalY, NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
                NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
                CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id)
         FROM temporarymeasurements tm
         INNER JOIN initial_dup_filter idf
             ON tm.FileID = idf.FileID AND tm.BatchID = idf.BatchID
             AND tm.TreeTag = idf.TreeTag AND tm.StemTag = idf.StemTag
             AND tm.SpeciesCode = idf.SpeciesCode AND tm.QuadratName = idf.QuadratName
-            AND COALESCE(tm.LocalX, 0) = COALESCE(idf.LocalX, 0)
-            AND COALESCE(tm.LocalY, 0) = COALESCE(idf.LocalY, 0)
+            AND tm.LocalX <=> idf.LocalX
+            AND tm.LocalY <=> idf.LocalY
             AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
             AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
             AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
@@ -1370,7 +1672,7 @@ BEGIN
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') as StemTag, i.SpeciesCode, i.QuadratName,
-           IFNULL(i.LocalX, 0) as LocalX, IFNULL(i.LocalY, 0) as LocalY,
+           i.LocalX, i.LocalY,
            IFNULL(i.DBH, 0) as DBH, IFNULL(i.HOM, 0) as HOM,
            i.MeasurementDate, i.Codes, i.Comments,
            CASE
@@ -1381,7 +1683,7 @@ BEGIN
            CASE WHEN tq.QuadratID IS NULL OR ts.SpeciesID IS NULL THEN false ELSE true END as Valid,
            tq.QuadratID, ts.SpeciesID
     FROM initial_dup_filter i
-    LEFT JOIN quadrats tq ON tq.QuadratName = i.QuadratName AND tq.IsActive = 1
+    LEFT JOIN quadrats tq ON tq.QuadratName = i.QuadratName AND tq.PlotID = i.PlotID AND tq.IsActive = 1
     LEFT JOIN species ts ON ts.SpeciesCode = i.SpeciesCode AND ts.IsActive = 1;
 
     CREATE INDEX idx_validity_valid ON filter_validity (Valid);
@@ -1397,12 +1699,12 @@ BEGIN
         SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = false);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
-                                       Comments, FailureReasons)
+                                       Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-               NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM filter_validity WHERE Valid = false;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -1547,22 +1849,22 @@ BEGIN
 
         -- Insert quadrat mismatch failures
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-               NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               X, Y, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM quadrat_mismatch_failures;
 
         -- Insert coordinate drift failures
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-               NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               X, Y, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM coordinate_drift_failures;
 
         -- Alert for cross-census validation failures
@@ -1591,10 +1893,22 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS quadrat_mismatch_failures, coordinate_drift_failures;
 
+    -- =====================================================
+    -- TREE INSERTION WITH INSERT IGNORE TRACKING
+    -- =====================================================
     CREATE TEMPORARY TABLE unique_trees_to_insert AS
     SELECT DISTINCT TreeTag, SpeciesID, CensusID FROM filtered WHERE CensusID = vCurrentCensusID;
 
     CREATE INDEX idx_trees_insert ON unique_trees_to_insert (TreeTag, SpeciesID, CensusID);
+
+    -- Count expected tree inserts
+    SET @expected_tree_inserts = (
+        SELECT COUNT(*)
+        FROM unique_trees_to_insert uti
+        LEFT JOIN trees existing ON existing.TreeTag = uti.TreeTag
+            AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
+        WHERE existing.TreeID IS NULL
+    );
 
     INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
     SELECT uti.TreeTag, uti.SpeciesID, uti.CensusID
@@ -1603,21 +1917,64 @@ BEGIN
         AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
     WHERE existing.TreeID IS NULL;
 
+    SET @actual_tree_inserts = ROW_COUNT();
+    SET @dropped_trees = @expected_tree_inserts - @actual_tree_inserts;
+
+    IF @dropped_trees > 0 THEN
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity, failedRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'INSERT_IGNORE_DROP',
+            CONCAT(@dropped_trees, ' tree rows dropped by INSERT IGNORE (constraint violation)'),
+            'warning', @dropped_trees
+        );
+        SET vDataLossCount = vDataLossCount + @dropped_trees;
+    END IF;
+
+    -- =====================================================
+    -- STEM INSERTION WITH INSERT IGNORE TRACKING
+    -- =====================================================
     CREATE TEMPORARY TABLE unique_stems_to_insert AS
     SELECT DISTINCT TreeTag, QuadratID, StemTag, LocalX, LocalY, CensusID, SpeciesID
     FROM filtered WHERE CensusID = vCurrentCensusID;
 
     CREATE INDEX idx_stems_insert ON unique_stems_to_insert (TreeTag, SpeciesID, CensusID);
 
+    -- Count expected stem inserts
+    SET @expected_stem_inserts = (
+        SELECT COUNT(*)
+        FROM unique_stems_to_insert usi
+        INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
+            AND t.CensusID = vCurrentCensusID AND t.IsActive = 1
+    );
+
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
     SELECT t.TreeID, usi.QuadratID, vCurrentCensusID, NULL,
            CASE WHEN TRIM(COALESCE(usi.StemTag, '')) = '' THEN NULL ELSE TRIM(usi.StemTag) END,
-           CASE WHEN usi.LocalX = 0 THEN NULL ELSE usi.LocalX END,
-           CASE WHEN usi.LocalY = 0 THEN NULL ELSE usi.LocalY END,
+           usi.LocalX,
+           usi.LocalY,
            0, NULL, 1
     FROM unique_stems_to_insert usi
     INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
         AND t.CensusID = vCurrentCensusID AND t.IsActive = 1;
+
+    SET @actual_stem_inserts = ROW_COUNT();
+    SET @dropped_stems = @expected_stem_inserts - @actual_stem_inserts;
+
+    IF @dropped_stems > 0 THEN
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity, failedRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'INSERT_IGNORE_DROP',
+            CONCAT(@dropped_stems, ' stem rows dropped by INSERT IGNORE (constraint violation)'),
+            'warning', @dropped_stems
+        );
+        SET vDataLossCount = vDataLossCount + @dropped_stems;
+    END IF;
 
     CREATE TEMPORARY TABLE stem_crossid_mapping AS
     SELECT s_curr.StemGUID as CurrentStemID,
@@ -1640,8 +1997,29 @@ BEGIN
 
     DROP TEMPORARY TABLE stem_crossid_mapping;
 
+    -- =====================================================
+    -- COREMEASUREMENTS INSERTION WITH INSERT IGNORE TRACKING
+    -- =====================================================
+
+    -- Count expected measurement inserts
+    SET @expected_cm_inserts = (
+        SELECT COUNT(*)
+        FROM filtered f
+        INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
+            AND t.CensusID = f.CensusID AND t.IsActive = 1
+        INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
+            AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
+        WHERE NOT EXISTS (
+            SELECT 1 FROM coremeasurements cm_check
+            WHERE cm_check.StemGUID = s.StemGUID
+              AND cm_check.CensusID = f.CensusID
+              AND (cm_check.UploadBatchID = vBatchID
+                   OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+        )
+    );
+
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                         Description, UserDefinedFields, IsActive)
+                                         Description, UserDefinedFields, UploadFileID, UploadBatchID, IsActive)
     SELECT f.CensusID, s.StemGUID, null,
            COALESCE(f.MeasurementDate, '1900-01-01'),
            CASE WHEN f.DBH = 0 THEN NULL ELSE f.DBH END,
@@ -1658,7 +2036,10 @@ BEGIN
                    'fileID', vFileID,
                    'batchID', vBatchID
                )
-           ), 1
+           ),
+           vFileID,
+           vBatchID,
+           1
     FROM filtered f
     INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
         AND t.CensusID = f.CensusID AND t.IsActive = 1
@@ -1669,17 +2050,35 @@ BEGIN
         SELECT 1 FROM coremeasurements cm_check
         WHERE cm_check.StemGUID = s.StemGUID
           AND cm_check.CensusID = f.CensusID
-          AND JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID
+          AND (cm_check.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
     );
 
-    SET vProcessedCount = ROW_COUNT();
+    SET @actual_cm_inserts = ROW_COUNT();
+    SET @dropped_cm = @expected_cm_inserts - @actual_cm_inserts;
+    SET vProcessedCount = @actual_cm_inserts;
+
+    IF @dropped_cm > 0 THEN
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity, failedRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'INSERT_IGNORE_DROP',
+            CONCAT(@dropped_cm, ' measurement rows dropped by INSERT IGNORE (constraint violation)'),
+            'warning', @dropped_cm
+        );
+        SET vDataLossCount = vDataLossCount + @dropped_cm;
+    END IF;
 
     UPDATE coremeasurements
     SET MeasurementDate = NULLIF(MeasurementDate, '1900-01-01'),
         MeasuredDBH = NULLIF(MeasuredDBH, 0),
         MeasuredHOM = NULLIF(MeasuredHOM, 0),
         Description = NULLIF(Description, '')
-    WHERE CensusID = vCurrentCensusID;
+    WHERE CensusID = vCurrentCensusID
+      AND (UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
 
     IF EXISTS(SELECT 1 FROM filtered WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
         CREATE TEMPORARY TABLE tempcodes AS
@@ -1690,7 +2089,9 @@ BEGIN
         INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
             AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
         INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
-            AND cm.CensusID = f.CensusID AND cm.IsActive = 1,
+            AND cm.CensusID = f.CensusID AND cm.IsActive = 1
+            AND (cm.UploadBatchID = vBatchID
+                 OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID),
         json_table(
             if(f.Codes = '' or trim(f.Codes) = '', '[]',
                concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
@@ -1743,7 +2144,9 @@ BEGIN
         AND prev_tree.PrevSpeciesID != t.SpeciesID  -- Different species
     INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
     WHERE cm.CensusID = vCurrentCensusID
-      AND cm.IsActive = 1;
+      AND cm.IsActive = 1
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
 
     INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
     SELECT DISTINCT CoreMeasurementID, 20 as ValidationErrorID
@@ -1791,6 +2194,8 @@ BEGIN
     ) first_occurrence ON t.TreeTag = first_occurrence.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
       AND sp.SpeciesCode != first_occurrence.SpeciesCode;
 
     INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
@@ -1836,9 +2241,11 @@ BEGIN
         FROM coremeasurements cm
         JOIN stems s ON cm.StemGUID = s.StemGUID AND s.IsActive = 1
         JOIN trees t ON s.TreeID = t.TreeID AND t.IsActive = 1
-        WHERE cm.CensusID = vCurrentCensusID
-          AND cm.MeasurementDate IS NOT NULL
-          AND cm.MeasuredDBH IS NOT NULL
+    WHERE cm.CensusID = vCurrentCensusID
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+      AND cm.MeasurementDate IS NOT NULL
+      AND cm.MeasuredDBH IS NOT NULL
         GROUP BY t.TreeTag, s.StemTag, cm.MeasurementDate
         HAVING dbh_count > 1
     ) dups
@@ -1858,6 +2265,8 @@ BEGIN
            vBatchRowCount, vProcessedCount, 0, 0
     FROM coremeasurements cm
     WHERE cm.CensusID = vCurrentCensusID
+      AND (cm.UploadBatchID = vBatchID
+           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
       AND cm.MeasurementDate > DATE_ADD(NOW(), INTERVAL 10 YEAR)
     HAVING COUNT(*) > 0;
 
@@ -1882,6 +2291,8 @@ BEGIN
             AND prev.MeasurementDate < curr.MeasurementDate
             AND prev.MeasuredDBH IS NOT NULL
         WHERE curr.CensusID = vCurrentCensusID
+          AND (curr.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(curr.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
           AND curr.MeasuredDBH IS NOT NULL
           AND curr.MeasurementDate IS NOT NULL
         ORDER BY curr.StemGUID, prev.MeasurementDate DESC
@@ -1895,12 +2306,43 @@ BEGIN
 
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
+    -- =====================================================
+    -- FINAL RECONCILIATION CHECK
+    -- Verify: input_rows = success + failed + deduplicated
+    -- =====================================================
+    SET @final_success = (
+        SELECT COUNT(*) FROM coremeasurements cm
+        WHERE cm.CensusID = vCurrentCensusID
+          AND (cm.UploadBatchID = vBatchID
+               OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+    );
+    SET @final_failed = (
+        SELECT COUNT(*) FROM failedmeasurements
+        WHERE BatchID = vBatchID AND CensusID = vCurrentCensusID
+    );
+    SET @unaccounted = vBatchRowCount - @final_success - vDataLossCount;
+
+    -- Log reconciliation mismatch if any rows are unaccounted for
+    IF @unaccounted != 0 THEN
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'RECONCILIATION_MISMATCH',
+            CONCAT('Reconciliation: ', vBatchRowCount, ' input, ', @final_success, ' success (in batch), ',
+                   vDataLossCount, ' failed/deduplicated, ', @unaccounted, ' unaccounted'),
+            IF(@unaccounted > 0, 'critical', 'warning'),
+            vBatchRowCount, @final_success, vDataLossCount, ABS(@unaccounted)
+        );
+    END IF;
+
     -- Final metrics update
     UPDATE uploadmetrics
     SET processedRecords = vProcessedCount,
         failedRecords = vDataLossCount,
-        missingRecords = 0,
-        dataLossDetected = IF(vDataLossCount > 0, 1, 0),
+        missingRecords = ABS(@unaccounted),
+        dataLossDetected = IF(vDataLossCount > 0 OR @unaccounted != 0, 1, 0),
         status = 'completed',
         endTime = NOW()
     WHERE uploadId = vUploadId;

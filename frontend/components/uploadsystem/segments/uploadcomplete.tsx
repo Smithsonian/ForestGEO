@@ -204,8 +204,15 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             }),
             method: 'POST'
           });
-          // Run failed measurements review procedure
-          await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) });
+          // Refresh failed measurements current reasons for this plot/census
+          await fetch(`/api/query`, {
+            body: JSON.stringify({
+              query: `CALL ${currentSite.schemaName}.refresh_failedmeasurements_current(?, ?);`,
+              params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
+              format: true
+            }),
+            method: 'POST'
+          });
         }
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
@@ -305,12 +312,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
           {/* Show warning alert if any refreshes failed */}
           {hasIssues && (
-            <Alert
-              color="warning"
-              variant="soft"
-              startDecorator={<WarningIcon />}
-              sx={{ width: '100%', textAlign: 'left' }}
-            >
+            <Alert color="warning" variant="soft" startDecorator={<WarningIcon />} sx={{ width: '100%', textAlign: 'left' }}>
               <Box>
                 <Typography level="title-sm" color="warning">
                   Data Refresh Issues
@@ -336,13 +338,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               Any rows with errors have been moved to the failed measurements table for review.
             </Typography>
           )}
-          <Button
-            variant="solid"
-            color={hasIssues ? 'warning' : 'success'}
-            size="lg"
-            onClick={() => setOpenUploadConfirmModal(true)}
-            sx={{ mt: 2 }}
-          >
+          <Button variant="solid" color={hasIssues ? 'warning' : 'success'} size="lg" onClick={() => setOpenUploadConfirmModal(true)} sx={{ mt: 2 }}>
             Close
           </Button>
         </Stack>

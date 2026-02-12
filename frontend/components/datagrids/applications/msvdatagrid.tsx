@@ -76,10 +76,13 @@ export default function MeasurementsSummaryViewDataGrid() {
 
   useEffect(() => {
     // Guard: only call if FSM is open AND schemaName is defined
-    if (openFSM && currentSite?.schemaName) {
-      fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) }).catch(ailogger.error);
+    if (openFSM && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
+      fetch(
+        `/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
+        { method: 'GET' }
+      ).catch(ailogger.error);
     }
-  }, [openFSM, currentSite?.schemaName]);
+  }, [openFSM, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
 
   const addNewRowToGrid = () => {
     const id = randomId();

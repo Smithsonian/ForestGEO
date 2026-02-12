@@ -58,17 +58,17 @@ export async function GET(request: NextRequest) {
 
   try {
     if (scope === 'batch') {
-      // Query specific batch using JSON_EXTRACT on coremeasurements.UserDefinedFields
+      // Query specific batch using indexed UploadFileID/UploadBatchID (fallback to JSON for legacy rows)
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?`
+         AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))
+         AND (cm.UploadBatchID = ? OR (cm.UploadBatchID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?))`
       );
-      processedParams = [plotID, censusID, fileID, batchID];
+      processedParams = [plotID, censusID, fileID, fileID, batchID, batchID];
 
       failedSQL = safeFormatQuery(
         schema,
@@ -76,16 +76,16 @@ export async function GET(request: NextRequest) {
       );
       failedParams = [plotID, censusID, fileID, batchID];
     } else if (scope === 'file') {
-      // Query all batches for a specific file
+      // Query all batches for a specific file (prefer UploadFileID, fallback to JSON)
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?`
+         AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))`
       );
-      processedParams = [plotID, censusID, fileID];
+      processedParams = [plotID, censusID, fileID, fileID];
 
       failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
       failedParams = [plotID, censusID, fileID];

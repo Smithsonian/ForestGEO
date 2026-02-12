@@ -468,7 +468,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             'hom',
             'date',
             'codes',
-            'failureReasons'
+            'currentFailureReasons',
+            'originalFailureReasons',
+            'failureReasons',
+            'lastValidatedAt'
           ];
           let fmCSVRows = fmHeaders.join(',') + '\n';
           fmData.forEach((row: Record<string, unknown>) => {

@@ -289,7 +289,28 @@ export const failureErrorMapping: Record<string, string[]> = {
   'Missing Codes and DBH': ['codes', 'dbh'],
   'Missing Codes and HOM': ['codes', 'hom'],
   'Missing Date': ['date'],
-  'Invalid Codes': ['codes']
+  'Invalid Codes': ['codes'],
+  'Missing required field: TreeTag': ['tag'],
+  'Missing required field: StemTag': ['stemTag'],
+  'Missing required field: SpeciesCode': ['spCode'],
+  'Missing required field: QuadratName': ['quadrat'],
+  'Missing required field: MeasurementDate': ['date'],
+  'TreeTag exceeds maximum length': ['tag'],
+  'StemTag exceeds maximum length': ['stemTag'],
+  'SpeciesCode exceeds maximum length': ['spCode'],
+  'Comments exceed maximum length': ['description'],
+  'Codes exceed maximum length': ['codes'],
+  'Invalid DBH': ['dbh'],
+  'Invalid HOM': ['hom'],
+  'Invalid LocalX': ['x'],
+  'Invalid LocalY': ['y'],
+  'Missing measurement data': ['dbh', 'hom', 'codes'],
+  'Invalid quadrat name': ['quadrat'],
+  'Invalid species code': ['spCode'],
+  'Duplicate entry': ['tag', 'stemTag', 'quadrat', 'date'],
+  'Quadrat mismatch': ['quadrat'],
+  'Coordinate drift': ['x', 'y'],
+  'SQL Exception': ['tag']
 };
 
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {

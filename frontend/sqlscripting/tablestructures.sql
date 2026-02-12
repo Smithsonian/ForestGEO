@@ -42,6 +42,9 @@ create table if not exists failedmeasurements
     Codes               varchar(255)   null,
     Comments            varchar(255)   null,
     FailureReasons      text           null,
+    OriginalFailureReasons text        null,
+    CurrentFailureReasons  text        null,
+    LastValidatedAt     datetime       null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
                                                       `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`,
                                                       `Codes`))) stored invisible,
@@ -722,6 +725,8 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(12, 6)          null,
     Description       varchar(255)            null,
     UserDefinedFields json                    null,
+    UploadFileID      varchar(255)            null,
+    UploadBatchID     varchar(36)             null,
     IsActive          tinyint(1) default 1    not null,
     DeletedAt         datetime                null,
     constraint ux_measure_unique
@@ -793,6 +798,9 @@ create index idx_stemid
 
 create index ix_cm_cid_date_dbh_hom
     on coremeasurements (CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
+
+create index idx_cm_uploadbatch_census
+    on coremeasurements (UploadBatchID, CensusID);
 
 create table if not exists specimens
 (
@@ -1097,4 +1105,3 @@ create index idx_uploadmetrics_starttime
 
 create index idx_uploadmetrics_batch_census_status
     on uploadmetrics (batchID, censusID, status) comment 'Composite index for idempotency check in bulkingestionprocess';
-

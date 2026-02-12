@@ -34,6 +34,9 @@ export interface FailedMeasurementsRDS {
   codes?: string;
   description?: string;
   failureReasons?: string;
+  originalFailureReasons?: string;
+  currentFailureReasons?: string;
+  lastValidatedAt?: Date | null;
 }
 
 export type FailedMeasurementsResult = ResultType<FailedMeasurementsRDS>;
@@ -42,7 +45,9 @@ export function getFailedMeasurementsHCs(): ColumnStates {
   return {
     failedMeasurementID: false,
     plotID: false,
-    censusID: false
+    censusID: false,
+    originalFailureReasons: false,
+    lastValidatedAt: false
   };
 }
 

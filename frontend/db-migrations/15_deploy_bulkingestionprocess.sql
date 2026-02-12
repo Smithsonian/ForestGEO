@@ -82,11 +82,13 @@ BEGIN
 
             -- Move all batch to failedmeasurements
             INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                                   Date, Codes, Comments, FailureReasons)
+                                                   Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
             SELECT vFileID, vBatchID, PlotID, CensusID,
                    NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                    NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150))
             FROM temporarymeasurements
             WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
@@ -209,12 +211,12 @@ BEGIN
         SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM validation_failures;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -252,11 +254,13 @@ BEGIN
         SET @dup_count = (SELECT SUM(duplicate_count - 1) FROM initial_dup_filter WHERE duplicate_count > 1);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, tm.PlotID, tm.CensusID,
                NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
                NULLIF(tm.LocalX, 0), NULLIF(tm.LocalY, 0), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
                NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
                CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id)
         FROM temporarymeasurements tm
         INNER JOIN initial_dup_filter idf
@@ -323,12 +327,12 @@ BEGIN
         SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = false);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
-                                       Comments, FailureReasons)
+                                       Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM filter_validity WHERE Valid = false;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -468,21 +472,21 @@ BEGIN
         );
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM quadrat_mismatch_failures;
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM coordinate_drift_failures;
 
         INSERT IGNORE INTO uploadintegrityalerts (
