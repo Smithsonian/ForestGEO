@@ -1458,7 +1458,7 @@ BEGIN
                                                    Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
             SELECT vFileID, vBatchID, PlotID, CensusID,
                    NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-                   NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+                   LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
@@ -1586,7 +1586,7 @@ BEGIN
                                        Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-               NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                FailureReason, FailureReason, FailureReason
         FROM validation_failures;
@@ -1629,7 +1629,7 @@ BEGIN
                                        Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, tm.PlotID, tm.CensusID,
                NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-               NULLIF(tm.LocalX, 0), NULLIF(tm.LocalY, 0), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
+               tm.LocalX, tm.LocalY, NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
                NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
                CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
                CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
@@ -1639,8 +1639,8 @@ BEGIN
             ON tm.FileID = idf.FileID AND tm.BatchID = idf.BatchID
             AND tm.TreeTag = idf.TreeTag AND tm.StemTag = idf.StemTag
             AND tm.SpeciesCode = idf.SpeciesCode AND tm.QuadratName = idf.QuadratName
-            AND COALESCE(tm.LocalX, 0) = COALESCE(idf.LocalX, 0)
-            AND COALESCE(tm.LocalY, 0) = COALESCE(idf.LocalY, 0)
+            AND tm.LocalX <=> idf.LocalX
+            AND tm.LocalY <=> idf.LocalY
             AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
             AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
             AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
@@ -1672,7 +1672,7 @@ BEGIN
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') as StemTag, i.SpeciesCode, i.QuadratName,
-           IFNULL(i.LocalX, 0) as LocalX, IFNULL(i.LocalY, 0) as LocalY,
+           i.LocalX, i.LocalY,
            IFNULL(i.DBH, 0) as DBH, IFNULL(i.HOM, 0) as HOM,
            i.MeasurementDate, i.Codes, i.Comments,
            CASE
@@ -1702,7 +1702,7 @@ BEGIN
                                        Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-               NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               LocalX, LocalY, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                FailureReason, FailureReason, FailureReason
         FROM filter_validity WHERE Valid = false;
@@ -1852,7 +1852,7 @@ BEGIN
                                        Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-               NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               X, Y, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                FailureReason, FailureReason, FailureReason
         FROM quadrat_mismatch_failures;
@@ -1862,7 +1862,7 @@ BEGIN
                                        Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-               NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
+               X, Y, NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
                FailureReason, FailureReason, FailureReason
         FROM coordinate_drift_failures;
@@ -1953,8 +1953,8 @@ BEGIN
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
     SELECT t.TreeID, usi.QuadratID, vCurrentCensusID, NULL,
            CASE WHEN TRIM(COALESCE(usi.StemTag, '')) = '' THEN NULL ELSE TRIM(usi.StemTag) END,
-           CASE WHEN usi.LocalX = 0 THEN NULL ELSE usi.LocalX END,
-           CASE WHEN usi.LocalY = 0 THEN NULL ELSE usi.LocalY END,
+           usi.LocalX,
+           usi.LocalY,
            0, NULL, 1
     FROM unique_stems_to_insert usi
     INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
