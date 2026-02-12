@@ -194,9 +194,7 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const deleteQuery = calls.find(
-        (call: any) => call[0].includes('DELETE') && call[0].includes('StemGUID') && call[0].includes('MeasurementDate')
-      );
+      const deleteQuery = calls.find((call: any) => call[0].includes('DELETE') && call[0].includes('StemGUID') && call[0].includes('MeasurementDate'));
 
       // Verify it deletes cm1 when cm1.ID > cm2.ID (keeps the older record)
       expect(deleteQuery[0]).toMatch(/DELETE cm1/);
@@ -542,9 +540,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       // processStemInsertions - cleanup
       .mockResolvedValueOnce([])
       // processCoreMeasurementInsertions - stem lookup
-      .mockResolvedValueOnce([
-        { StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }
-      ])
+      .mockResolvedValueOnce([{ StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }])
       // processCoreMeasurementInsertions - bulk upsert
       .mockResolvedValueOnce([])
       // processCoreMeasurementInsertions - cleanup
@@ -552,13 +548,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       // processCMAttributeInsertions - cm lookup
       .mockResolvedValueOnce([]);
 
-    await processBulkIngestionProcessor(
-      mockConnectionManager as any,
-      'forestgeo_test',
-      'test.csv',
-      'batch-1',
-      measurements
-    );
+    await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
 
     // KEY ASSERTION: insertFailedMeasurements should NOT have been called.
     // If the dedup key matched on TreeTag+StemTag alone, row 2 would be flagged.
@@ -637,9 +627,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       // processStemInsertions - cleanup
       .mockResolvedValueOnce([])
       // processCoreMeasurementInsertions - stem lookup
-      .mockResolvedValueOnce([
-        { StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }
-      ])
+      .mockResolvedValueOnce([{ StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }])
       // processCoreMeasurementInsertions - bulk upsert
       .mockResolvedValueOnce([])
       // processCoreMeasurementInsertions - cleanup
@@ -647,13 +635,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       // processCMAttributeInsertions - cm lookup
       .mockResolvedValueOnce([]);
 
-    await processBulkIngestionProcessor(
-      mockConnectionManager as any,
-      'forestgeo_test',
-      'test.csv',
-      'batch-1',
-      measurements
-    );
+    await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
 
     // KEY ASSERTION: The first executeQuery call should be the duplicate insert
     const firstCall = mockConnectionManager.executeQuery.mock.calls[0];

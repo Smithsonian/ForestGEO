@@ -50,7 +50,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
 
   // Keep validation logic in a ref so the effect always calls the latest version
   // without needing it as a dependency (prevents effect re-runs from callback recreation)
-  const runValidationRef = useRef<(types: (keyof UnifiedValidityFlags)[], signal?: AbortSignal) => Promise<void>>();
+  const runValidationRef = useRef<(types: (keyof UnifiedValidityFlags)[], signal?: AbortSignal) => Promise<void>>(undefined);
   runValidationRef.current = async (types, signal) => {
     if (!schemaName || !plotID || plotCensusNumber == null) return;
 

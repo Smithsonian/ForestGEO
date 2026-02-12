@@ -266,9 +266,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     if (!currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) return;
     setIsValidating(true);
     try {
-      const response = await fetch(
-        `/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`
-      );
+      const response = await fetch(`/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
         throw new Error(errorData.error || `Validation check failed: ${response.status}`);

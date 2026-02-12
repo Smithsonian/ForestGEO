@@ -67,11 +67,7 @@ const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
     }
   }
   const needsFormulaEscape =
-    strValue.startsWith('=') ||
-    strValue.startsWith('+') ||
-    strValue.startsWith('-') ||
-    strValue.startsWith('@') ||
-    strValue.startsWith('\t');
+    strValue.startsWith('=') || strValue.startsWith('+') || strValue.startsWith('-') || strValue.startsWith('@') || strValue.startsWith('\t');
   const safeValue = needsFormulaEscape ? `'${strValue}` : strValue;
   if (safeValue.includes(',') || safeValue.includes('"') || safeValue.includes('\n')) {
     return `"${safeValue.replace(/"/g, '""')}"`;

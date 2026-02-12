@@ -271,10 +271,7 @@ export async function GET(
       } catch (autoError: any) {
         ailogger.error('Auto-reingest failed, rows remain in failedmeasurements:', autoError);
         try {
-          const cleanupSQL = safeFormatQuery(
-            schema,
-            'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?'
-          );
+          const cleanupSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
           await connectionManager.executeQuery(cleanupSQL, [autoFileID, autoBatchID]);
         } catch (cleanupError: any) {
           ailogger.error('Failed to clean up temporary auto-reingest rows:', cleanupError);
