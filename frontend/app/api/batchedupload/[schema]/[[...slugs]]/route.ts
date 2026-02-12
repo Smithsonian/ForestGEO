@@ -56,8 +56,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     ...row,
     plotID,
     censusID,
-    originalFailureReasons: row.originalFailureReasons ?? row.failureReasons ?? null,
-    currentFailureReasons: row.currentFailureReasons ?? row.failureReasons ?? null
+    originalFailureReasons: row.originalFailureReasons ?? row.failureReasons ?? undefined,
+    currentFailureReasons: row.currentFailureReasons ?? row.failureReasons ?? undefined
   }));
 
   const connectionManager = connectionmanager.getInstance();
