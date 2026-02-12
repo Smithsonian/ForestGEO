@@ -285,6 +285,7 @@ jobs:
       - name: Send deployment notification
         if: ${{ success() }}
         uses: dawidd6/action-send-mail@v3
+        continue-on-error: true  # TODO: Remove once NOTIFS_EMAIL_PWD is updated
         with:
           server_address: smtp.gmail.com
           server_port: 587
@@ -300,7 +301,7 @@ jobs:
           body: |
             Hello ForestGEO Users,
 
-            The branch `${{ github.ref_name }}` was just deployed successfully! 
+            The branch `${{ github.ref_name }}` was just deployed successfully!
             Please review the following commit details for more information:
 
             • Commit SHA: `${{ github.sha }}`
@@ -429,6 +430,7 @@ jobs:
 
       - name: Send failure notification
         uses: dawidd6/action-send-mail@v3
+        continue-on-error: true  # TODO: Remove once NOTIFS_EMAIL_PWD is updated
         with:
           server_address: smtp.gmail.com
           server_port: 587
