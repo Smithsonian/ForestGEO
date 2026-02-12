@@ -189,10 +189,12 @@ export async function POST(request: NextRequest) {
       .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .join(', ');
     const values = Object.values(fileRowSet ?? []).flatMap(row => {
-      // const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
       const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
       const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
-      return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, formattedDate, codes, comments];
+      // Convert empty/non-numeric coordinate strings to null so MySQL stores NULL instead of 0
+      const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
+      const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
+      return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, parsedLx, parsedLy, dbh, hom, formattedDate, codes, comments];
     });
     // Retry logic for database operations
     while (retryCount <= maxRetries) {

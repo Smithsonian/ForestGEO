@@ -59,22 +59,25 @@ async function validateAndExtractParams(
  */
 async function moveFailedToTemporary(
   connectionManager: any,
-  transactionID: string,
   schema: string,
   plotID: number,
   censusID: number
-): Promise<{ totalRows: number; fileID: string; batchID: string }> {
+): Promise<{ totalRows: number; fileID: string; batchID: string; failedIds: number[] }> {
   // Validate schema to prevent SQL injection
   validateSchemaOrThrow(schema);
 
   // Count total failed measurements
   const countSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as total FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-  const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID], transactionID);
+  const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID]);
   const totalRows = countResult[0]?.total || 0;
 
   if (totalRows === 0) {
-    return { totalRows: 0, fileID: 'reingestion.csv', batchID: generateShortBatchID() };
+    return { totalRows: 0, fileID: 'reingestion.csv', batchID: generateShortBatchID(), failedIds: [] };
   }
+
+  const idSQL = safeFormatQuery(schema, 'SELECT FailedMeasurementID FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+  const idRows = await connectionManager.executeQuery(idSQL, [plotID, censusID]);
+  const failedIds = idRows.map((row: any) => row.FailedMeasurementID).filter((id: any) => typeof id === 'number');
 
   // Generate batch identifiers
   const fileID = 'reingestion.csv';
@@ -106,14 +109,22 @@ async function moveFailedToTemporary(
 
   // Clear temp table and move failed measurements
   const deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
-  await connectionManager.executeQuery(deleteTempSQL, [plotID, censusID], transactionID);
-  await connectionManager.executeQuery(shiftQuery, [fileID, batchID, plotID, censusID], transactionID);
+  await connectionManager.executeQuery(deleteTempSQL, [plotID, censusID]);
+  await connectionManager.executeQuery(shiftQuery, [fileID, batchID, plotID, censusID]);
 
-  // Clear failed measurements (they're now in temp table)
-  const deleteFailedSQL = safeFormatQuery(schema, 'DELETE FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-  await connectionManager.executeQuery(deleteFailedSQL, [plotID, censusID], transactionID);
+  return { totalRows, fileID, batchID, failedIds };
+}
 
-  return { totalRows, fileID, batchID };
+async function deleteFailedByIds(connectionManager: any, schema: string, failedIds: number[]): Promise<void> {
+  if (failedIds.length === 0) return;
+
+  const chunkSize = 1000;
+  for (let i = 0; i < failedIds.length; i += chunkSize) {
+    const chunk = failedIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.failedmeasurements WHERE FailedMeasurementID IN (${placeholders})`);
+    await connectionManager.executeQuery(deleteSQL, chunk);
+  }
 }
 
 /**
@@ -136,16 +147,11 @@ export async function POST(
   const { schema, plotID, censusID } = paramsResult;
 
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID = '';
-
   try {
     await connectionManager.cleanupStaleTransactions();
-    transactionID = await connectionManager.beginTransaction();
-
-    const { totalRows, fileID, batchID } = await moveFailedToTemporary(connectionManager, transactionID, schema, plotID, censusID);
+    const { totalRows, fileID, batchID, failedIds } = await moveFailedToTemporary(connectionManager, schema, plotID, censusID);
 
     if (totalRows === 0) {
-      await connectionManager.commitTransaction(transactionID);
       return new NextResponse(
         JSON.stringify({
           responseMessage: 'No failed measurements found to reingest',
@@ -155,7 +161,7 @@ export async function POST(
       );
     }
 
-    await connectionManager.commitTransaction(transactionID);
+    await deleteFailedByIds(connectionManager, schema, failedIds);
 
     return new NextResponse(
       JSON.stringify({
@@ -168,9 +174,6 @@ export async function POST(
     );
   } catch (e: any) {
     ailogger.error('Failed to move rows to temporary table:', e);
-    if (transactionID) {
-      await connectionManager.rollbackTransaction(transactionID);
-    }
 
     return new NextResponse(
       JSON.stringify({
@@ -204,16 +207,11 @@ export async function GET(
   const { schema, plotID, censusID } = paramsResult;
 
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID = '';
-
   try {
     await connectionManager.cleanupStaleTransactions();
-    transactionID = await connectionManager.beginTransaction();
-
-    const { totalRows, fileID, batchID } = await moveFailedToTemporary(connectionManager, transactionID, schema, plotID, censusID);
+    const { totalRows, fileID, batchID, failedIds } = await moveFailedToTemporary(connectionManager, schema, plotID, censusID);
 
     if (totalRows === 0) {
-      await connectionManager.commitTransaction(transactionID);
       return new NextResponse(
         JSON.stringify({
           responseMessage: 'No failed measurements found to reingest',
@@ -227,15 +225,68 @@ export async function GET(
 
     // Run ingestion process (may move some back to failed measurements)
     const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-    await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
+    await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID]);
 
-    // Step 4: Count remaining failures and successes
+    // Remove originals only after successful processing to avoid data loss
+    await deleteFailedByIds(connectionManager, schema, failedIds);
+
+    // Refresh failure reasons for any rows that ended up back in failedmeasurements
+    const refreshFailedSQL = safeFormatQuery(schema, 'CALL ??.refresh_failedmeasurements_current(?, ?)');
+    await connectionManager.executeQuery(refreshFailedSQL, [plotID, censusID]);
+
+    // Auto-reingest rows that passed validation (no actionable errors)
+    const readyCountSQL = safeFormatQuery(
+      schema,
+      `SELECT COUNT(*) as cnt FROM ??.failedmeasurements
+       WHERE PlotID = ? AND CensusID = ? AND FailureReasons = 'Ready for reingestion'`
+    );
+    const readyResult = await connectionManager.executeQuery(readyCountSQL, [plotID, censusID]);
+    const readyCount = readyResult[0]?.cnt || 0;
+
+    if (readyCount > 0) {
+      const autoFileID = 'auto-reingest.csv';
+      const autoBatchID = generateShortBatchID();
+
+      try {
+        const moveReadySQL = safeFormatQuery(
+          schema,
+          `INSERT IGNORE INTO ??.temporarymeasurements
+            (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName,
+             LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+          SELECT ?, ?, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat,
+                 X, Y, DBH, HOM, Date, Codes, Comments
+          FROM ??.failedmeasurements
+          WHERE PlotID = ? AND CensusID = ? AND FailureReasons = 'Ready for reingestion'`
+        );
+        await connectionManager.executeQuery(moveReadySQL, [autoFileID, autoBatchID, plotID, censusID]);
+
+        await connectionManager.executeQuery(bulkProcessSQL, [autoFileID, autoBatchID]);
+
+        const deleteReadySQL = safeFormatQuery(
+          schema,
+          `DELETE FROM ??.failedmeasurements
+           WHERE PlotID = ? AND CensusID = ? AND FailureReasons = 'Ready for reingestion'`
+        );
+        await connectionManager.executeQuery(deleteReadySQL, [plotID, censusID]);
+      } catch (autoError: any) {
+        ailogger.error('Auto-reingest failed, rows remain in failedmeasurements:', autoError);
+        try {
+          const cleanupSQL = safeFormatQuery(
+            schema,
+            'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?'
+          );
+          await connectionManager.executeQuery(cleanupSQL, [autoFileID, autoBatchID]);
+        } catch (cleanupError: any) {
+          ailogger.error('Failed to clean up temporary auto-reingest rows:', cleanupError);
+        }
+      }
+    }
+
+    // Count remaining failures (only rows with real validation errors)
     const countRemainingSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as remaining FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-    const remainingFailuresResult = await connectionManager.executeQuery(countRemainingSQL, [plotID, censusID], transactionID);
+    const remainingFailuresResult = await connectionManager.executeQuery(countRemainingSQL, [plotID, censusID]);
     const remainingFailures = remainingFailuresResult[0]?.remaining || 0;
     const successfulReingestions = totalRows - remainingFailures;
-
-    await connectionManager.commitTransaction(transactionID);
 
     return new NextResponse(
       JSON.stringify({
@@ -248,9 +299,6 @@ export async function GET(
     );
   } catch (e: any) {
     ailogger.error('Reingestion failed:', e);
-    if (transactionID) {
-      await connectionManager.rollbackTransaction(transactionID);
-    }
 
     return new NextResponse(
       JSON.stringify({
