@@ -1056,6 +1056,32 @@ create index idx_alerts_resolved
 create index idx_alerts_created
     on uploadintegrityalerts (createdAt);
 
+create table if not exists upload_errors
+(
+    id           int auto_increment primary key,
+    FileID       varchar(36)                                         null,
+    BatchID      varchar(36)                                         null,
+    PlotID       int                                                 null,
+    CensusID     int                                                 null,
+    RowIndex     int                                                 null,
+    RawData      json                                                null,
+    ErrorType    varchar(50)                                         not null,
+    ErrorMessage text                                                not null,
+    CreatedAt    datetime                                            default CURRENT_TIMESTAMP null
+);
+
+create index idx_upload_errors_file_batch
+    on upload_errors (FileID, BatchID);
+
+create index idx_upload_errors_plot_census
+    on upload_errors (PlotID, CensusID);
+
+create index idx_upload_errors_created
+    on upload_errors (CreatedAt);
+
+create index idx_upload_errors_type
+    on upload_errors (ErrorType);
+
 create table if not exists uploadmetrics
 (
     id                         int auto_increment primary key,

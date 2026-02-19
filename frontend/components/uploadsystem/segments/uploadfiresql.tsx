@@ -186,13 +186,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         );
 
         if (!response.ok) {
-          throw new Error(`Failed to push error rows to failedmeasurements: ${response.status}`);
+          throw new Error(`Failed to push error rows to upload_errors: ${response.status}`);
         }
 
-        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to failedmeasurements table`);
+        ailogger.info(`Successfully pushed ${errorRows.length} error rows from ${fileName} to upload_errors table`);
       } catch (error: unknown) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error(`Failed to push error rows from ${fileName} to failedmeasurements:`, errorObj);
+        ailogger.error(`Failed to push error rows from ${fileName} to upload_errors:`, errorObj);
         // Don't throw - we don't want to stop the upload process because of error row insertion failures
       }
     },
@@ -353,7 +353,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               ailogger.error(
                 `DATA INTEGRITY WARNING for ${fileName} (batchID: ${data.batchID}): ` +
                   `Expected ${data.expectedCount} rows, only ${data.insertedCount} were inserted. ` +
-                  `${data.droppedCount} row(s) were dropped and moved to failedmeasurements.`
+                  `${data.droppedCount} row(s) were dropped and moved to upload_errors.`
               );
             }
 
@@ -765,8 +765,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await waitForAllOperationsToComplete();
             ailogger.info(`All database operations completed for ${file.name}`);
             if (parsingInvalidRows.length > 0) {
-              ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
-              // Push error rows directly to failedmeasurements table instead of storing in component state
+              ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to upload_errors table`);
+              // Push error rows directly to upload_errors table instead of storing in component state
               await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
             }
 
@@ -1073,7 +1073,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // If there are no batches to process, skip batch processing entirely
         if (output.length === 0) {
-          ailogger.info('No batches to process - all data was processed directly or moved to failedmeasurements');
+          ailogger.info('No batches to process - all data was processed directly or moved to failure tables');
 
           // Check if component is still mounted
           if (!isMountedRef.current) {
@@ -1085,11 +1085,27 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setProcessedChunks(0);
           setCompletedOperations(prev => prev + 1);
 
-          // Skip to collapser
+          // Run validation and then collapser
           try {
             setIsVerifying(true);
-            setTotalVerificationSteps(2); // Collapser + Final sync
+            setTotalVerificationSteps(3); // Validation + Collapser + Final sync
             setVerificationStep(0);
+            setVerificationStatus('Running validation pass (no batches to process)...');
+            ailogger.info('Starting validation procedure (no batches)...');
+
+            const validationResponse = await fetch(
+              `/api/setupbulkvalidation/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`,
+              {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+              }
+            );
+            if (!validationResponse.ok) {
+              const errorText = await validationResponse.text().catch(() => 'Unknown error');
+              throw new Error(`Validation failed: ${validationResponse.status} - ${errorText}`);
+            }
+
+            setVerificationStep(1);
             setVerificationStatus('Starting data consolidation (no batches to process)...');
             ailogger.info('Starting collapser procedure (no batches)...');
 
@@ -1117,7 +1133,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setVerificationStatus('Data consolidation completed successfully');
             ailogger.info('Collapser completed successfully (no batches):', collapserData);
 
-            setVerificationStep(1);
+            setVerificationStep(2);
             setVerificationStatus('Finalizing database operations...');
             await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -1128,7 +1144,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
 
             setVerificationStatus('All processing verification completed');
-            setVerificationStep(2);
+            setVerificationStep(3);
           } catch (collapserError: unknown) {
             const message = collapserError instanceof Error ? collapserError.message : String(collapserError);
             if (isMountedRef.current) {
@@ -1176,7 +1192,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }
                   const result = await response.json();
 
-                  // Check if batch was handled internally (moved to failedmeasurements by the procedure)
+                  // Check if batch was handled internally (moved to failure table by the procedure)
                   if (result.batchFailedButHandled) {
                     ailogger.info(`Batch ${fileID}-${batchID} was handled internally: ${result.message}`);
                   }
@@ -1202,13 +1218,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                   if (isMonitoringError) {
                     ailogger.warn(`Batch ${fileID}-${batchID} encountered monitoring system error (not data error): ${errorMessage}`);
-                    // Don't try to move to failedmeasurements for monitoring errors
+                    // Don't try to move to failure table for monitoring errors
                   } else {
                     ailogger.error(`Error processing batch ${fileID}-${batchID}:`, e);
-                    // Only move to failedmeasurements if not already handled internally and it's a real processing error
+                    // Only move to failure table if not already handled internally and it's a real processing error
                     if (!errorMessage.includes('handled internally')) {
                       try {
-                        ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to unhandled error: ${errorMessage}`);
+                        ailogger.warn(`Moving ${fileID}-${batchID} to upload_errors due to unhandled error: ${errorMessage}`);
                         const failureResponse = await fetch(
                           `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
                         );
@@ -1217,7 +1233,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         }
                       } catch (failureError: unknown) {
                         const failErrObj = failureError instanceof Error ? failureError : new Error(String(failureError));
-                        ailogger.error(`Failed to move ${fileID}-${batchID} to failedmeasurements:`, failErrObj);
+                        ailogger.error(`Failed to move ${fileID}-${batchID} to upload_errors:`, failErrObj);
                       }
                     }
                   }
@@ -1269,7 +1285,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Start processing verification with UI feedback
         setIsVerifying(true);
-        setTotalVerificationSteps(3); // Processing verification + Collapser + Final sync
+        setTotalVerificationSteps(4); // Processing verification + Validation + Collapser + Final sync
         setVerificationStep(0);
         setVerificationStatus('Preparing processing verification...');
 
@@ -1289,10 +1305,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             const verifyData = await verifyProcessingResponse.json();
             const totalAccountedFor = verifyData.processedCount + verifyData.failedCount;
             setVerificationStatus(
-              `Verification: ${verifyData.processedCount} total in coremeasurements, ${verifyData.failedCount} total in failedmeasurements (${totalAccountedFor} cumulative for this census), ${verifyData.remainingCount} remaining to process`
+              `Verification: ${verifyData.processedCount} total in coremeasurements, ${verifyData.failedCount} total in failure tables (${totalAccountedFor} cumulative for this census), ${verifyData.remainingCount} remaining to process`
             );
             ailogger.info(
-              `Processing verification: ${verifyData.processedCount} cumulative rows in coremeasurements, ${verifyData.failedCount} cumulative rows in failedmeasurements, ${verifyData.remainingCount} remaining in temporarymeasurements. Note: Counts are cumulative for this plot/census combination.`
+              `Processing verification: ${verifyData.processedCount} cumulative rows in coremeasurements, ${verifyData.failedCount} cumulative rows in failure tables, ${verifyData.remainingCount} remaining in temporarymeasurements. Note: Counts are cumulative for this plot/census combination.`
             );
           } else {
             setVerificationStatus('Processing verification failed, continuing with data consolidation...');
@@ -1308,6 +1324,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.warn(`Processing verification error: ${message}`);
         }
 
+        // Run validation once after all batches finish ingesting
+        setVerificationStep(2);
+        setVerificationStatus('Running validation pass...');
+        const validationResponse = await fetch(
+          `/api/setupbulkvalidation/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}?schema=${schema}`,
+          {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+        if (!validationResponse.ok) {
+          const errorText = await validationResponse.text().catch(() => 'Unknown error');
+          throw new Error(`Validation failed: ${validationResponse.status} - ${errorText}`);
+        }
+
         // Synchronization checkpoint before collapser
         await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -1321,7 +1352,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // trigger collapser ONCE and wait for it to complete
         try {
-          setVerificationStep(2);
+          setVerificationStep(3);
           setVerificationStatus('Starting data consolidation (collapser procedure)...');
           ailogger.info('Starting collapser procedure...');
 
@@ -1351,7 +1382,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.info('Collapser completed successfully:', collapserData);
 
           // Additional settling time to ensure database operations complete
-          setVerificationStep(3);
+          setVerificationStep(4);
           setVerificationStatus('Finalizing database operations...');
           ailogger.info('Allowing 2 seconds for database operations to settle...');
           await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1388,7 +1419,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   if (discrepancy !== 0) {
                     dataIntegrityIssuesFound = true;
                     ailogger.warn(
-                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failedmeasurements). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
+                      `Data verification note for ${fileID}: Expected ${expectedForFile} rows from file, actual ${actualTotal} in database (${sessionData.processedCount} in coremeasurements + ${sessionData.failedCount} in failure tables). Difference: ${discrepancy} row(s). This may be normal if rows were deduplicated or merged during processing.`
                     );
                   }
 

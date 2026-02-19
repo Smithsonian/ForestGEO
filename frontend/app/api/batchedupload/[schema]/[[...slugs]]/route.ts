@@ -3,8 +3,9 @@ import { HTTPResponses } from '@/config/macros';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import connectionmanager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
-import { format } from 'mysql2/promise';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -61,17 +62,66 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   }));
 
   const connectionManager = connectionmanager.getInstance();
-  const columns = Object.keys(errorRows[0]).filter(col => col !== 'id' && col !== 'failedMeasurementID');
-  const values = errorRows.map(row => columns.map(col => row[col as keyof FailedMeasurementsRDS]));
-
-  const insertQuery = format(`INSERT INTO ?? (${columns.map(() => '??').join(', ')}) VALUES ?`, [`${schema}.failedmeasurements`, ...columns, values]);
+  const { hasUploadErrors } = await getSchemaCapabilities(schema);
 
   try {
-    await connectionManager.executeQuery(insertQuery);
-
-    // Refresh current failure reasons for the affected plot/census
-    const refreshFailedQuery = `CALL ${schema}.refresh_failedmeasurements_current(?, ?)`;
-    await connectionManager.executeQuery(refreshFailedQuery, [plotID, censusID]);
+    if (hasUploadErrors) {
+      const insertQuery = safeFormatQuery(
+        schema,
+        `INSERT INTO ??.upload_errors
+           (FileID, BatchID, PlotID, CensusID, RowIndex, RawData, ErrorType, ErrorMessage)
+         VALUES ?`
+      );
+      const uploadErrorValues = errorRows.map((row, index) => [
+        (row as any).fileID ?? null,
+        (row as any).batchID ?? null,
+        row.plotID ?? plotID,
+        row.censusID ?? censusID,
+        index + 1,
+        JSON.stringify({
+          tag: row.tag ?? null,
+          stemTag: row.stemTag ?? null,
+          spCode: row.spCode ?? null,
+          quadrat: row.quadrat ?? null,
+          x: row.x ?? null,
+          y: row.y ?? null,
+          dbh: row.dbh ?? null,
+          hom: row.hom ?? null,
+          date: row.date ?? null,
+          codes: row.codes ?? null,
+          comments: (row as any).comments ?? row.description ?? null
+        }),
+        'PARSE_VALIDATION_ERROR',
+        row.failureReasons ?? 'Unknown parse validation error'
+      ]);
+      await connectionManager.executeQuery(insertQuery, [uploadErrorValues]);
+    } else {
+      const legacyInsertQuery = safeFormatQuery(
+        schema,
+        `INSERT INTO ??.failedmeasurements
+           (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, FailureReasons, OriginalFailureReasons, CurrentFailureReasons)
+         VALUES ?`
+      );
+      const legacyValues = errorRows.map(row => [
+        row.plotID ?? plotID,
+        row.censusID ?? censusID,
+        row.tag ?? null,
+        row.stemTag ?? null,
+        row.spCode ?? null,
+        row.quadrat ?? null,
+        row.x ?? null,
+        row.y ?? null,
+        row.dbh ?? null,
+        row.hom ?? null,
+        row.date ?? null,
+        row.codes ?? null,
+        (row as any).comments ?? row.description ?? null,
+        row.failureReasons ?? 'Unknown parse validation error',
+        row.originalFailureReasons ?? row.failureReasons ?? 'Unknown parse validation error',
+        row.currentFailureReasons ?? row.failureReasons ?? 'Unknown parse validation error'
+      ]);
+      await connectionManager.executeQuery(legacyInsertQuery, [legacyValues]);
+    }
 
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {

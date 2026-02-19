@@ -14,6 +14,7 @@ import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
 import crypto from 'crypto';
 
 /**
@@ -42,6 +43,37 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   const data = sortedRows.join('|');
   // Use full SHA-256 hash for better collision resistance
   return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+async function logDroppedRowAlert(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  plotID: number,
+  censusID: number | string,
+  error: Error,
+  droppedRowCount: number
+): Promise<void> {
+  try {
+    const alertSQL = format(
+      `INSERT INTO ??.uploadintegrityalerts
+       (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
+        sourceRecords, processedRecords, failedRecords, missingRecords)
+       VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_FAILURE_TABLE', ?, 'critical', 0, 0, ?, 0)`,
+      [schema]
+    );
+    const alertMessage = JSON.stringify({
+      error: error.message,
+      droppedRowCount,
+      timestamp: new Date().toISOString(),
+      note: 'These rows were dropped during upload and could not be tracked in any failure table'
+    });
+    await connectionManager.executeQuery(alertSQL, [batchID, fileName, batchID, plotID, censusID, alertMessage, droppedRowCount]);
+    ailogger.error(`Logged dropped row alert to uploadintegrityalerts for ${fileName}-${batchID}`);
+  } catch (alertError: any) {
+    ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRowCount}`);
+  }
 }
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -100,6 +132,7 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
+  const { hasUploadErrors } = await getSchemaCapabilities(schema);
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
@@ -299,67 +332,82 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Insert dropped rows into failedmeasurements for tracking
+          // Insert dropped rows into the appropriate failure table
           if (droppedRows.length > 0) {
-            const failedInsertSQL = format(
-              `INSERT INTO ??.failedmeasurements
-               (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
-               VALUES ?`,
-              [schema]
-            );
-            const failedValues = droppedRows.map(row => [
-              fileName,
-              batchID,
-              plot?.plotID ?? -1,
-              censusCookie,
-              row.tag,
-              row.stemtag || null,
-              row.spcode,
-              row.quadrat,
-              row.lx || null,
-              row.ly || null,
-              row.dbh || null,
-              row.hom || null,
-              row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-              row.codes || null,
-              null,
-              row.failureReason || 'Unknown error during insert',
-              row.failureReason || 'Unknown error during insert',
-              row.failureReason || 'Unknown error during insert'
-            ]);
+            let droppedInsertSQL: string;
+            let droppedValues: any[][];
 
+            if (hasUploadErrors) {
+              droppedInsertSQL = format(
+                `INSERT INTO ??.upload_errors
+                 (FileID, BatchID, PlotID, CensusID, RowIndex, RawData, ErrorType, ErrorMessage)
+                 VALUES ?`,
+                [schema]
+              );
+              droppedValues = droppedRows.map(row => [
+                fileName,
+                batchID,
+                plot?.plotID ?? -1,
+                censusCookie,
+                null,
+                JSON.stringify({
+                  tag: row.tag ?? null,
+                  stemTag: row.stemtag ?? null,
+                  spCode: row.spcode ?? null,
+                  quadrat: row.quadrat ?? null,
+                  x: row.lx ?? null,
+                  y: row.ly ?? null,
+                  dbh: row.dbh ?? null,
+                  hom: row.hom ?? null,
+                  date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+                  codes: row.codes ?? null,
+                  comments: row.comments ?? null
+                }),
+                'INSERT_IGNORE_DROP',
+                row.failureReason || 'Unknown error during insert'
+              ]);
+            } else {
+              droppedInsertSQL = format(
+                `INSERT INTO ??.failedmeasurements
+                 (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
+                 VALUES ?`,
+                [schema]
+              );
+              droppedValues = droppedRows.map(row => [
+                fileName,
+                batchID,
+                plot?.plotID ?? -1,
+                censusCookie,
+                row.tag ?? null,
+                row.stemtag ?? null,
+                row.spcode ?? null,
+                row.quadrat ?? null,
+                row.lx ?? null,
+                row.ly ?? null,
+                row.dbh ?? null,
+                row.hom ?? null,
+                row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+                row.codes ?? null,
+                row.comments ?? null,
+                row.failureReason || 'Unknown error during insert',
+                row.failureReason || 'Unknown error during insert',
+                row.failureReason || 'Unknown error during insert'
+              ]);
+            }
+
+            const targetTable = hasUploadErrors ? 'upload_errors' : 'failedmeasurements';
             try {
-              await connectionManager.executeQuery(failedInsertSQL, [failedValues]);
-              ailogger.info(`Moved ${droppedRows.length} dropped rows to failedmeasurements for ${fileName}-${batchID}`);
-            } catch (failedInsertError: any) {
-              ailogger.error(`Failed to track dropped rows in failedmeasurements (attempt 1): ${failedInsertError.message}`);
-
-              // Retry once before giving up
+              await connectionManager.executeQuery(droppedInsertSQL, [droppedValues]);
+              ailogger.info(`Moved ${droppedRows.length} dropped rows to ${targetTable} for ${fileName}-${batchID}`);
+            } catch (insertError: any) {
+              ailogger.error(`Failed to insert dropped rows to ${targetTable}: ${insertError.message}`);
+              // Retry once for transient failures
               try {
-                await connectionManager.executeQuery(failedInsertSQL, [failedValues]);
-                ailogger.info(`Retry successful: Moved ${droppedRows.length} dropped rows to failedmeasurements for ${fileName}-${batchID}`);
+                await connectionManager.executeQuery(droppedInsertSQL, [droppedValues]);
+                ailogger.info(`Retry successful: moved ${droppedRows.length} dropped rows to ${targetTable} for ${fileName}-${batchID}`);
               } catch (retryError: any) {
-                ailogger.error(`Failed to track dropped rows in failedmeasurements (attempt 2): ${retryError.message}`);
-
-                // Critical: Log to uploadintegrityalerts so data loss is not silent
-                try {
-                  const alertSQL = format(
-                    `INSERT INTO ??.uploadintegrityalerts
-                     (fileID, batchID, plotID, censusID, type, message, severity, failedRecords)
-                     VALUES (?, ?, ?, ?, 'FAILED_INSERT_TO_FAILEDMEASUREMENTS', ?, 'critical', ?)`,
-                    [schema]
-                  );
-                  const alertMessage = JSON.stringify({
-                    error: retryError.message,
-                    droppedRowCount: droppedRows.length,
-                    timestamp: new Date().toISOString(),
-                    note: 'These rows were dropped during upload and could not be tracked in failedmeasurements table'
-                  });
-                  await connectionManager.executeQuery(alertSQL, [fileName, batchID, plot?.plotID ?? -1, censusCookie, alertMessage, droppedRows.length]);
-                  ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
-                } catch (alertError: any) {
-                  ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRows.length}`);
-                }
+                ailogger.error(`Retry also failed: ${retryError.message}`);
+                await logDroppedRowAlert(connectionManager, schema, fileName, batchID, plot?.plotID ?? -1, censusCookie, retryError, droppedRows.length);
               }
             }
           }
@@ -413,7 +461,7 @@ export async function POST(request: NextRequest) {
           JSON.stringify({
             responseMessage:
               droppedRowCount > 0
-                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check failedmeasurements table`
+                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check upload_errors table`
                 : `Bulk insert to SQL completed`,
             failingRows: Array.from(failingRows),
             insertedCount: actualInsertedCount,

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
+import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -19,44 +22,93 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
+  let insertSQL: string;
+  let deleteTempSQL: string;
+  let insertParams: any[];
+  try {
+    deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in setupbulkfailure: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const connectionManager = ConnectionManager.getInstance();
+  const { hasUploadErrors } = await getSchemaCapabilities(schema);
+
+  if (hasUploadErrors) {
+    insertSQL = safeFormatQuery(
+      schema,
+      `INSERT INTO ??.upload_errors
+         (FileID, BatchID, PlotID, CensusID, RowIndex, RawData, ErrorType, ErrorMessage)
+       SELECT tm.FileID,
+              tm.BatchID,
+              tm.PlotID,
+              tm.CensusID,
+              tm.id,
+              JSON_OBJECT(
+                  'tag', tm.TreeTag,
+                  'stemTag', tm.StemTag,
+                  'spCode', tm.SpeciesCode,
+                  'quadrat', tm.QuadratName,
+                  'x', tm.LocalX,
+                  'y', tm.LocalY,
+                  'dbh', tm.DBH,
+                  'hom', tm.HOM,
+                  'date', tm.MeasurementDate,
+                  'codes', tm.Codes,
+                  'comments', tm.Comments
+              ),
+              ?,
+              ?
+       FROM ??.temporarymeasurements tm
+       WHERE tm.FileID = ? AND tm.BatchID = ?`
+    );
+    insertParams = ['BATCH_PROCESSING_ERROR', 'Batch moved after max attempts', fileID, batchID];
+  } else {
+    insertSQL = safeFormatQuery(
+      schema,
+      `INSERT INTO ??.failedmeasurements
+         (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
+       SELECT DISTINCT FileID,
+                       BatchID,
+                       PlotID,
+                       CensusID,
+                       NULLIF(TreeTag, '')                   AS Tag,
+                       NULLIF(StemTag, '')                   AS StemTag,
+                       NULLIF(SpeciesCode, '')               AS SpCode,
+                       NULLIF(QuadratName, '')               AS Quadrat,
+                       LocalX                                AS X,
+                       LocalY                                AS Y,
+                       NULLIF(DBH, 0)                        AS DBH,
+                       NULLIF(HOM, 0)                        AS HOM,
+                       NULLIF(MeasurementDate, '1900-01-01') AS MeasurementDate,
+                       NULLIF(Codes, '')                     AS Codes,
+                       NULLIF(Comments, '')                  AS Comments,
+                       'Batch moved after max attempts'      AS OriginalFailureReasons,
+                       NULL                                  AS CurrentFailureReasons,
+                       NULL                                  AS FailureReasons
+       FROM ??.temporarymeasurements
+       WHERE FileID = ? AND BatchID = ?`
+    );
+    insertParams = [fileID, batchID];
+  }
+
   let transactionID: string | null = null;
   try {
     transactionID = await connectionManager.beginTransaction();
-    let query = `
-    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
-    select distinct FileID,
-                    BatchID,
-                    PlotID,
-                    CensusID,
-                    nullif(TreeTag, '')                   as Tag,
-                    nullif(StemTag, '')                   as StemTag,
-                    nullif(SpeciesCode, '')               as SpCode,
-                    nullif(QuadratName, '')               as Quadrat,
-                    nullif(LocalX, 0)                     as X,
-                    nullif(LocalY, 0)                     as Y,
-                    nullif(DBH, 0)                        as DBH,
-                    nullif(HOM, 0)                        as HOM,
-                    nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
-                    nullif(Codes, '')                     as Codes,
-                    nullif(Comments, '')                  as Comments,
-                    'Batch moved after max attempts'      as OriginalFailureReasons,
-                    null                                  as CurrentFailureReasons,
-                    null                                  as FailureReasons
-    from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?
-    `;
-    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
-    query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
-    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
+    await connectionManager.executeQuery(insertSQL, insertParams, transactionID);
 
-    // Populate failure reasons for the newly inserted failed measurements
-    query = `CALL ${schema}.reviewfailed()`;
-    await connectionManager.executeQuery(query, [], transactionID);
+    if (!hasUploadErrors) {
+      const reviewFailedSQL = safeFormatQuery(schema, 'CALL ??.reviewfailed()');
+      await connectionManager.executeQuery(reviewFailedSQL, [], transactionID);
+    }
 
+    await connectionManager.executeQuery(deleteTempSQL, [fileID, batchID], transactionID);
     await connectionManager.commitTransaction(transactionID);
-  } catch {
+  } catch (error: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
-    throw new Error('failure transfer to failedmeasurements --> error detected.');
+    const targetTable = hasUploadErrors ? 'upload_errors' : 'failedmeasurements';
+    throw new Error(`failure transfer to ${targetTable} --> error detected: ${error.message}`);
   }
   return new NextResponse(JSON.stringify({ temp: true }), { status: HTTPResponses.OK });
 }

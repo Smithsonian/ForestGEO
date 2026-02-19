@@ -8,6 +8,7 @@ import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
 import { generateShortBatchID } from '@/config/utils';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -36,7 +37,9 @@ export async function POST(request: NextRequest) {
       `INSERT INTO ??.temporarymeasurements (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
       VALUES ?`
     );
-    bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+    const { hasIngestMeasurements } = await getSchemaCapabilities(schema);
+    const procedureName = hasIngestMeasurements ? 'ingest_measurements' : 'bulkingestionprocess';
+    bulkProcessSQL = safeFormatQuery(schema, `CALL ??.${procedureName}(?, ?)`);
   } catch (error: any) {
     ailogger.error(`Invalid schema in bulkcrud: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });

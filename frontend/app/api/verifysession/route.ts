@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -12,7 +13,7 @@ export const runtime = 'nodejs';
  * Session-Based Upload Verification Endpoint
  *
  * Verifies data for a specific upload session (FileID and optional BatchID)
- * Returns precise per-upload counts to verify: input_rows = coremeasurements + failedmeasurements
+ * Returns precise per-upload counts to verify: input_rows = coremeasurements + failure tables
  *
  * Query Parameters:
  * - schema (required): Database schema
@@ -24,7 +25,7 @@ export const runtime = 'nodejs';
  * Returns:
  * {
  *   processedCount: number,      // Rows in coremeasurements
- *   failedCount: number,          // Rows in failedmeasurements
+ *   failedCount: number,          // Rows in failedmeasurements + upload_errors
  *   totalAccounted: number,       // processedCount + failedCount
  *   fileID: string | null,
  *   batchID: string | null,
@@ -36,8 +37,8 @@ export async function GET(request: NextRequest) {
   const schema = searchParams.get('schema');
   const plotID = searchParams.get('plotID');
   const censusID = searchParams.get('censusID');
-  const fileID = searchParams.get('fileID'); // Optional: specific file
-  const batchID = searchParams.get('batchID'); // Optional: specific batch (requires fileID)
+  const fileID = searchParams.get('fileID');
+  const batchID = searchParams.get('batchID');
 
   if (!schema || !plotID || !censusID) {
     return new NextResponse(JSON.stringify({ error: 'Missing required parameters: schema, plotID, censusID' }), {
@@ -49,16 +50,13 @@ export async function GET(request: NextRequest) {
     return new NextResponse(JSON.stringify({ error: 'batchID requires fileID parameter' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // Determine query scope
   const scope = batchID ? 'batch' : fileID ? 'file' : 'all';
 
-  // Build queries based on scope
-  let processedSQL: string, failedSQL: string;
+  let processedSQL: string, failedMeasurementsSQL: string;
   let processedParams: any[], failedParams: any[];
 
   try {
     if (scope === 'batch') {
-      // Query specific batch using indexed UploadFileID/UploadBatchID (fallback to JSON for legacy rows)
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -69,14 +67,12 @@ export async function GET(request: NextRequest) {
          AND (cm.UploadBatchID = ? OR (cm.UploadBatchID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?))`
       );
       processedParams = [plotID, censusID, fileID, fileID, batchID, batchID];
-
-      failedSQL = safeFormatQuery(
+      failedMeasurementsSQL = safeFormatQuery(
         schema,
         'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ? AND BatchID = ?'
       );
       failedParams = [plotID, censusID, fileID, batchID];
     } else if (scope === 'file') {
-      // Query all batches for a specific file (prefer UploadFileID, fallback to JSON)
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -86,18 +82,15 @@ export async function GET(request: NextRequest) {
          AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))`
       );
       processedParams = [plotID, censusID, fileID, fileID];
-
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
+      failedMeasurementsSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
       failedParams = [plotID, censusID, fileID];
     } else {
-      // Query all files for this plot/census (cumulative total)
       processedSQL = safeFormatQuery(
         schema,
         'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ?'
       );
       processedParams = [plotID, censusID];
-
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+      failedMeasurementsSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
       failedParams = [plotID, censusID];
     }
   } catch (error: any) {
@@ -106,24 +99,45 @@ export async function GET(request: NextRequest) {
   }
 
   const connectionManager = ConnectionManager.getInstance();
+  const { hasUploadErrors } = await getSchemaCapabilities(schema);
 
   try {
-    // Execute queries
     const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
-    const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
+    const failedMeasurementsResult = await connectionManager.executeQuery(failedMeasurementsSQL, failedParams);
+
+    let uploadErrorsCount = 0;
+    if (hasUploadErrors) {
+      let uploadErrorsSQL: string;
+      let uploadErrorParams: any[];
+      if (scope === 'batch') {
+        uploadErrorsSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.upload_errors WHERE PlotID = ? AND CensusID = ? AND FileID = ? AND BatchID = ?');
+        uploadErrorParams = [plotID, censusID, fileID, batchID];
+      } else if (scope === 'file') {
+        uploadErrorsSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.upload_errors WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
+        uploadErrorParams = [plotID, censusID, fileID];
+      } else {
+        uploadErrorsSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.upload_errors WHERE PlotID = ? AND CensusID = ?');
+        uploadErrorParams = [plotID, censusID];
+      }
+      const uploadErrorsResult = await connectionManager.executeQuery(uploadErrorsSQL, uploadErrorParams);
+      uploadErrorsCount = uploadErrorsResult[0]?.count || 0;
+    }
 
     const processedCount = processedResult[0]?.count || 0;
-    const failedCount = failedResult[0]?.count || 0;
+    const failedMeasurementsCount = failedMeasurementsResult[0]?.count || 0;
+    const failedCount = failedMeasurementsCount + uploadErrorsCount;
     const totalAccounted = processedCount + failedCount;
 
     ailogger.info(
-      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} in failedmeasurements. Total: ${totalAccounted}`
+      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} in failure tables (${failedMeasurementsCount} failedmeasurements + ${uploadErrorsCount} upload_errors). Total: ${totalAccounted}`
     );
 
     return new NextResponse(
       JSON.stringify({
         processedCount,
         failedCount,
+        failedMeasurementsCount,
+        uploadErrorsCount,
         totalAccounted,
         plotID,
         censusID,

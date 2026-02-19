@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -23,10 +24,8 @@ export async function GET(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    const result = await connectionManager.executeQuery(
-      `SELECT COUNT(*) as count FROM ${schema}.temporarymeasurements WHERE FileID = ? AND PlotID = ? AND CensusID = ?`,
-      [fileName, plotID, censusID]
-    );
+    const verifySQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND PlotID = ? AND CensusID = ?');
+    const result = await connectionManager.executeQuery(verifySQL, [fileName, plotID, censusID]);
 
     const count = result[0]?.count || 0;
     ailogger.info(`Verification check for ${fileName}: ${count} rows found in temporarymeasurements`);

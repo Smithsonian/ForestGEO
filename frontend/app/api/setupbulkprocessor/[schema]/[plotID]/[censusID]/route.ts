@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -16,13 +17,17 @@ export async function GET(
   const { schema, plotID, censusID } = await props.params;
 
   const connectionManager = ConnectionManager.getInstance();
+  let batchSQL: string;
+  try {
+    batchSQL = safeFormatQuery(schema, 'SELECT DISTINCT FileID, BatchID FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ? ORDER BY FileID, BatchID');
+  } catch (error: any) {
+    ailogger.error(`Invalid schema in setupbulkprocessor: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
 
   try {
     const output: { fileID: string; batchID: string }[] = (
-      await connectionManager.executeQuery(
-        `select distinct FileID, BatchID from ${schema}.temporarymeasurements where PlotID = ? and CensusID = ? order by FileID, BatchID;`,
-        [plotID, censusID]
-      )
+      await connectionManager.executeQuery(batchSQL, [plotID, censusID])
     ).map((row: any) => ({
       fileID: row.FileID,
       batchID: row.BatchID

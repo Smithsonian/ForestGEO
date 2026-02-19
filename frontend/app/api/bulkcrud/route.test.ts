@@ -72,6 +72,16 @@ vi.mock('mysql2/promise', () => {
   const format = (sql: string, params: any[]) => `FORMATTED_SQL:${sql}::PARAMS:${JSON.stringify(params)}`;
   return { format };
 });
+
+const mockCapabilities = {
+  hasUploadErrors: true,
+  hasIngestMeasurements: true,
+  hasValidateMeasurements: true
+};
+
+vi.mock('@/config/utils/schemacapabilities', () => ({
+  getSchemaCapabilities: vi.fn().mockImplementation(() => Promise.resolve(mockCapabilities))
+}));
 // Minimal helpers
 function makeRequest(body: unknown) {
   return new Request('http://localhost/api', {
@@ -113,9 +123,12 @@ function normalizeConnectionManager() {
 }
 
 describe('bulkcrud POST route', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     normalizeConnectionManager();
+    // Re-establish mock after clearAllMocks
+    const { getSchemaCapabilities } = await import('@/config/utils/schemacapabilities');
+    (getSchemaCapabilities as ReturnType<typeof vi.fn>).mockResolvedValue(mockCapabilities);
   });
 
   /**
@@ -231,7 +244,7 @@ describe('bulkcrud POST route', () => {
     expect(values).toHaveLength(2);
 
     const [secondSQL, secondParams] = execSpy.mock.calls[1];
-    expect(String(secondSQL)).toMatch(/CALL `forestgeo_testing`\.bulkingestionprocess\(\?, \?\);?/i);
+    expect(String(secondSQL)).toMatch(/CALL `forestgeo_testing`\.ingest_measurements\(\?, \?\);?/i);
     expect(secondParams).toEqual(['sample_bulk_insert.csv', 'test-batch-id']);
 
     expect(insertOrUpdate).not.toHaveBeenCalled();

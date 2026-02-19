@@ -3,6 +3,8 @@ drop procedure if exists clearcensusfull;
 drop procedure if exists clearcensusmsmts;
 drop procedure if exists RefreshMeasurementsSummary;
 drop procedure if exists RefreshViewFullTable;
+drop procedure if exists ingest_measurements;
+drop procedure if exists validate_measurements;
 drop procedure if exists reingestfailedrows;
 drop procedure if exists reviewfailed;
 drop procedure if exists refresh_failedmeasurements_current;
@@ -73,7 +75,8 @@ BEGIN
              join stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
              join trees t on t.CensusID = c.CensusID and t.TreeID = st.TreeID
              join species sp on t.SpeciesID = sp.SpeciesID
-             join quadrats q on q.QuadratID = st.QuadratID;
+             join quadrats q on q.QuadratID = st.QuadratID
+    WHERE cm.IsValidated IS NOT FALSE;
 
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
@@ -208,7 +211,8 @@ BEGIN
              LEFT JOIN plots p ON q.PlotID = p.PlotID
              LEFT JOIN census c ON cm.CensusID = c.CensusID
              LEFT JOIN cmattributes ca ON ca.CoreMeasurementID = cm.CoreMeasurementID
-             LEFT JOIN attributes a ON a.Code = ca.Code;
+             LEFT JOIN attributes a ON a.Code = ca.Code
+    WHERE cm.IsValidated IS NOT FALSE;
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
 END $$
@@ -279,11 +283,12 @@ begin
     -- Log StemGUID+Date deduplication if any rows were removed
     IF vStemDateDupCount > 0 THEN
         INSERT INTO uploadintegrityalerts
-            (plotID, censusID, type, message, severity, failedRecords)
+            (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
+             sourceRecords, processedRecords, failedRecords, missingRecords)
         VALUES
-            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+            ('SYSTEM', 'SYSTEM', 'SYSTEM', vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
              CONCAT('Removed ', vStemDateDupCount, ' duplicate rows (same StemGUID+MeasurementDate)'),
-             'info', vStemDateDupCount);
+             'info', 0, 0, vStemDateDupCount, 0);
     END IF;
 
     -- Count duplicates BEFORE deletion (TreeTag + StemTag duplicates)
@@ -319,11 +324,12 @@ begin
     -- Log TreeTag+StemTag deduplication if any rows were removed
     IF vTreeStemTagDupCount > 0 THEN
         INSERT INTO uploadintegrityalerts
-            (plotID, censusID, type, message, severity, failedRecords)
+            (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
+             sourceRecords, processedRecords, failedRecords, missingRecords)
         VALUES
-            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+            ('SYSTEM', 'SYSTEM', 'SYSTEM', vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
              CONCAT('Removed ', vTreeStemTagDupCount, ' duplicate rows (same TreeTag+StemTag in census)'),
-             'info', vTreeStemTagDupCount);
+             'info', 0, 0, vTreeStemTagDupCount, 0);
     END IF;
 
     -- Commit all changes atomically
@@ -2358,5 +2364,31 @@ BEGIN
                FALSE as batch_failed, 0 as records_failed;
     END IF;
 END $$
+
+create
+    definer = azureroot@`%` procedure ingest_measurements(IN vFileID varchar(36), IN vBatchID varchar(36))
+begin
+    -- Compatibility entrypoint: keeps existing ingestion behavior while new routes call a split API.
+    call bulkingestionprocess(vFileID, vBatchID);
+end $$
+
+create
+    definer = azureroot@`%` procedure validate_measurements(IN vPlotID int, IN vCensusID int)
+begin
+    -- Stamps IsValidated based on existing cmverrors rows.
+    -- Visibility contract:
+    --   TRUE  -> clean (no validation errors)
+    --   FALSE -> flagged (has validation errors)
+    --   NULL  -> not yet validated
+    UPDATE coremeasurements cm
+        JOIN census c ON cm.CensusID = c.CensusID
+        LEFT JOIN (
+            SELECT DISTINCT CoreMeasurementID FROM cmverrors
+        ) errs ON errs.CoreMeasurementID = cm.CoreMeasurementID
+    SET cm.IsValidated = IF(errs.CoreMeasurementID IS NULL, 1, 0)
+    WHERE cm.CensusID = vCensusID
+      AND c.PlotID = vPlotID
+      AND cm.IsActive = 1;
+end $$
 
 DELIMITER ;

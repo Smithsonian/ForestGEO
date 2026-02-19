@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { getSchemaCapabilities } from '@/config/utils/schemacapabilities';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -44,7 +45,10 @@ export async function GET(
   // Validate schema to prevent SQL injection
   let procedureSQL: string;
   try {
-    procedureSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+    // Capability check determines which procedure to call — no runtime fallback needed
+    const { hasIngestMeasurements } = await getSchemaCapabilities(schema);
+    const procedureName = hasIngestMeasurements ? 'ingest_measurements' : 'bulkingestionprocess';
+    procedureSQL = safeFormatQuery(schema, `CALL ??.${procedureName}(?, ?)`);
   } catch (error: any) {
     ailogger.error(`Invalid schema in setupbulkprocedure: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -107,7 +111,6 @@ export async function GET(
           ailogger.info(`Acquired application lock: ${lockKey}`);
 
           const queryStart = Date.now();
-          // Use pre-validated and formatted SQL to prevent injection
           const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, batchID], transactionID);
           const queryDuration = Date.now() - queryStart;
 
@@ -115,10 +118,12 @@ export async function GET(
           const batchHandledInternally =
             procedureResult &&
             procedureResult[0] &&
-            (procedureResult[0].message?.includes('moved to failedmeasurements') || procedureResult[0].batch_failed === true);
+            ((procedureResult[0].message?.includes('moved to failedmeasurements') ||
+              procedureResult[0].message?.includes('moved to upload_errors')) ||
+              procedureResult[0].batch_failed === true);
 
           if (batchHandledInternally) {
-            ailogger.info(`Batch ${fileID}-${batchID} was handled internally by procedure (moved to failedmeasurements) in ${queryDuration}ms`);
+            ailogger.info(`Batch ${fileID}-${batchID} was handled internally by procedure (moved to failure table) in ${queryDuration}ms`);
             return {
               attemptsNeeded: attempt,
               batchFailedButHandled: true,
