@@ -22,41 +22,29 @@ create index idx_attributes_description
 create index idx_attributes_status
     on attributes (Status);
 
-create table if not exists failedmeasurements
+-- failedmeasurements table removed: failures now stored in coremeasurements (StemGUID=NULL)
+-- with error details in measurement_error_log + measurement_errors tables.
+
+create table if not exists upload_errors
 (
-    FailedMeasurementID int auto_increment
+    UploadErrorID  int auto_increment
         primary key,
-    FileID              varchar(255)   null comment 'Source file name from upload',
-    BatchID             varchar(36)    null comment 'Batch identifier for this upload chunk',
-    PlotID              int            null,
-    CensusID            int            null,
-    Tag                 varchar(20)    null,
-    StemTag             varchar(10)    null,
-    SpCode              varchar(25)    null,
-    Quadrat             varchar(255)   null,
-    X                   decimal(12, 6) null,
-    Y                   decimal(12, 6) null,
-    DBH                 decimal(12, 6) null,
-    HOM                 decimal(12, 6) null,
-    Date                date           null,
-    Codes               varchar(255)   null,
-    Comments            varchar(255)   null,
-    FailureReasons      text           null,
-    OriginalFailureReasons text        null,
-    CurrentFailureReasons  text        null,
-    LastValidatedAt     datetime       null,
-    hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
-                                                      `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`,
-                                                      `Codes`))) stored invisible,
-    constraint unique_required_hash
-        unique (hash_id)
+    FileID         varchar(255)                        null,
+    BatchID        varchar(36)                         null,
+    PlotID         int                                 null,
+    CensusID       int                                 null,
+    RowNumber      int                                 null,
+    ErrorType      varchar(100)                        null,
+    ErrorMessage   text                                null,
+    RawRow         json                                null,
+    CreatedAt      datetime default CURRENT_TIMESTAMP  null
 );
 
-create index idx_upload_session
-    on failedmeasurements (FileID, BatchID) comment 'Index for upload session queries';
+create index idx_upload_errors_file_batch
+    on upload_errors (FileID, BatchID);
 
-create index idx_plot_census_upload
-    on failedmeasurements (PlotID, CensusID, FileID, BatchID) comment 'Composite index for verification queries';
+create index idx_upload_errors_plot_census
+    on upload_errors (PlotID, CensusID);
 
 create table if not exists measurementssummary
 (
@@ -727,6 +715,15 @@ create table if not exists coremeasurements
     UserDefinedFields json                    null,
     UploadFileID      varchar(255)            null,
     UploadBatchID     varchar(36)             null,
+    RawTreeTag        varchar(20)             null,
+    RawStemTag        varchar(10)             null,
+    RawSpCode         varchar(25)             null,
+    RawQuadrat        varchar(255)            null,
+    RawX              decimal(12, 6)          null,
+    RawY              decimal(12, 6)          null,
+    RawCodes          varchar(255)            null,
+    RawComments       varchar(255)            null,
+    SourceRowIndex    int                     null,
     IsActive          tinyint(1) default 1    not null,
     DeletedAt         datetime                null,
     constraint ux_measure_unique
@@ -801,6 +798,42 @@ create index ix_cm_cid_date_dbh_hom
 
 create index idx_cm_uploadbatch_census
     on coremeasurements (UploadBatchID, CensusID);
+
+create unique index ux_cm_uploadbatch_rowindex
+    on coremeasurements (UploadBatchID, SourceRowIndex);
+
+create table if not exists measurement_errors
+(
+    ErrorID      int auto_increment
+        primary key,
+    ErrorSource  enum ('ingestion', 'validation') not null,
+    ErrorCode    varchar(50)                      null,
+    ErrorMessage text                             not null,
+    constraint uq_measurement_error_source_code
+        unique (ErrorSource, ErrorCode)
+);
+
+create table if not exists measurement_error_log
+(
+    MeasurementID int                               not null,
+    ErrorID       int                               not null,
+    CreatedAt     datetime default CURRENT_TIMESTAMP null,
+    IsResolved    tinyint(1) default 0             not null,
+    ResolvedAt    datetime                          null,
+    primary key (MeasurementID, ErrorID),
+    constraint measurement_error_log_coremeasurements_fk
+        foreign key (MeasurementID) references coremeasurements (CoreMeasurementID)
+            on delete cascade,
+    constraint measurement_error_log_errors_fk
+        foreign key (ErrorID) references measurement_errors (ErrorID)
+            on delete restrict
+);
+
+create index idx_measurement_error_log_errorid
+    on measurement_error_log (ErrorID);
+
+create index idx_measurement_error_log_resolved
+    on measurement_error_log (IsResolved, CreatedAt);
 
 create table if not exists specimens
 (
