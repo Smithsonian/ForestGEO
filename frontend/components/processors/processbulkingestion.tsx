@@ -1,11 +1,12 @@
 import * as moment from 'moment';
 import { buildBulkUpsertQuery, createError } from '@/config/utils';
 import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { CMAttributesResult, CoreMeasurementsResult, FailedMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
+import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { IngestionFailureRowInput, insertIngestionFailureRows } from '@/config/measurementerrors';
 
 export interface TemporaryMeasurement {
   id: number;
@@ -176,8 +177,9 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     // FIXED: Now checks for actual duplicate coremeasurements, not duplicate stems/trees entries
     const clearDuplicateValidationErrors = `
       DELETE e
-      FROM ${schema}.cmverrors e
-      INNER JOIN ${schema}.coremeasurements cm ON e.CoreMeasurementID = cm.CoreMeasurementID
+      FROM ${schema}.measurement_error_log e
+      INNER JOIN ${schema}.measurement_errors me ON e.ErrorID = me.ErrorID
+      INNER JOIN ${schema}.coremeasurements cm ON e.MeasurementID = cm.CoreMeasurementID
       LEFT JOIN (
         SELECT cm2.CoreMeasurementID
         FROM ${schema}.coremeasurements cm2
@@ -197,8 +199,9 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
                        AND t.TreeTag = duplicates.TreeTag
                        AND s.StemTag = duplicates.StemTag
         WHERE cm2.CensusID = ?
-      ) AS still_duplicates ON e.CoreMeasurementID = still_duplicates.CoreMeasurementID
-      WHERE e.ValidationErrorID = 5
+      ) AS still_duplicates ON e.MeasurementID = still_duplicates.CoreMeasurementID
+      WHERE me.ErrorSource = 'validation'
+        AND me.ErrorCode = '5'
         AND cm.CensusID = ?
         AND still_duplicates.CoreMeasurementID IS NULL
     `;
@@ -257,7 +260,7 @@ export async function processBulkIngestionProcessor(
       }
     }
 
-    // Log duplicate rows to failedmeasurements for auditing
+    // Log duplicate rows as unresolved ingestion errors for auditing.
     if (duplicateMeasurements.length > 0) {
       ailogger.info(
         `[Deduplication] Removed ${duplicateMeasurements.length} duplicate rows (same TreeTag/StemTag/SpeciesCode/QuadratName/DBH/HOM/Date/LocalX/LocalY)`,
@@ -269,23 +272,23 @@ export async function processBulkIngestionProcessor(
         }
       );
 
-      const duplicateFailures: FailedMeasurementsResult[] = duplicateMeasurements.map(m => ({
-        FileID: fileID,
-        BatchID: batchID,
-        PlotID: m.PlotID,
-        CensusID: m.CensusID,
-        Tag: m.TreeTag || '',
-        StemTag: m.StemTag || '',
-        SpCode: m.SpeciesCode,
-        Quadrat: m.QuadratName,
-        X: m.LocalX ?? null,
-        Y: m.LocalY ?? -1,
-        DBH: m.DBH ?? -1,
-        HOM: m.HOM ?? -1,
-        Date: m.MeasurementDate,
-        Codes: m.Codes || '',
-        Comments: m.Comments || '',
-        FailureReasons: 'DUPLICATE_IN_BATCH: Same TreeTag/StemTag/SpeciesCode/QuadratName/DBH/HOM/Date/LocalX/LocalY as earlier row in batch'
+      const duplicateFailures: IngestionFailureRowInput[] = duplicateMeasurements.map(m => ({
+        fileID: fileID,
+        batchID: batchID,
+        plotID: m.PlotID,
+        censusID: m.CensusID,
+        tag: m.TreeTag || '',
+        stemTag: m.StemTag || '',
+        spCode: m.SpeciesCode,
+        quadrat: m.QuadratName,
+        x: m.LocalX ?? null,
+        y: m.LocalY ?? -1,
+        dbh: m.DBH ?? -1,
+        hom: m.HOM ?? -1,
+        date: m.MeasurementDate,
+        codes: m.Codes || '',
+        comments: m.Comments || '',
+        failureReason: 'DUPLICATE_IN_BATCH: Same TreeTag/StemTag/SpeciesCode/QuadratName/DBH/HOM/Date/LocalX/LocalY as earlier row in batch'
       }));
 
       await insertFailedMeasurements(connectionManager, schema, duplicateFailures);
@@ -294,7 +297,7 @@ export async function processBulkIngestionProcessor(
     // Step 2: Create filter_validity table (replicating stored procedure logic)
     const filteredMeasurements: FilteredMeasurement[] = [];
     const validMeasurements: FilteredMeasurement[] = [];
-    const failedMeasurements: FailedMeasurementsResult[] = [];
+    const failedMeasurements: IngestionFailureRowInput[] = [];
 
     for (const measurement of uniqueMeasurements) {
       // Validate quadrat and species joins
@@ -305,19 +308,21 @@ export async function processBulkIngestionProcessor(
       if (!measurement.TreeTag || !hasValidQuadrat || !hasValidSpecies || !measurement.MeasurementDate) {
         // Add to failed measurements (Condition 2 from stored procedure)
         failedMeasurements.push({
-          PlotID: measurement.PlotID,
-          CensusID: measurement.CensusID,
-          Tag: measurement.TreeTag || '',
-          StemTag: measurement.StemTag || '',
-          SpCode: measurement.SpeciesCode,
-          Quadrat: measurement.QuadratName,
-          X: measurement.LocalX ?? null,
-          Y: measurement.LocalY || -1,
-          DBH: measurement.DBH || -1,
-          HOM: measurement.HOM || -1,
-          Date: measurement.MeasurementDate,
-          Codes: measurement.Codes || '',
-          Description: measurement.Comments || ''
+          plotID: measurement.PlotID,
+          censusID: measurement.CensusID,
+          tag: measurement.TreeTag || '',
+          stemTag: measurement.StemTag || '',
+          spCode: measurement.SpeciesCode,
+          quadrat: measurement.QuadratName,
+          x: measurement.LocalX ?? null,
+          y: measurement.LocalY || -1,
+          dbh: measurement.DBH || -1,
+          hom: measurement.HOM || -1,
+          date: measurement.MeasurementDate,
+          codes: measurement.Codes || '',
+          comments: measurement.Comments || '',
+          fileID,
+          batchID
         });
         continue;
       }
@@ -357,19 +362,21 @@ export async function processBulkIngestionProcessor(
       } else {
         // Add to failed measurements (Condition 1 from stored procedure)
         failedMeasurements.push({
-          PlotID: measurement.PlotID,
-          CensusID: measurement.CensusID,
-          Tag: measurement.TreeTag,
-          StemTag: measurement.StemTag || '',
-          SpCode: measurement.SpeciesCode,
-          Quadrat: measurement.QuadratName,
-          X: measurement.LocalX ?? null,
-          Y: measurement.LocalY ?? null,
-          DBH: dbh,
-          HOM: hom,
-          Date: measurement.MeasurementDate,
-          Codes: measurement.Codes || '',
-          Description: measurement.Comments || ''
+          plotID: measurement.PlotID,
+          censusID: measurement.CensusID,
+          tag: measurement.TreeTag,
+          stemTag: measurement.StemTag || '',
+          spCode: measurement.SpeciesCode,
+          quadrat: measurement.QuadratName,
+          x: measurement.LocalX ?? null,
+          y: measurement.LocalY ?? null,
+          dbh: dbh,
+          hom: hom,
+          date: measurement.MeasurementDate,
+          codes: measurement.Codes || '',
+          comments: measurement.Comments || '',
+          fileID,
+          batchID
         });
       }
     }
@@ -469,9 +476,8 @@ async function validateAttributeCodes(connectionManager: ConnectionManager, sche
   return result?.[0]?.invalid || 0;
 }
 
-async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: FailedMeasurementsResult[]): Promise<void> {
-  const { sql, params } = buildBulkUpsertQuery(schema, 'failedmeasurements', failedMeasurements, 'FailedMeasurementID');
-  await connectionManager.executeQuery(sql, params);
+async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: IngestionFailureRowInput[]): Promise<void> {
+  await insertIngestionFailureRows(connectionManager, schema, failedMeasurements);
 }
 
 /**

@@ -266,13 +266,21 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         });
       }
 
-      const failedQuery = `SELECT COUNT(*) AS CountFailed FROM ${currentSite.schemaName}.failedmeasurements WHERE PlotID = ${currentPlot.plotID} AND CensusID = ${currentCensus.dateRanges?.[0]?.censusID}`;
+      const failedQuery = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS CountFailed
+                           FROM ${currentSite.schemaName}.coremeasurements cm
+                                  JOIN ${currentSite.schemaName}.measurement_error_log mel
+                                       ON mel.MeasurementID = cm.CoreMeasurementID AND mel.IsResolved = FALSE
+                                  JOIN ${currentSite.schemaName}.measurement_errors me
+                                       ON me.ErrorID = mel.ErrorID
+                           WHERE cm.CensusID = ${currentCensus.dateRanges?.[0]?.censusID}
+                             AND cm.StemGUID IS NULL
+                             AND me.ErrorSource = 'ingestion'`;
       const failedResponse = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(failedQuery)
       });
-      if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
+      if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for unresolved ingestion-error count failed');
       const failedData = await failedResponse.json();
       setFailedCount(Number(failedData[0].CountFailed) || 0);
     } catch (error: unknown) {
@@ -1312,10 +1320,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   async function handleResetValidations() {
     try {
-      const clearCMVQuery = `DELETE cmv
-                             FROM ${currentSite?.schemaName}.cmverrors AS cmv
+      const clearCMVQuery = `DELETE mel
+                             FROM ${currentSite?.schemaName}.measurement_error_log AS mel
+                                    JOIN ${currentSite?.schemaName}.measurement_errors AS me
+                                         ON me.ErrorID = mel.ErrorID
                                     JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-                                         ON cmv.CoreMeasurementID = cm.CoreMeasurementID
+                                         ON mel.MeasurementID = cm.CoreMeasurementID
                                     JOIN ${currentSite?.schemaName}.census AS c
                                          ON c.CensusID = cm.CensusID
                              WHERE c.CensusID IN (SELECT CensusID
@@ -1323,6 +1333,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                                                   WHERE PlotID = ${currentPlot?.plotID}
                                                     AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
                                AND c.PlotID = ${currentPlot?.plotID}
+                               AND me.ErrorSource = 'validation'
                                AND (cm.IsValidated = 0 OR cm.IsValidated IS NULL);`;
       const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
         JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
@@ -1339,8 +1350,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       });
       if (!clearCMVResponse.ok) {
         const errorData = await clearCMVResponse.json();
-        ailogger.error('Clear CMVErrors query failed:', errorData);
-        throw new Error(`Clear cmverrors query failed: ${errorData.error || 'Unknown error'}`);
+        ailogger.error('Clear validation errors query failed:', errorData);
+        throw new Error(`Clear validation errors query failed: ${errorData.error || 'Unknown error'}`);
       }
       const response = await fetch(`/api/query`, {
         method: 'POST',
@@ -1580,8 +1591,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       const deleteResponse = await fetch(`/api/query`, {
                         method: 'POST',
                         body: JSON.stringify({
-                          query: `DELETE FROM ??.cmverrors WHERE CoreMeasurementID = ?`,
-                          params: [currentSite?.schemaName, cmvSelected],
+                          query: `DELETE mel
+                                  FROM ??.measurement_error_log mel
+                                         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+                                  WHERE mel.MeasurementID = ?
+                                    AND me.ErrorSource = ?`,
+                          params: [currentSite?.schemaName, currentSite?.schemaName, cmvSelected, 'validation'],
                           format: true
                         })
                       });

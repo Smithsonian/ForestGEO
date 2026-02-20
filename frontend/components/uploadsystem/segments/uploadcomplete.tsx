@@ -204,15 +204,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             }),
             method: 'POST'
           });
-          // Refresh failed measurements current reasons for this plot/census
-          await fetch(`/api/query`, {
-            body: JSON.stringify({
-              query: `CALL ${currentSite.schemaName}.refresh_failedmeasurements_current(?, ?);`,
-              params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
-              format: true
-            }),
-            method: 'POST'
-          });
         }
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);

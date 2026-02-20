@@ -4,6 +4,7 @@ import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsde
 import ConnectionManager from '@/config/connectionmanager';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // need to try integrating this into validation system:
 
@@ -296,15 +297,26 @@ export async function runValidation(
       attempt++;
       transactionID = await connectionManager.beginTransaction();
 
+      const validationErrorID = await ensureMeasurementErrorDefinition(
+        connectionManager,
+        schema,
+        VALIDATION_ERROR_SOURCE,
+        String(validationProcedureID),
+        `Validation ${validationProcedureName}`,
+        transactionID
+      );
+
       // STEP 1: Clear stale validation errors for this specific validation
       // This removes errors from previous runs where the underlying data may have been fixed.
       // Only clears errors for measurements that are being re-validated (IsValidated IS NULL)
       // and scoped to the current census/plot if provided.
       const cleanupQuery = `
-        DELETE cme FROM ${schema}.cmverrors cme
-        JOIN ${schema}.coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
+        DELETE cme FROM ${schema}.measurement_error_log cme
+        JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
+        JOIN ${schema}.coremeasurements cm ON cme.MeasurementID = cm.CoreMeasurementID
         JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-        WHERE cme.ValidationErrorID = ?
+        WHERE me.ErrorSource = ?
+          AND me.ErrorCode = ?
           AND cm.IsValidated IS NULL
           AND cm.IsActive = TRUE
           AND (? IS NULL OR cm.CensusID = ?)
@@ -312,7 +324,7 @@ export async function runValidation(
       `;
       const censusID = params.p_CensusID ?? null;
       const plotID = params.p_PlotID ?? null;
-      await connectionManager.executeQuery(cleanupQuery, [validationProcedureID, censusID, censusID, plotID, plotID]);
+      await connectionManager.executeQuery(cleanupQuery, [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID], transactionID);
 
       ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
 
@@ -322,14 +334,17 @@ export async function runValidation(
       const formattedCursorQuery = cursorQuery
         .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
         .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        .replace(/@validationProcedureID/g, validationProcedureID.toString())
+        .replace(/@validationProcedureID/g, validationErrorID.toString())
         .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
         .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`) // Process BEFORE species
         .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)
         .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
         .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
         .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
-        .replace(/(?<!\w\.)cmverrors\b/g, `${schema}.cmverrors`)
+        .replace(/insert\s+into\s+cmverrors\s*\(\s*CoreMeasurementID\s*,\s*ValidationErrorID\s*\)/gi, `INSERT INTO ${schema}.measurement_error_log (MeasurementID, ErrorID)`)
+        .replace(/(?<!\w\.)cmverrors\b/gi, `${schema}.measurement_error_log`)
+        .replace(/\be\.CoreMeasurementID\b/gi, 'e.MeasurementID')
+        .replace(/\be\.ValidationErrorID\b/gi, 'e.ErrorID')
         .replace(/(?<!\w\.)species\b/g, `${schema}.species`) // Process AFTER specieslimits
         .replace(/(?<!\w\.)genus\b/g, `${schema}.genus`)
         .replace(/(?<!\w\.)family\b/g, `${schema}.family`)
@@ -340,7 +355,12 @@ export async function runValidation(
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
       // STEP 3: Execute the validation query to insert new errors
-      await connectionManager.executeQuery(formattedCursorQuery);
+      const finalCursorQuery =
+        /insert\s+into\s+.*measurement_error_log/gi.test(formattedCursorQuery) && !/on\s+duplicate\s+key/gi.test(formattedCursorQuery)
+          ? formattedCursorQuery.replace(/;?\s*$/, ' ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;')
+          : formattedCursorQuery;
+
+      await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {
@@ -394,8 +414,11 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
   SET cm.IsValidated = CASE
     WHEN NOT EXISTS (
       SELECT 1
-      FROM ${schema}.cmverrors cme
-      WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+      FROM ${schema}.measurement_error_log cme
+      JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
+      WHERE cme.MeasurementID = cm.CoreMeasurementID
+        AND cme.IsResolved = FALSE
+        AND me.ErrorSource = 'validation'
     ) THEN TRUE
     ELSE FALSE
   END

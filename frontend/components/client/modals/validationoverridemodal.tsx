@@ -23,19 +23,24 @@ export default function ValidationOverrideModal(props: VOMProps) {
   const currentCensus = useOrgCensusContext();
 
   const triggerOverride = useCallback(async () => {
-    const clearCMVQuery = `DELETE cmv
-      FROM ${currentSite?.schemaName}.cmverrors AS cmv
+    const clearCMVQuery = `DELETE mel
+      FROM ${currentSite?.schemaName}.measurement_error_log AS mel
+      JOIN ${currentSite?.schemaName}.measurement_errors AS me
+          ON me.ErrorID = mel.ErrorID
       JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-          ON cmv.CoreMeasurementID = cm.CoreMeasurementID
+          ON mel.MeasurementID = cm.CoreMeasurementID
       JOIN ${currentSite?.schemaName}.census AS c
           ON c.CensusID = cm.CensusID
       WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
         AND c.PlotID = ${currentPlot?.plotID}
+        AND me.ErrorSource = 'validation'
         AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
     const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
       JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
       SET cm.IsValidated = TRUE
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber}) AND c.PlotID = ${currentPlot?.plotID} AND cm.IsValidated = FALSE OR cm.IsValidated IS NULL`;
+      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+        AND c.PlotID = ${currentPlot?.plotID}
+        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL)`;
     const clearCMVResponse = await fetch(`/api/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
