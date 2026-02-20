@@ -269,15 +269,12 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence for measurements upload path:
-      // 1-2. Duplicate detection checks (checkRowExists for first and last row)
-      // 3. INSERT to temporarymeasurements
-      // 4. COUNT inserted rows
-      // 5. SELECT existing changelog entry (none found)
-      // 6. INSERT new changelog entry
+      // 1. INSERT to temporarymeasurements
+      // 2. COUNT inserted rows
+      // 3. SELECT existing changelog entry (none found)
+      // 4. INSERT new changelog entry
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
         .mockResolvedValueOnce([{ count: 1200 }]) // COUNT inserted rows
         .mockResolvedValueOnce([]) // SELECT existing changelog entry (none found)
@@ -360,15 +357,12 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence:
-      // 1-2. Duplicate detection checks
-      // 3. INSERT temporarymeasurements
-      // 4. COUNT rows
-      // 5. SELECT changelog (found)
-      // 6. UPDATE changelog
+      // 1. INSERT temporarymeasurements
+      // 2. COUNT rows
+      // 3. SELECT changelog (found)
+      // 4. UPDATE changelog
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
         .mockResolvedValueOnce([{ count: 800 }]) // COUNT inserted rows
         .mockResolvedValueOnce([
@@ -475,8 +469,6 @@ describe('Unified Changelog Tracking System', () => {
 
       let _exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 500 }])
         .mockResolvedValueOnce([]) // No existing entry for file1
@@ -504,8 +496,6 @@ describe('Unified Changelog Tracking System', () => {
 
       _exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 300 }])
         .mockResolvedValueOnce([]) // No existing entry for file2
@@ -575,8 +565,6 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 100 }])
         .mockResolvedValueOnce([])
@@ -612,8 +600,6 @@ describe('Unified Changelog Tracking System', () => {
       // Mock changelog insert failure but upload succeeds
       const _exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: first row not found
-        .mockResolvedValueOnce([{ matchCount: 0 }]) // Duplicate check: last row not found
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
         .mockResolvedValueOnce([{ count: 50 }]) // COUNT succeeds
         .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog SELECT fails

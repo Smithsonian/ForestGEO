@@ -497,7 +497,7 @@ BEGIN
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'CROSS_CENSUS_VALIDATION_FAILURE',
             CONCAT(@cross_census_failures, ' records failed cross-census validation (quadrat changes, coordinate drift)'),
-            'error',
+            'warning',
             vBatchRowCount, 0, @cross_census_failures, 0
         );
 

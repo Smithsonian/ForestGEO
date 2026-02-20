@@ -114,82 +114,10 @@ export async function POST(request: NextRequest) {
     const contentHash = hashChunkContent(fileRowSet);
     const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, contentHash);
 
-    // DUPLICATE DETECTION: Check for exact content match using sample data from the chunk
-    // Checks first, middle, and last rows to increase detection accuracy while minimizing DB queries
-    // This prevents false negatives where first/last match but middle differs (different chunks)
-    try {
-      const chunkRows = Object.values(fileRowSet);
-      if (chunkRows.length > 0) {
-        // Select sample rows: first, middle, and last for comprehensive coverage
-        const firstRow = chunkRows[0];
-        const lastRow = chunkRows[chunkRows.length - 1];
-        const middleRow = chunkRows.length >= 3 ? chunkRows[Math.floor(chunkRows.length / 2)] : null;
-
-        // Build a query to check for these specific rows
-        const duplicateCheckSQL = format(
-          `SELECT COUNT(*) as matchCount FROM ??.temporarymeasurements
-           WHERE FileID = ? AND PlotID = ? AND CensusID = ?
-           AND TreeTag = ? AND StemTag <=> ? AND SpeciesCode = ? AND QuadratName = ?
-           AND LocalX <=> ? AND LocalY <=> ? AND DBH <=> ? AND MeasurementDate <=> ?`,
-          [schema]
-        );
-
-        // Helper function to check a single row
-        const checkRowExists = async (row: FileRow): Promise<boolean> => {
-          const formattedDate = row.date ? moment(row.date).format('YYYY-MM-DD') : null;
-          const result = await connectionManager.executeQuery(duplicateCheckSQL, [
-            fileName,
-            plot?.plotID ?? -1,
-            censusCookie,
-            row.tag,
-            row.stemtag || null,
-            row.spcode,
-            row.quadrat,
-            row.lx || null,
-            row.ly || null,
-            row.dbh || null,
-            formattedDate
-          ]);
-          return result[0]?.matchCount > 0;
-        };
-
-        // Check all sample rows in parallel for efficiency
-        const checksToPerform = [checkRowExists(firstRow), checkRowExists(lastRow)];
-        if (middleRow) {
-          checksToPerform.push(checkRowExists(middleRow));
-        }
-
-        const [firstExists, lastExists, middleExists] = await Promise.all(checksToPerform);
-
-        // Require ALL checked rows to exist for duplicate detection
-        // This reduces false positives while catching true duplicates
-        const allCheckedRowsExist = middleRow ? firstExists && lastExists && middleExists : firstExists && lastExists;
-
-        if (allCheckedRowsExist) {
-          const rowsChecked = middleRow ? 'first, middle, and last' : 'first and last';
-          ailogger.info(
-            `Duplicate chunk detected for ${fileName} - ${rowsChecked} rows already exist in database. ` +
-              `Content hash: ${contentHash}. Idempotency key: ${idempotencyKey}. Skipping to prevent data duplication.`
-          );
-          return new NextResponse(
-            JSON.stringify({
-              responseMessage: `Chunk already exists - duplicate submission detected`,
-              failingRows: [],
-              insertedCount: rowCount,
-              transactionCompleted: true,
-              batchID: 'duplicate-skipped',
-              isDuplicate: true,
-              idempotencyKey,
-              contentHash
-            }),
-            { status: HTTPResponses.OK }
-          );
-        }
-      }
-    } catch (dupCheckError: any) {
-      // Log but continue - better to potentially duplicate than to fail entirely
-      ailogger.warn(`Content-based idempotency check failed for ${fileName}, proceeding with insert: ${dupCheckError.message}`);
-    }
+    // NOTE:
+    // Sample-row duplicate short-circuit checks were removed because they could
+    // falsely classify unique chunks as duplicates. We now always ingest the chunk
+    // and rely on downstream dedupe + explicit dropped-row tracking.
 
     const batchID = generateShortBatchID();
     const placeholders = Object.values(fileRowSet ?? [])

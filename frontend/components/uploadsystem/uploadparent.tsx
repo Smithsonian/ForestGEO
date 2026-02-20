@@ -293,19 +293,6 @@ function UploadParentInner(props: UploadParentProps) {
             ailogger.info('Closing failed measurements modal');
             setShowFailedMeasurementsModal(false);
           }}
-          onTriggerReingestion={() => {
-            ailogger.info('Triggering reingestion from failed measurements modal');
-            setShowFailedMeasurementsModal(false);
-
-            // Clear files from original upload so UploadReingestion component renders
-            fileManagement.clearFiles();
-            setParsedData({});
-
-            // Set reingestion mode and start upload cycle
-            setIsReingestionMode(true);
-            uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
-            ailogger.info('Starting upload cycle to process temporarymeasurements after bulk reingestion');
-          }}
         />
         <Box
           sx={{

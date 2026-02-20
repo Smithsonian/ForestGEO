@@ -180,11 +180,6 @@ export default function MeasurementsSummaryViewDataGrid() {
             setOpenFSM(false);
           }
         }}
-        onTriggerReingestion={() => {
-          // Open upload modal in reingestion mode after failed measurements modal closes
-          setIsReingesting(true);
-          setIsUploadModalOpen(true);
-        }}
       />
       <MeasurementsCommons
         gridType={'measurementssummary'}
