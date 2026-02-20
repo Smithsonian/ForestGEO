@@ -161,7 +161,7 @@ async function moveFailedToTemporary(
   return { totalRows, fileID, batchID, failedIds };
 }
 
-async function deleteFailedByIds(connectionManager: any, schema: string, failedIds: number[]): Promise<void> {
+async function deleteFailedByIds(connectionManager: any, schema: string, failedIds: number[], transactionID?: string): Promise<void> {
   if (failedIds.length === 0) return;
 
   const chunkSize = 1000;
@@ -177,10 +177,10 @@ async function deleteFailedByIds(connectionManager: any, schema: string, failedI
          AND mel.IsResolved = FALSE
          AND me.ErrorSource = ?`
     );
-    await connectionManager.executeQuery(resolveSQL, [...chunk, INGESTION_ERROR_SOURCE]);
+    await connectionManager.executeQuery(resolveSQL, [...chunk, INGESTION_ERROR_SOURCE], transactionID);
 
     const deleteSQL = safeFormatQuery(schema, `DELETE FROM ??.coremeasurements WHERE CoreMeasurementID IN (${placeholders}) AND StemGUID IS NULL`);
-    await connectionManager.executeQuery(deleteSQL, chunk);
+    await connectionManager.executeQuery(deleteSQL, chunk, transactionID);
   }
 }
 
@@ -218,7 +218,9 @@ export async function POST(
       );
     }
 
-    await deleteFailedByIds(connectionManager, schema, failedIds);
+    await connectionManager.withTransaction(async (transactionID: string) => {
+      await deleteFailedByIds(connectionManager, schema, failedIds, transactionID);
+    });
 
     return new NextResponse(
       JSON.stringify({
@@ -285,7 +287,9 @@ export async function GET(
     await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID]);
 
     // Remove originals only after successful processing to avoid data loss
-    await deleteFailedByIds(connectionManager, schema, failedIds);
+    await connectionManager.withTransaction(async (transactionID: string) => {
+      await deleteFailedByIds(connectionManager, schema, failedIds, transactionID);
+    });
 
     const countRemainingSQL = safeFormatQuery(
       schema,

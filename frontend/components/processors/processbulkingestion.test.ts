@@ -266,7 +266,7 @@ describe('processBulkIngestionCollapser', () => {
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
       const clearErrorsQuery = calls.find(
-        (call: any) => call[0].includes('DELETE') && call[0].includes('cmverrors') && call[0].includes('ValidationErrorID = 5')
+        (call: any) => call[0].includes('DELETE') && call[0].includes('measurement_error_log') && call[0].includes("me.ErrorCode = '5'")
       );
 
       expect(clearErrorsQuery).toBeDefined();
@@ -279,11 +279,11 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const clearErrorsQuery = calls.find((call: any) => call[0].includes('cmverrors') && call[0].includes('still_duplicates'));
+      const clearErrorsQuery = calls.find((call: any) => call[0].includes('measurement_error_log') && call[0].includes('still_duplicates'));
 
       // Verify it uses LEFT JOIN to find records that are NO LONGER duplicates
       expect(clearErrorsQuery[0]).toMatch(/LEFT\s+JOIN.*AS\s+still_duplicates/is);
-      expect(clearErrorsQuery[0]).toMatch(/WHERE.*e\.ValidationErrorID\s*=\s*5/is);
+      expect(clearErrorsQuery[0]).toMatch(/WHERE.*me\.ErrorCode\s*=\s*'5'/is);
       expect(clearErrorsQuery[0]).toMatch(/AND.*still_duplicates\.CoreMeasurementID\s+IS\s+NULL/is);
     });
 
@@ -301,16 +301,16 @@ describe('processBulkIngestionCollapser', () => {
       expect(clearErrorsQuery[0]).toMatch(/HAVING count\(distinct cm3\.CoreMeasurementID\) > 1/);
     });
 
-    it('should only clear ValidationErrorID 5 (duplicate tree/stem tag)', async () => {
+    it("should only clear validation error code '5' (duplicate tree/stem tag)", async () => {
       mockConnectionManager.executeQuery.mockResolvedValue([]);
 
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const clearErrorsQuery = calls.find((call: any) => call[0].includes('cmverrors'));
+      const clearErrorsQuery = calls.find((call: any) => call[0].includes('measurement_error_log'));
 
-      expect(clearErrorsQuery[0]).toMatch(/ValidationErrorID = 5/);
-      expect(clearErrorsQuery[0]).not.toMatch(/ValidationErrorID != 5/);
+      expect(clearErrorsQuery[0]).toMatch(/me\.ErrorCode = '5'/);
+      expect(clearErrorsQuery[0]).not.toMatch(/me\.ErrorCode != '5'/);
     });
   });
 
@@ -347,7 +347,7 @@ describe('processBulkIngestionCollapser', () => {
       expect(calls[7][0]).toMatch(/DELETE.*TreeTag.*StemTag/is);
 
       // 9. DELETE validation errors
-      expect(calls[8][0]).toMatch(/DELETE.*cmverrors/is);
+      expect(calls[8][0]).toMatch(/DELETE.*measurement_error_log/is);
     });
   });
 
@@ -554,7 +554,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
     // If the dedup key matched on TreeTag+StemTag alone, row 2 would be flagged.
     // Since the key includes DBH and Date, both rows pass through.
     const failedInsertCalls = mockConnectionManager.executeQuery.mock.calls.filter(
-      (call: any) => typeof call[0] === 'string' && call[0].includes('failedmeasurements')
+      (call: any) => typeof call[0] === 'string' && call[0].includes('measurement_error_log')
     );
     expect(failedInsertCalls).toHaveLength(0);
   });
@@ -601,7 +601,7 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       }
     ];
 
-    // The duplicate gets inserted into failedmeasurements first (1 call),
+    // The duplicate gets inserted into unresolved coremeasurements via insertIngestionFailureRows first (1 call),
     // then only 1 valid measurement continues through the pipeline.
     mockConnectionManager.executeQuery
       // insertFailedMeasurements (duplicate row 2)
@@ -637,8 +637,8 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
 
     await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
 
-    // KEY ASSERTION: The first executeQuery call should be the duplicate insert
+    // KEY ASSERTION: The first executeQuery call should be the unresolved coremeasurements insert
     const firstCall = mockConnectionManager.executeQuery.mock.calls[0];
-    expect(firstCall[0]).toContain('failedmeasurements');
+    expect(firstCall[0]).toContain('coremeasurements');
   });
 });

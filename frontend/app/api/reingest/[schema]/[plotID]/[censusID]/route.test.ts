@@ -8,10 +8,12 @@ vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
+  const withTransaction = vi.fn(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
   const instance = {
     executeQuery,
     closeConnection,
-    cleanupStaleTransactions
+    cleanupStaleTransactions,
+    withTransaction
   };
   return {
     default: {
@@ -69,6 +71,7 @@ describe('reingest API routes', () => {
     mockConnectionManager = ConnectionManager.getInstance();
     mockConnectionManager.cleanupStaleTransactions.mockResolvedValue(undefined);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
+    mockConnectionManager.withTransaction.mockImplementation(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
 
     // Get the mocked function
     const { validateContextualValues } = await import('@/lib/contextvalidation');

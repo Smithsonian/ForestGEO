@@ -1913,15 +1913,16 @@ BEGIN
         FROM tempcodes tc
         INNER JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1;
 
-        INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-        SELECT DISTINCT tc.CoreMeasurementID, 14 as ValidationErrorID
+        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+        SELECT DISTINCT tc.CoreMeasurementID, me.ErrorID, FALSE
         FROM tempcodes tc
         LEFT JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1
+        JOIN measurement_errors me ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'
         WHERE a.Code IS NULL;
     END IF;
 
     -- =====================================================
-    -- SOFT VALIDATIONS: Accept but flag in cmverrors
+    -- SOFT VALIDATIONS: Accept but flag in measurement_error_log
     -- =====================================================
 
     -- VALIDATION 3: Species Mismatch Detection (SOFT - Accept but Flag)
@@ -1957,9 +1958,10 @@ BEGIN
       AND (cm.UploadBatchID = vBatchID
            OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
 
-    INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-    SELECT DISTINCT CoreMeasurementID, 20 as ValidationErrorID
-    FROM species_mismatch_records;
+    INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+    SELECT DISTINCT smr.CoreMeasurementID, me.ErrorID, FALSE
+    FROM species_mismatch_records smr
+    JOIN measurement_errors me ON me.ErrorSource = 'validation' AND me.ErrorCode = '20';
 
     IF EXISTS(SELECT 1 FROM species_mismatch_records) THEN
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -2007,9 +2009,10 @@ BEGIN
            OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
       AND sp.SpeciesCode != first_occurrence.SpeciesCode;
 
-    INSERT IGNORE INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-    SELECT DISTINCT CoreMeasurementID, 21 as ValidationErrorID
-    FROM same_batch_species_conflicts;
+    INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+    SELECT DISTINCT sbsc.CoreMeasurementID, me.ErrorID, FALSE
+    FROM same_batch_species_conflicts sbsc
+    JOIN measurement_errors me ON me.ErrorSource = 'validation' AND me.ErrorCode = '21';
 
     IF EXISTS(SELECT 1 FROM same_batch_species_conflicts) THEN
         INSERT IGNORE INTO uploadintegrityalerts (

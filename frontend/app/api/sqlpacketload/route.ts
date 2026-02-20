@@ -217,12 +217,11 @@ export async function POST(request: NextRequest) {
         );
 
         await connectionManager.executeQuery(insertSQL, values, transactionID);
-        await connectionManager.commitTransaction(transactionID);
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
         const expectedRowCount = Object.keys(fileRowSet ?? {}).length;
         const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
-        const countResult = await connectionManager.executeQuery(countSQL, [fileName, batchID]);
+        const countResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
         const actualInsertedCount = countResult[0]?.count || 0;
 
         // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
@@ -247,15 +246,19 @@ export async function POST(request: NextRequest) {
                AND SpeciesCode = ? AND QuadratName = ? AND MeasurementDate <=> ?`,
               [schema]
             );
-            const checkResult = await connectionManager.executeQuery(checkSQL, [
-              fileName,
-              batchID,
-              row.tag,
-              row.stemtag || null,
-              row.spcode,
-              row.quadrat,
-              formattedDate
-            ]);
+            const checkResult = await connectionManager.executeQuery(
+              checkSQL,
+              [
+                fileName,
+                batchID,
+                row.tag,
+                row.stemtag || null,
+                row.spcode,
+                row.quadrat,
+                formattedDate
+              ],
+              transactionID
+            );
 
             if (checkResult[0]?.cnt === 0) {
               // This row was dropped - try to identify the specific reason
@@ -269,14 +272,11 @@ export async function POST(request: NextRequest) {
                  LIMIT 1`,
                 [schema]
               );
-              const dupResult = await connectionManager.executeQuery(duplicateCheckSQL, [
-                fileName,
-                plot?.plotID ?? -1,
-                censusCookie,
-                row.tag,
-                row.stemtag || null,
-                row.quadrat
-              ]);
+              const dupResult = await connectionManager.executeQuery(
+                duplicateCheckSQL,
+                [fileName, plot?.plotID ?? -1, censusCookie, row.tag, row.stemtag || null, row.quadrat],
+                transactionID
+              );
 
               if (dupResult.length > 0) {
                 const existingBatch = dupResult[0].BatchID;
@@ -381,7 +381,11 @@ export async function POST(request: NextRequest) {
                     timestamp: new Date().toISOString(),
                     note: 'These rows were dropped during upload and could not be persisted as unresolved ingestion errors'
                   });
-                  await connectionManager.executeQuery(alertSQL, [fileName, batchID, plot?.plotID ?? -1, censusCookie, alertMessage, droppedRows.length]);
+                  await connectionManager.executeQuery(
+                    alertSQL,
+                    [fileName, batchID, plot?.plotID ?? -1, censusCookie, alertMessage, droppedRows.length],
+                    transactionID
+                  );
                   ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
                 } catch (alertError: any) {
                   ailogger.error(`CRITICAL: Failed to log data loss to uploadintegrityalerts: ${alertError.message}. Dropped rows: ${droppedRows.length}`);
@@ -402,7 +406,7 @@ export async function POST(request: NextRequest) {
              ORDER BY ChangeID DESC LIMIT 1`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusCookie]);
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusCookie], transactionID);
 
           if (existingEntry.length === 0) {
             // First batch for this file - insert new entry
@@ -419,7 +423,11 @@ export async function POST(request: NextRequest) {
               VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
               [schema]
             );
-            await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie]);
+            await connectionManager.executeQuery(
+              insertChangelogSQL,
+              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie],
+              transactionID
+            );
           } else {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
@@ -428,12 +436,15 @@ export async function POST(request: NextRequest) {
             metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
             metadata.batchCount = (metadata.batchCount || 1) + 1;
             const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
+            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
           }
         } catch (logError: any) {
           // Log but don't fail the upload if changelog tracking fails
           ailogger.error('Failed to log file upload to changelog', logError);
         }
+
+        await connectionManager.commitTransaction(transactionID);
+        transactionID = undefined;
 
         return new NextResponse(
           JSON.stringify({
