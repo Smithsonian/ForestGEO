@@ -45,8 +45,6 @@ import {
   AttributesResult,
   CMAttributesRDS,
   CMAttributesResult,
-  CMVErrorRDS,
-  CMVErrorResult,
   CoreMeasurementsRDS,
   CoreMeasurementsResult,
   FailedMeasurementsRDS,
@@ -236,8 +234,6 @@ class MapperFactory {
         return new GenericMapper<CoreMeasurementsRDS, CoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'coremeasurements_staging':
         return new GenericMapper<StagingCoreMeasurementsRDS, StagingCoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'cmverrors':
-        return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'failedmeasurements':

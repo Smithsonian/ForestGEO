@@ -10,6 +10,13 @@ import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinit
 import { getCookie } from '@/app/actions/cookiemanager';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ailogger from '@/ailogger';
+import {
+  INGESTION_ERROR_SOURCE,
+  ensureMeasurementErrorDefinition,
+  getIngestionErrorMessage,
+  inferIngestionErrorCode,
+  insertIngestionFailureRows
+} from '@/config/measurementerrors';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -18,7 +25,6 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
   attributes: 'Code',
   census: 'CensusID',
   cmattributes: 'CMAID',
-  cmverrors: 'CMVErrorID',
   family: 'FamilyID',
   genus: 'GenusID',
   personnel: 'PersonnelID',
@@ -214,8 +220,14 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         }
 
         if (changesFound) {
-          const deleteErrorsQuery = format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmverrors`, 'CoreMeasurementID', mappedUpdatedRow.CoreMeasurementID]);
-          await connectionManager.executeQuery(deleteErrorsQuery);
+          const deleteErrorsQuery = format(
+            `DELETE mel
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = ? AND me.ErrorSource = 'validation'`,
+            [schema, schema]
+          );
+          await connectionManager.executeQuery(deleteErrorsQuery, [mappedUpdatedRow.CoreMeasurementID]);
 
           const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
             `${schema}.coremeasurements`,
@@ -250,7 +262,61 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               failedTrimmed['Date'] = date.toISOString().split('T')[0];
             }
           }
-          dataToUpdate = failedTrimmed;
+          const failedMeasurementID = Number(gridIDKey);
+          const updateFailedQuery = format(
+            `UPDATE ??.coremeasurements
+             SET RawTreeTag = ?, RawStemTag = ?, RawSpCode = ?, RawQuadrat = ?,
+                 RawX = ?, RawY = ?, MeasuredDBH = ?, MeasuredHOM = ?, MeasurementDate = ?,
+                 RawCodes = ?, RawComments = ?, Description = ?, UploadFileID = COALESCE(?, UploadFileID),
+                 UploadBatchID = COALESCE(?, UploadBatchID), IsValidated = FALSE
+             WHERE CoreMeasurementID = ? AND StemGUID IS NULL`,
+            [schema]
+          );
+          await connectionManager.executeQuery(updateFailedQuery, [
+            failedTrimmed['Tag'] ?? null,
+            failedTrimmed['StemTag'] ?? null,
+            failedTrimmed['SpCode'] ?? null,
+            failedTrimmed['Quadrat'] ?? null,
+            failedTrimmed['X'] ?? null,
+            failedTrimmed['Y'] ?? null,
+            failedTrimmed['DBH'] ?? null,
+            failedTrimmed['HOM'] ?? null,
+            failedTrimmed['Date'] ?? null,
+            failedTrimmed['Codes'] ?? null,
+            failedTrimmed['Comments'] ?? null,
+            failedTrimmed['Comments'] ?? null,
+            failedTrimmed['FileID'] ?? null,
+            failedTrimmed['BatchID'] ?? null,
+            failedMeasurementID
+          ]);
+
+          const clearIngestionErrorQuery = format(
+            `DELETE mel
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = ? AND me.ErrorSource = ?`,
+            [schema, schema]
+          );
+          await connectionManager.executeQuery(clearIngestionErrorQuery, [failedMeasurementID, INGESTION_ERROR_SOURCE]);
+
+          const reason = failedTrimmed['FailureReasons'] ?? failedTrimmed['CurrentFailureReasons'] ?? null;
+          if (reason) {
+            const errorCode = inferIngestionErrorCode(reason);
+            const errorID = await ensureMeasurementErrorDefinition(
+              connectionManager,
+              schema,
+              INGESTION_ERROR_SOURCE,
+              errorCode,
+              getIngestionErrorMessage(errorCode, reason),
+              transactionID
+            );
+            const insertErrorLogQuery = format('INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)', [schema]);
+            await connectionManager.executeQuery(insertErrorLogQuery, [failedMeasurementID, errorID]);
+          }
+
+          updateIDs = { [dataType]: failedMeasurementID };
+          await connectionManager.commitTransaction(transactionID ?? '');
+          return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
         } else if (dataType === 'plots') {
           const { NumQuadrats, ...plotTrimmed } = newRowData;
           dataToUpdate = plotTrimmed;
@@ -357,19 +423,40 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       if (params.dataType === 'personnel') delete newRowData.CensusActive;
 
-      // Convert Date from ISO format to MySQL format (YYYY-MM-DD) for failedmeasurements
-      if (params.dataType === 'failedmeasurements' && newRowData['Date']) {
-        const date = new Date(newRowData['Date']);
-        if (!isNaN(date.getTime())) {
-          newRowData['Date'] = date.toISOString().split('T')[0];
-        }
-      }
-
       let insertQuery = '';
-      if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      const results = await connectionManager.executeQuery(insertQuery);
-      insertIDs = { [params.dataType]: results.insertId };
+      if (params.dataType === 'failedmeasurements') {
+        const inserted = await insertIngestionFailureRows(
+          connectionManager,
+          schema,
+          [
+            {
+              plotID: Number(newRowData.PlotID ?? 0),
+              censusID: Number(newRowData.CensusID ?? censusID ?? 0),
+              tag: newRowData.Tag ?? null,
+              stemTag: newRowData.StemTag ?? null,
+              spCode: newRowData.SpCode ?? null,
+              quadrat: newRowData.Quadrat ?? null,
+              x: newRowData.X ?? null,
+              y: newRowData.Y ?? null,
+              dbh: newRowData.DBH ?? null,
+              hom: newRowData.HOM ?? null,
+              date: newRowData.Date ?? null,
+              codes: newRowData.Codes ?? null,
+              comments: newRowData.Comments ?? null,
+              failureReason: newRowData.FailureReasons ?? null,
+              fileID: newRowData.FileID ?? null,
+              batchID: newRowData.BatchID ?? null,
+              sourceRowIndex: newRowData.SourceRowIndex ?? null
+            }
+          ],
+          transactionID
+        );
+        insertIDs = { [params.dataType]: inserted[0] ?? 0 };
+      } else {
+        insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+        const results = await connectionManager.executeQuery(insertQuery);
+        insertIDs = { [params.dataType]: results.insertId };
+      }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
@@ -400,8 +487,11 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
     if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
       await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
+    } else if (params.dataType === 'failedmeasurements') {
+      const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
+      await connectionManager.executeQuery(deleteFailedQuery, [gridIDKey]);
     } else if (params.dataType === 'measurementssummary') {
-      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmverrors`, demappedGridID, gridIDKey]));
+      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE MeasurementID = ?', [`${schema}.measurement_error_log`]), [gridIDKey]);
       await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmattributes`, demappedGridID, gridIDKey]));
       await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.coremeasurements`, demappedGridID, gridIDKey]));
     } else {

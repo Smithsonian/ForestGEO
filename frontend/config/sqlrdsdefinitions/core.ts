@@ -20,6 +20,8 @@ export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
 export interface FailedMeasurementsRDS {
   id?: number;
   failedMeasurementID?: number;
+  fileID?: string;
+  batchID?: string;
   plotID?: number;
   censusID?: number;
   tag?: string;
@@ -32,6 +34,7 @@ export interface FailedMeasurementsRDS {
   hom?: number;
   date?: Date | null;
   codes?: string;
+  comments?: string;
   description?: string;
   failureReasons?: string;
   originalFailureReasons?: string;
