@@ -753,21 +753,7 @@ create table if not exists cmattributes
             on delete cascade
 );
 
-create table if not exists cmverrors
-(
-    CMVErrorID        int auto_increment
-        primary key,
-    CoreMeasurementID int null,
-    ValidationErrorID int null,
-    constraint unique_cmverrors_cm_valerror
-        unique (CoreMeasurementID, ValidationErrorID),
-    constraint cmverrors_coremeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
-            on delete cascade,
-    constraint cmverrors_sitespecificvalidations_ValidationID_fk
-        foreign key (ValidationErrorID) references sitespecificvalidations (ValidationID)
-            on delete cascade
-);
+-- cmverrors table removed: replaced by measurement_errors + measurement_error_log tables.
 
 create index idx_censusid
     on coremeasurements (CensusID);
