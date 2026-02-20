@@ -6,6 +6,7 @@ import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -84,8 +85,6 @@ export async function DELETE(
     censusID = values.censusID!;
   }
 
-  const tableName = VALID_TABLE_TYPES[tableType as TableType];
-
   // Validate schema to prevent SQL injection
   try {
     validateSchemaOrThrow(schema);
@@ -94,18 +93,57 @@ export async function DELETE(
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // Construct safe SQL queries with validated and escaped identifiers
-  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-  const deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
   try {
     transactionID = await connectionManager.beginTransaction();
 
+    let countSQL = '';
+    let countParams: any[] = [];
+    let deleteSQL = '';
+    let deleteParams: any[] = [];
+
+    if (tableType === 'failedmeasurements') {
+      countSQL = format(
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON c.CensusID = cm.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`,
+        [schema, schema, schema, schema]
+      );
+      countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+
+      deleteSQL = format(
+        `DELETE cm
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON c.CensusID = cm.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`,
+        [schema, schema, schema, schema]
+      );
+      deleteParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+    } else {
+      const tableName = VALID_TABLE_TYPES[tableType as TableType];
+      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      countParams = [plotID, censusID];
+      deleteParams = [plotID, censusID];
+    }
+
     // First, get count of records that will be deleted for confirmation
-    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID], transactionID);
+    const countResult = await connectionManager.executeQuery(countSQL, countParams, transactionID);
     const totalRecords = countResult[0]?.total || 0;
 
     if (totalRecords === 0) {
@@ -120,7 +158,7 @@ export async function DELETE(
     }
 
     // Delete all records for this plot/census from the specified table
-    await connectionManager.executeQuery(deleteSQL, [plotID, censusID], transactionID);
+    await connectionManager.executeQuery(deleteSQL, deleteParams, transactionID);
 
     await connectionManager.commitTransaction(transactionID);
 
@@ -187,8 +225,6 @@ export async function GET(
     );
   }
 
-  const tableName = VALID_TABLE_TYPES[tableType as TableType];
-
   // Validate schema to prevent SQL injection
   try {
     validateSchemaOrThrow(schema);
@@ -197,14 +233,35 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // Construct safe SQL query with validated and escaped identifiers
-  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-
   const connectionManager = ConnectionManager.getInstance();
 
   try {
+    let countSQL = '';
+    let countParams: any[] = [];
+
+    if (tableType === 'failedmeasurements') {
+      countSQL = format(
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON c.CensusID = cm.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`,
+        [schema, schema, schema, schema]
+      );
+      countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+    } else {
+      const tableName = VALID_TABLE_TYPES[tableType as TableType];
+      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      countParams = [plotID, censusID];
+    }
+
     // Get count of records for this plot/census from the specified table
-    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID]);
+    const countResult = await connectionManager.executeQuery(countSQL, countParams);
 
     return new NextResponse(
       JSON.stringify({

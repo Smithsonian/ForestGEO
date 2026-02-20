@@ -15,6 +15,7 @@ import { auth } from '@/auth';
 import { format } from 'mysql2/promise';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import crypto from 'crypto';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 /**
  * Generate idempotency key for a batch of data
@@ -42,6 +43,12 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   const data = sortedRows.join('|');
   // Use full SHA-256 hash for better collision resistance
   return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -299,61 +306,80 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Insert dropped rows into failedmeasurements for tracking
+          // Persist dropped rows as unresolved ingestion errors in coremeasurements.
           if (droppedRows.length > 0) {
-            const failedInsertSQL = format(
-              `INSERT INTO ??.failedmeasurements
-               (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
-               VALUES ?`,
-              [schema]
-            );
-            const failedValues = droppedRows.map(row => [
-              fileName,
-              batchID,
-              plot?.plotID ?? -1,
-              censusCookie,
-              row.tag,
-              row.stemtag || null,
-              row.spcode,
-              row.quadrat,
-              row.lx || null,
-              row.ly || null,
-              row.dbh || null,
-              row.hom || null,
-              row.date ? moment(row.date).format('YYYY-MM-DD') : null,
-              row.codes || null,
-              null,
-              row.failureReason || 'Unknown error during insert',
-              row.failureReason || 'Unknown error during insert',
-              row.failureReason || 'Unknown error during insert'
-            ]);
-
             try {
-              await connectionManager.executeQuery(failedInsertSQL, [failedValues]);
-              ailogger.info(`Moved ${droppedRows.length} dropped rows to failedmeasurements for ${fileName}-${batchID}`);
+              await insertIngestionFailureRows(
+                connectionManager,
+                schema,
+                droppedRows.map((row, idx) => ({
+                  plotID: plot?.plotID ?? -1,
+                  censusID: censusCookie,
+                  tag: row.tag,
+                  stemTag: row.stemtag || null,
+                  spCode: row.spcode,
+                  quadrat: row.quadrat,
+                  x: toNullableNumber(row.lx),
+                  y: toNullableNumber(row.ly),
+                  dbh: toNullableNumber(row.dbh),
+                  hom: toNullableNumber(row.hom),
+                  date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+                  codes: row.codes || null,
+                  comments: null,
+                  fileID: fileName,
+                  batchID,
+                  sourceRowIndex: idx + 1,
+                  failureReason: row.failureReason || 'Unknown error during insert'
+                })),
+                transactionID
+              );
+              ailogger.info(`Persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
             } catch (failedInsertError: any) {
-              ailogger.error(`Failed to track dropped rows in failedmeasurements (attempt 1): ${failedInsertError.message}`);
+              ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 1): ${failedInsertError.message}`);
 
               // Retry once before giving up
               try {
-                await connectionManager.executeQuery(failedInsertSQL, [failedValues]);
-                ailogger.info(`Retry successful: Moved ${droppedRows.length} dropped rows to failedmeasurements for ${fileName}-${batchID}`);
+                await insertIngestionFailureRows(
+                  connectionManager,
+                  schema,
+                  droppedRows.map((row, idx) => ({
+                    plotID: plot?.plotID ?? -1,
+                    censusID: censusCookie,
+                    tag: row.tag,
+                    stemTag: row.stemtag || null,
+                    spCode: row.spcode,
+                    quadrat: row.quadrat,
+                    x: toNullableNumber(row.lx),
+                    y: toNullableNumber(row.ly),
+                    dbh: toNullableNumber(row.dbh),
+                    hom: toNullableNumber(row.hom),
+                    date: row.date ? moment(row.date).format('YYYY-MM-DD') : null,
+                    codes: row.codes || null,
+                    comments: null,
+                    fileID: fileName,
+                    batchID,
+                    sourceRowIndex: idx + 1,
+                    failureReason: row.failureReason || 'Unknown error during insert'
+                  })),
+                  transactionID
+                );
+                ailogger.info(`Retry successful: persisted ${droppedRows.length} dropped rows as unresolved ingestion errors for ${fileName}-${batchID}`);
               } catch (retryError: any) {
-                ailogger.error(`Failed to track dropped rows in failedmeasurements (attempt 2): ${retryError.message}`);
+                ailogger.error(`Failed to persist dropped rows as unresolved ingestion errors (attempt 2): ${retryError.message}`);
 
-                // Critical: Log to uploadintegrityalerts so data loss is not silent
+                // Critical: log to uploadintegrityalerts so data loss is not silent.
                 try {
                   const alertSQL = format(
                     `INSERT INTO ??.uploadintegrityalerts
                      (fileID, batchID, plotID, censusID, type, message, severity, failedRecords)
-                     VALUES (?, ?, ?, ?, 'FAILED_INSERT_TO_FAILEDMEASUREMENTS', ?, 'critical', ?)`,
+                     VALUES (?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?)`,
                     [schema]
                   );
                   const alertMessage = JSON.stringify({
                     error: retryError.message,
                     droppedRowCount: droppedRows.length,
                     timestamp: new Date().toISOString(),
-                    note: 'These rows were dropped during upload and could not be tracked in failedmeasurements table'
+                    note: 'These rows were dropped during upload and could not be persisted as unresolved ingestion errors'
                   });
                   await connectionManager.executeQuery(alertSQL, [fileName, batchID, plot?.plotID ?? -1, censusCookie, alertMessage, droppedRows.length]);
                   ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
@@ -413,7 +439,7 @@ export async function POST(request: NextRequest) {
           JSON.stringify({
             responseMessage:
               droppedRowCount > 0
-                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check failedmeasurements table`
+                ? `Bulk insert completed with ${droppedRowCount} row(s) dropped - check unresolved ingestion errors`
                 : `Bulk insert to SQL completed`,
             failingRows: Array.from(failingRows),
             insertedCount: actualInsertedCount,

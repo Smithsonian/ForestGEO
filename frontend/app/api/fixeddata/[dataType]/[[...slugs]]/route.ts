@@ -6,6 +6,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { getGridID } from '@/config/servergridhelpers';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import ailogger from '@/ailogger';
+import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -106,11 +107,13 @@ export async function GET(
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'failedmeasurements':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.* FROM ${schema}.${params.dataType} fm
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.*
+          FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
           JOIN ${schema}.census c ON fm.CensusID = c.CensusID AND c.IsActive IS TRUE
-          WHERE fm.PlotID = ? 
-          AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          WHERE fm.PlotID = ?
+            AND c.PlotID = ?
+            AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
+        queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'viewfulltable':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? LIMIT ?, ?`;

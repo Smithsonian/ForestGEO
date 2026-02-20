@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -26,18 +27,42 @@ export async function GET(request: NextRequest) {
   let failedParams: (string | number)[];
 
   try {
-    // If fileId is provided, filter temporarymeasurements and failedmeasurements by it
+    // If fileId is provided, filter temporarymeasurements and unresolved ingestion errors by it.
     // This allows tracking current upload progress vs cumulative totals
     if (fileId) {
       tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
       tempParams = [plotID, censusID, fileId];
-      // failedmeasurements also has FileID column for tracking
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.UploadFileID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
       failedParams = [plotID, censusID, fileId];
     } else {
       tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
       tempParams = [plotID, censusID];
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
       failedParams = [plotID, censusID];
     }
 
@@ -45,7 +70,7 @@ export async function GET(request: NextRequest) {
     // This is acceptable since processed rows are the "successful" count
     processedSQL = safeFormatQuery(
       schema,
-      'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ?'
+      'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL'
     );
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifyprocessing: ${schema}`);
@@ -61,8 +86,8 @@ export async function GET(request: NextRequest) {
     // Check how many rows were processed into the main measurements table
     const processedResult = await connectionManager.executeQuery(processedSQL, [plotID, censusID]);
 
-    // Check how many rows failed during ingestion and were moved to failedmeasurements
-    const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
+    // Check how many rows currently have unresolved ingestion errors.
+    const failedResult = await connectionManager.executeQuery(failedSQL, [...failedParams, INGESTION_ERROR_SOURCE]);
 
     const remainingCount = tempResult[0]?.count || 0;
     const processedCount = processedResult[0]?.count || 0;
@@ -74,7 +99,7 @@ export async function GET(request: NextRequest) {
 
     ailogger.info(
       `Processing verification for Plot ${plotID}, Census ${censusID}${fileId ? ` (FileID: ${fileId})` : ''}: ` +
-        `${processedCount} total rows in coremeasurements, ${failedCount} rows in failedmeasurements${filteringByFile ? ' (filtered)' : ''}, ` +
+        `${processedCount} total rows in coremeasurements, ${failedCount} unresolved ingestion-error rows${filteringByFile ? ' (filtered)' : ''}, ` +
         `${remainingCount} remaining in temporarymeasurements${filteringByFile ? ' (filtered)' : ''}. ` +
         `Total: ${totalAccounted}`
     );
@@ -108,5 +133,7 @@ export async function GET(request: NextRequest) {
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

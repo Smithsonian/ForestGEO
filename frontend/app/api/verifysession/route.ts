@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -12,7 +13,7 @@ export const runtime = 'nodejs';
  * Session-Based Upload Verification Endpoint
  *
  * Verifies data for a specific upload session (FileID and optional BatchID)
- * Returns precise per-upload counts to verify: input_rows = coremeasurements + failedmeasurements
+ * Returns precise per-upload counts to verify: input_rows = coremeasurements + unresolved ingestion errors
  *
  * Query Parameters:
  * - schema (required): Database schema
@@ -24,7 +25,7 @@ export const runtime = 'nodejs';
  * Returns:
  * {
  *   processedCount: number,      // Rows in coremeasurements
- *   failedCount: number,          // Rows in failedmeasurements
+ *   failedCount: number,          // Rows with unresolved ingestion errors
  *   totalAccounted: number,       // processedCount + failedCount
  *   fileID: string | null,
  *   batchID: string | null,
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest) {
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
          AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))
          AND (cm.UploadBatchID = ? OR (cm.UploadBatchID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?))`
       );
@@ -72,9 +74,20 @@ export async function GET(request: NextRequest) {
 
       failedSQL = safeFormatQuery(
         schema,
-        'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ? AND BatchID = ?'
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.UploadFileID = ?
+           AND cm.UploadBatchID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
       );
-      failedParams = [plotID, censusID, fileID, batchID];
+      failedParams = [plotID, censusID, fileID, batchID, INGESTION_ERROR_SOURCE];
     } else if (scope === 'file') {
       // Query all batches for a specific file (prefer UploadFileID, fallback to JSON)
       processedSQL = safeFormatQuery(
@@ -83,22 +96,48 @@ export async function GET(request: NextRequest) {
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
          AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))`
       );
       processedParams = [plotID, censusID, fileID, fileID];
 
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
-      failedParams = [plotID, censusID, fileID];
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.UploadFileID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
+      failedParams = [plotID, censusID, fileID, INGESTION_ERROR_SOURCE];
     } else {
       // Query all files for this plot/census (cumulative total)
       processedSQL = safeFormatQuery(
         schema,
-        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ?'
+        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL'
       );
       processedParams = [plotID, censusID];
 
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-      failedParams = [plotID, censusID];
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
+      failedParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
     }
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifysession: ${schema}`);
@@ -117,7 +156,7 @@ export async function GET(request: NextRequest) {
     const totalAccounted = processedCount + failedCount;
 
     ailogger.info(
-      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} in failedmeasurements. Total: ${totalAccounted}`
+      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} unresolved ingestion-error rows. Total: ${totalAccounted}`
     );
 
     return new NextResponse(
@@ -145,5 +184,7 @@ export async function GET(request: NextRequest) {
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

@@ -111,14 +111,14 @@ export async function GET(
           const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, batchID], transactionID);
           const queryDuration = Date.now() - queryStart;
 
-          // Check if the procedure handled a batch failure internally
+          // Check if the procedure handled a batch failure internally.
           const batchHandledInternally =
             procedureResult &&
             procedureResult[0] &&
-            (procedureResult[0].message?.includes('moved to failedmeasurements') || procedureResult[0].batch_failed === true);
+            (procedureResult[0].records_failed > 0 || procedureResult[0].batch_failed === true);
 
           if (batchHandledInternally) {
-            ailogger.info(`Batch ${fileID}-${batchID} was handled internally by procedure (moved to failedmeasurements) in ${queryDuration}ms`);
+            ailogger.info(`Batch ${fileID}-${batchID} was handled internally by procedure in ${queryDuration}ms`);
             return {
               attemptsNeeded: attempt,
               batchFailedButHandled: true,

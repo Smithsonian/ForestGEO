@@ -3,8 +3,10 @@ import { HTTPResponses } from '@/config/macros';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import connectionmanager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
-import { format } from 'mysql2/promise';
 import ailogger from '@/ailogger';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { generateShortBatchID } from '@/config/utils';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -51,31 +53,64 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     censusID = values.censusID!;
   }
 
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    return new NextResponse(JSON.stringify({ message: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   // Add plotID and censusID to each row
+  const batchID = generateShortBatchID();
+  const fileID = request.nextUrl.searchParams.get('fileID') || 'upload-parse-errors.csv';
   errorRows = errorRows.map(row => ({
     ...row,
     plotID,
     censusID,
+    batchID: (row as any).batchID ?? batchID,
+    fileID: (row as any).fileID ?? fileID,
     originalFailureReasons: row.originalFailureReasons ?? row.failureReasons ?? undefined,
     currentFailureReasons: row.currentFailureReasons ?? row.failureReasons ?? undefined
   }));
 
   const connectionManager = connectionmanager.getInstance();
-  const columns = Object.keys(errorRows[0]).filter(col => col !== 'id' && col !== 'failedMeasurementID');
-  const values = errorRows.map(row => columns.map(col => row[col as keyof FailedMeasurementsRDS]));
-
-  const insertQuery = format(`INSERT INTO ?? (${columns.map(() => '??').join(', ')}) VALUES ?`, [`${schema}.failedmeasurements`, ...columns, values]);
+  let transactionID = '';
 
   try {
-    await connectionManager.executeQuery(insertQuery);
+    transactionID = await connectionManager.beginTransaction();
+    await insertIngestionFailureRows(
+      connectionManager,
+      schema,
+      errorRows.map((row, idx) => ({
+        plotID,
+        censusID,
+        tag: row.tag ?? null,
+        stemTag: row.stemTag ?? null,
+        spCode: row.spCode ?? null,
+        quadrat: row.quadrat ?? null,
+        x: row.x ?? null,
+        y: row.y ?? null,
+        dbh: row.dbh ?? null,
+        hom: row.hom ?? null,
+        date: row.date ?? null,
+        codes: row.codes ?? null,
+        comments: row.description ?? null,
+        failureReason: row.failureReasons ?? 'Unknown error',
+        fileID: (row as any).fileID ?? fileID,
+        batchID: (row as any).batchID ?? batchID,
+        sourceRowIndex: idx + 1
+      })),
+      transactionID
+    );
+    await connectionManager.commitTransaction(transactionID);
 
-    // Refresh current failure reasons for the affected plot/census
-    const refreshFailedQuery = `CALL ${schema}.refresh_failedmeasurements_current(?, ?)`;
-    await connectionManager.executeQuery(refreshFailedQuery, [plotID, censusID]);
-
-    return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
+    return new NextResponse(JSON.stringify({ message: 'Inserted ingestion error rows', rowCount: errorRows.length }), { status: HTTPResponses.OK });
   } catch (error: any) {
+    if (transactionID) {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
     ailogger.error('Database Error:', error);
     return new NextResponse(JSON.stringify({ message: 'Database error', error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

@@ -27,11 +27,13 @@ export async function GET(request: NextRequest) {
           GROUP_CONCAT(ve.Description) AS Descriptions,
           GROUP_CONCAT(ve.Criteria) AS Criteria
       FROM 
-          ${schema}.cmverrors AS cve
+          ${schema}.measurement_error_log AS cve
+      JOIN
+          ${schema}.measurement_errors me ON me.ErrorID = cve.ErrorID AND me.ErrorSource = 'validation' AND cve.IsResolved = FALSE
       JOIN 
-          ${schema}.coremeasurements cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
+          ${schema}.coremeasurements cm ON cve.MeasurementID = cm.CoreMeasurementID
       JOIN 
-          ${schema}.sitespecificvalidations AS ve ON cve.ValidationErrorID = ve.ValidationID
+          ${schema}.sitespecificvalidations AS ve ON me.ErrorCode = CAST(ve.ValidationID AS CHAR)
       JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
       JOIN ${schema}.plots p ON c.PlotID = p.PlotID
       WHERE p.PlotID = ? AND c.PlotCensusNumber = ?

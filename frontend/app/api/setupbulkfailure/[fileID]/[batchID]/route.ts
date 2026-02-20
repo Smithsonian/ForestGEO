@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { validateSchemaOrThrow, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -19,44 +22,72 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
+  try {
+    validateSchemaOrThrow(schema);
+  } catch (error: any) {
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | null = null;
   try {
     transactionID = await connectionManager.beginTransaction();
-    let query = `
-    insert into ${schema}.failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
-    select distinct FileID,
-                    BatchID,
-                    PlotID,
-                    CensusID,
-                    nullif(TreeTag, '')                   as Tag,
-                    nullif(StemTag, '')                   as StemTag,
-                    nullif(SpeciesCode, '')               as SpCode,
-                    nullif(QuadratName, '')               as Quadrat,
-                    nullif(LocalX, 0)                     as X,
-                    nullif(LocalY, 0)                     as Y,
-                    nullif(DBH, 0)                        as DBH,
-                    nullif(HOM, 0)                        as HOM,
-                    nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
-                    nullif(Codes, '')                     as Codes,
-                    nullif(Comments, '')                  as Comments,
-                    'Batch moved after max attempts'      as OriginalFailureReasons,
-                    null                                  as CurrentFailureReasons,
-                    null                                  as FailureReasons
-    from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?
-    `;
-    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
-    query = `delete from ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`;
-    await connectionManager.executeQuery(query, [fileID, batchID], transactionID);
+    const selectTempSQL = safeFormatQuery(
+      schema,
+      `SELECT id, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments
+       FROM ??.temporarymeasurements
+       WHERE FileID = ? AND BatchID = ?`
+    );
+    const sourceRows: any[] = await connectionManager.executeQuery(
+      selectTempSQL,
+      [fileID, batchID],
+      transactionID
+    );
 
-    // Populate failure reasons for the newly inserted failed measurements
-    query = `CALL ${schema}.reviewfailed()`;
-    await connectionManager.executeQuery(query, [], transactionID);
+    if (sourceRows.length > 0) {
+      await insertIngestionFailureRows(
+        connectionManager,
+        schema,
+        sourceRows.map((row, idx) => ({
+          plotID: row.PlotID,
+          censusID: row.CensusID,
+          tag: row.TreeTag,
+          stemTag: row.StemTag,
+          spCode: row.SpeciesCode,
+          quadrat: row.QuadratName,
+          x: row.LocalX,
+          y: row.LocalY,
+          dbh: row.DBH,
+          hom: row.HOM,
+          date: row.MeasurementDate,
+          codes: row.Codes,
+          comments: row.Comments,
+          fileID,
+          batchID,
+          sourceRowIndex: row.id ?? idx + 1,
+          failureReason: 'Batch moved after max attempts'
+        })),
+        transactionID
+      );
+    }
+
+    const deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
+    await connectionManager.executeQuery(deleteTempSQL, [fileID, batchID], transactionID);
 
     await connectionManager.commitTransaction(transactionID);
-  } catch {
+    ailogger.warn(`Moved ${sourceRows.length} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}`);
+  } catch (error: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
-    throw new Error('failure transfer to failedmeasurements --> error detected.');
+    ailogger.error(`failure transfer for ${fileID}-${batchID}:`, error);
+    return new NextResponse(
+      JSON.stringify({
+        error: 'Failure transfer to unresolved coremeasurements detected.',
+        details: error.message
+      }),
+      { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+    );
+  } finally {
+    await connectionManager.closeConnection();
   }
   return new NextResponse(JSON.stringify({ temp: true }), { status: HTTPResponses.OK });
 }

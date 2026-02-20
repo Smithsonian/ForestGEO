@@ -5,6 +5,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
+import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -77,10 +78,30 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                      AND COLUMN_NAME NOT LIKE '%uuid%'
                      AND COLUMN_NAME NOT LIKE 'id%'
                      AND COLUMN_NAME NOT LIKE '%_id' `;
-    const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
+    const tableForColumns =
+      params.dataType === 'measurements' || params.dataType === 'failedmeasurements' ? 'coremeasurements' : params.dataType;
+    const results = await connectionManager.executeQuery(query, [schema, tableForColumns]);
     columns = results.map((row: any) => row.COLUMN_NAME);
     if (params.dataType === 'failedmeasurements') {
-      columns = Array.from(new Set([...columns, 'FileID', 'BatchID']));
+      columns = [
+        'FailedMeasurementID',
+        'FileID',
+        'BatchID',
+        'Tag',
+        'StemTag',
+        'SpCode',
+        'Quadrat',
+        'X',
+        'Y',
+        'DBH',
+        'HOM',
+        'Date',
+        'Codes',
+        'FailureReasons',
+        'OriginalFailureReasons',
+        'CurrentFailureReasons',
+        'LastValidatedAt'
+      ];
     }
   } catch (e: any) {
     ailogger.error('Error fetching columns in formdownload:', e);
@@ -194,9 +215,12 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
                   ) as Codes,
                   (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR '; ')
-                   FROM ${schema}.sitespecificvalidations vp
-                   JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
-                   WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
+                   FROM ${schema}.measurement_error_log mel
+                   JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+                   JOIN ${schema}.sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                   WHERE mel.MeasurementID = cm.CoreMeasurementID
+                     AND me.ErrorSource = 'validation'
+                     AND mel.IsResolved = FALSE) AS Errors
               FROM ${schema}.coremeasurements cm
               JOIN ${schema}.census c ON cm.CensusID = c.CensusID and c.IsActive IS TRUE
               JOIN ${schema}.stems st ON st.StemGUID = cm.StemGUID and st.CensusID = c.CensusID and st.IsActive IS TRUE
@@ -262,7 +286,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                   fm.Date                AS date,
                   fm.Codes               AS codes,
                   fm.FailureReasons      AS failureReasons
-              FROM ${schema}.failedmeasurements fm
+              FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
               WHERE fm.PlotID = ? AND fm.CensusID = ?
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
               ORDER BY fm.FailedMeasurementID ASC`;
@@ -281,7 +305,10 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
           hom: row.hom,
           date: row.date,
           codes: row.codes,
-          failureReasons: row.failureReasons
+          failureReasons: row.failureReasons,
+          originalFailureReasons: row.OriginalFailureReasons,
+          currentFailureReasons: row.CurrentFailureReasons,
+          lastValidatedAt: row.LastValidatedAt
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:

@@ -125,9 +125,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
       case 'failedmeasurements': {
         // Use parameterized query for all user-provided values
         const fmQuery = format(
-          `SELECT 1 FROM \`${schema}\`.failedmeasurements fm
-           JOIN \`${schema}\`.census c ON c.CensusID = fm.CensusID
-           WHERE fm.PlotID = ? AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE LIMIT 1`,
+          `SELECT 1
+           FROM \`${schema}\`.coremeasurements cm
+           JOIN \`${schema}\`.census c ON c.CensusID = cm.CensusID
+           JOIN \`${schema}\`.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+           JOIN \`${schema}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+           WHERE c.PlotID = ?
+             AND c.PlotCensusNumber = ?
+             AND c.IsActive IS TRUE
+             AND cm.StemGUID IS NULL
+             AND mel.IsResolved = FALSE
+             AND me.ErrorSource = 'ingestion'
+           LIMIT 1`,
           [plotID, plotCensusNumber]
         );
         const fmResults = await connection.executeQuery(fmQuery);

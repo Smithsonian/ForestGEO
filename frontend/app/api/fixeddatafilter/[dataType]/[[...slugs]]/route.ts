@@ -8,6 +8,7 @@ import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -115,8 +116,33 @@ export async function POST(
       try {
         const query = `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? 
       AND COLUMN_NAME NOT LIKE '%id%' AND COLUMN_NAME NOT LIKE '%uuid%' AND COLUMN_NAME NOT LIKE 'id%'  AND COLUMN_NAME NOT LIKE '%_id' `;
-        const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
+        const tableNameForColumns = params.dataType === 'failedmeasurements' ? 'coremeasurements' : params.dataType;
+        const results = await connectionManager.executeQuery(query, [schema, tableNameForColumns]);
         columns = results.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME);
+        if (params.dataType === 'failedmeasurements') {
+          columns = [
+            'FailedMeasurementID',
+            'PlotID',
+            'CensusID',
+            'Tag',
+            'StemTag',
+            'SpCode',
+            'Quadrat',
+            'X',
+            'Y',
+            'DBH',
+            'HOM',
+            'Date',
+            'Codes',
+            'Comments',
+            'FailureReasons',
+            'OriginalFailureReasons',
+            'CurrentFailureReasons',
+            'LastValidatedAt',
+            'FileID',
+            'BatchID'
+          ];
+        }
       } catch (e: unknown) {
         const errorObj = e instanceof Error ? e : new Error(String(e));
         ailogger.error('Error fetching columns in fixeddatafilter:', errorObj);
@@ -140,12 +166,14 @@ export async function POST(
         case 'failedmeasurements':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
-          paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} fm
-          JOIN census c ON fm.CensusID = c.CensusID
-          WHERE fm.PlotID = ? 
-          AND c.PlotCensusNumber = ? 
+          paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.*
+          FROM (${buildFailedMeasurementsSelectQuery(schema)}) fm
+          JOIN ${schema}.census c ON fm.CensusID = c.CensusID
+          WHERE fm.PlotID = ?
+          AND c.PlotID = ?
+          AND c.PlotCensusNumber = ?
           ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'attributes':
         case 'species':
@@ -289,7 +317,7 @@ export async function POST(
             paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS pdt.*
               FROM ${schema}.${params.dataType} pdt
-                       JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+                       JOIN ${schema}.census c ON pdt.CensusID = c.CensusID
               WHERE c.PlotID = ?
                 AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')}) 
                 ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}

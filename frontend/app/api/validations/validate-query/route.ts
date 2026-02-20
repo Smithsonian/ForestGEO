@@ -203,19 +203,19 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
   const queryUpper = query.toUpperCase();
   const queryLower = query.toLowerCase();
 
-  // Check for required INSERT INTO cmverrors structure
-  if (!queryUpper.includes('INSERT INTO CMVERRORS')) {
-    validationResult.errors.push('Validation queries must INSERT INTO cmverrors table');
+  // Check for required INSERT INTO measurement_error_log structure.
+  if (!queryUpper.includes('INSERT INTO MEASUREMENT_ERROR_LOG')) {
+    validationResult.errors.push('Validation queries must INSERT INTO measurement_error_log table');
   }
 
-  // Check for required CoreMeasurementID and ValidationErrorID columns
-  if (!queryUpper.includes('COREMEASUREMENTID') || !queryUpper.includes('VALIDATIONERRORID')) {
-    validationResult.errors.push('Query must select CoreMeasurementID and ValidationErrorID columns');
+  // Check for required MeasurementID and ErrorID columns.
+  if (!queryUpper.includes('MEASUREMENTID') || !queryUpper.includes('ERRORID')) {
+    validationResult.errors.push('Query must select MeasurementID and ErrorID columns');
   }
 
-  // Check for required @validationProcedureID parameter
+  // Check for required @validationProcedureID parameter (used to resolve ErrorID).
   if (!query.includes('@validationProcedureID')) {
-    validationResult.errors.push('Query must use @validationProcedureID as ValidationErrorID value');
+    validationResult.errors.push('Query must use @validationProcedureID to resolve validation ErrorID');
   }
 
   // Check for required plot and census parameters
@@ -233,9 +233,11 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
     validationResult.warnings.push('Query should include IsActive filters on relevant tables');
   }
 
-  // Check for duplicate prevention pattern
-  if (!queryLower.includes('left join cmverrors e') || !queryLower.includes('e.coremeasurementid is null')) {
-    validationResult.warnings.push('Query should include LEFT JOIN cmverrors with e.CoreMeasurementID IS NULL to prevent duplicate error records');
+  // Check for duplicate prevention pattern.
+  if (!queryLower.includes('left join measurement_error_log e') || !queryLower.includes('e.measurementid is null')) {
+    validationResult.warnings.push(
+      'Query should include LEFT JOIN measurement_error_log with e.MeasurementID IS NULL to prevent duplicate error records'
+    );
   }
 
   // Check for proper census join pattern
