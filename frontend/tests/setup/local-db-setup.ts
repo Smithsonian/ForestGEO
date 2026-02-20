@@ -353,7 +353,7 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
   }
 
   // Add inline validation definitions (used by stored procedure during ingestion, not via API)
-  // These are required because cmverrors has FK constraint to sitespecificvalidations.
+  // These are required because measurement_error_log references error codes from sitespecificvalidations.
   // IMPORTANT: IsEnabled = false because these are INLINE validations executed during
   // bulkingestionprocess, NOT post-ingestion API validations. The Definition is empty
   // because the validation logic is embedded in the stored procedure itself.
@@ -733,20 +733,19 @@ export async function teardownTestDatabase(
  * Order: leaf tables first (no children), then parent tables.
  *
  * FK chain:
- *   cmverrors → coremeasurements
+ *   measurement_error_log → coremeasurements, measurement_errors
  *   cmattributes → coremeasurements
  *   coremeasurements → stems → trees
  *   stems → quadrats (preserved)
  *   trees → species (preserved), census
  */
 const MEASUREMENT_TABLES_DELETE_ORDER = [
-  'cmverrors',           // Leaf: depends on coremeasurements
-  'cmattributes',        // Leaf: depends on coremeasurements
-  'coremeasurements',    // Parent of cmverrors, cmattributes; child of stems
-  'stems',               // Parent of coremeasurements; child of trees, quadrats
-  'trees',               // Parent of stems; child of species, census
-  'failedmeasurements',  // Standalone (no FKs)
-  'temporarymeasurements' // Standalone (no FKs)
+  'measurement_error_log', // Leaf: depends on coremeasurements + measurement_errors
+  'cmattributes',          // Leaf: depends on coremeasurements
+  'coremeasurements',      // Parent of measurement_error_log, cmattributes; child of stems
+  'stems',                 // Parent of coremeasurements; child of trees, quadrats
+  'trees',                 // Parent of stems; child of species, census
+  'temporarymeasurements'  // Standalone (no FKs)
 ] as const;
 
 /**
@@ -1138,7 +1137,8 @@ export async function insertDirectMeasurements(
 }
 
 /**
- * Helper to get validation errors for specific measurements
+ * Helper to get validation errors for specific measurements.
+ * Queries the unified measurement_error_log + measurement_errors tables.
  */
 export async function getValidationErrors(
   connection: mysql.Connection,
@@ -1149,7 +1149,8 @@ export async function getValidationErrors(
   } = {}
 ): Promise<
   Array<{
-    CMVErrorID: number;
+    MeasurementID: number;
+    ErrorID: number;
     ValidationErrorID: number;
     CoreMeasurementID: number;
     ProcedureName: string;
@@ -1157,14 +1158,18 @@ export async function getValidationErrors(
   }>
 > {
   let query = `
-    SELECT cmv.CMVErrorID, cmv.ValidationErrorID, cmv.CoreMeasurementID,
+    SELECT mel.MeasurementID, mel.ErrorID,
+           CAST(me.ErrorCode AS UNSIGNED) AS ValidationErrorID,
+           mel.MeasurementID AS CoreMeasurementID,
            ssv.ProcedureName, ssv.Description
-    FROM cmverrors cmv
-    LEFT JOIN sitespecificvalidations ssv ON cmv.ValidationErrorID = ssv.ValidationID
-    LEFT JOIN coremeasurements cm ON cm.CoreMeasurementID = cmv.CoreMeasurementID
+    FROM measurement_error_log mel
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    LEFT JOIN sitespecificvalidations ssv ON me.ErrorCode = CAST(ssv.ValidationID AS CHAR)
+    LEFT JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
     LEFT JOIN stems s ON s.StemGUID = cm.StemGUID
     LEFT JOIN trees t ON t.TreeID = s.TreeID
-    WHERE 1=1
+    WHERE me.ErrorSource = 'validation'
+      AND mel.IsResolved = FALSE
   `;
   const params: any[] = [];
 
@@ -1173,7 +1178,7 @@ export async function getValidationErrors(
     params.push(options.censusID);
   }
   if (options.validationID) {
-    query += ' AND cmv.ValidationErrorID = ?';
+    query += ' AND me.ErrorCode = CAST(? AS CHAR)';
     params.push(options.validationID);
   }
   if (options.treeTag) {
@@ -1186,13 +1191,15 @@ export async function getValidationErrors(
 }
 
 /**
- * Helper to get failed measurements
+ * Helper to get failed measurements (unresolved ingestion errors).
+ * Queries coremeasurements WHERE StemGUID IS NULL with measurement_error_log join.
  */
 export async function getFailedMeasurements(
   connection: mysql.Connection,
   options: {
     fileID?: string;
     batchID?: string;
+    tag?: string;
   } = {}
 ): Promise<
   Array<{
@@ -1204,17 +1211,37 @@ export async function getFailedMeasurements(
     FailureReasons: string;
   }>
 > {
-  let query = 'SELECT * FROM failedmeasurements WHERE 1=1';
+  let query = `
+    SELECT
+      cm.CoreMeasurementID AS FailedMeasurementID,
+      cm.UploadFileID AS FileID,
+      cm.UploadBatchID AS BatchID,
+      cm.RawTreeTag AS Tag,
+      cm.RawStemTag AS StemTag,
+      GROUP_CONCAT(DISTINCT me.ErrorMessage ORDER BY me.ErrorCode SEPARATOR '; ') AS FailureReasons
+    FROM coremeasurements cm
+    JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    WHERE cm.StemGUID IS NULL
+      AND me.ErrorSource = 'ingestion'
+      AND mel.IsResolved = FALSE
+  `;
   const params: any[] = [];
 
   if (options.fileID) {
-    query += ' AND FileID = ?';
+    query += ' AND cm.UploadFileID = ?';
     params.push(options.fileID);
   }
   if (options.batchID) {
-    query += ' AND BatchID = ?';
+    query += ' AND cm.UploadBatchID = ?';
     params.push(options.batchID);
   }
+  if (options.tag) {
+    query += ' AND cm.RawTreeTag = ?';
+    params.push(options.tag);
+  }
+
+  query += ' GROUP BY cm.CoreMeasurementID, cm.UploadFileID, cm.UploadBatchID, cm.RawTreeTag, cm.RawStemTag';
 
   const [rows] = await connection.query<mysql.RowDataPacket[]>(query, params);
   return rows as any[];
@@ -1447,10 +1474,12 @@ export async function runValidationForTest(
 
   // Clear stale validation errors for this validation
   const cleanupQuery = `
-    DELETE cme FROM cmverrors cme
-    JOIN coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
+    DELETE mel FROM measurement_error_log mel
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
     JOIN census c ON cm.CensusID = c.CensusID
-    WHERE cme.ValidationErrorID = ?
+    WHERE me.ErrorSource = 'validation'
+      AND me.ErrorCode = CAST(? AS CHAR)
       AND cm.IsValidated IS NULL
       AND cm.IsActive = TRUE
       ${params.censusID ? 'AND cm.CensusID = ?' : ''}

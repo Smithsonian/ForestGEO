@@ -7,7 +7,7 @@
  * - Quadrat change between censuses (trees can't move)
  * - Coordinate drift >10m within same quadrat
  *
- * Inline Validations (accept but flag in cmverrors):
+ * Inline Validations (accept but flag in measurement_error_log):
  * - ValidationID 14: Invalid attribute code
  *
  * NOTE: Most cross-census validations (ValidationID 1, 2, 20, 21) run POST-INGESTION via the API layer.
@@ -122,14 +122,11 @@ describe('Hard Failure Validation Tests', () => {
         [fileID]
       );
 
-      // Check failedmeasurements for failure details
-      const [failedDetails] = await connection.query<RowDataPacket[]>(
-        'SELECT Tag, StemTag, Quadrat, FailureReasons FROM failedmeasurements WHERE FileID = ?',
-        [fileID]
-      );
+      // Check for failed measurements (coremeasurements with StemGUID IS NULL + ingestion errors)
+      const failedDetails = await getFailedMeasurements(connection, { fileID });
 
-      // The stored procedure puts cross-census validation failures in failedmeasurements
-      // and continues processing (batch_failed is false, but records are marked as failed)
+      // The stored procedure puts cross-census validation failures in coremeasurements
+      // with StemGUID IS NULL and logs errors in measurement_error_log.
       // Check that the record was flagged as a failure with the correct reason
       expect(failedDetails.length).toBeGreaterThan(0);
       expect(failedDetails[0].FailureReasons).toContain('Quadrat mismatch');
@@ -194,13 +191,13 @@ describe('Hard Failure Validation Tests', () => {
       const result = await runBulkIngestion(connection, fileID, batchID);
 
       // Check that NO quadrat mismatch failure was recorded
-      const [failedDetails] = await connection.query<RowDataPacket[]>(
-        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
-        [fileID, '%Quadrat mismatch%']
+      const failedDetails = await getFailedMeasurements(connection, { fileID });
+      const quadratMismatchFailures = failedDetails.filter(
+        f => f.FailureReasons?.includes('Quadrat mismatch')
       );
 
       // Should NOT have any quadrat mismatch failures
-      expect(failedDetails.length).toBe(0);
+      expect(quadratMismatchFailures.length).toBe(0);
 
       // ASSERTION: Record should not hard-fail for valid same-quadrat data
       expect(result.batch_failed).toBe(false);
@@ -268,8 +265,8 @@ describe('Hard Failure Validation Tests', () => {
         [fileID]
       );
 
-      // The stored procedure puts cross-census validation failures in failedmeasurements
-      // and continues processing (batch_failed is false, but records are marked as failed)
+      // The stored procedure puts cross-census validation failures in coremeasurements
+      // with StemGUID IS NULL and logs errors in measurement_error_log
       expect(failed.length).toBeGreaterThan(0);
       expect(failed[0].FailureReasons).toBeDefined();
       expect(failed[0].FailureReasons.toLowerCase()).toContain('coordinate');
@@ -335,13 +332,13 @@ describe('Hard Failure Validation Tests', () => {
       const result = await runBulkIngestion(connection, fileID, batchID);
 
       // Check that NO coordinate drift failure was recorded
-      const [failedDetails] = await connection.query<RowDataPacket[]>(
-        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
-        [fileID, '%Coordinate drift%']
+      const failedDetails = await getFailedMeasurements(connection, { fileID });
+      const coordinateDriftFailures = failedDetails.filter(
+        f => f.FailureReasons?.toLowerCase().includes('coordinate')
       );
 
       // Should NOT have any coordinate drift failures
-      expect(failedDetails.length).toBe(0);
+      expect(coordinateDriftFailures.length).toBe(0);
 
       // ASSERTION: Record should not hard-fail for valid small-drift data
       expect(result.batch_failed).toBe(false);
@@ -401,13 +398,13 @@ describe('Hard Failure Validation Tests', () => {
       const result = await runBulkIngestion(connection, fileID, batchID);
 
       // Check for coordinate drift failure
-      const [failedDetails] = await connection.query<RowDataPacket[]>(
-        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
-        [fileID, '%Coordinate%']
+      const failedDetails = await getFailedMeasurements(connection, { fileID });
+      const coordinateFailures = failedDetails.filter(
+        f => f.FailureReasons?.toLowerCase().includes('coordinate')
       );
 
       // Exactly 10m should NOT trigger - validation is for EXCEEDS (>10m)
-      expect(failedDetails.length).toBe(0);
+      expect(coordinateFailures.length).toBe(0);
       expect(result.batch_failed).toBe(false);
     });
 
@@ -464,13 +461,13 @@ describe('Hard Failure Validation Tests', () => {
       await runBulkIngestion(connection, fileID, batchID);
 
       // Check for coordinate drift failure
-      const [failedDetails] = await connection.query<RowDataPacket[]>(
-        'SELECT Tag, FailureReasons FROM failedmeasurements WHERE FileID = ? AND FailureReasons LIKE ?',
-        [fileID, '%Coordinate%']
+      const failedDetails = await getFailedMeasurements(connection, { fileID });
+      const coordinateFailures = failedDetails.filter(
+        f => f.FailureReasons?.toLowerCase().includes('coordinate')
       );
 
       // 10.01m SHOULD trigger - just over threshold
-      expect(failedDetails.length).toBeGreaterThan(0);
+      expect(coordinateFailures.length).toBeGreaterThan(0);
     });
   });
 });
@@ -549,7 +546,7 @@ describe('Inline Validation Data Tests', () => {
     /**
      * Scenario: Tree is recorded with Species A in census 1, then Species B in census 2.
      * This is biologically impossible (trees don't change species) and indicates data error.
-     * Expected: Soft validation error (record accepted, flagged in cmverrors)
+     * Expected: Soft validation error (record accepted, flagged in measurement_error_log)
      */
     it('should flag when tree has different species across censuses', async () => {
       // Need at least 2 species
@@ -606,7 +603,7 @@ describe('Inline Validation Data Tests', () => {
     /**
      * Scenario: Same tree tag appears twice in the same batch with different species.
      * This is definitely a data entry error.
-     * Expected: Soft validation error (flagged in cmverrors)
+     * Expected: Soft validation error (flagged in measurement_error_log)
      */
     it('should flag when same tree has different species within same batch', async () => {
       // Need at least 2 species
@@ -662,7 +659,7 @@ describe('Inline Validation Data Tests', () => {
      * Scenario: Measurement uses a species code that doesn't exist in the species table.
      * Expected: Record is ingested but flagged with ValidationID 3
      *
-     * NOTE: This may be handled as a hard failure during ingestion (rejected to failedmeasurements)
+     * NOTE: This may be handled as a hard failure during ingestion (rejected to coremeasurements with StemGUID IS NULL)
      * rather than a soft validation, depending on stored procedure implementation.
      */
     it('should flag non-existent species code', async () => {

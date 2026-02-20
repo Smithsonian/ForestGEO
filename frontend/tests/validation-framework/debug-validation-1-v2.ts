@@ -30,7 +30,7 @@ async function debugValidation1() {
     if (existingCMs.length > 0) {
       const cmIDs = existingCMs.map((r: any) => r.CoreMeasurementID).join(',');
       await connection.query(`DELETE FROM ${dbConfig.database}.cmattributes WHERE CoreMeasurementID IN (${cmIDs})`);
-      await connection.query(`DELETE FROM ${dbConfig.database}.cmverrors WHERE CoreMeasurementID IN (${cmIDs})`);
+      await connection.query(`DELETE FROM ${dbConfig.database}.measurement_error_log WHERE MeasurementID IN (${cmIDs})`);
     }
 
     await connection.query(`DELETE FROM ${dbConfig.database}.coremeasurements WHERE StemGUID = 999999`);
@@ -285,7 +285,7 @@ async function debugValidation1() {
     });
 
     // d) Full validation query simulation
-    console.log('  d) Full validation query (without inserting into cmverrors):');
+    console.log('  d) Full validation query (without inserting into measurement_error_log):');
     const [fullQuery] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT DISTINCT
         cm_present.CoreMeasurementID,

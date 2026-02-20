@@ -123,7 +123,7 @@ async function checkDatabase() {
 
     // Check other required tables
     console.log('🔍 Checking other required tables...');
-    const requiredTables = ['plots', 'census', 'quadrats', 'species', 'trees', 'stems', 'coremeasurements', 'cmattributes', 'attributes', 'cmverrors'];
+    const requiredTables = ['plots', 'census', 'quadrats', 'species', 'trees', 'stems', 'coremeasurements', 'cmattributes', 'attributes', 'measurement_error_log', 'measurement_errors'];
 
     const [existingTables] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT TABLE_NAME

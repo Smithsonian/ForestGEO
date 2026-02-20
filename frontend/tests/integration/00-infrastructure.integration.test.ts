@@ -52,10 +52,10 @@ const EXPECTED_TABLES = [
   'stems',
   'coremeasurements',
   'cmattributes',
-  'cmverrors',
+  'measurement_error_log',
+  'measurement_errors',
   'attributes',
   'temporarymeasurements',
-  'failedmeasurements',
   'sitespecificvalidations'
 ] as const;
 

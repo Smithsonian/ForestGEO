@@ -3,16 +3,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ailogger from '@/ailogger';
 import connectionmanager from '@/config/connectionmanager';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
-  const instance = { executeQuery };
+  const beginTransaction = vi.fn().mockResolvedValue('tx-test');
+  const commitTransaction = vi.fn().mockResolvedValue(undefined);
+  const rollbackTransaction = vi.fn().mockResolvedValue(undefined);
+  const closeConnection = vi.fn().mockResolvedValue(undefined);
+  const instance = { executeQuery, beginTransaction, commitTransaction, rollbackTransaction, closeConnection };
   return {
     default: {
       getInstance: () => instance
     }
   };
 });
+
+vi.mock('@/config/measurementerrors', () => ({
+  insertIngestionFailureRows: vi.fn().mockResolvedValue([1, 2])
+}));
 
 vi.mock('@/ailogger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -25,11 +34,13 @@ vi.mock('mysql2/promise', () => {
 });
 
 function makeRequest(body: unknown) {
-  return new Request('http://localhost/api', {
+  const req = new Request('http://localhost/api', {
     method: 'POST',
     body: JSON.stringify(body),
     headers: { 'content-type': 'application/json' }
   }) as any;
+  req.nextUrl = new URL('http://localhost/api');
+  return req;
 }
 
 function makeParams(schema: string | undefined, slugs?: string[]) {
@@ -83,45 +94,35 @@ describe('batchedupload POST route', () => {
       { treeID: 11, stemGUID: 21, reason: 'missing height' }
     ];
     const req = makeRequest(payload);
-    const res = await POST(req, makeParams('myschema', ['42', '7']));
+    const res = await POST(req, makeParams('forestgeo_testing', ['42', '7']));
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.message).toMatch(/Insert to SQL successful/i);
+    expect(body.message).toMatch(/Inserted ingestion error rows/i);
+    expect(body.rowCount).toBe(2);
 
-    // ⟵ FIX: default import already *is* the mocked module
-    const exec = connectionmanager.getInstance().executeQuery as ReturnType<typeof vi.fn>;
-    // Route calls executeQuery twice: INSERT + CALL refresh_failedmeasurements_current()
-    expect(exec).toHaveBeenCalledTimes(2);
-
-    // With mocked mysql2.format we can sanity-check the SQL + params
-    const sqlArg = exec.mock.calls[0][0] as string;
-    expect(sqlArg).toContain('FORMATTED_SQL:');
-    expect(sqlArg).toContain('INSERT INTO ?? ('); // don't assert exact number of ?? (order can vary)
-    expect(sqlArg).toContain('myschema.failedmeasurements');
-
-    // Ensure excluded keys don't appear as column names
-    expect(sqlArg).not.toMatch(/failedMeasurementID/);
-    // Beware: /id/ would also match 'plotID', so avoid that generic check.
-
-    // Ensure plotID/censusID are present in params blob
-    expect(sqlArg).toContain('"plotID"');
-    expect(sqlArg).toContain('"censusID"');
-    expect(sqlArg).toContain('42'); // plotID
-    expect(sqlArg).toContain('7'); // censusID
-
-    // Verify the second call is the refresh_failedmeasurements_current procedure
-    const refreshCall = exec.mock.calls[1][0] as string;
-    expect(refreshCall).toMatch(/CALL myschema\.refresh_failedmeasurements_current/i);
+    const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+    expect(insertMock).toHaveBeenCalledTimes(1);
+    const [connArg, schemaArg, rowsArg, txArg] = insertMock.mock.calls[0];
+    expect(connArg).toBe(connectionmanager.getInstance());
+    expect(schemaArg).toBe('forestgeo_testing');
+    expect(txArg === undefined || txArg === 'tx-test').toBe(true);
+    expect(rowsArg).toHaveLength(2);
+    expect(rowsArg[0]).toMatchObject({
+      plotID: 42,
+      censusID: 7,
+      sourceRowIndex: 1,
+      failureReason: 'Unknown error'
+    });
   });
 
   it('500s and logs on DB error', async () => {
-    const exec = connectionmanager.getInstance().executeQuery as ReturnType<typeof vi.fn>;
-    exec.mockRejectedValueOnce(new Error('boom'));
+    const insertMock = insertIngestionFailureRows as ReturnType<typeof vi.fn>;
+    insertMock.mockRejectedValueOnce(new Error('boom'));
 
     const payload = [{ treeID: 1, stemGUID: 2, reason: 'oops' }];
     const req = makeRequest(payload);
-    const res = await POST(req, makeParams('myschema', ['1', '2']));
+    const res = await POST(req, makeParams('forestgeo_testing', ['1', '2']));
 
     expect(res.status).toBe(500);
     const body = await res.json();

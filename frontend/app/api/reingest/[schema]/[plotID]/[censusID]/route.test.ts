@@ -55,9 +55,9 @@ function makeParams() {
   } as any;
 }
 
-/** Helper: generate mock FailedMeasurementID rows */
-function mockFailedIds(count: number) {
-  return Array.from({ length: count }, (_, i) => ({ FailedMeasurementID: i + 1 }));
+/** Helper: generate mock CoreMeasurementID rows (unresolved ingestion-error rows) */
+function mockUnresolvedIds(count: number) {
+  return Array.from({ length: count }, (_, i) => ({ CoreMeasurementID: i + 1 }));
 }
 
 describe('reingest API routes', () => {
@@ -86,13 +86,14 @@ describe('reingest API routes', () => {
   });
 
   describe('POST route (move rows only)', () => {
-    it('moves rows from failedmeasurements to temporarymeasurements', async () => {
+    it('moves unresolved ingestion-error rows to temporarymeasurements', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(5)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
-        .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
-        .mockResolvedValueOnce(undefined); // 5. DELETE failedmeasurements by IDs
+        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(DISTINCT cm.CoreMeasurementID) for unresolved rows
+        .mockResolvedValueOnce(mockUnresolvedIds(5)) // 2. SELECT DISTINCT cm.CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
+        .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements FROM coremeasurements
+        .mockResolvedValueOnce(undefined) // 5. UPDATE measurement_error_log SET IsResolved = TRUE
+        .mockResolvedValueOnce(undefined); // 6. DELETE FROM coremeasurements WHERE StemGUID IS NULL
 
       const req = makeRequest('POST');
       const res = await POST(req, makeParams());
@@ -104,10 +105,10 @@ describe('reingest API routes', () => {
       expect(body.batchID).toBe('test-batch-id-12345');
 
       expect(mockConnectionManager.closeConnection).toHaveBeenCalledTimes(1);
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(5);
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(6);
     });
 
-    it('returns 200 with rowsMoved=0 when no failed measurements exist', async () => {
+    it('returns 200 with rowsMoved=0 when no unresolved rows exist', async () => {
       mockConnectionManager.executeQuery.mockResolvedValueOnce([{ total: 0 }]);
 
       const req = makeRequest('POST');
@@ -116,7 +117,7 @@ describe('reingest API routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.rowsMoved).toBe(0);
-      expect(body.responseMessage).toMatch(/No failed measurements found/i);
+      expect(body.responseMessage).toMatch(/No unresolved ingestion-error rows/i);
     });
 
     it('returns 500 on error', async () => {
@@ -135,15 +136,14 @@ describe('reingest API routes', () => {
   describe('GET route (full reingestion)', () => {
     it('moves rows and runs batch ingestion process', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 10 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(10)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 10 }]) // 1. COUNT unresolved rows
+        .mockResolvedValueOnce(mockUnresolvedIds(10)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // 5. CALL bulkingestionprocess
-        .mockResolvedValueOnce(undefined) // 6. DELETE failedmeasurements by IDs
-        .mockResolvedValueOnce(undefined) // 7. CALL refresh_failedmeasurements_current
-        .mockResolvedValueOnce([{ cnt: 0 }]) // 8. SELECT COUNT(*) ready for reingestion
-        .mockResolvedValueOnce([{ remaining: 2 }]); // 9. COUNT(*) remaining failures
+        .mockResolvedValueOnce(undefined) // 6. UPDATE measurement_error_log (resolve)
+        .mockResolvedValueOnce(undefined) // 7. DELETE FROM coremeasurements (old unresolved)
+        .mockResolvedValueOnce([{ remaining: 2 }]); // 8. COUNT remaining unresolved
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -158,13 +158,9 @@ describe('reingest API routes', () => {
       const calls = mockConnectionManager.executeQuery.mock.calls;
       const bulkIngestionCall = calls.find((call: any) => call[0]?.includes('bulkingestionprocess'));
       expect(bulkIngestionCall).toBeDefined();
-
-      // Verify refresh was called
-      const refreshCall = calls.find((call: any) => call[0]?.includes('refresh_failedmeasurements_current'));
-      expect(refreshCall).toBeDefined();
     });
 
-    it('returns 200 with 0 processed when no failed measurements exist', async () => {
+    it('returns 200 with 0 processed when no unresolved rows exist', async () => {
       mockConnectionManager.executeQuery.mockResolvedValueOnce([{ total: 0 }]);
 
       const req = makeRequest('GET');
@@ -179,15 +175,14 @@ describe('reingest API routes', () => {
 
     it('handles all rows successfully reingested', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(5)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT unresolved
+        .mockResolvedValueOnce(mockUnresolvedIds(5)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // 5. CALL bulkingestionprocess
-        .mockResolvedValueOnce(undefined) // 6. DELETE failedmeasurements by IDs
-        .mockResolvedValueOnce(undefined) // 7. CALL refresh_failedmeasurements_current
-        .mockResolvedValueOnce([{ cnt: 0 }]) // 8. SELECT COUNT(*) ready
-        .mockResolvedValueOnce([{ remaining: 0 }]); // 9. All successful
+        .mockResolvedValueOnce(undefined) // 6. UPDATE measurement_error_log (resolve)
+        .mockResolvedValueOnce(undefined) // 7. DELETE FROM coremeasurements
+        .mockResolvedValueOnce([{ remaining: 0 }]); // 8. All successful
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -201,9 +196,9 @@ describe('reingest API routes', () => {
 
     it('returns 500 on error', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(5)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT unresolved
+        .mockResolvedValueOnce(mockUnresolvedIds(5)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockRejectedValueOnce(new Error('Bulk ingestion failed')); // 4. INSERT fails
 
       const req = makeRequest('GET');
@@ -213,33 +208,6 @@ describe('reingest API routes', () => {
       const body = await res.json();
       expect(body.error).toBe('Bulk ingestion failed');
       expect(mockConnectionManager.closeConnection).toHaveBeenCalledTimes(1);
-    });
-
-    it('auto-reingests rows marked Ready for reingestion', async () => {
-      mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(5)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
-        .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
-        .mockResolvedValueOnce(undefined) // 5. CALL bulkingestionprocess
-        .mockResolvedValueOnce(undefined) // 6. DELETE failedmeasurements by IDs
-        .mockResolvedValueOnce(undefined) // 7. CALL refresh_failedmeasurements_current
-        .mockResolvedValueOnce([{ cnt: 2 }]) // 8. 2 rows ready for reingestion
-        .mockResolvedValueOnce(undefined) // 9. INSERT ready rows into temporarymeasurements
-        .mockResolvedValueOnce(undefined) // 10. CALL bulkingestionprocess (auto-reingest)
-        .mockResolvedValueOnce(undefined) // 11. DELETE ready rows from failedmeasurements
-        .mockResolvedValueOnce([{ remaining: 1 }]); // 12. COUNT(*) remaining
-
-      const req = makeRequest('GET');
-      const res = await GET(req, makeParams());
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.totalProcessed).toBe(5);
-      expect(body.successfulReingestions).toBe(4);
-      expect(body.remainingFailures).toBe(1);
-
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(12);
     });
   });
 
@@ -267,40 +235,40 @@ describe('reingest API routes', () => {
   });
 
   describe('Attribute persistence regression tests', () => {
-    it('should preserve Codes field when moving to temporarymeasurements', async () => {
+    it('should preserve RawCodes field when moving to temporarymeasurements', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 1 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(1)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 1 }]) // 1. COUNT unresolved
+        .mockResolvedValueOnce(mockUnresolvedIds(1)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockResolvedValueOnce({ insertId: 1, affectedRows: 1 }) // 4. INSERT INTO temporarymeasurements
-        .mockResolvedValueOnce(undefined); // 5. DELETE failedmeasurements by IDs
+        .mockResolvedValueOnce(undefined) // 5. UPDATE measurement_error_log (resolve)
+        .mockResolvedValueOnce(undefined); // 6. DELETE FROM coremeasurements
 
       const req = makeRequest('POST');
       const res = await POST(req, makeParams());
 
       expect(res.status).toBe(200);
 
-      // Verify the INSERT query includes the Codes field
+      // Verify the INSERT query includes the Codes field mapped from RawCodes
       const insertCall = mockConnectionManager.executeQuery.mock.calls.find(
         (call: any) => call[0]?.includes('INSERT IGNORE INTO') && call[0]?.includes('temporarymeasurements')
       );
 
       expect(insertCall).toBeDefined();
       expect(insertCall[0]).toContain('Codes');
-      expect(insertCall[0]).toContain('fm.Codes'); // Maps from failedmeasurements
+      expect(insertCall[0]).toContain('cm.RawCodes'); // Maps from coremeasurements.RawCodes
     });
 
-    it('should complete GET reingestion without extra validation calls', async () => {
+    it('should complete GET reingestion end-to-end', async () => {
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(5)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 5 }]) // 1. COUNT unresolved
+        .mockResolvedValueOnce(mockUnresolvedIds(5)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // 5. CALL bulkingestionprocess
-        .mockResolvedValueOnce(undefined) // 6. DELETE failedmeasurements by IDs
-        .mockResolvedValueOnce(undefined) // 7. CALL refresh_failedmeasurements_current
-        .mockResolvedValueOnce([{ cnt: 0 }]) // 8. SELECT COUNT(*) ready
-        .mockResolvedValueOnce([{ remaining: 0 }]); // 9. Count remaining
+        .mockResolvedValueOnce(undefined) // 6. UPDATE measurement_error_log (resolve)
+        .mockResolvedValueOnce(undefined) // 7. DELETE FROM coremeasurements
+        .mockResolvedValueOnce([{ remaining: 0 }]); // 8. Count remaining
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -310,18 +278,17 @@ describe('reingest API routes', () => {
 
     it('should handle rows with codes correctly in bulk ingestion', async () => {
       // This test verifies the complete flow:
-      // failedmeasurements (with Codes) → temporarymeasurements → bulkingestionprocess → cmattributes
+      // coremeasurements (StemGUID IS NULL, with RawCodes) → temporarymeasurements → bulkingestionprocess → cmattributes
 
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ total: 1 }]) // 1. COUNT(*)
-        .mockResolvedValueOnce(mockFailedIds(1)) // 2. SELECT FailedMeasurementID
-        .mockResolvedValueOnce(undefined) // 3. DELETE temporarymeasurements
+        .mockResolvedValueOnce([{ total: 1 }]) // 1. COUNT unresolved
+        .mockResolvedValueOnce(mockUnresolvedIds(1)) // 2. SELECT CoreMeasurementID
+        .mockResolvedValueOnce(undefined) // 3. DELETE FROM temporarymeasurements
         .mockResolvedValueOnce(undefined) // 4. INSERT INTO temporarymeasurements
         .mockResolvedValueOnce(undefined) // 5. CALL bulkingestionprocess
-        .mockResolvedValueOnce(undefined) // 6. DELETE failedmeasurements by IDs
-        .mockResolvedValueOnce(undefined) // 7. CALL refresh_failedmeasurements_current
-        .mockResolvedValueOnce([{ cnt: 0 }]) // 8. SELECT COUNT(*) ready
-        .mockResolvedValueOnce([{ remaining: 0 }]); // 9. All succeeded
+        .mockResolvedValueOnce(undefined) // 6. UPDATE measurement_error_log (resolve)
+        .mockResolvedValueOnce(undefined) // 7. DELETE FROM coremeasurements
+        .mockResolvedValueOnce([{ remaining: 0 }]); // 8. All succeeded
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());

@@ -23,6 +23,7 @@ import {
   cleanupTestMeasurements,
   insertTestMeasurements,
   runBulkIngestion,
+  getValidationErrors,
   type TestData
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
@@ -151,10 +152,8 @@ describe('Validation API Integration Tests', () => {
 
       await connection.query(validationSQL);
 
-      // Verify error was created
-      const [errors] = await connection.query<RowDataPacket[]>(
-        'SELECT * FROM cmverrors WHERE ValidationErrorID = 6'
-      );
+      // Verify error was created in the new measurement_error_log table
+      const errors = await getValidationErrors(connection, { validationID: 6 });
 
       expect(errors.length).toBeGreaterThan(0);
     });
@@ -186,19 +185,15 @@ describe('Validation API Integration Tests', () => {
       await runBulkIngestion(connection, fileID, batchID);
 
       // Count errors after first run
-      const [errorsAfterFirst] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM cmverrors WHERE ValidationErrorID = 14'
-      );
-      const firstCount = errorsAfterFirst[0].count;
+      const errorsAfterFirst = await getValidationErrors(connection, { validationID: 14 });
+      const firstCount = errorsAfterFirst.length;
 
       // Run bulk ingestion again (should not duplicate errors)
       await runBulkIngestion(connection, fileID, batchID);
 
       // Count errors after second run
-      const [errorsAfterSecond] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM cmverrors WHERE ValidationErrorID = 14'
-      );
-      const secondCount = errorsAfterSecond[0].count;
+      const errorsAfterSecond = await getValidationErrors(connection, { validationID: 14 });
+      const secondCount = errorsAfterSecond.length;
 
       // Error count should not increase
       expect(secondCount).toBe(firstCount);
@@ -316,20 +311,23 @@ describe('Validation API Integration Tests', () => {
       // Query errors with joined measurement data (simulating API response)
       const [errorDisplay] = await connection.query<RowDataPacket[]>(`
         SELECT
-          cme.CMVErrorID,
-          cme.ValidationErrorID,
+          mel.LogID AS CMVErrorID,
+          CAST(me.ErrorCode AS UNSIGNED) AS ValidationErrorID,
           ssv.ProcedureName,
           ssv.Description as ValidationDescription,
           cm.MeasuredDBH,
           cm.MeasurementDate,
           t.TreeTag,
           s.StemTag
-        FROM cmverrors cme
-        JOIN sitespecificvalidations ssv ON cme.ValidationErrorID = ssv.ValidationID
-        JOIN coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
+        FROM measurement_error_log mel
+        JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+        JOIN sitespecificvalidations ssv ON me.ErrorCode = CAST(ssv.ValidationID AS CHAR)
+        JOIN coremeasurements cm ON mel.MeasurementID = cm.CoreMeasurementID
         JOIN stems s ON cm.StemGUID = s.StemGUID
         JOIN trees t ON s.TreeID = t.TreeID
-        WHERE cme.ValidationErrorID = 15
+        WHERE me.ErrorSource = 'validation'
+          AND me.ErrorCode = '15'
+          AND mel.IsResolved = FALSE
         LIMIT 10
       `);
 
@@ -344,27 +342,27 @@ describe('Validation API Integration Tests', () => {
   });
 
   describe('Cross-Validation Consistency', () => {
-    it('should maintain referential integrity between cmverrors and coremeasurements', async () => {
+    it('should maintain referential integrity between measurement_error_log and coremeasurements', async () => {
       // Verify foreign key relationship is enforced
       const [fkCheck] = await connection.query<RowDataPacket[]>(`
         SELECT
           COUNT(*) as orphaned_errors
-        FROM cmverrors cme
-        LEFT JOIN coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
+        FROM measurement_error_log mel
+        LEFT JOIN coremeasurements cm ON mel.MeasurementID = cm.CoreMeasurementID
         WHERE cm.CoreMeasurementID IS NULL
       `);
 
       expect(fkCheck[0].orphaned_errors).toBe(0);
     });
 
-    it('should maintain referential integrity between cmverrors and sitespecificvalidations', async () => {
-      // Verify all validation errors reference valid validation rules
+    it('should maintain referential integrity between measurement_error_log and measurement_errors', async () => {
+      // Verify all error log entries reference valid error definitions
       const [fkCheck] = await connection.query<RowDataPacket[]>(`
         SELECT
           COUNT(*) as orphaned_errors
-        FROM cmverrors cme
-        LEFT JOIN sitespecificvalidations ssv ON cme.ValidationErrorID = ssv.ValidationID
-        WHERE ssv.ValidationID IS NULL
+        FROM measurement_error_log mel
+        LEFT JOIN measurement_errors me ON mel.ErrorID = me.ErrorID
+        WHERE me.ErrorID IS NULL
       `);
 
       expect(fkCheck[0].orphaned_errors).toBe(0);

@@ -42,8 +42,8 @@ export async function cleanupAllTestData(connection: mysql.Connection, schema: s
       `);
 
       await connection.query(`
-        DELETE FROM ${schema}.cmverrors
-        WHERE CoreMeasurementID IN (
+        DELETE FROM ${schema}.measurement_error_log
+        WHERE MeasurementID IN (
           SELECT CoreMeasurementID FROM ${schema}.coremeasurements
           WHERE TreeID IN (${treeIDList})
         )

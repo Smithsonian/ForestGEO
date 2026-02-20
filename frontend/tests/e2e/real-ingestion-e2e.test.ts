@@ -8,7 +8,7 @@
  * - Bug #15: Deduplication using GROUP_CONCAT (not MAX)
  * - Bug #8: ON DUPLICATE KEY UPDATE for reingestion
  * - Bug #5: Rows don't disappear after validation
- * - Bug #6: FailedMeasurements changes are reflected
+ * - Bug #6: Unresolved ingestion-error rows are reflected
  * - Complete ingestion pipeline from temporarymeasurements to coremeasurements
  */
 
@@ -193,7 +193,7 @@ describe('Real E2E Ingestion Tests', () => {
           codes: 'P',
           comments: 'Second observation'
         },
-        // Tree 3: Invalid (missing coordinates) - should go to failedmeasurements
+        // Tree 3: Invalid (missing coordinates) - should be rejected (coremeasurements with StemGUID IS NULL)
         {
           treeTag: 'TREE004',
           stemTag: '1',
@@ -228,13 +228,17 @@ describe('Real E2E Ingestion Tests', () => {
       expect(tree003Codes).toContain('DS');
       expect(tree003Codes).toContain('P');
 
-      // Verify failed measurement was captured
-      const [failedCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?', ['TREE004']);
+      // Verify failed measurement was captured (unresolved row in coremeasurements with StemGUID IS NULL)
+      const [failedCount] = await connection.query<mysql.RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM coremeasurements cm
+         WHERE cm.StemGUID IS NULL AND cm.RawTreeTag = ?`,
+        ['TREE004']
+      );
       expect(failedCount[0].count).toBeGreaterThan(0);
 
       console.log('✅ Complex deduplication verified');
       console.log(`   Valid measurements: ${ingestionResults.insertedCount}`);
-      console.log(`   Failed measurements: ${failedCount[0].count}`);
+      console.log(`   Rejected measurements: ${failedCount[0].count}`);
       console.log(`   TREE003 codes merged: ${tree003Codes}`);
     }, 30000);
   });
@@ -380,20 +384,31 @@ describe('Real E2E Ingestion Tests', () => {
       const { fileID, batchID } = await insertTestMeasurements(connection, testData, measurements as any);
       await runBulkIngestion(connection, fileID, batchID);
 
-      // Verify it went to failed measurements
-      const [failedRows] = await connection.query<mysql.RowDataPacket[]>('SELECT * FROM failedmeasurements WHERE Tag = ?', ['TREE007']);
+      // Verify it was rejected (coremeasurements row with StemGUID IS NULL)
+      const [failedRows] = await connection.query<mysql.RowDataPacket[]>(
+        `SELECT cm.CoreMeasurementID, cm.RawX, cm.RawY
+         FROM coremeasurements cm
+         WHERE cm.StemGUID IS NULL AND cm.RawTreeTag = ?`,
+        ['TREE007']
+      );
       expect(failedRows.length).toBeGreaterThan(0);
-      const failedID = failedRows[0].FailedMeasurementID;
+      const failedID = failedRows[0].CoreMeasurementID;
 
-      // Fix the coordinates
-      await connection.query('UPDATE failedmeasurements SET X = ?, Y = ? WHERE FailedMeasurementID = ?', [15.5, 25.5, failedID]);
+      // Fix the coordinates on the raw columns
+      await connection.query(
+        'UPDATE coremeasurements SET RawX = ?, RawY = ? WHERE CoreMeasurementID = ? AND StemGUID IS NULL',
+        [15.5, 25.5, failedID]
+      );
 
       // Verify update was reflected
-      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>('SELECT X, Y FROM failedmeasurements WHERE FailedMeasurementID = ?', [failedID]);
-      expect(updatedRows[0].X).toBe(15.5);
-      expect(updatedRows[0].Y).toBe(25.5);
+      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>(
+        'SELECT RawX, RawY FROM coremeasurements WHERE CoreMeasurementID = ?',
+        [failedID]
+      );
+      expect(parseFloat(updatedRows[0].RawX)).toBe(15.5);
+      expect(parseFloat(updatedRows[0].RawY)).toBe(25.5);
 
-      console.log('✅ Bug #6 verified: FailedMeasurements changes reflected');
+      console.log('✅ Bug #6 verified: Unresolved ingestion-error row changes reflected');
     }, 30000);
   });
 
@@ -482,14 +497,18 @@ describe('Real E2E Ingestion Tests', () => {
       expect(dupCodes).toContain('M');
       expect(dupCodes).toContain('P');
 
-      // Verify invalid went to failed
-      const [failedCount] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as count FROM failedmeasurements WHERE Tag = ?', ['BATCH_INVALID']);
+      // Verify invalid went to unresolved (coremeasurements with StemGUID IS NULL)
+      const [failedCount] = await connection.query<mysql.RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM coremeasurements cm
+         WHERE cm.StemGUID IS NULL AND cm.RawTreeTag = ?`,
+        ['BATCH_INVALID']
+      );
       expect(failedCount[0].count).toBe(1);
 
       console.log('✅ Complete pipeline verified');
       console.log(`   Input: ${measurements.length} measurements`);
       console.log(`   Valid inserted: ${ingestionResults.insertedCount}`);
-      console.log(`   Failed validations: ${failedCount[0].count}`);
+      console.log(`   Rejected measurements: ${failedCount[0].count}`);
       console.log(`   Duplicate merged: BATCH_DUP with codes ${dupCodes}`);
 
       // Data integrity check
