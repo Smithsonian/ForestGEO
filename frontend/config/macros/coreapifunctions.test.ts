@@ -602,7 +602,6 @@ describe('CoreAPIFunctions', () => {
         { dataType: 'attributes', primaryKey: 'Code' },
         { dataType: 'census', primaryKey: 'CensusID' },
         { dataType: 'cmattributes', primaryKey: 'CMAID' },
-        { dataType: 'cmverrors', primaryKey: 'CMVErrorID' },
         { dataType: 'family', primaryKey: 'FamilyID' },
         { dataType: 'genus', primaryKey: 'GenusID' },
         { dataType: 'personnel', primaryKey: 'PersonnelID' },

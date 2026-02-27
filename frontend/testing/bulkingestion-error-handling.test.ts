@@ -2,40 +2,44 @@ import { describe, expect, test } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Enhanced Error Handling Tests for bulkingestionprocess_fixed
+ * Enhanced Error Handling Tests for bulkingestionprocess
  *
  * This test suite verifies that the enhanced error handling mechanism
  * logic correctly detects and handles batch failures at the API level.
  * These are unit tests focusing on the logic rather than database integration.
+ *
+ * In the unified measurements model, failed rows stay in coremeasurements
+ * (StemGUID=NULL) with errors tracked in measurement_error_log.
+ * The stored procedure returns { message, batch_failed } to indicate outcome.
  */
 
 describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
-  test('Should detect procedure-handled batch failures from message content', () => {
-    const testFileID = `TEST_${uuidv4()}`;
+  test('Should detect procedure-handled batch failures from batch_failed flag', () => {
     const testBatchID = uuidv4();
 
-    // Mock procedure result indicating internal failure handling
+    // Mock procedure result with explicit batch_failed flag
+    // In the unified model, the procedure handles failures internally
+    // (inserts into coremeasurements with StemGUID=NULL + measurement_error_log)
     const mockProcedureResult = [
       {
-        message: `Batch ${testBatchID} moved to failedmeasurements due to error: Foreign key constraint violation`,
-        batch_failed: undefined // MySQL doesn't return this field when error is handled internally
+        message: `Batch ${testBatchID} failed due to SQL error: Foreign key constraint violation`,
+        batch_failed: true
       }
     ];
 
-    // Test the logic from setupbulkprocedure route
     const batchHandledInternally = !!(
       mockProcedureResult &&
       mockProcedureResult[0] &&
-      (mockProcedureResult[0].message?.includes('moved to failedmeasurements') || mockProcedureResult[0].batch_failed === true)
+      mockProcedureResult[0].batch_failed === true
     );
 
     expect(batchHandledInternally).toBe(true);
   });
 
-  test('Should detect procedure-handled batch failures from batch_failed flag', () => {
+  test('Should detect batch failures from batch_failed flag without message', () => {
     const testBatchID = uuidv4();
 
-    // Mock procedure result with explicit batch_failed flag
+    // MySQL may not always return a message with the batch_failed flag
     const mockProcedureResult = [
       {
         message: `Batch ${testBatchID} processing encountered errors`,
@@ -43,11 +47,10 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
       }
     ];
 
-    // Test the logic from setupbulkprocedure route
     const batchHandledInternally = !!(
       mockProcedureResult &&
       mockProcedureResult[0] &&
-      (mockProcedureResult[0].message?.includes('moved to failedmeasurements') || mockProcedureResult[0].batch_failed === true)
+      mockProcedureResult[0].batch_failed === true
     );
 
     expect(batchHandledInternally).toBe(true);
@@ -64,11 +67,10 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
       }
     ];
 
-    // Test the logic from setupbulkprocedure route
     const batchHandledInternally = !!(
       mockProcedureResult &&
       mockProcedureResult[0] &&
-      (mockProcedureResult[0].message?.includes('moved to failedmeasurements') || mockProcedureResult[0].batch_failed === true)
+      mockProcedureResult[0].batch_failed === true
     );
 
     expect(batchHandledInternally).toBe(false);
@@ -78,16 +80,14 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
     // Test various edge cases
     const testCases = [[], null, undefined, [{}], [{ message: null }], [{ batch_failed: null }]];
 
-    testCases.forEach((mockProcedureResult, index) => {
+    testCases.forEach((mockProcedureResult) => {
       const batchHandledInternally = !!(
         mockProcedureResult &&
         Array.isArray(mockProcedureResult) &&
         mockProcedureResult[0] &&
         typeof mockProcedureResult[0] === 'object' &&
-        (('message' in mockProcedureResult[0] &&
-          typeof mockProcedureResult[0].message === 'string' &&
-          (mockProcedureResult[0].message as string).includes('moved to failedmeasurements')) ||
-          ('batch_failed' in mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true))
+        'batch_failed' in mockProcedureResult[0] &&
+        mockProcedureResult[0].batch_failed === true
       );
 
       expect(batchHandledInternally).toBe(false);
@@ -98,25 +98,24 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
 /**
  * Integration test for the setupbulkprocedure API route
  *
- * Tests the enhanced error handling at the API level
+ * Tests the enhanced error handling at the API level.
+ * In the unified model, the procedure writes failed rows to coremeasurements
+ * (StemGUID=NULL) and links them to measurement_error_log, then returns
+ * batch_failed=true to signal the API layer.
  */
 describe('setupbulkprocedure API Enhanced Error Handling', () => {
   test('Should handle internally processed batch failures correctly', async () => {
-    // This would be an integration test that calls the actual API
-    // For now, we'll test the logic components
-
     const mockProcedureResult = [
       {
-        message: 'Batch test-batch moved to failedmeasurements due to error: 1452',
-        batch_failed: undefined // This would be the actual structure from MySQL
+        message: 'Batch test-batch failed due to SQL error: 1452',
+        batch_failed: true
       }
     ];
 
-    // Test the logic for detecting internally handled batches
     const batchHandledInternally =
       mockProcedureResult &&
       mockProcedureResult[0] &&
-      (mockProcedureResult[0].message?.includes('moved to failedmeasurements') || mockProcedureResult[0].batch_failed === true);
+      mockProcedureResult[0].batch_failed === true;
 
     expect(batchHandledInternally).toBe(true);
   });
@@ -129,11 +128,10 @@ describe('setupbulkprocedure API Enhanced Error Handling', () => {
       }
     ];
 
-    // Test the logic for detecting successful processing
     const batchHandledInternally =
       mockProcedureResult &&
       mockProcedureResult[0] &&
-      (mockProcedureResult[0].message?.includes('moved to failedmeasurements') || mockProcedureResult[0].batch_failed === true);
+      mockProcedureResult[0].batch_failed === true;
 
     expect(batchHandledInternally).toBe(false);
   });

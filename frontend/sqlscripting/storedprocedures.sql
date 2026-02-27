@@ -205,14 +205,14 @@ BEGIN
             WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
            cm.UserDefinedFields                                AS UserDefinedFields
     FROM coremeasurements cm
-             LEFT JOIN stems s ON cm.StemGUID = s.StemGUID
-             LEFT JOIN trees t ON s.TreeID = t.TreeID
+             JOIN census c ON cm.CensusID = c.CensusID
+             JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = c.CensusID
+             JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = c.CensusID
              LEFT JOIN species sp ON t.SpeciesID = sp.SpeciesID
              LEFT JOIN genus g ON sp.GenusID = g.GenusID
              LEFT JOIN family f ON g.FamilyID = f.FamilyID
              LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
              LEFT JOIN plots p ON q.PlotID = p.PlotID
-             LEFT JOIN census c ON cm.CensusID = c.CensusID
              LEFT JOIN cmattributes ca ON ca.CoreMeasurementID = cm.CoreMeasurementID
              LEFT JOIN attributes a ON a.Code = ca.Code
     WHERE cm.StemGUID IS NOT NULL;

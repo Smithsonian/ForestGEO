@@ -301,7 +301,7 @@ describe('Bug Fixes E2E Verification', () => {
       // Mock failed reset
       cy.intercept('POST', '/api/query', {
         statusCode: 500,
-        body: { error: 'Clear cmverrors query failed' }
+        body: { error: 'Clear measurement_error_log query failed' }
       }).as('resetQueryFailed');
 
       cy.visit('/measurementshub');
@@ -315,7 +315,7 @@ describe('Bug Fixes E2E Verification', () => {
       cy.wait('@resetQueryFailed');
 
       // Verify error message is displayed
-      cy.get('[data-testid="error-message"]').should('be.visible').and('contain', 'Clear cmverrors query failed');
+      cy.get('[data-testid="error-message"]').should('be.visible').and('contain', 'Clear measurement_error_log query failed');
     });
   });
 
@@ -683,7 +683,7 @@ describe('Bug Fixes E2E Verification', () => {
       console.log('✅ Bug #13 verified: No duplicate error messages displayed');
     });
 
-    it('should show unique errors in failedmeasurements table', () => {
+    it('should show unique errors in failed measurements view', () => {
       // Mock failed measurements with duplicate reasons
       cy.intercept('POST', '/api/fixeddatafilter/failedmeasurements/test_schema', {
         statusCode: 200,

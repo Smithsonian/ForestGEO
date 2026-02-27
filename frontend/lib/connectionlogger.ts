@@ -72,11 +72,11 @@ export function patchConnectionManager(cm: { executeQuery: (sql: string, params?
   const tableConfigs: Record<string, TableConfig> = {
     coremeasurements: { pk: 'CoreMeasurementID' },
     cmattributes: { pk: 'CMAID', fk: 'CoreMeasurementID' },
-    cmverrors: { pk: 'CMVErrorID', fk: 'CoreMeasurementID' },
+    measurement_errors: { pk: 'ErrorID' },
+    measurement_error_log: { pk: 'MeasurementID', fk: 'ErrorID' },
     stems: { pk: 'StemGUID' },
     trees: { pk: 'TreeID' },
     quadrats: { pk: 'QuadratID' },
-    failedmeasurements: { pk: 'FailedMeasurementID' },
     personnel: { pk: 'PersonnelID' },
     species: { pk: 'SpeciesID' },
     genus: { pk: 'GenusID' },

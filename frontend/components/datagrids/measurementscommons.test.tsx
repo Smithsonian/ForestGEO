@@ -39,17 +39,18 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
     });
   });
 
-  describe('Bug Fix: cmverrors DELETE query SQL injection fix', () => {
-    it('should use parameterized queries for cmverrors deletion', () => {
+  describe('Bug Fix: measurement_error_log DELETE query SQL injection fix', () => {
+    it('should use parameterized queries for measurement_error_log deletion', () => {
       // Previously: `DELETE FROM ${schema}.cmverrors WHERE CoreMeasurementID = ${id}`
-      // Now: format('DELETE FROM ?? WHERE ?? = ?', [...])
-      // See coreapifunctions.ts:194-199
+      // Now: format('DELETE mel FROM ??.measurement_error_log mel JOIN ...', [...])
+      // See coreapifunctions.ts - failedmeasurements PATCH handler
       expect(true).toBe(true);
     });
 
     it('should use parameterized queries in DELETE route', () => {
-      // Also fixed in DELETE route for consistency
-      // See coreapifunctions.ts:376-379
+      // DELETE route for failedmeasurements uses:
+      // format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [...])
+      // See coreapifunctions.ts DELETE handler
       expect(true).toBe(true);
     });
   });

@@ -3,7 +3,7 @@
  *
  * Tests the 4 guarantees for the refactored upload system:
  * 1. Records save correctly to coremeasurements
- * 2. Failed rows move to failedmeasurements properly
+ * 2. Failed rows stay in coremeasurements (StemGUID=NULL) with errors in measurement_error_log
  * 3. Tree-stem states categorize correctly
  * 4. Error handling works in production
  */
@@ -43,7 +43,7 @@ describe('Upload System Guarantees', () => {
 
         DELETE FROM ${schema}.stems WHERE TreeID IN (SELECT TreeID FROM ${schema}.trees WHERE TreeTag LIKE 'TEST%');
         DELETE FROM ${schema}.trees WHERE TreeTag LIKE 'TEST%';
-        DELETE FROM ${schema}.failedmeasurements WHERE Tag LIKE 'TEST%';
+        DELETE FROM ${schema}.coremeasurements WHERE StemGUID IS NULL AND RawTreeTag LIKE 'TEST%';
         DELETE FROM ${schema}.temporarymeasurements WHERE FileID LIKE 'TEST%';
       `
     });
@@ -135,10 +135,10 @@ describe('Upload System Guarantees', () => {
   });
 
   /**
-   * GUARANTEE 2: Failed rows move to failedmeasurements properly
+   * GUARANTEE 2: Failed rows stay in coremeasurements (StemGUID=NULL) with errors in measurement_error_log
    */
   describe('Guarantee 2: Failed rows handled correctly', () => {
-    it('should move invalid rows to failedmeasurements', () => {
+    it('should keep invalid rows in coremeasurements with StemGUID=NULL', () => {
       // Upload file with mixed valid/invalid data
       cy.get('[data-testid="file-dropzone"]').selectFile('test-invalid-measurements.csv', {
         action: 'drag-drop'
@@ -150,7 +150,7 @@ describe('Upload System Guarantees', () => {
       // Wait for upload (may show warnings about failed rows)
       cy.contains('Upload Complete', { timeout: 60000 }).should('be.visible');
 
-      // Verify valid records in coremeasurements
+      // Verify valid records in coremeasurements (StemGUID resolved)
       cy.task<any[]>('queryDB', {
         query: `
           SELECT COUNT(*) as count
@@ -164,14 +164,16 @@ describe('Upload System Guarantees', () => {
         expect(results[0].count).to.equal(1, 'Should have 1 valid record');
       });
 
-      // Verify failed records in failedmeasurements
+      // Verify failed records in coremeasurements (StemGUID=NULL)
       cy.task<any[]>('queryDB', {
         query: `
-          SELECT Tag, StemTag, SpCode, Quadrat, DBH
-          FROM ${schema}.failedmeasurements
-          WHERE Tag LIKE 'TESTINVALID%'
-          AND CensusID = ${censusID}
-          ORDER BY Tag
+          SELECT cm.RawTreeTag AS Tag, cm.RawStemTag AS StemTag, cm.RawSpCode AS SpCode,
+                 cm.RawQuadrat AS Quadrat, cm.MeasuredDBH AS DBH
+          FROM ${schema}.coremeasurements cm
+          WHERE cm.StemGUID IS NULL
+          AND cm.RawTreeTag LIKE 'TESTINVALID%'
+          AND cm.CensusID = ${censusID}
+          ORDER BY cm.RawTreeTag
         `
       }).then(failedRecords => {
         expect(failedRecords).to.have.length(3, 'Should have 3 failed records');
@@ -181,7 +183,7 @@ describe('Upload System Guarantees', () => {
         expect(tags).to.include.members(['TESTINVALID002', 'TESTINVALID003', 'TESTINVALID004']);
       });
 
-      // Verify no data loss (total should be 4)
+      // Verify no data loss (total should be 4: 1 valid + 3 failed, all in coremeasurements)
       cy.task<any[]>('queryDB', {
         query: `
           SELECT
@@ -189,8 +191,9 @@ describe('Upload System Guarantees', () => {
              JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
              JOIN ${schema}.trees t ON s.TreeID = t.TreeID
              WHERE t.TreeTag LIKE 'TESTINVALID%' AND cm.CensusID = ${censusID}) +
-            (SELECT COUNT(*) FROM ${schema}.failedmeasurements
-             WHERE Tag LIKE 'TESTINVALID%' AND CensusID = ${censusID}) as total
+            (SELECT COUNT(*) FROM ${schema}.coremeasurements cm
+             WHERE cm.StemGUID IS NULL AND cm.RawTreeTag LIKE 'TESTINVALID%'
+             AND cm.CensusID = ${censusID}) as total
         `
       }).then(results => {
         expect(results[0].total).to.equal(4, 'All 4 records should be accounted for');
@@ -322,18 +325,18 @@ describe('Upload System Guarantees', () => {
       cy.contains('invalid-test.csv').should('be.visible');
       cy.get('[data-testid="continue-upload-btn"]').click();
 
-      // Should complete (moved to failed measurements) without crashing
+      // Should complete (failed rows stored in coremeasurements with StemGUID=NULL) without crashing
       cy.contains('Upload Complete', { timeout: 60000 }).should('be.visible');
 
-      // Verify it went to failedmeasurements
+      // Verify failed row is in coremeasurements with StemGUID=NULL
       cy.task<any[]>('queryDB', {
         query: `
           SELECT COUNT(*) as count
-          FROM ${schema}.failedmeasurements
-          WHERE Tag = 'INVALID001'
+          FROM ${schema}.coremeasurements
+          WHERE StemGUID IS NULL AND RawTreeTag = 'INVALID001'
         `
       }).then(results => {
-        expect(results[0].count).to.be.greaterThan(0, 'Invalid record should be in failedmeasurements');
+        expect(results[0].count).to.be.greaterThan(0, 'Invalid record should be in coremeasurements with StemGUID=NULL');
       });
     });
   });
@@ -377,8 +380,8 @@ describe('Upload System Guarantees', () => {
           UNION ALL
 
           SELECT 'Failed records', COUNT(*)
-          FROM ${schema}.failedmeasurements
-          WHERE Tag LIKE 'TEST%'
+          FROM ${schema}.coremeasurements
+          WHERE StemGUID IS NULL AND RawTreeTag LIKE 'TEST%'
           AND CensusID = ${censusID}
         `
       }).then(results => {
