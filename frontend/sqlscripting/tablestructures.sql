@@ -1124,3 +1124,28 @@ create index idx_uploadmetrics_starttime
 
 create index idx_uploadmetrics_batch_census_status
     on uploadmetrics (batchID, censusID, status) comment 'Composite index for idempotency check in bulkingestionprocess';
+
+-- =====================================================================================
+-- Views
+-- =====================================================================================
+
+-- Surfaces upload batches where rows were truly lost (unaccounted for after ingestion).
+-- Validation failures are NOT data loss — they are stored in coremeasurements with StemGUID=NULL.
+-- This view only returns rows when sourceRecords > processedRecords + failedRecords.
+CREATE OR REPLACE VIEW uploaddatalossreport AS
+SELECT
+    um.fileID           AS FileID,
+    um.batchID          AS BatchID,
+    um.plotID           AS PlotID,
+    um.censusID         AS CensusID,
+    um.sourceRecords    AS SourceRecords,
+    um.processedRecords AS ProcessedRecords,
+    um.failedRecords    AS FailedRecords,
+    um.missingRecords   AS MissingRecords,
+    um.status           AS Status,
+    um.errorMessage     AS ErrorMessage,
+    um.startTime        AS StartTime,
+    um.endTime          AS EndTime
+FROM uploadmetrics um
+WHERE um.status IN ('completed', 'failed')
+  AND um.missingRecords > 0;

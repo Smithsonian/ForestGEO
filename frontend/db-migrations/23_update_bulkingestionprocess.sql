@@ -28,12 +28,8 @@ DROP PROCEDURE IF EXISTS refresh_failedmeasurements_current;
 -- Drop the old version of bulkingestionprocess
 DROP PROCEDURE IF EXISTS bulkingestionprocess;
 
--- NOTE: The new bulkingestionprocess is deployed by running the full
--- storedprocedures.sql file against the target schema. This migration
--- serves as the marker that the legacy procedures have been removed
--- and the new SP should be deployed.
---
--- Run: source frontend/sqlscripting/storedprocedures.sql
--- Or apply via the deployment pipeline that sources storedprocedures.sql.
+-- NOTE: The new bulkingestionprocess is deployed automatically by
+-- 00_run_all_migrations.sh which sources ../sqlscripting/storedprocedures.sql
+-- immediately after this migration.
 
-SELECT 'Migration 23: Legacy failedmeasurements procedures dropped. Deploy storedprocedures.sql to install new bulkingestionprocess.' AS Status;
+SELECT 'Migration 23: Legacy failedmeasurements procedures dropped. storedprocedures.sql will be deployed next.' AS Status;

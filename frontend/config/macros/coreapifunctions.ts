@@ -15,7 +15,8 @@ import {
   ensureMeasurementErrorDefinition,
   getIngestionErrorMessage,
   inferIngestionErrorCode,
-  insertIngestionFailureRows
+  insertIngestionFailureRows,
+  revalidateEditedFailedRow
 } from '@/config/measurementerrors';
 
 // Mapping from dataType to primary key column name
@@ -290,6 +291,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             failedMeasurementID
           ]);
 
+          // Clear all existing ingestion errors before revalidation
           const clearIngestionErrorQuery = format(
             `DELETE mel
              FROM ??.measurement_error_log mel
@@ -299,19 +301,42 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
           await connectionManager.executeQuery(clearIngestionErrorQuery, [failedMeasurementID, INGESTION_ERROR_SOURCE]);
 
-          const reason = failedTrimmed['FailureReasons'] ?? failedTrimmed['CurrentFailureReasons'] ?? null;
-          if (reason) {
-            const errorCode = inferIngestionErrorCode(reason);
+          // Revalidate ALL checks against the edited field values (not text-inferred)
+          const validationErrors = await revalidateEditedFailedRow(
+            connectionManager,
+            schema,
+            censusID,
+            {
+              Tag: failedTrimmed['Tag'],
+              StemTag: failedTrimmed['StemTag'],
+              SpCode: failedTrimmed['SpCode'],
+              Quadrat: failedTrimmed['Quadrat'],
+              X: failedTrimmed['X'],
+              Y: failedTrimmed['Y'],
+              DBH: failedTrimmed['DBH'],
+              HOM: failedTrimmed['HOM'],
+              Date: failedTrimmed['Date']
+            },
+            transactionID
+          );
+
+          // Insert ALL applicable error codes into the error log
+          for (const { errorCode, errorMessage } of validationErrors) {
             const errorID = await ensureMeasurementErrorDefinition(
-              connectionManager,
-              schema,
-              INGESTION_ERROR_SOURCE,
-              errorCode,
-              getIngestionErrorMessage(errorCode, reason),
-              transactionID
+              connectionManager, schema, INGESTION_ERROR_SOURCE, errorCode, errorMessage, transactionID
             );
-            const insertErrorLogQuery = format('INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)', [schema]);
+            const insertErrorLogQuery = format(
+              'INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)',
+              [schema]
+            );
             await connectionManager.executeQuery(insertErrorLogQuery, [failedMeasurementID, errorID]);
+          }
+
+          // Update Description with concatenated current failure reasons
+          if (validationErrors.length > 0) {
+            const descriptionText = validationErrors.map(e => e.errorMessage).join('; ');
+            const updateDescQuery = format('UPDATE ??.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?', [schema]);
+            await connectionManager.executeQuery(updateDescQuery, [descriptionText, failedMeasurementID], transactionID);
           }
 
           updateIDs = { [dataType]: failedMeasurementID };

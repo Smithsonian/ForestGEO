@@ -12,6 +12,7 @@ import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 export const runtime = 'nodejs';
 
 const MAX_SIGNED_INT = 2147483647;
+const REINGESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes for bulk reingestion
 
 interface ReingestionSourceRow {
   CoreMeasurementID: number;
@@ -422,11 +423,35 @@ export async function GET(
   const connectionManager = ConnectionManager.getInstance();
   try {
     await connectionManager.cleanupStaleTransactions();
-    const { totalRows, fileID, batchID, rowMappings } = await connectionManager.withTransaction(async (transactionID: string) =>
-      moveFailedToTemporary(connectionManager, schema, plotID, censusID, transactionID)
+
+    // All three steps run in a single transaction for atomicity:
+    // if any step fails, everything rolls back and originals remain untouched.
+    const result = await connectionManager.withTransaction(
+      async (transactionID: string) => {
+        // Step 1: Stage failed rows to temporarymeasurements
+        const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(
+          connectionManager, schema, plotID, censusID, transactionID
+        );
+
+        if (totalRows === 0) {
+          return { totalRows: 0, successfulReingestions: 0, remainingFailures: 0 };
+        }
+
+        // Step 2: Run bulkingestionprocess within the same transaction
+        const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
+        await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
+
+        // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
+        const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(
+          connectionManager, schema, fileID, batchID, rowMappings, transactionID
+        );
+
+        return { totalRows, successfulReingestions, remainingFailures };
+      },
+      { timeoutMs: REINGESTION_TIMEOUT_MS }
     );
 
-    if (totalRows === 0) {
+    if (result.totalRows === 0) {
       return new NextResponse(
         JSON.stringify({
           responseMessage: 'No unresolved ingestion-error rows found to reingest',
@@ -438,21 +463,12 @@ export async function GET(
       );
     }
 
-    // Run ingestion process against staged rows.
-    const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-    await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID]);
-
-    // Reconcile processed rows back onto original CoreMeasurementID rows.
-    const { successfulReingestions, remainingFailures } = await connectionManager.withTransaction(async (transactionID: string) =>
-      reconcileReingestionRows(connectionManager, schema, fileID, batchID, rowMappings, transactionID)
-    );
-
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Reingestion completed',
-        totalProcessed: totalRows,
-        successfulReingestions: successfulReingestions,
-        remainingFailures: remainingFailures
+        totalProcessed: result.totalRows,
+        successfulReingestions: result.successfulReingestions,
+        remainingFailures: result.remainingFailures
       }),
       { status: HTTPResponses.OK }
     );

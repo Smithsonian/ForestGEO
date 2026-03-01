@@ -28,6 +28,9 @@ export interface IngestionFailureRowInput {
 const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   MISSING_FIELD_TREETAG: 'Missing required field: TreeTag',
   MISSING_FIELD_STEMTAG: 'Missing required field: StemTag',
+  MISSING_FIELD_SPECIESCODE: 'Missing required field: SpeciesCode',
+  MISSING_FIELD_QUADRATNAME: 'Missing required field: QuadratName',
+  MISSING_FIELD_DATE: 'Missing required field: MeasurementDate',
   INVALID_QUADRAT: 'Invalid quadrat reference',
   INVALID_SPECIES: 'Invalid species reference',
   QUADRAT_MISMATCH: 'Quadrat mismatch across censuses',
@@ -41,21 +44,35 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
 };
 
 export function inferIngestionErrorCode(reason?: string | null): string {
-  const text = (reason || '').toLowerCase();
+  const codes = inferAllIngestionErrorCodes(reason);
+  return codes[0];
+}
 
-  if (text.includes('missing required field: treetag') || text.includes('missing treetag')) return 'MISSING_FIELD_TREETAG';
-  if (text.includes('missing required field: stemtag') || text.includes('missing stemtag')) return 'MISSING_FIELD_STEMTAG';
-  if (text.includes('invalid quadrat') || text.includes('quadrat name')) return 'INVALID_QUADRAT';
-  if (text.includes('invalid species') || text.includes('species code')) return 'INVALID_SPECIES';
-  if (text.includes('quadrat mismatch')) return 'QUADRAT_MISMATCH';
-  if (text.includes('coordinate drift')) return 'COORDINATE_DRIFT';
-  if (text.includes('duplicate')) return 'DUPLICATE_ENTRY';
-  if (text.includes('invalid dbh') || text.includes('negative dbh')) return 'NEGATIVE_DBH';
-  if (text.includes('invalid hom') || text.includes('negative hom')) return 'NEGATIVE_HOM';
-  if (text.includes('exceeds maximum length') || text.includes('field too long')) return 'FIELD_TOO_LONG';
-  if (text.includes('missing measurement data')) return 'MISSING_MEASUREMENT_DATA';
-  ailogger.warn(`inferIngestionErrorCode: unmapped error pattern defaulting to SQL_EXCEPTION: "${reason}"`);
-  return 'SQL_EXCEPTION';
+export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
+  const text = (reason || '').toLowerCase();
+  const codes: string[] = [];
+
+  if (text.includes('missing required field: treetag') || text.includes('missing treetag')) codes.push('MISSING_FIELD_TREETAG');
+  if (text.includes('missing required field: stemtag') || text.includes('missing stemtag')) codes.push('MISSING_FIELD_STEMTAG');
+  if (text.includes('missing required field: speciescode') || text.includes('missing speciescode')) codes.push('MISSING_FIELD_SPECIESCODE');
+  if (text.includes('missing required field: quadratname') || text.includes('missing quadratname')) codes.push('MISSING_FIELD_QUADRATNAME');
+  if (text.includes('missing required field: date') || text.includes('missing date') || text.includes('missing measurementdate')) codes.push('MISSING_FIELD_DATE');
+  if (text.includes('invalid quadrat') || text.includes('quadrat name')) codes.push('INVALID_QUADRAT');
+  if (text.includes('invalid species') || text.includes('species code')) codes.push('INVALID_SPECIES');
+  if (text.includes('quadrat mismatch')) codes.push('QUADRAT_MISMATCH');
+  if (text.includes('coordinate drift')) codes.push('COORDINATE_DRIFT');
+  if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
+  if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
+  if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
+  if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
+  if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
+
+  if (codes.length === 0) {
+    ailogger.warn(`inferAllIngestionErrorCodes: unmapped error pattern defaulting to SQL_EXCEPTION: "${reason}"`);
+    codes.push('SQL_EXCEPTION');
+  }
+
+  return codes;
 }
 
 export function getIngestionErrorMessage(code: string, fallback?: string | null): string {
@@ -193,6 +210,91 @@ export async function insertIngestionFailureRows(
   return insertedIDs;
 }
 
+
+export interface RevalidationResult {
+  errorCode: string;
+  errorMessage: string;
+}
+
+interface FailedRowFields {
+  Tag?: string | null;
+  StemTag?: string | null;
+  SpCode?: string | null;
+  Quadrat?: string | null;
+  X?: number | null;
+  Y?: number | null;
+  DBH?: number | null;
+  HOM?: number | null;
+  Date?: string | null;
+}
+
+/**
+ * Validates edited failed-row field values against all ingestion checks
+ * (mirrors the stored procedure's early validation and reference validation).
+ * Returns ALL applicable errors, not just the first match.
+ */
+export async function revalidateEditedFailedRow(
+  connectionManager: ConnectionManager,
+  schema: string,
+  censusID: number,
+  fields: FailedRowFields,
+  transactionID?: string
+): Promise<RevalidationResult[]> {
+  const errors: RevalidationResult[] = [];
+  const isEmpty = (v: string | null | undefined) => !v || String(v).trim() === '';
+
+  // Field-presence checks (mirrors stored procedure early validation)
+  if (isEmpty(fields.Tag)) {
+    errors.push({ errorCode: 'MISSING_FIELD_TREETAG', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_TREETAG'] });
+  }
+  if (isEmpty(fields.StemTag)) {
+    errors.push({ errorCode: 'MISSING_FIELD_STEMTAG', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_STEMTAG'] });
+  }
+  if (isEmpty(fields.SpCode)) {
+    errors.push({ errorCode: 'MISSING_FIELD_SPECIESCODE', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_SPECIESCODE'] });
+  }
+  if (isEmpty(fields.Quadrat)) {
+    errors.push({ errorCode: 'MISSING_FIELD_QUADRATNAME', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_QUADRATNAME'] });
+  }
+  if (!fields.Date) {
+    errors.push({ errorCode: 'MISSING_FIELD_DATE', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_DATE'] });
+  }
+
+  // Numeric range checks
+  if (fields.DBH != null && Number(fields.DBH) < 0) {
+    errors.push({ errorCode: 'NEGATIVE_DBH', errorMessage: INGESTION_ERROR_MESSAGES['NEGATIVE_DBH'] });
+  }
+  if (fields.HOM != null && Number(fields.HOM) < 0) {
+    errors.push({ errorCode: 'NEGATIVE_HOM', errorMessage: INGESTION_ERROR_MESSAGES['NEGATIVE_HOM'] });
+  }
+  if (fields.DBH == null && fields.HOM == null) {
+    errors.push({ errorCode: 'MISSING_MEASUREMENT_DATA', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_MEASUREMENT_DATA'] });
+  }
+
+  // Reference checks (require DB lookups, skip if field is empty since missing-field error already covers it)
+  if (!isEmpty(fields.Quadrat)) {
+    const plotIDQuery = safeFormatQuery(schema, 'SELECT PlotID FROM ??.census WHERE CensusID = ? LIMIT 1');
+    const plotRows: any[] = await connectionManager.executeQuery(plotIDQuery, [censusID], transactionID);
+    const plotID = plotRows?.[0]?.PlotID;
+    if (plotID) {
+      const quadratCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.quadrats WHERE QuadratName = ? AND PlotID = ?');
+      const quadratResult: any[] = await connectionManager.executeQuery(quadratCheckSQL, [String(fields.Quadrat).trim(), plotID], transactionID);
+      if (quadratResult?.[0]?.cnt === 0) {
+        errors.push({ errorCode: 'INVALID_QUADRAT', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_QUADRAT'] });
+      }
+    }
+  }
+
+  if (!isEmpty(fields.SpCode)) {
+    const speciesCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.species WHERE SpeciesCode = ?');
+    const speciesResult: any[] = await connectionManager.executeQuery(speciesCheckSQL, [String(fields.SpCode).trim()], transactionID);
+    if (speciesResult?.[0]?.cnt === 0) {
+      errors.push({ errorCode: 'INVALID_SPECIES', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_SPECIES'] });
+    }
+  }
+
+  return errors;
+}
 
 export function buildFailedMeasurementsBaseQuery(schema: string): string {
   return `

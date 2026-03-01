@@ -1166,18 +1166,29 @@ BEGIN
 
     -- Seed all ingestion error codes (idempotent)
     INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
-        ('ingestion', 'MISSING_FIELD_TREETAG',    'Missing required field: TreeTag'),
-        ('ingestion', 'MISSING_FIELD_STEMTAG',    'Missing required field: StemTag'),
-        ('ingestion', 'INVALID_QUADRAT',           'Invalid quadrat reference'),
-        ('ingestion', 'INVALID_SPECIES',           'Invalid species reference'),
-        ('ingestion', 'QUADRAT_MISMATCH',          'Quadrat mismatch across censuses'),
-        ('ingestion', 'COORDINATE_DRIFT',          'Coordinate drift exceeds allowed threshold'),
-        ('ingestion', 'DUPLICATE_ENTRY',           'Duplicate measurement row detected'),
-        ('ingestion', 'NEGATIVE_DBH',              'DBH must be non-negative'),
-        ('ingestion', 'NEGATIVE_HOM',              'HOM must be non-negative'),
-        ('ingestion', 'FIELD_TOO_LONG',            'One or more fields exceed column length limits'),
-        ('ingestion', 'MISSING_MEASUREMENT_DATA',  'Missing measurement data'),
-        ('ingestion', 'SQL_EXCEPTION',             'Ingestion SQL exception');
+        ('ingestion', 'MISSING_FIELD_TREETAG',      'Missing required field: TreeTag'),
+        ('ingestion', 'MISSING_FIELD_STEMTAG',       'Missing required field: StemTag'),
+        ('ingestion', 'MISSING_FIELD_SPECIESCODE',   'Missing required field: SpeciesCode'),
+        ('ingestion', 'MISSING_FIELD_QUADRATNAME',   'Missing required field: QuadratName'),
+        ('ingestion', 'MISSING_FIELD_DATE',          'Missing required field: MeasurementDate'),
+        ('ingestion', 'INVALID_QUADRAT',             'Invalid quadrat reference'),
+        ('ingestion', 'INVALID_SPECIES',             'Invalid species reference'),
+        ('ingestion', 'QUADRAT_MISMATCH',            'Quadrat mismatch across censuses'),
+        ('ingestion', 'COORDINATE_DRIFT',            'Coordinate drift exceeds allowed threshold'),
+        ('ingestion', 'DUPLICATE_ENTRY',             'Duplicate measurement row detected'),
+        ('ingestion', 'NEGATIVE_DBH',                'DBH must be non-negative'),
+        ('ingestion', 'NEGATIVE_HOM',                'HOM must be non-negative'),
+        ('ingestion', 'FIELD_TOO_LONG',              'One or more fields exceed column length limits'),
+        ('ingestion', 'MISSING_MEASUREMENT_DATA',    'Missing measurement data'),
+        ('ingestion', 'SQL_EXCEPTION',               'Ingestion SQL exception');
+
+    -- Seed validation error codes used by soft validations and attribute checks.
+    -- These are normally created by the validation procedures, but must exist
+    -- before the first upload so soft validation INSERTs don't silently fail.
+    INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
+        ('validation', '14', 'Invalid attribute code'),
+        ('validation', '20', 'Species mismatch from previous census'),
+        ('validation', '21', 'Same-batch species conflict');
 
     SET vUploadId = CONCAT(vFileID, '-', vBatchID);
 
@@ -1231,52 +1242,49 @@ BEGIN
         stem_crossid_mapping, pre_insert_check;
 
     -- ============================================================
-    -- FIX 1: EARLY VALIDATION WITH SPECIFIC ERROR MESSAGES
+    -- FIX 1: EARLY VALIDATION - REPORTS ALL ERRORS PER ROW
+    -- Uses CONCAT_WS with IF() instead of CASE so every failing
+    -- check is captured, not just the first one.
     -- ============================================================
     CREATE TEMPORARY TABLE validation_failures AS
     SELECT tm.*,
-        CASE
-            WHEN tm.TreeTag IS NULL OR TRIM(tm.TreeTag) = ''
-                THEN 'Missing required field: TreeTag'
-            WHEN tm.StemTag IS NULL OR TRIM(tm.StemTag) = ''
-                THEN 'Missing required field: StemTag'
-            WHEN tm.SpeciesCode IS NULL OR TRIM(tm.SpeciesCode) = ''
-                THEN 'Missing required field: SpeciesCode'
-            WHEN tm.QuadratName IS NULL OR TRIM(tm.QuadratName) = ''
-                THEN 'Missing required field: QuadratName'
-            WHEN tm.MeasurementDate IS NULL
-                THEN 'Missing required field: MeasurementDate'
+        CONCAT_WS('; ',
+            IF(tm.TreeTag IS NULL OR TRIM(tm.TreeTag) = '',
+                'Missing required field: TreeTag', NULL),
+            IF(tm.StemTag IS NULL OR TRIM(tm.StemTag) = '',
+                'Missing required field: StemTag', NULL),
+            IF(tm.SpeciesCode IS NULL OR TRIM(tm.SpeciesCode) = '',
+                'Missing required field: SpeciesCode', NULL),
+            IF(tm.QuadratName IS NULL OR TRIM(tm.QuadratName) = '',
+                'Missing required field: QuadratName', NULL),
+            IF(tm.MeasurementDate IS NULL,
+                'Missing required field: MeasurementDate', NULL),
             -- String length validations (CRITICAL - prevent SQL errors)
-            WHEN LENGTH(tm.TreeTag) > 20
-                THEN CONCAT('TreeTag exceeds maximum length of 20 characters: "', LEFT(tm.TreeTag, 25), '..." (', LENGTH(tm.TreeTag), ' chars)')
-            WHEN LENGTH(tm.StemTag) > 10
-                THEN CONCAT('StemTag exceeds maximum length of 10 characters: "', tm.StemTag, '" (', LENGTH(tm.StemTag), ' chars)')
-            WHEN LENGTH(tm.SpeciesCode) > 25
-                THEN CONCAT('SpeciesCode exceeds maximum length of 25 characters: "', tm.SpeciesCode, '" (', LENGTH(tm.SpeciesCode), ' chars)')
-            WHEN tm.Comments IS NOT NULL AND LENGTH(tm.Comments) > 255
-                THEN CONCAT('Comments exceed maximum length of 255 characters (', LENGTH(tm.Comments), ' chars, truncated)')
-            WHEN tm.Codes IS NOT NULL AND LENGTH(tm.Codes) > 255
-                THEN CONCAT('Codes exceed maximum length of 255 characters (', LENGTH(tm.Codes), ' chars, truncated)')
+            IF(LENGTH(tm.TreeTag) > 20,
+                CONCAT('TreeTag exceeds maximum length of 20 characters: "', LEFT(tm.TreeTag, 25), '..." (', LENGTH(tm.TreeTag), ' chars)'), NULL),
+            IF(LENGTH(tm.StemTag) > 10,
+                CONCAT('StemTag exceeds maximum length of 10 characters: "', tm.StemTag, '" (', LENGTH(tm.StemTag), ' chars)'), NULL),
+            IF(LENGTH(tm.SpeciesCode) > 25,
+                CONCAT('SpeciesCode exceeds maximum length of 25 characters: "', tm.SpeciesCode, '" (', LENGTH(tm.SpeciesCode), ' chars)'), NULL),
+            IF(tm.Comments IS NOT NULL AND LENGTH(tm.Comments) > 255,
+                CONCAT('Comments exceed maximum length of 255 characters (', LENGTH(tm.Comments), ' chars, truncated)'), NULL),
+            IF(tm.Codes IS NOT NULL AND LENGTH(tm.Codes) > 255,
+                CONCAT('Codes exceed maximum length of 255 characters (', LENGTH(tm.Codes), ' chars, truncated)'), NULL),
             -- Numeric validations
-            WHEN tm.DBH < 0
-                THEN CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)')
-            WHEN tm.HOM < 0
-                THEN CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)')
-            WHEN tm.LocalX IS NULL
-                THEN 'Missing X'
-            WHEN tm.LocalX < 0
-                THEN CONCAT('Invalid LocalX: ', tm.LocalX)
-            WHEN tm.LocalY IS NULL
-                THEN 'Missing Y'
-            WHEN tm.LocalY < 0
-                THEN CONCAT('Invalid LocalY: ', tm.LocalY)
-            WHEN tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = '')
-                THEN 'Missing measurement data: DBH and HOM both 0 with no codes'
-            ELSE NULL
-        END as FailureReason
+            IF(tm.DBH < 0,
+                CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)'), NULL),
+            IF(tm.HOM < 0,
+                CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)'), NULL),
+            -- NULL coordinates are allowed (tag-only censuses don't collect XY).
+            -- Negative coordinates are always invalid.
+            IF(tm.LocalX < 0, CONCAT('Invalid LocalX: ', tm.LocalX), NULL),
+            IF(tm.LocalY < 0, CONCAT('Invalid LocalY: ', tm.LocalY), NULL),
+            IF(tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = ''),
+                'Missing measurement data: DBH and HOM both 0 with no codes', NULL)
+        ) as FailureReason
     FROM temporarymeasurements tm
     WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID AND tm.CensusID = vCurrentCensusID
-    HAVING FailureReason IS NOT NULL;
+    HAVING FailureReason IS NOT NULL AND FailureReason != '';
 
     IF EXISTS(SELECT 1 FROM validation_failures) THEN
         SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
@@ -1296,35 +1304,28 @@ BEGIN
         FROM validation_failures
         ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
 
-        -- Link to error log with variable error codes
+        -- Link ALL matching error codes per row (not just the first).
+        -- Cross-joins each failed row with all ingestion error codes, then
+        -- filters to only (row, code) pairs where the FailureReason contains
+        -- text matching that code. One row with 3 errors gets 3 log entries.
         INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
         SELECT cm.CoreMeasurementID, me.ErrorID, FALSE
         FROM coremeasurements cm
-        JOIN (
-            SELECT id, CASE
-                WHEN FailureReason LIKE '%Missing required field: TreeTag%'  THEN 'MISSING_FIELD_TREETAG'
-                WHEN FailureReason LIKE '%Missing required field: StemTag%'  THEN 'MISSING_FIELD_STEMTAG'
-                WHEN FailureReason LIKE '%Missing required field: QuadratName%'
-                  OR FailureReason LIKE '%invalid quadrat%'
-                  OR FailureReason LIKE '%quadrat name%'             THEN 'INVALID_QUADRAT'
-                WHEN FailureReason LIKE '%Missing required field: SpeciesCode%'
-                  OR FailureReason LIKE '%invalid species%'
-                  OR FailureReason LIKE '%species code%'             THEN 'INVALID_SPECIES'
-                WHEN FailureReason LIKE '%Missing required field: MeasurementDate%'
-                  OR FailureReason LIKE '%Missing measurement data%'
-                  OR FailureReason LIKE '%Missing X%' OR FailureReason LIKE '%Missing Y%'
-                  OR FailureReason LIKE '%Invalid Local%'            THEN 'MISSING_MEASUREMENT_DATA'
-                WHEN FailureReason LIKE '%exceeds maximum length%'   THEN 'FIELD_TOO_LONG'
-                WHEN FailureReason LIKE '%Invalid DBH%'
-                  OR FailureReason LIKE '%negative dbh%'             THEN 'NEGATIVE_DBH'
-                WHEN FailureReason LIKE '%Invalid HOM%'
-                  OR FailureReason LIKE '%negative hom%'             THEN 'NEGATIVE_HOM'
-                ELSE 'SQL_EXCEPTION'
-            END AS ErrorCode
-            FROM validation_failures
-        ) src ON src.id = cm.SourceRowIndex
-        JOIN measurement_errors me ON me.ErrorSource = 'ingestion' AND me.ErrorCode = src.ErrorCode
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
+        JOIN validation_failures vf ON vf.id = cm.SourceRowIndex
+        JOIN measurement_errors me ON me.ErrorSource = 'ingestion'
+        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL
+          AND (
+            (me.ErrorCode = 'MISSING_FIELD_TREETAG'      AND vf.FailureReason LIKE '%Missing required field: TreeTag%')
+            OR (me.ErrorCode = 'MISSING_FIELD_STEMTAG'    AND vf.FailureReason LIKE '%Missing required field: StemTag%')
+            OR (me.ErrorCode = 'MISSING_FIELD_SPECIESCODE' AND vf.FailureReason LIKE '%Missing required field: SpeciesCode%')
+            OR (me.ErrorCode = 'MISSING_FIELD_QUADRATNAME' AND vf.FailureReason LIKE '%Missing required field: QuadratName%')
+            OR (me.ErrorCode = 'MISSING_FIELD_DATE'       AND vf.FailureReason LIKE '%Missing required field: MeasurementDate%')
+            OR (me.ErrorCode = 'MISSING_MEASUREMENT_DATA' AND (vf.FailureReason LIKE '%Missing measurement data%'
+                                                               OR vf.FailureReason LIKE '%Invalid Local%'))
+            OR (me.ErrorCode = 'FIELD_TOO_LONG'           AND vf.FailureReason LIKE '%exceeds maximum length%')
+            OR (me.ErrorCode = 'NEGATIVE_DBH'             AND vf.FailureReason LIKE '%Invalid DBH%')
+            OR (me.ErrorCode = 'NEGATIVE_HOM'             AND vf.FailureReason LIKE '%Invalid HOM%')
+          );
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -1473,16 +1474,19 @@ BEGIN
         FROM filter_validity WHERE Valid = false
         ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
 
-        -- Link to error log with variable error codes
+        -- Link to error log with variable error codes.
+        -- At this stage, only invalid references reach here (missing fields
+        -- were already caught by early validation), so only match against
+        -- actual invalid quadrat/species messages from filter_validity.
         INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
         SELECT cm.CoreMeasurementID, me.ErrorID, FALSE
         FROM coremeasurements cm
         JOIN (
             SELECT id, CASE
                 WHEN FailureReason LIKE '%invalid quadrat%' OR FailureReason LIKE '%quadrat name%'
-                    OR FailureReason LIKE '%Missing required field: QuadratName%'  THEN 'INVALID_QUADRAT'
+                    THEN 'INVALID_QUADRAT'
                 WHEN FailureReason LIKE '%invalid species%' OR FailureReason LIKE '%species code%'
-                    OR FailureReason LIKE '%Missing required field: SpeciesCode%'  THEN 'INVALID_SPECIES'
+                    THEN 'INVALID_SPECIES'
                 ELSE 'SQL_EXCEPTION'
             END AS ErrorCode
             FROM filter_validity WHERE Valid = false
@@ -1743,7 +1747,9 @@ BEGIN
             CONCAT(@dropped_trees, ' tree rows dropped by INSERT IGNORE (constraint violation)'),
             'warning', @dropped_trees
         );
-        SET vDataLossCount = vDataLossCount + @dropped_trees;
+        -- NOTE: Don't add @dropped_trees to vDataLossCount here. Dropped tree
+        -- inserts don't map 1:1 to lost measurements. The orphan detection after
+        -- the measurement INSERT correctly counts actual measurement-level losses.
     END IF;
 
     -- =====================================================
@@ -1786,7 +1792,9 @@ BEGIN
             CONCAT(@dropped_stems, ' stem rows dropped by INSERT IGNORE (constraint violation)'),
             'warning', @dropped_stems
         );
-        SET vDataLossCount = vDataLossCount + @dropped_stems;
+        -- NOTE: Don't add @dropped_stems to vDataLossCount here. One dropped stem
+        -- can orphan multiple measurements. The orphan detection after the measurement
+        -- INSERT correctly counts actual measurement-level losses.
     END IF;
 
     CREATE TEMPORARY TABLE stem_crossid_mapping AS
@@ -1836,10 +1844,10 @@ BEGIN
                                          RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
                                          RawCodes, RawComments, SourceRowIndex, IsActive)
     SELECT f.CensusID, s.StemGUID, null,
-           COALESCE(f.MeasurementDate, '1900-01-01'),
-           CASE WHEN f.DBH = 0 THEN NULL ELSE f.DBH END,
-           CASE WHEN f.HOM = 0 THEN NULL ELSE f.HOM END,
-           COALESCE(f.Comments, ''),
+           f.MeasurementDate,
+           NULLIF(f.DBH, 0),
+           NULLIF(f.HOM, 0),
+           NULLIF(f.Comments, ''),
            JSON_OBJECT(
                'treestemstate',
                CASE
@@ -1889,14 +1897,68 @@ BEGIN
         SET vDataLossCount = vDataLossCount + @dropped_cm;
     END IF;
 
-    UPDATE coremeasurements
-    SET MeasurementDate = NULLIF(MeasurementDate, '1900-01-01'),
-        MeasuredDBH = NULLIF(MeasuredDBH, 0),
-        MeasuredHOM = NULLIF(MeasuredHOM, 0),
-        Description = NULLIF(Description, '')
-    WHERE CensusID = vCurrentCensusID
-      AND (UploadBatchID = vBatchID
-           OR JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
+    -- =====================================================
+    -- ORPHAN DETECTION: Catch filtered rows that passed
+    -- validation but have no coremeasurements entry.
+    -- This happens when tree or stem INSERT IGNORE drops
+    -- prevent measurement insertion (the INNER JOIN on
+    -- stems finds nothing). Counts actual measurement-level
+    -- losses instead of tree/stem-level INSERT IGNORE drops.
+    -- =====================================================
+    SET @orphaned_filtered = (
+        SELECT COUNT(*)
+        FROM filtered f
+        WHERE NOT EXISTS (
+            SELECT 1 FROM coremeasurements cm
+            WHERE cm.SourceRowIndex = f.id
+              AND cm.UploadBatchID = vBatchID
+              AND cm.UploadFileID = vFileID
+        )
+    );
+
+    IF @orphaned_filtered > 0 THEN
+        INSERT IGNORE INTO coremeasurements
+            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+             Description, UploadFileID, UploadBatchID,
+             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+             RawCodes, RawComments, SourceRowIndex, IsActive)
+        SELECT vCurrentCensusID, NULL, FALSE,
+            NULLIF(f.MeasurementDate, '1900-01-01'), NULLIF(f.DBH, 0), NULLIF(f.HOM, 0),
+            'Tree/stem resolution failed: row passed validation but no matching stem could be created',
+            vFileID, vBatchID,
+            NULLIF(f.TreeTag, ''), NULLIF(f.StemTag, ''), NULLIF(f.SpeciesCode, ''), NULLIF(f.QuadratName, ''),
+            f.LocalX, f.LocalY, NULLIF(f.Codes, ''), NULLIF(f.Comments, ''),
+            f.id, 1
+        FROM filtered f
+        WHERE NOT EXISTS (
+            SELECT 1 FROM coremeasurements cm
+            WHERE cm.SourceRowIndex = f.id
+              AND cm.UploadBatchID = vBatchID
+              AND cm.UploadFileID = vFileID
+        )
+        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+
+        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+        SELECT cm.CoreMeasurementID,
+            (SELECT me.ErrorID FROM measurement_errors me
+             WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'SQL_EXCEPTION' LIMIT 1),
+            FALSE
+        FROM coremeasurements cm
+        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL
+          AND cm.Description = 'Tree/stem resolution failed: row passed validation but no matching stem could be created';
+
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity, failedRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'ORPHANED_MEASUREMENT',
+            CONCAT(@orphaned_filtered, ' measurement(s) passed validation but tree/stem resolution failed (INSERT IGNORE constraint violation)'),
+            'critical', @orphaned_filtered
+        );
+
+        SET vDataLossCount = vDataLossCount + @orphaned_filtered;
+    END IF;
 
     IF EXISTS(SELECT 1 FROM filtered WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
         CREATE TEMPORARY TABLE tempcodes AS
@@ -2001,16 +2063,17 @@ BEGIN
     INNER JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = vCurrentCensusID
     INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = vCurrentCensusID
     INNER JOIN species sp ON t.SpeciesID = sp.SpeciesID
+    -- Use initial_dup_filter (post-validation, post-dedup rows) instead of
+    -- temporarymeasurements to avoid picking a validation-failed row as the
+    -- "first occurrence" reference for species comparison.
     INNER JOIN (
-        SELECT tm1.TreeTag, tm1.SpeciesCode
-        FROM temporarymeasurements tm1
+        SELECT idf1.TreeTag, idf1.SpeciesCode
+        FROM initial_dup_filter idf1
         INNER JOIN (
             SELECT TreeTag, MIN(id) as first_id
-            FROM temporarymeasurements
-            WHERE FileID = vFileID AND BatchID = vBatchID
+            FROM initial_dup_filter
             GROUP BY TreeTag
-        ) tm_first ON tm1.TreeTag = tm_first.TreeTag AND tm1.id = tm_first.first_id
-        WHERE tm1.FileID = vFileID AND tm1.BatchID = vBatchID
+        ) idf_first ON idf1.TreeTag = idf_first.TreeTag AND idf1.id = idf_first.first_id
     ) first_occurrence ON t.TreeTag = first_occurrence.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
@@ -2092,7 +2155,9 @@ BEGIN
     HAVING COUNT(*) > 0;
 
     -- Warning 3: Extreme growth rates (>10 cm/year DBH increase)
-    -- Detect unusually high growth rates that may indicate data entry errors
+    -- Detect unusually high growth rates that may indicate data entry errors.
+    -- Stems are per-census, so cross-census comparison must join via StemCrossID
+    -- (which links the same physical stem across censuses), not StemGUID.
     INSERT IGNORE INTO uploadintegrityalerts (
         uploadId, fileID, batchID, plotID, censusID,
         type, message, severity,
@@ -2105,18 +2170,23 @@ BEGIN
            vBatchRowCount, vProcessedCount, 0, 0
     FROM (
         SELECT curr.CoreMeasurementID,
-               (curr.MeasuredDBH - prev.MeasuredDBH) / NULLIF(DATEDIFF(curr.MeasurementDate, prev.MeasurementDate) / 365.25, 0) as growth_rate
+               (curr.MeasuredDBH - prev_cm.MeasuredDBH)
+                   / NULLIF(DATEDIFF(curr.MeasurementDate, prev_cm.MeasurementDate) / 365.25, 0) as growth_rate
         FROM coremeasurements curr
-        JOIN coremeasurements prev ON curr.StemGUID = prev.StemGUID
-            AND prev.CensusID < vCurrentCensusID
-            AND prev.MeasurementDate < curr.MeasurementDate
-            AND prev.MeasuredDBH IS NOT NULL
+        INNER JOIN stems s_curr ON curr.StemGUID = s_curr.StemGUID
+        INNER JOIN stems s_prev ON s_curr.StemCrossID IS NOT NULL
+            AND (s_prev.StemCrossID = s_curr.StemCrossID OR s_prev.StemGUID = s_curr.StemCrossID)
+            AND s_prev.CensusID < vCurrentCensusID
+            AND s_prev.IsActive = 1
+        INNER JOIN coremeasurements prev_cm ON prev_cm.StemGUID = s_prev.StemGUID
+            AND prev_cm.MeasurementDate < curr.MeasurementDate
+            AND prev_cm.MeasuredDBH IS NOT NULL
+            AND prev_cm.IsActive = 1
         WHERE curr.CensusID = vCurrentCensusID
           AND (curr.UploadBatchID = vBatchID
                OR JSON_UNQUOTE(JSON_EXTRACT(curr.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
           AND curr.MeasuredDBH IS NOT NULL
           AND curr.MeasurementDate IS NOT NULL
-        ORDER BY curr.StemGUID, prev.MeasurementDate DESC
     ) growth
     WHERE growth.growth_rate > 10
     HAVING COUNT(*) > 0;
@@ -2178,3 +2248,23 @@ BEGIN
 END $$
 
 DELIMITER ;
+
+-- Upload data loss report view (idempotent, safe to re-run)
+-- Surfaces batches where rows are truly unaccounted for after ingestion.
+CREATE OR REPLACE VIEW uploaddatalossreport AS
+SELECT
+    um.fileID           AS FileID,
+    um.batchID          AS BatchID,
+    um.plotID           AS PlotID,
+    um.censusID         AS CensusID,
+    um.sourceRecords    AS SourceRecords,
+    um.processedRecords AS ProcessedRecords,
+    um.failedRecords    AS FailedRecords,
+    um.missingRecords   AS MissingRecords,
+    um.status           AS Status,
+    um.errorMessage     AS ErrorMessage,
+    um.startTime        AS StartTime,
+    um.endTime          AS EndTime
+FROM uploadmetrics um
+WHERE um.status IN ('completed', 'failed')
+  AND um.missingRecords > 0;
