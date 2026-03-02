@@ -59,7 +59,7 @@ SET @sql = IF(
     @has_validations = 1,
     'UPDATE sitespecificvalidations
      SET Definition = ''INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm_present.CoreMeasurementID, @validationProcedureID AS ErrorID
+SELECT DISTINCT cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) AS ErrorID
 FROM coremeasurements cm_present
 JOIN census c_present ON cm_present.CensusID = c_present.CensusID AND c_present.IsActive = 1
 JOIN stems s_present ON s_present.StemGUID = cm_present.StemGUID AND s_present.CensusID = cm_present.CensusID AND s_present.IsActive = 1
@@ -74,7 +74,7 @@ JOIN attributes a_present ON a_present.Code = cma_present.Code
 JOIN cmattributes cma_past ON cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
 JOIN attributes a_past ON a_past.Code = cma_past.Code
 LEFT JOIN measurement_error_log e ON e.MeasurementID = cm_present.CoreMeasurementID
-    AND e.ErrorID = @validationProcedureID
+    AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE c_past.PlotCensusNumber >= 1
   AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   AND t_past.TreeTag = t_present.TreeTag
@@ -110,7 +110,7 @@ SET @sql = IF(
     @has_validations = 1,
     'UPDATE sitespecificvalidations
      SET Definition = ''INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm_present.CoreMeasurementID, @validationProcedureID AS ErrorID
+SELECT DISTINCT cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) AS ErrorID
 FROM coremeasurements cm_present
 JOIN census c_present ON cm_present.CensusID = c_present.CensusID AND c_present.IsActive = 1
 JOIN stems s_present ON s_present.StemGUID = cm_present.StemGUID AND s_present.CensusID = cm_present.CensusID AND s_present.IsActive = 1
@@ -124,7 +124,7 @@ JOIN attributes a_present ON a_present.Code = cma_present.Code
 JOIN cmattributes cma_past ON cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
 JOIN attributes a_past ON a_past.Code = cma_past.Code
 LEFT JOIN measurement_error_log e ON e.MeasurementID = cm_present.CoreMeasurementID
-    AND e.ErrorID = @validationProcedureID
+    AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE c_past.PlotCensusNumber >= 1
   AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   AND t_past.TreeTag = t_present.TreeTag
@@ -157,7 +157,7 @@ SET @sql = IF(
          ''Quadrat mismatch with previous census for same TreeTag/StemTag'',
          ''quadratName;treeTag;stemTag'',
          ''INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 FROM coremeasurements cm
 JOIN census c ON c.CensusID = cm.CensusID AND c.IsActive = 1
 JOIN stems s ON s.StemGUID = cm.StemGUID AND s.CensusID = cm.CensusID AND s.IsActive = 1
@@ -167,7 +167,7 @@ JOIN census c_prev ON c_prev.PlotID = c.PlotID AND c_prev.PlotCensusNumber = c.P
 JOIN trees t_prev ON t_prev.TreeTag = t.TreeTag AND t_prev.CensusID = c_prev.CensusID AND t_prev.IsActive = 1
 JOIN stems s_prev ON s_prev.TreeID = t_prev.TreeID AND s_prev.StemTag = s.StemTag AND s_prev.CensusID = c_prev.CensusID AND s_prev.IsActive = 1
 JOIN quadrats q_prev ON q_prev.QuadratID = s_prev.QuadratID AND q_prev.IsActive = 1
-LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID AND e.ErrorID = @validationProcedureID
+LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE cm.IsActive = 1
   AND cm.StemGUID IS NOT NULL
   AND q_prev.QuadratName <> q_cur.QuadratName
@@ -182,7 +182,7 @@ ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;'',
          ''Coordinate drift exceeds 10m versus previous census for same TreeTag/StemTag'',
          ''stemLocalX;stemLocalY;treeTag;stemTag'',
          ''INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 FROM coremeasurements cm
 JOIN census c ON c.CensusID = cm.CensusID AND c.IsActive = 1
 JOIN stems s ON s.StemGUID = cm.StemGUID AND s.CensusID = cm.CensusID AND s.IsActive = 1
@@ -190,7 +190,7 @@ JOIN trees t ON t.TreeID = s.TreeID AND t.CensusID = s.CensusID AND t.IsActive =
 JOIN census c_prev ON c_prev.PlotID = c.PlotID AND c_prev.PlotCensusNumber = c.PlotCensusNumber - 1 AND c_prev.IsActive = 1
 JOIN trees t_prev ON t_prev.TreeTag = t.TreeTag AND t_prev.CensusID = c_prev.CensusID AND t_prev.IsActive = 1
 JOIN stems s_prev ON s_prev.TreeID = t_prev.TreeID AND s_prev.StemTag = s.StemTag AND s_prev.CensusID = c_prev.CensusID AND s_prev.IsActive = 1
-LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID AND e.ErrorID = @validationProcedureID
+LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''''validation'''' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE cm.IsActive = 1
   AND cm.StemGUID IS NOT NULL
   AND s.LocalX IS NOT NULL AND s.LocalY IS NOT NULL

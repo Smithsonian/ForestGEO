@@ -448,8 +448,9 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
       temporaryDeleted = (tempResult as any).affectedRows || 0;
     }
 
-    // Note: We don't automatically delete from failedmeasurements as those might be
-    // legitimate failures the user wants to review. We only clean up temporary data.
+    // Note: We don't automatically delete failed measurements (coremeasurements with
+    // StemGUID=NULL + measurement_error_log) as those might be legitimate failures
+    // the user wants to review. We only clean up temporary data.
 
     // Mark session as cleaned up
     const updateSQL = `

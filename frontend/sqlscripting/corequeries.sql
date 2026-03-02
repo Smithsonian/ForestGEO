@@ -6,7 +6,7 @@ INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, C
                                      ChangelogDefinition, IsEnabled)
 VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', '
 insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
@@ -21,7 +21,7 @@ from coremeasurements cm_present
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID and
-                                  e.ErrorID = @validationProcedureID
+                                  e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
   and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
@@ -47,7 +47,7 @@ on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', '
 insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
@@ -61,7 +61,7 @@ from coremeasurements cm_present
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID
-              and e.ErrorID = @validationProcedureID
+              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
   and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
@@ -80,13 +80,13 @@ INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, C
                                      ChangelogDefinition, IsEnabled)
 VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)',
         'speciesCode', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive = TRUE
          join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive = TRUE
          join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive = TRUE
          left join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive = TRUE
-         left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+         left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
@@ -97,7 +97,7 @@ VALUES (4, 'ValidateFindDuplicatedQuadratsByName',
         'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)',
         'quadratName',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -109,7 +109,7 @@ from coremeasurements cm
                having count(distinct q2.QuadratID) > 1) as ambiguous
               ON q.QuadratName = ambiguous.QuadratName AND c.CensusID = ambiguous.CensusID
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
   and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
@@ -121,7 +121,7 @@ VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus',
         'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census',
         'stemTag;treeTag',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -141,7 +141,7 @@ from coremeasurements cm
                         AND t.TreeTag = duplicates.TreeTag
                         AND s.StemTag = duplicates.StemTag
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
@@ -151,11 +151,11 @@ INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, C
                                      ChangelogDefinition, IsEnabled)
 VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds',
         'measurementDate', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (cm.MeasurementDate < c.StartDate or cm.MeasurementDate > c.EndDate)
@@ -166,7 +166,7 @@ VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies',
         'Flagged;Different species',
         'stemTag;speciesCode',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -183,7 +183,7 @@ from coremeasurements cm
              having count(distinct sp2.SpeciesCode) > 1
          ) as problematic_tree_data ON t.TreeTag = problematic_tree_data.TreeTag AND t.CensusID = problematic_tree_data.CensusID
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
     and e.MeasurementID is null
     and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -195,13 +195,13 @@ VALUES (8, 'ValidateFindStemsOutsidePlots',
         'Stem coordinates NULL, negative, or outside plot boundaries (both upper and lower bounds)',
         'stemTag;treeTag;stemLocalX;stemLocalY;quadratStartX;quadratStartY;plotGlobalX;plotGlobalY;plotDimensionX;plotDimensionY',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
 join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
 join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
 join plots p on c.PlotID = p.PlotID
-left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
 and e.MeasurementID is null
 and cm.IsActive is true
@@ -238,7 +238,7 @@ VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats',
         'Flagged;Flagged;Different quadrats',
         'stemTag;treeTag;quadratName',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join stems s1 on cm.StemGUID = s1.StemGUID and c.CensusID = s1.CensusID and s1.IsActive is true
@@ -253,7 +253,7 @@ from coremeasurements cm
              having count(distinct s2.QuadratID) > 1
          ) as cross_quadrat_data ON t.TreeID = cross_quadrat_data.TreeID AND t.CensusID = cross_quadrat_data.CensusID
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -265,7 +265,7 @@ VALUES (11, 'ValidateScreenMeasuredDiameterMinMax',
         'Measured DBH is outside of species-defined bounds from specieslimits table',
         'measuredDBH;speciesCode;speciesLimitMin;speciesLimitMax',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
 join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -276,7 +276,7 @@ join specieslimits sl on sp.SpeciesID = sl.SpeciesID
     and sl.LimitType = ''DBH''
     and sl.IsActive is true
 left join measurement_error_log e on cm.CoreMeasurementID = e.MeasurementID
-    and e.ErrorID = @validationProcedureID
+    and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
 and cm.IsActive is true
 and e.MeasurementID is null
@@ -292,14 +292,14 @@ INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, C
                                      ChangelogDefinition, IsEnabled)
 VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes', 'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
         'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a on cma.Code = a.Code and a.IsActive is true
               and cma.Code = a.Code and a.Status in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
          left join measurement_error_log e
-                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = @validationProcedureID
+                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and ((cm.MeasuredDBH is not null and cm.MeasuredDBH <> 0)
@@ -311,14 +311,14 @@ INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, C
                                      ChangelogDefinition, IsEnabled)
 VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes',
         'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a on cma.Code = a.Code and a.IsActive is true
               and cma.Code = a.Code and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\') and a.IsActive is true
          left join measurement_error_log e
-                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = @validationProcedureID
+                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and ((cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
@@ -331,13 +331,13 @@ VALUES (14, 'ValidateFindInvalidAttributeCodes',
         'Attribute code does not exist in attributes table',
         'attributes',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          left join attributes a on cma.Code = a.Code and a.IsActive is true
          left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID
-              and e.ErrorID = @validationProcedureID
+              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
   and cm.IsActive is true
   and a.Code is null  -- Attribute code doesn''t exist in attributes table
@@ -360,12 +360,12 @@ VALUES (15, 'ValidateFindAbnormallyHighDBH',
         'DBH exceeds absolute maximum threshold (3500mm or 350cm)',
         'measuredDBH',
         'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join plots p on c.PlotID = p.PlotID
          left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID
-              and e.ErrorID = @validationProcedureID
+              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
   and cm.IsActive is true
   and cm.MeasuredDBH is not null

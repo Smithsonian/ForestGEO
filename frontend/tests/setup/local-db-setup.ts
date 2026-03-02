@@ -151,7 +151,8 @@ async function connectWithRetry(
         user: config.user,
         password: config.password,
         port: config.port,
-        multipleStatements: true
+        multipleStatements: true,
+        charset: 'UTF8MB4_0900_AI_CI'
       });
 
       // Verify connection is actually working
@@ -647,6 +648,60 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
 }
 
 /**
+ * Seeds the measurement_errors catalog table with all known error codes.
+ *
+ * This must run BEFORE any validation SQL or bulkingestionprocess call, because:
+ * - Validation definitions INSERT into measurement_error_log with ErrorID looked up
+ *   from measurement_errors via (ErrorSource='validation', ErrorCode=ValidationID)
+ * - bulkingestionprocess also seeds this table, but tests that bypass ingestion
+ *   (e.g. post-ingestion validation tests using insertDirectMeasurements) need it
+ *   pre-populated
+ *
+ * The ingestion error codes match storedprocedures.sql lines 1168-1183.
+ * The validation error codes are generated from sitespecificvalidations rows.
+ */
+export async function seedMeasurementErrors(connection: mysql.Connection): Promise<void> {
+  // Seed ingestion error codes (same as bulkingestionprocess)
+  await connection.query(`
+    INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
+      ('ingestion', 'MISSING_FIELD_TREETAG',    'Missing required field: TreeTag'),
+      ('ingestion', 'MISSING_FIELD_STEMTAG',     'Missing required field: StemTag'),
+      ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
+      ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
+      ('ingestion', 'MISSING_FIELD_DATE',        'Missing required field: MeasurementDate'),
+      ('ingestion', 'INVALID_QUADRAT',           'Invalid quadrat reference'),
+      ('ingestion', 'INVALID_SPECIES',           'Invalid species reference'),
+      ('ingestion', 'QUADRAT_MISMATCH',          'Quadrat mismatch across censuses'),
+      ('ingestion', 'COORDINATE_DRIFT',          'Coordinate drift exceeds allowed threshold'),
+      ('ingestion', 'DUPLICATE_ENTRY',           'Duplicate measurement row detected'),
+      ('ingestion', 'NEGATIVE_DBH',              'DBH must be non-negative'),
+      ('ingestion', 'NEGATIVE_HOM',              'HOM must be non-negative'),
+      ('ingestion', 'FIELD_TOO_LONG',            'One or more fields exceed column length limits'),
+      ('ingestion', 'MISSING_MEASUREMENT_DATA',  'Missing measurement data'),
+      ('ingestion', 'SQL_EXCEPTION',             'Ingestion SQL exception')
+  `);
+
+  // Seed validation error codes — one row per sitespecificvalidations entry.
+  // ErrorCode stores the ValidationID as a string (e.g. '1', '2', '14').
+  // Validation SQL definitions look up ErrorID via:
+  //   SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode=CAST(@validationProcedureID AS CHAR)
+  const [validations] = await connection.query<mysql.RowDataPacket[]>(
+    'SELECT ValidationID, ProcedureName, Description FROM sitespecificvalidations ORDER BY ValidationID'
+  );
+
+  for (const v of validations) {
+    const errorMessage = `Validation ${v.ValidationID}: ${v.Description || v.ProcedureName}`;
+    await connection.query(
+      `INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
+       VALUES ('validation', CAST(? AS CHAR), ?)`,
+      [v.ValidationID, errorMessage]
+    );
+  }
+
+  log.debug(` Seeded measurement_errors: 15 ingestion + ${validations.length} validation error codes`);
+}
+
+/**
  * Complete setup of test database with schema, procedures, and data.
  * Ensures cleanup on any failure during setup to prevent resource leaks.
  */
@@ -664,6 +719,7 @@ export async function setupTestDatabase(config: TestDatabaseConfig = DEFAULT_TES
     await loadSchema(connection);
     await loadStoredProcedures(connection);
     await loadValidationDefinitions(connection);
+    await seedMeasurementErrors(connection);
     const testData = await seedSampleData(connection);
 
     log.debug(' Test database setup complete\n');
@@ -889,6 +945,20 @@ export async function runBulkIngestion(
     // Get the result message
     const result = Array.isArray(results) ? results[0] : results;
     const row = Array.isArray(result) ? result[0] : result;
+
+    // If stored procedure caught an error internally, fetch full error details
+    if (row?.batch_failed) {
+      const [metrics] = await connection.query<mysql.RowDataPacket[]>(
+        'SELECT errorMessage FROM uploadmetrics WHERE batchID = ? ORDER BY endTime DESC LIMIT 1',
+        [batchID]
+      );
+      const fullMessage = metrics?.[0]?.errorMessage || row?.message || 'Unknown error';
+      return {
+        success: false,
+        message: fullMessage,
+        batch_failed: row.batch_failed
+      };
+    }
 
     return {
       success: !row?.batch_failed,
@@ -1545,12 +1615,18 @@ export interface CrossCensusMeasurement {
   census1Date: string;
   census2Date: string;
   codes?: string;
+  /** Census 2 x-coordinate (defaults to x if omitted) */
+  x2?: number;
+  /** Census 2 y-coordinate (defaults to y if omitted) */
+  y2?: number;
+  /** Census 2 quadrat name (defaults to quadratName if omitted) */
+  quadratName2?: string;
 }
 
 /**
- * Inserts measurements that span two censuses with SHARED StemGUID.
+ * Inserts measurements that span two censuses with census-versioned tree/stem records.
  * This is required for cross-census validations (1, 2) which compare
- * measurements across censuses by matching on StemGUID.
+ * measurements across censuses by matching on TreeTag/StemTag.
  *
  * Key differences from insertDirectMeasurements:
  * - Creates tree/stem ONCE, reuses SAME StemGUID for both census measurements
@@ -1594,50 +1670,70 @@ export async function insertCrossCensusMeasurements(
     }
     const speciesID = speciesRows[0].SpeciesID;
 
-    // Create tree (we'll use census 1 as the "home" census for the tree)
+    // Census-versioned records: validation queries join stems/trees with CensusID,
+    // e.g. `s_present.StemGUID = cm_present.StemGUID AND s_present.CensusID = cm_present.CensusID`
+    // so each census needs its own tree and stem records.
+
+    // Census 1 tree + stem
     await connection.query(
       'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
       [meas.treeTag, speciesID, census1ID]
     );
-    const [treeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
-    const treeID = treeRows[0].TreeID;
+    const [tree1Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
+    const tree1ID = tree1Rows[0].TreeID;
 
-    // Create stem ONCE - this StemGUID will be used for measurements in BOTH censuses.
-    //
-    // DESIGN NOTE: stems.CensusID represents when the stem was FIRST RECORDED, not a
-    // constraint on which census measurements can reference this stem. In ForestGEO:
-    // - Physical stems persist across multiple censuses
-    // - The same StemGUID is used for measurements in different censuses
-    // - Validation queries join on StemGUID across censuses to compare measurements
-    //   Example: cm_present.StemGUID = cm_past.StemGUID AND cm_present.CensusID <> cm_past.CensusID
-    //
-    // This correctly models real ingestion where stems are re-measured each census period.
     await connection.query(
       `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
        VALUES (?, ?, ?, ?, ?, ?, 1)`,
-      [treeID, quadratID, census1ID, meas.stemTag, meas.x, meas.y]
+      [tree1ID, quadratID, census1ID, meas.stemTag, meas.x, meas.y]
     );
-    const [stemRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
-    const stemGUID = stemRows[0].StemGUID;
-    stemGUIDs.push(stemGUID);
+    const [stem1Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
+    const stemGUID1 = stem1Rows[0].StemGUID;
 
-    // Insert census 1 measurement (validated = true, as if already processed)
+    // Census 2 tree + stem (same TreeTag/StemTag, different CensusID and StemGUID)
+    // Use census2-specific coordinates if provided, otherwise use census1 coordinates
+    const x2 = meas.x2 ?? meas.x;
+    const y2 = meas.y2 ?? meas.y;
+    const quadratID2 = meas.quadratName2
+      ? (await connection.query<mysql.RowDataPacket[]>(
+          'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
+          [meas.quadratName2, plotID]
+        ))[0][0]?.QuadratID ?? quadratID
+      : quadratID;
+
+    await connection.query(
+      'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
+      [meas.treeTag, speciesID, census2ID]
+    );
+    const [tree2Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
+    const tree2ID = tree2Rows[0].TreeID;
+
+    await connection.query(
+      `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      [tree2ID, quadratID2, census2ID, meas.stemTag, x2, y2]
+    );
+    const [stem2Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
+    const stemGUID2 = stem2Rows[0].StemGUID;
+    stemGUIDs.push(stemGUID1, stemGUID2);
+
+    // Census 1 measurement (validated = true, as if already processed)
     await connection.query(
       `INSERT INTO coremeasurements
        (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
        VALUES (?, ?, ?, ?, ?, 1, 1)`,
-      [stemGUID, census1ID, meas.census1DBH, meas.hom, meas.census1Date]
+      [stemGUID1, census1ID, meas.census1DBH, meas.hom, meas.census1Date]
     );
     const [cm1Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as CoreMeasurementID');
     const cm1ID = cm1Rows[0].CoreMeasurementID;
     census1MeasurementIDs.push(cm1ID);
 
-    // Insert census 2 measurement using SAME StemGUID (validated = null, as if newly ingested)
+    // Census 2 measurement (validated = null, as if newly ingested)
     await connection.query(
       `INSERT INTO coremeasurements
        (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
        VALUES (?, ?, ?, ?, ?, NULL, 1)`,
-      [stemGUID, census2ID, meas.census2DBH, meas.hom, meas.census2Date]
+      [stemGUID2, census2ID, meas.census2DBH, meas.hom, meas.census2Date]
     );
     const [cm2Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as CoreMeasurementID');
     const cm2ID = cm2Rows[0].CoreMeasurementID;

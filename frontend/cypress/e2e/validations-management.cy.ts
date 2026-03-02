@@ -30,7 +30,7 @@ describe('Validations Management Interface', () => {
     description: 'Test validation for E2E',
     criteria: 'DBH > 0',
     definition: `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ErrorID
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
 JOIN census c ON cm.CensusID = c.CensusID AND c.IsActive = TRUE
 WHERE cm.IsValidated IS NULL
@@ -273,7 +273,7 @@ WHERE cm.IsValidated IS NULL
         description: 'E2E test validation',
         criteria: 'Test criteria',
         definition: `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ErrorID
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
 WHERE cm.IsValidated IS NULL;`
       };

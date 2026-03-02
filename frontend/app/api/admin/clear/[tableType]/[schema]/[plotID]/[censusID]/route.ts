@@ -12,7 +12,9 @@ import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid table types that can be cleared
+// Valid table types that can be cleared.
+// Note: 'failedmeasurements' is a logical routing key — the handler uses custom SQL
+// against coremeasurements + measurement_error_log, NOT a physical table.
 const VALID_TABLE_TYPES = {
   failedmeasurements: 'failedmeasurements',
   temporarymeasurements: 'temporarymeasurements'

@@ -480,7 +480,7 @@ create table if not exists sitespecificvalidations
     ChangelogDefinition text             null,
     IsEnabled           bit default b'1' not null
 )
-    charset = utf8mb3;
+    charset = utf8mb4;
 
 create table if not exists species
 (

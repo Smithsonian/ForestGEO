@@ -200,7 +200,7 @@ describe('Hard Failure Validation Tests', () => {
       expect(quadratMismatchFailures.length).toBe(0);
 
       // ASSERTION: Record should not hard-fail for valid same-quadrat data
-      expect(result.batch_failed).toBe(false);
+      expect(result.batch_failed, `Unexpected batch failure: ${result.message}`).toBe(false);
     });
   });
 
@@ -341,7 +341,7 @@ describe('Hard Failure Validation Tests', () => {
       expect(coordinateDriftFailures.length).toBe(0);
 
       // ASSERTION: Record should not hard-fail for valid small-drift data
-      expect(result.batch_failed).toBe(false);
+      expect(result.batch_failed, `Unexpected batch failure: ${result.message}`).toBe(false);
     });
 
     /**
@@ -405,7 +405,7 @@ describe('Hard Failure Validation Tests', () => {
 
       // Exactly 10m should NOT trigger - validation is for EXCEEDS (>10m)
       expect(coordinateFailures.length).toBe(0);
-      expect(result.batch_failed).toBe(false);
+      expect(result.batch_failed, `Unexpected batch failure: ${result.message}`).toBe(false);
     });
 
     /**

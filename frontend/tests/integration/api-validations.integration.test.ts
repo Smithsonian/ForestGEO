@@ -311,7 +311,7 @@ describe('Validation API Integration Tests', () => {
       // Query errors with joined measurement data (simulating API response)
       const [errorDisplay] = await connection.query<RowDataPacket[]>(`
         SELECT
-          mel.LogID AS CMVErrorID,
+          mel.MeasurementID AS CMVErrorID,
           CAST(me.ErrorCode AS UNSIGNED) AS ValidationErrorID,
           ssv.ProcedureName,
           ssv.Description as ValidationDescription,

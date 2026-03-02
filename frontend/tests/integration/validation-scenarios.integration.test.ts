@@ -141,7 +141,7 @@ describe('Validation Scenarios Integration Tests', () => {
       const result = await runBulkIngestion(connection, fileID, batchID);
 
       // ASSERTION: Ingestion should not hard-fail for valid data
-      expect(result.batch_failed).toBe(false);
+      expect(result.batch_failed, `Unexpected batch failure: ${result.message}`).toBe(false);
 
       // Verify data was processed - either inserted or flagged (not silently dropped)
       const [measurements] = await connection.query<RowDataPacket[]>(

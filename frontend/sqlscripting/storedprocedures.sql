@@ -730,7 +730,7 @@ begin
                                          ChangelogDefinition, IsEnabled)
     VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', '
 insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
@@ -745,7 +745,7 @@ from coremeasurements cm_present
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID and
-                                  e.ErrorID = @validationProcedureID
+                                  e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
   and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
@@ -772,7 +772,7 @@ on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
                                          ChangelogDefinition, IsEnabled)
     VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', '
 insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
@@ -786,7 +786,7 @@ from coremeasurements cm_present
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID
-              and e.ErrorID = @validationProcedureID
+              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
   and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
@@ -805,13 +805,13 @@ on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
                                          ChangelogDefinition, IsEnabled)
     VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)',
             'speciesCode', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive = TRUE
          join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive = TRUE
          join trees t on s.TreeID = t.TreeID and c.CensusID = t.CensusID and t.IsActive = TRUE
          left join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive = TRUE
-         left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+         left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
@@ -823,7 +823,7 @@ where cm.IsValidated is null and cm.IsActive is true
             'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)',
             'quadratName',
             'insert into measurement_error_log (MeasurementID, ErrorID)
-    select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+    select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
     from coremeasurements cm
              join census c on cm.CensusID = c.CensusID and c.IsActive is true
              join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -835,7 +835,7 @@ where cm.IsValidated is null and cm.IsActive is true
                    having count(distinct q2.QuadratID) > 1) as ambiguous
                   ON q.QuadratName = ambiguous.QuadratName AND c.CensusID = ambiguous.CensusID
              left join measurement_error_log e
-                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
     where cm.IsValidated is null
       and cm.IsActive is true
       and (@p_CensusID is null or c.CensusID = @p_CensusID)
@@ -848,7 +848,7 @@ where cm.IsValidated is null and cm.IsActive is true
             'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census',
             'stemTag;treeTag',
             'insert into measurement_error_log (MeasurementID, ErrorID)
-    select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+    select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
     from coremeasurements cm
              join census c on cm.CensusID = c.CensusID and c.IsActive is true
              join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -868,7 +868,7 @@ where cm.IsValidated is null and cm.IsActive is true
                             AND t.TreeTag = duplicates.TreeTag
                             AND s.StemTag = duplicates.StemTag
              left join measurement_error_log e
-                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
     where cm.IsValidated is null and cm.IsActive is true
       and e.MeasurementID is null
       and (@p_CensusID is null or c.CensusID = @p_CensusID)
@@ -878,11 +878,11 @@ where cm.IsValidated is null and cm.IsActive is true
                                          ChangelogDefinition, IsEnabled)
     VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds',
             'measurementDate', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join measurement_error_log e
-                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (cm.MeasurementDate < c.StartDate or cm.MeasurementDate > c.EndDate)
@@ -894,7 +894,7 @@ where cm.IsValidated is null and cm.IsActive is true
             'Flagged;Different species',
             'stemTag;speciesCode',
             'insert into measurement_error_log (MeasurementID, ErrorID)
-    select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+    select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
     from coremeasurements cm
              join census c on cm.CensusID = c.CensusID and c.IsActive is true
              join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -911,7 +911,7 @@ where cm.IsValidated is null and cm.IsActive is true
                  having count(distinct sp2.SpeciesCode) > 1
              ) as problematic_trees ON t.TreeTag = problematic_trees.TreeTag AND t.CensusID = problematic_trees.CensusID
              left join measurement_error_log e
-                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
     where cm.IsValidated is null and cm.IsActive is true
         and e.MeasurementID is null
         and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -921,13 +921,13 @@ where cm.IsValidated is null and cm.IsActive is true
                                          ChangelogDefinition, IsEnabled)
     VALUES (8, 'ValidateFindStemsOutsidePlots', 'Stem coordinates NULL, negative, or outside plot boundaries (both upper and lower bounds)',
             'stemTag;treeTag;stemLocalX;stemLocalY;quadratStartX;quadratStartY;plotGlobalX;plotGlobalY;plotDimensionX;plotDimensionY', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
 join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
 join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
 join plots p on c.PlotID = p.PlotID
-left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
 and e.MeasurementID is null
 and cm.IsActive is true
@@ -964,7 +964,7 @@ and NOT EXISTS (
             'Flagged;Flagged;Different quadrats',
             'stemTag;treeTag;quadratName',
             'insert into measurement_error_log (MeasurementID, ErrorID)
-    select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+    select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
     from coremeasurements cm
              join census c on cm.CensusID = c.CensusID and c.IsActive is true
              join stems s1 on cm.StemGUID = s1.StemGUID and c.CensusID = s1.CensusID and s1.IsActive is true
@@ -979,7 +979,7 @@ and NOT EXISTS (
                  having count(distinct s2.QuadratID) > 1
              ) as cross_quadrat_trees ON t.TreeID = cross_quadrat_trees.TreeID AND t.CensusID = cross_quadrat_trees.CensusID
              left join measurement_error_log e
-                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = @validationProcedureID
+                       on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
     where cm.IsValidated is null and cm.IsActive is true
       and e.MeasurementID is null
       and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -989,7 +989,7 @@ and NOT EXISTS (
                                          ChangelogDefinition, IsEnabled)
     VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds from specieslimits table',
             'measuredDBH;speciesCode;speciesLimitMin;speciesLimitMax', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID and c.IsActive is true
 join stems s on cm.StemGUID = s.StemGUID and c.CensusID = s.CensusID and s.IsActive is true
@@ -1000,7 +1000,7 @@ join specieslimits sl on sp.SpeciesID = sl.SpeciesID
     and sl.LimitType = ''DBH''
     and sl.IsActive is true
 left join measurement_error_log e on cm.CoreMeasurementID = e.MeasurementID
-    and e.ErrorID = @validationProcedureID
+    and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
 and cm.IsActive is true
 and e.MeasurementID is null
@@ -1017,14 +1017,14 @@ and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
             'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
             'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a on cma.Code = a.Code and a.IsActive is true
               and cma.Code = a.Code and a.Status in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
          left join measurement_error_log e
-                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = @validationProcedureID
+                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and ((cm.MeasuredDBH is not null and cm.MeasuredDBH <> 0)
@@ -1036,14 +1036,14 @@ where cm.IsValidated is null and cm.IsActive is true
                                          ChangelogDefinition, IsEnabled)
     VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes',
             'Live stem is missing DBH measurement (HOM is optional)', 'measuredDBH;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm.CoreMeasurementID, @validationProcedureID as ErrorID
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a on cma.Code = a.Code and a.IsActive is true
               and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
          left join measurement_error_log e
-                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = @validationProcedureID
+                   on cm.CoreMeasurementID = e.MeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   -- Only flag if DBH is missing - HOM is optional (defaults to standard 1.3m)
@@ -1154,7 +1154,8 @@ BEGIN
 
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
                 old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-                stem_crossid_mapping, pre_insert_check;
+                stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+                species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
             SELECT CONCAT('Batch ', vBatchID, ' failed: ', vErrorCode) as message, TRUE as batch_failed;
         END;
@@ -1239,7 +1240,8 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
         old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-        stem_crossid_mapping, pre_insert_check;
+        stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
     -- ============================================================
     -- FIX 1: EARLY VALIDATION - REPORTS ALL ERRORS PER ROW
@@ -2054,32 +2056,33 @@ BEGIN
 
     -- VALIDATION 4: Same-Batch TreeTag with Different SpeciesID (SOFT - Accept but Flag)
     -- Multiple rows in same batch with same TreeTag but different SpeciesID
+    -- Snapshot first occurrence per TreeTag into a separate temp table
+    -- to avoid MySQL error 1137 (Can't reopen table) from self-joining initial_dup_filter
+    DROP TEMPORARY TABLE IF EXISTS idf_first_occurrence;
+    CREATE TEMPORARY TABLE idf_first_occurrence AS
+    SELECT TreeTag, SpeciesCode
+    FROM (
+        SELECT TreeTag, SpeciesCode,
+               ROW_NUMBER() OVER (PARTITION BY TreeTag ORDER BY id) as rn
+        FROM initial_dup_filter
+    ) ranked
+    WHERE rn = 1;
+
     CREATE TEMPORARY TABLE same_batch_species_conflicts AS
     SELECT DISTINCT cm.CoreMeasurementID,
            t.TreeTag,
            sp.SpeciesCode as CurrentSpeciesCode,
-           first_occurrence.SpeciesCode as FirstSpeciesCode
+           fo.SpeciesCode as FirstSpeciesCode
     FROM coremeasurements cm
     INNER JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = vCurrentCensusID
     INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = vCurrentCensusID
     INNER JOIN species sp ON t.SpeciesID = sp.SpeciesID
-    -- Use initial_dup_filter (post-validation, post-dedup rows) instead of
-    -- temporarymeasurements to avoid picking a validation-failed row as the
-    -- "first occurrence" reference for species comparison.
-    INNER JOIN (
-        SELECT idf1.TreeTag, idf1.SpeciesCode
-        FROM initial_dup_filter idf1
-        INNER JOIN (
-            SELECT TreeTag, MIN(id) as first_id
-            FROM initial_dup_filter
-            GROUP BY TreeTag
-        ) idf_first ON idf1.TreeTag = idf_first.TreeTag AND idf1.id = idf_first.first_id
-    ) first_occurrence ON t.TreeTag = first_occurrence.TreeTag
+    INNER JOIN idf_first_occurrence fo ON t.TreeTag = fo.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
       AND (cm.UploadBatchID = vBatchID
            OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
-      AND sp.SpeciesCode != first_occurrence.SpeciesCode;
+      AND sp.SpeciesCode != fo.SpeciesCode;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT sbsc.CoreMeasurementID, me.ErrorID, FALSE
@@ -2102,7 +2105,7 @@ BEGIN
         );
     END IF;
 
-    DROP TEMPORARY TABLE IF EXISTS same_batch_species_conflicts;
+    DROP TEMPORARY TABLE IF EXISTS same_batch_species_conflicts, idf_first_occurrence;
 
     -- =====================================================
     -- ENHANCEMENT: Data Quality Warnings (Info-level)
@@ -2193,7 +2196,8 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
         old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-        stem_crossid_mapping, pre_insert_check;
+        stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+        species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 

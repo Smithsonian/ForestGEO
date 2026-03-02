@@ -30,12 +30,12 @@ const NewValidationRow: React.FC<NewValidationRowProps> = ({ validation, onValid
 
   // Default validation query template following corequeries.sql patterns
   const defaultTemplate = `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ErrorID
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
          JOIN census c ON cm.CensusID = c.CensusID AND c.IsActive = TRUE
          -- Add additional JOINs as needed for your validation logic
          LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID
-                                  AND e.ErrorID = @validationProcedureID
+                                  AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE cm.IsValidated IS NULL
   AND cm.IsActive = TRUE
   AND e.MeasurementID IS NULL
