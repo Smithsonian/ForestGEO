@@ -1836,8 +1836,7 @@ BEGIN
             SELECT 1 FROM coremeasurements cm_check
             WHERE cm_check.StemGUID = s.StemGUID
               AND cm_check.CensusID = f.CensusID
-              AND (cm_check.UploadBatchID = vBatchID
-                   OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+              AND cm_check.UploadBatchID = vBatchID
         )
     );
 
@@ -1878,8 +1877,7 @@ BEGIN
         SELECT 1 FROM coremeasurements cm_check
         WHERE cm_check.StemGUID = s.StemGUID
           AND cm_check.CensusID = f.CensusID
-          AND (cm_check.UploadBatchID = vBatchID
-               OR JSON_UNQUOTE(JSON_EXTRACT(cm_check.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+          AND cm_check.UploadBatchID = vBatchID
     );
 
     SET @actual_cm_inserts = ROW_COUNT();
@@ -1972,8 +1970,7 @@ BEGIN
             AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
         INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
             AND cm.CensusID = f.CensusID AND cm.IsActive = 1
-            AND (cm.UploadBatchID = vBatchID
-                 OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID),
+            AND cm.UploadBatchID = vBatchID,
         json_table(
             if(f.Codes = '' or trim(f.Codes) = '', '[]',
                concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
@@ -2028,8 +2025,7 @@ BEGIN
     INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
-      AND (cm.UploadBatchID = vBatchID
-           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID);
+      AND cm.UploadBatchID = vBatchID;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT smr.CoreMeasurementID, me.ErrorID, FALSE
@@ -2080,8 +2076,7 @@ BEGIN
     INNER JOIN idf_first_occurrence fo ON t.TreeTag = fo.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
-      AND (cm.UploadBatchID = vBatchID
-           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+      AND cm.UploadBatchID = vBatchID
       AND sp.SpeciesCode != fo.SpeciesCode;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
@@ -2129,8 +2124,7 @@ BEGIN
         JOIN stems s ON cm.StemGUID = s.StemGUID AND s.IsActive = 1
         JOIN trees t ON s.TreeID = t.TreeID AND t.IsActive = 1
     WHERE cm.CensusID = vCurrentCensusID
-      AND (cm.UploadBatchID = vBatchID
-           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+      AND cm.UploadBatchID = vBatchID
       AND cm.MeasurementDate IS NOT NULL
       AND cm.MeasuredDBH IS NOT NULL
         GROUP BY t.TreeTag, s.StemTag, cm.MeasurementDate
@@ -2152,8 +2146,7 @@ BEGIN
            vBatchRowCount, vProcessedCount, 0, 0
     FROM coremeasurements cm
     WHERE cm.CensusID = vCurrentCensusID
-      AND (cm.UploadBatchID = vBatchID
-           OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+      AND cm.UploadBatchID = vBatchID
       AND cm.MeasurementDate > DATE_ADD(NOW(), INTERVAL 10 YEAR)
     HAVING COUNT(*) > 0;
 
@@ -2186,8 +2179,7 @@ BEGIN
             AND prev_cm.MeasuredDBH IS NOT NULL
             AND prev_cm.IsActive = 1
         WHERE curr.CensusID = vCurrentCensusID
-          AND (curr.UploadBatchID = vBatchID
-               OR JSON_UNQUOTE(JSON_EXTRACT(curr.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+          AND curr.UploadBatchID = vBatchID
           AND curr.MeasuredDBH IS NOT NULL
           AND curr.MeasurementDate IS NOT NULL
     ) growth
@@ -2209,8 +2201,7 @@ BEGIN
         SELECT COUNT(*) FROM coremeasurements cm
         WHERE cm.CensusID = vCurrentCensusID
           AND cm.StemGUID IS NOT NULL
-          AND (cm.UploadBatchID = vBatchID
-               OR JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = vBatchID)
+          AND cm.UploadBatchID = vBatchID
     );
     SET @unaccounted = vBatchRowCount - @final_success - vDataLossCount;
 

@@ -619,38 +619,11 @@ create index idx_tmpm_file_batch_census
 create index ingest_temporarymeasurements_FBPC_index
     on temporarymeasurements (FileID, BatchID, PlotID, CensusID);
 
-create index ingest_temporarymeasurements_batchID_index
-    on temporarymeasurements (BatchID);
-
-create index temporarymeasurements_Codes_index
-    on temporarymeasurements (Codes);
-
-create index temporarymeasurements_DBH_HOM_MeasurementDate_index
-    on temporarymeasurements (DBH, HOM, MeasurementDate);
-
-create index temporarymeasurements_FileID_BatchID_index
-    on temporarymeasurements (FileID, BatchID);
-
-create index temporarymeasurements_FileID_index
-    on temporarymeasurements (FileID);
-
 create index temporarymeasurements_QuadratName_index
     on temporarymeasurements (QuadratName);
 
-create index temporarymeasurements_StemTag_LocalX_LocalY_index
-    on temporarymeasurements (StemTag, LocalX, LocalY);
-
-create index temporarymeasurements_StemTag_index
-    on temporarymeasurements (StemTag);
-
 create index temporarymeasurements_TreeTag_SpeciesCode_index
     on temporarymeasurements (TreeTag, SpeciesCode);
-
-create index temporarymeasurements_TreeTag_index
-    on temporarymeasurements (TreeTag);
-
-create index temporarymeasurements_id_index
-    on temporarymeasurements (id);
 
 create table if not exists trees
 (

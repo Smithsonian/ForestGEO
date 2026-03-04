@@ -76,7 +76,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [verificationStep, setVerificationStep] = useState<number>(0);
   const [totalVerificationSteps, setTotalVerificationSteps] = useState<number>(0);
   const { data: session } = useSession();
-  const chunkSize = 1024 * 32; // Increased from 8KB to 32KB to reduce AJAX call count (4x reduction)
+  const chunkSize = 1024 * 256; // 256KB chunks: reduces batch count ~8x vs 32KB (critical for 100k+ row uploads)
   const connectionLimit = 1; // Process batches sequentially to prevent lock contention (file-level locks require serial processing)
   const uploadStartedRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
@@ -912,10 +912,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Preparing upload verification...');
         }
 
-        // Synchronization checkpoint: Ensure all operations are complete
-        ailogger.info('Upload verification checkpoint: Ensuring all database operations are synchronized...');
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause for synchronization
-
         // Additional verification: Check that data was actually inserted into the database
         try {
           if (isMountedRef.current) {
@@ -940,9 +936,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               throw new Error(`No data found in database for ${file.name} - upload may have failed silently`);
             }
             ailogger.info(`Verified ${verificationData.count} rows uploaded for ${file.name}`);
-
-            // Brief pause between file verifications for better UX
-            await new Promise(resolve => setTimeout(resolve, 500));
           }
 
           if (isMountedRef.current) {
@@ -958,10 +951,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.warn(`Upload verification failed, but continuing: ${message}`);
           // Don't fail the upload if verification fails, but log the warning
         }
-
-        // Final synchronization checkpoint before marking as uploaded
-        ailogger.info('Final upload synchronization checkpoint...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (isMountedRef.current) {
           setIsVerifying(false);
@@ -1119,7 +1108,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             setVerificationStep(1);
             setVerificationStatus('Finalizing database operations...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
 
             // Final mount check
             if (!isMountedRef.current) {
@@ -1273,10 +1261,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setVerificationStep(0);
         setVerificationStatus('Preparing processing verification...');
 
-        // Synchronization checkpoint: Ensure all batch operations are complete
-        ailogger.info('Processing verification checkpoint: Ensuring all batch operations are synchronized...');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Longer pause for batch synchronization
-
         // Verify that all batches were processed successfully
         try {
           setVerificationStep(1);
@@ -1307,9 +1291,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus(`Processing verification error: ${message}`);
           ailogger.warn(`Processing verification error: ${message}`);
         }
-
-        // Synchronization checkpoint before collapser
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Check if component is still mounted before collapser
         if (!isMountedRef.current) {
@@ -1350,11 +1331,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setVerificationStatus('Data consolidation completed successfully');
           ailogger.info('Collapser completed successfully:', collapserData);
 
-          // Additional settling time to ensure database operations complete
           setVerificationStep(3);
-          setVerificationStatus('Finalizing database operations...');
-          ailogger.info('Allowing 2 seconds for database operations to settle...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
 
           // Session-Based Verification: Verify each uploaded file AFTER collapser has moved data to coremeasurements
           if (isMountedRef.current) {
@@ -1436,10 +1413,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ailogger.error(`Collapser error: ${message}`);
           throw collapserError instanceof Error ? collapserError : new Error(message);
         }
-
-        // Final processing synchronization checkpoint
-        ailogger.info('Final processing synchronization checkpoint...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Final mount check before completing
         if (!isMountedRef.current) {
