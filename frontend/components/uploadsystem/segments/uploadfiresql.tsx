@@ -5,7 +5,7 @@ import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacro
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
-import Papa, { parse, ParseResult } from 'papaparse';
+import Papa, { ParseResult } from 'papaparse';
 import moment from 'moment';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
@@ -199,26 +199,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     [currentPlot?.plotID, currentCensus?.dateRanges, schema, fetchWithTimeout]
   );
 
-  // Usage: Count total chunks using the SAME delimiter that will be used for actual parsing
-  const countTotalChunks = useCallback(
-    (file: File, delimiter: string): Promise<number> => {
-      return new Promise((resolve, reject) => {
-        let chunkCount = 0;
-
-        parse<File>(file, {
-          worker: true,
-          header: true,
-          skipEmptyLines: true,
-          chunkSize: chunkSize,
-          delimiter: delimiter, // CRITICAL: Use same delimiter as actual parsing
-          chunk: () => (chunkCount += 1),
-          complete: () => resolve(chunkCount),
-          error: err => reject(err)
-        });
-      });
-    },
-    [chunkSize]
-  );
+  const estimateChunkCount = useCallback((file: File): number => Math.max(1, Math.ceil(file.size / chunkSize)), [chunkSize]);
 
   // Unified ETA calculator for overall progress (0-100%)
   // Uses lower alpha for smoother estimates across all stages
@@ -425,11 +406,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const parseFileInChunks = useCallback(
-    async (file: File, delimiter: string) => {
+    async (file: File, delimiter: string, estimatedChunkCount: number) => {
       queue.clear();
       const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
       const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
       const parsingInvalidRows: FileRow[] = [];
+      const parsingDiagnostics = {
+        extraColumnRows: 0,
+        extraColumnSample: null as string | null,
+        invalidDateCount: 0,
+        invalidDateSamples: new Set<string>()
+      };
 
       if (!expectedHeaders || !requiredHeaders) {
         ailogger.error(`No headers defined for form type: ${uploadForm}`);
@@ -535,13 +522,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         const mappedHeader = headerMappings[normalizedHeader];
         if (mappedHeader) {
-          ailogger.info(`Header mapping: "${header}" -> "${mappedHeader}"`);
           return mappedHeader;
         }
 
         // If no mapping found, return normalized header (lowercase, no underscores/spaces/hyphens)
         // This ensures consistent key names for processPersonnel, processSpecies, etc.
-        ailogger.info(`Header normalized: "${header}" -> "${normalizedHeader}"`);
         return normalizedHeader;
       };
       const validateRow = (row: FileRow): boolean => {
@@ -557,11 +542,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         if (row['__parsed_extra'] !== undefined) {
-          // Log warning but don't reject row - extra columns are common when re-uploading
-          // exported data that includes reference columns like stemID, treeID, errors
-          ailogger.warn(
-            `Row has extra columns (will be ignored): "${row['__parsed_extra']}". ` + `This is normal when re-uploading exported data with reference columns.`
-          );
+          // Extra columns are common when re-uploading exported data with
+          // reference columns like stemID, treeID, or errors. Track once per file
+          // instead of logging once per row.
+          parsingDiagnostics.extraColumnRows += 1;
+          if (!parsingDiagnostics.extraColumnSample) {
+            parsingDiagnostics.extraColumnSample = JSON.stringify(row['__parsed_extra']);
+          }
           extraData = true;
         }
 
@@ -638,7 +625,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           for (const format of dateFormats) {
             const parsed = moment(value.trim(), format, true);
             if (parsed.isValid()) {
-              ailogger.info(`Date "${value}" parsed successfully with format "${format}"`);
               return parsed.toDate();
             }
           }
@@ -646,11 +632,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           // Try moment's flexible parsing as fallback
           const flexible = moment(value.trim());
           if (flexible.isValid()) {
-            ailogger.info(`Date "${value}" parsed with flexible format detection`);
             return flexible.toDate();
           }
 
-          ailogger.error(`Unable to parse date "${value}" with any known format`);
+          parsingDiagnostics.invalidDateCount += 1;
+          if (parsingDiagnostics.invalidDateSamples.size < 3) {
+            parsingDiagnostics.invalidDateSamples.add(value);
+          }
           return value; // Return original value if parsing fails
         }
 
@@ -659,11 +647,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           const numValue = parseFloat(value);
           if (!isNaN(numValue)) {
             // Round to 6 decimal places for coordinate precision
-            const rounded = Math.round(numValue * 1000000) / 1000000;
-            if (rounded !== numValue) {
-              ailogger.info(`Coordinate ${field} value ${numValue} rounded to ${rounded} for precision`);
-            }
-            return rounded;
+            return Math.round(numValue * 1000000) / 1000000;
           }
         }
 
@@ -672,11 +656,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           const numValue = parseFloat(value);
           if (!isNaN(numValue)) {
             // Round to 2 decimal places for measurement precision
-            const rounded = Math.round(numValue * 100) / 100;
-            if (rounded !== numValue) {
-              ailogger.info(`Measurement ${field} value ${numValue} rounded to ${rounded} for precision`);
-            }
-            return rounded;
+            return Math.round(numValue * 100) / 100;
           }
         }
 
@@ -684,6 +664,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       };
 
       let totalRows = 0;
+      let actualChunkCount = 0;
 
       await new Promise<void>((resolve, reject) => {
         Papa.parse<FileRow>(file, {
@@ -694,6 +675,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           transformHeader,
           transform,
           async chunk(results: ParseResult<FileRow>, parser) {
+            actualChunkCount += 1;
             totalRows += results.data.length;
             try {
               if (queue.size >= connectionLimit * 2) {
@@ -763,11 +745,32 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await queue.onEmpty();
             // Wait for all database operations to complete
             await waitForAllOperationsToComplete();
+
+            if (actualChunkCount !== estimatedChunkCount && isMountedRef.current) {
+              const delta = actualChunkCount - estimatedChunkCount;
+              setTotalChunks(prev => Math.max(actualChunkCount, prev + delta));
+              ailogger.info(`Adjusted chunk estimate for ${file.name}: estimated ${estimatedChunkCount}, actual ${actualChunkCount}`);
+            }
+
             ailogger.info(`All database operations completed for ${file.name}`);
             if (parsingInvalidRows.length > 0) {
               ailogger.warn(`Found ${parsingInvalidRows.length} invalid rows from ${file.name}, pushing directly to failedmeasurements table`);
               // Push error rows directly to failedmeasurements table instead of storing in component state
               await pushErrorRowsToFailedMeasurements(parsingInvalidRows, file.name);
+            }
+
+            if (parsingDiagnostics.extraColumnRows > 0) {
+              ailogger.warn(
+                `Ignored extra columns in ${parsingDiagnostics.extraColumnRows} row(s) from ${file.name}` +
+                  (parsingDiagnostics.extraColumnSample ? `. Example payload: ${parsingDiagnostics.extraColumnSample}` : '')
+              );
+            }
+
+            if (parsingDiagnostics.invalidDateCount > 0) {
+              ailogger.warn(
+                `Encountered ${parsingDiagnostics.invalidDateCount} unrecognized date value(s) in ${file.name}` +
+                  (parsingDiagnostics.invalidDateSamples.size > 0 ? `. Sample values: ${Array.from(parsingDiagnostics.invalidDateSamples).join(', ')}` : '')
+              );
             }
 
             // Store expected row count for end-to-end verification
@@ -802,8 +805,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       queue,
       connectionLimit,
       chunkSize,
+      isMountedRef,
       uploadToSql,
       setCompletedChunks,
+      setTotalChunks,
       pushErrorRowsToFailedMeasurements,
       waitForAllOperationsToComplete
     ]
@@ -849,9 +854,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         const totalOps = acceptedFiles.length;
         setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
 
-        // CRITICAL FIX: Detect delimiters FIRST, then count chunks and parse
-        // This ensures chunk count matches actual parsing
+        // Detect delimiters first so the real parser uses the expected format.
         const fileDelimiters: Map<string, string> = new Map();
+        const estimatedChunkCounts: Map<string, number> = new Map();
 
         // Step 1: Detect delimiters for all files
         for (const file of acceptedFiles) {
@@ -886,18 +891,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           fileDelimiters.set(file.name, delimiter);
         }
 
-        // Step 2: Count chunks using the SAME delimiters that will be used for parsing
+        // Step 2: Estimate chunk counts from file size. The real parser adjusts
+        // the total if PapaParse produces a different number of chunks.
         for (const file of acceptedFiles) {
-          const delimiter = fileDelimiters.get(file.name)!;
-          const count = await countTotalChunks(file as File, delimiter);
-          ailogger.info(`File ${file.name}: Counted ${count} chunks with delimiter "${delimiter}"`);
-          setTotalChunks(prev => prev + count);
+          const estimatedCount = estimateChunkCount(file as File);
+          estimatedChunkCounts.set(file.name, estimatedCount);
+          ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${file.size} bytes`);
+          setTotalChunks(prev => prev + estimatedCount);
         }
 
         // Step 3: Parse files using the detected delimiters
         for (const file of acceptedFiles) {
           const delimiter = fileDelimiters.get(file.name)!;
-          await parseFileInChunks(file as File, delimiter);
+          const estimatedCount = estimatedChunkCounts.get(file.name) ?? 1;
+          await parseFileInChunks(file as File, delimiter, estimatedCount);
           setCompletedOperations(prev => prev + 1);
         }
         await queue.onEmpty();

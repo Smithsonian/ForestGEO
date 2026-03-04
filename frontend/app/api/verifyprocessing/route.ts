@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
   // Validate schema to prevent SQL injection
   let tempSQL: string, processedSQL: string, failedSQL: string;
   let tempParams: (string | number)[];
+  let processedParams: (string | number)[];
   let failedParams: (string | number)[];
 
   try {
@@ -32,6 +33,11 @@ export async function GET(request: NextRequest) {
     if (fileId) {
       tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
       tempParams = [plotID, censusID, fileId];
+      processedSQL = safeFormatQuery(
+        schema,
+        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.UploadFileID = ? AND cm.StemGUID IS NOT NULL'
+      );
+      processedParams = [plotID, censusID, fileId];
       failedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
@@ -50,6 +56,11 @@ export async function GET(request: NextRequest) {
     } else {
       tempSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
       tempParams = [plotID, censusID];
+      processedSQL = safeFormatQuery(
+        schema,
+        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL'
+      );
+      processedParams = [plotID, censusID];
       failedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
@@ -65,13 +76,6 @@ export async function GET(request: NextRequest) {
       );
       failedParams = [plotID, censusID];
     }
-
-    // coremeasurements doesn't have FileID, so we always get cumulative count
-    // This is acceptable since processed rows are the "successful" count
-    processedSQL = safeFormatQuery(
-      schema,
-      'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL'
-    );
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifyprocessing: ${schema}`);
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
@@ -84,7 +88,7 @@ export async function GET(request: NextRequest) {
     const tempResult = await connectionManager.executeQuery(tempSQL, tempParams);
 
     // Check how many rows were processed into the main measurements table
-    const processedResult = await connectionManager.executeQuery(processedSQL, [plotID, censusID]);
+    const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
 
     // Check how many rows currently have unresolved ingestion errors.
     const failedResult = await connectionManager.executeQuery(failedSQL, [...failedParams, INGESTION_ERROR_SOURCE]);

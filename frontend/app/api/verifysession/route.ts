@@ -56,10 +56,12 @@ export async function GET(request: NextRequest) {
   // Build queries based on scope
   let processedSQL: string, failedSQL: string;
   let processedParams: any[], failedParams: any[];
+  let processedFallbackSQL: string | null = null;
+  let processedFallbackParams: any[] = [];
 
   try {
     if (scope === 'batch') {
-      // Query specific batch using indexed UploadFileID/UploadBatchID (fallback to JSON for legacy rows)
+      // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -67,10 +69,23 @@ export async function GET(request: NextRequest) {
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
          AND cm.StemGUID IS NOT NULL
-         AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))
-         AND (cm.UploadBatchID = ? OR (cm.UploadBatchID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?))`
+         AND cm.UploadFileID = ?
+         AND cm.UploadBatchID = ?`
       );
-      processedParams = [plotID, censusID, fileID, fileID, batchID, batchID];
+      processedParams = [plotID, censusID, fileID, batchID];
+      processedFallbackSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID IS NULL
+         AND cm.UploadBatchID IS NULL
+         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?
+         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?`
+      );
+      processedFallbackParams = [plotID, censusID, fileID, batchID];
 
       failedSQL = safeFormatQuery(
         schema,
@@ -89,7 +104,7 @@ export async function GET(request: NextRequest) {
       );
       failedParams = [plotID, censusID, fileID, batchID, INGESTION_ERROR_SOURCE];
     } else if (scope === 'file') {
-      // Query all batches for a specific file (prefer UploadFileID, fallback to JSON)
+      // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -97,9 +112,20 @@ export async function GET(request: NextRequest) {
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
          AND cm.StemGUID IS NOT NULL
-         AND (cm.UploadFileID = ? OR (cm.UploadFileID IS NULL AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?))`
+         AND cm.UploadFileID = ?`
       );
-      processedParams = [plotID, censusID, fileID, fileID];
+      processedParams = [plotID, censusID, fileID];
+      processedFallbackSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID IS NULL
+         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?`
+      );
+      processedFallbackParams = [plotID, censusID, fileID];
 
       failedSQL = safeFormatQuery(
         schema,
@@ -151,7 +177,16 @@ export async function GET(request: NextRequest) {
     const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
     const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
 
-    const processedCount = processedResult[0]?.count || 0;
+    let processedCount = processedResult[0]?.count || 0;
+    if (processedCount === 0 && processedFallbackSQL) {
+      const processedFallbackResult = await connectionManager.executeQuery(processedFallbackSQL, processedFallbackParams);
+      processedCount = processedFallbackResult[0]?.count || 0;
+      if (processedCount > 0) {
+        ailogger.info(
+          `Session verification [${scope}] fell back to legacy uploadSession JSON fields for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}`
+        );
+      }
+    }
     const failedCount = failedResult[0]?.count || 0;
     const totalAccounted = processedCount + failedCount;
 
