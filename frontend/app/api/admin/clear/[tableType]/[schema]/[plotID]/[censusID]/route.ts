@@ -111,13 +111,16 @@ export async function DELETE(
         `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
          FROM ??.coremeasurements cm
          JOIN ??.census c ON c.CensusID = cm.CensusID
-         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
-           AND mel.IsResolved = FALSE
-           AND me.ErrorSource = ?`,
+           AND EXISTS (
+             SELECT 1
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = cm.CoreMeasurementID
+               AND me.ErrorSource = ?
+           )`,
         [schema, schema, schema, schema]
       );
       countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
@@ -126,13 +129,16 @@ export async function DELETE(
         `DELETE cm
          FROM ??.coremeasurements cm
          JOIN ??.census c ON c.CensusID = cm.CensusID
-         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
-           AND mel.IsResolved = FALSE
-           AND me.ErrorSource = ?`,
+           AND EXISTS (
+             SELECT 1
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = cm.CoreMeasurementID
+               AND me.ErrorSource = ?
+           )`,
         [schema, schema, schema, schema]
       );
       deleteParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
@@ -246,13 +252,16 @@ export async function GET(
         `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
          FROM ??.coremeasurements cm
          JOIN ??.census c ON c.CensusID = cm.CensusID
-         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
-           AND mel.IsResolved = FALSE
-           AND me.ErrorSource = ?`,
+           AND EXISTS (
+             SELECT 1
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = cm.CoreMeasurementID
+               AND me.ErrorSource = ?
+           )`,
         [schema, schema, schema, schema]
       );
       countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];

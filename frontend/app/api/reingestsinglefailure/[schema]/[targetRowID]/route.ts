@@ -58,26 +58,15 @@ export async function GET(
          cm.RawComments
        FROM ??.coremeasurements cm
        JOIN ??.census c ON c.CensusID = cm.CensusID
-       JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-       JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
        WHERE cm.CoreMeasurementID = ?
          AND cm.StemGUID IS NULL
-         AND mel.IsResolved = FALSE
-         AND me.ErrorSource = ?
-       GROUP BY
-         c.PlotID,
-         cm.CensusID,
-         cm.RawTreeTag,
-         cm.RawStemTag,
-         cm.RawSpCode,
-         cm.RawQuadrat,
-         cm.RawX,
-         cm.RawY,
-         cm.MeasuredDBH,
-         cm.MeasuredHOM,
-         cm.MeasurementDate,
-         cm.RawCodes,
-         cm.RawComments`
+         AND EXISTS (
+           SELECT 1
+           FROM ??.measurement_error_log mel
+           JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+           WHERE mel.MeasurementID = cm.CoreMeasurementID
+             AND me.ErrorSource = ?
+         )`
     );
     bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
     resolveIngestionSQL = safeFormatQuery(
@@ -163,7 +152,7 @@ export async function GET(
     if (!shiftResult?.affectedRows) {
       await connectionManager.rollbackTransaction(transactionID);
       return new NextResponse(
-        JSON.stringify({ error: `No unresolved ingestion row found for CoreMeasurementID ${targetMeasurementID}` }),
+        JSON.stringify({ error: `No failed measurement row found for CoreMeasurementID ${targetMeasurementID}` }),
         { status: HTTPResponses.NOT_FOUND }
       );
     }

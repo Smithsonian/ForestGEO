@@ -86,7 +86,7 @@ async function validateAndExtractParams(
   return { schema, plotID, censusID };
 }
 
-async function getUnresolvedIngestionRows(
+async function getFailedMeasurementRows(
   connectionManager: any,
   schema: string,
   plotID: number,
@@ -112,13 +112,16 @@ async function getUnresolvedIngestionRows(
        cm.RawComments
      FROM ??.coremeasurements cm
      JOIN ??.census c ON c.CensusID = cm.CensusID
-     JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
      WHERE c.PlotID = ?
        AND cm.CensusID = ?
        AND cm.StemGUID IS NULL
-       AND mel.IsResolved = FALSE
-       AND me.ErrorSource = ?
+       AND EXISTS (
+         SELECT 1
+         FROM ??.measurement_error_log mel
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE mel.MeasurementID = cm.CoreMeasurementID
+           AND me.ErrorSource = ?
+       )
      ORDER BY cm.CoreMeasurementID`
   );
 
@@ -126,7 +129,7 @@ async function getUnresolvedIngestionRows(
 }
 
 /**
- * Move unresolved ingestion rows into temporarymeasurements for reprocessing.
+ * Move failed measurement rows into temporarymeasurements for reprocessing.
  * Rows are intentionally retained in coremeasurements until reconciliation succeeds.
  */
 async function moveFailedToTemporary(
@@ -138,7 +141,7 @@ async function moveFailedToTemporary(
 ): Promise<MoveFailedRowsResult> {
   validateSchemaOrThrow(schema);
 
-  const sourceRows = await getUnresolvedIngestionRows(connectionManager, schema, plotID, censusID, transactionID);
+  const sourceRows = await getFailedMeasurementRows(connectionManager, schema, plotID, censusID, transactionID);
   if (sourceRows.length === 0) {
     return { totalRows: 0, fileID: 'reingestion.csv', batchID: generateShortBatchID(), rowMappings: [] };
   }
@@ -370,7 +373,7 @@ export async function POST(
     if (totalRows === 0) {
       return new NextResponse(
         JSON.stringify({
-          responseMessage: 'No unresolved ingestion-error rows found to reingest',
+          responseMessage: 'No failed measurement rows found to reingest',
           rowsMoved: 0
         }),
         { status: HTTPResponses.OK }

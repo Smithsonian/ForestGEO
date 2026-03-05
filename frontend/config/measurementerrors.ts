@@ -74,11 +74,16 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
     codes.push('SQL_EXCEPTION');
   }
 
-  return codes;
+  return Array.from(new Set(codes));
 }
 
 export function getIngestionErrorMessage(code: string, fallback?: string | null): string {
   return INGESTION_ERROR_MESSAGES[code] || fallback || 'Ingestion error';
+}
+
+interface MeasurementErrorInput {
+  errorCode: string;
+  errorMessage: string;
 }
 
 export async function ensureMeasurementErrorDefinition(
@@ -124,6 +129,60 @@ function normalizeDate(date?: string | Date | null): string | null {
   return null;
 }
 
+export async function resolveMeasurementErrors(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  source: 'ingestion' | 'validation',
+  transactionID?: string
+): Promise<void> {
+  const resolveSQL = safeFormatQuery(
+    schema,
+    `UPDATE ??.measurement_error_log mel
+     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+     SET mel.IsResolved = TRUE,
+         mel.ResolvedAt = NOW()
+     WHERE mel.MeasurementID = ?
+       AND me.ErrorSource = ?
+       AND mel.IsResolved = FALSE`
+  );
+
+  await connectionManager.executeQuery(resolveSQL, [measurementID, source], transactionID);
+}
+
+export async function upsertMeasurementErrors(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  source: 'ingestion' | 'validation',
+  errors: MeasurementErrorInput[],
+  transactionID?: string,
+  errorIDCache: Map<string, number> = new Map<string, number>()
+): Promise<void> {
+  if (errors.length === 0) return;
+
+  const linkSQL = safeFormatQuery(
+    schema,
+    `INSERT INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved, CreatedAt, ResolvedAt)
+     VALUES (?, ?, FALSE, NOW(), NULL)
+     ON DUPLICATE KEY UPDATE
+       IsResolved = FALSE,
+       CreatedAt = VALUES(CreatedAt),
+       ResolvedAt = NULL`
+  );
+
+  for (const { errorCode, errorMessage } of errors) {
+    const cacheKey = `${source}:${errorCode}`;
+    let errorID = errorIDCache.get(cacheKey);
+    if (!errorID) {
+      errorID = await ensureMeasurementErrorDefinition(connectionManager, schema, source, errorCode, errorMessage, transactionID);
+      errorIDCache.set(cacheKey, errorID);
+    }
+
+    await connectionManager.executeQuery(linkSQL, [measurementID, errorID], transactionID);
+  }
+}
+
 export async function insertIngestionFailureRows(
   connectionManager: ConnectionManager,
   schema: string,
@@ -158,8 +217,6 @@ export async function insertIngestionFailureRows(
        RawComments = VALUES(RawComments),
        IsValidated = FALSE`
   );
-  const linkSQL = safeFormatQuery(schema, 'INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)');
-
   for (const [index, row] of rows.entries()) {
     const normalizedDate = normalizeDate(row.date);
     const sourceRowIndex = row.sourceRowIndex ?? index + 1;
@@ -191,22 +248,18 @@ export async function insertIngestionFailureRows(
     }
     insertedIDs.push(measurementID);
 
-    const code = inferIngestionErrorCode(row.failureReason);
-    const cacheKey = `${INGESTION_ERROR_SOURCE}:${code}`;
-    let errorID = errorIDCache.get(cacheKey);
-    if (!errorID) {
-      errorID = await ensureMeasurementErrorDefinition(
-        connectionManager,
-        schema,
-        INGESTION_ERROR_SOURCE,
-        code,
-        getIngestionErrorMessage(code, row.failureReason),
-        transactionID
-      );
-      errorIDCache.set(cacheKey, errorID);
-    }
-
-    await connectionManager.executeQuery(linkSQL, [measurementID, errorID], transactionID);
+    await upsertMeasurementErrors(
+      connectionManager,
+      schema,
+      measurementID,
+      INGESTION_ERROR_SOURCE,
+      inferAllIngestionErrorCodes(row.failureReason).map(code => ({
+        errorCode: code,
+        errorMessage: getIngestionErrorMessage(code, row.failureReason)
+      })),
+      transactionID,
+      errorIDCache
+    );
   }
 
   return insertedIDs;
@@ -338,63 +391,80 @@ export async function revalidateEditedFailedRow(
   return errors;
 }
 
+export async function refreshIngestionErrorsForMeasurement(
+  connectionManager: ConnectionManager,
+  schema: string,
+  measurementID: number,
+  censusID: number,
+  fields: FailedRowFields,
+  transactionID?: string
+): Promise<RevalidationResult[]> {
+  const validationErrors = await revalidateEditedFailedRow(connectionManager, schema, censusID, fields, transactionID);
+
+  await resolveMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, transactionID);
+  await upsertMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, validationErrors, transactionID);
+
+  return validationErrors;
+}
+
 export function buildFailedMeasurementsBaseQuery(schema: string): string {
   return `
     FROM ${schema}.coremeasurements cm
     JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-    JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-    JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
     WHERE cm.StemGUID IS NULL
-      AND me.ErrorSource = 'ingestion'
-      AND mel.IsResolved = FALSE
+      AND EXISTS (
+        SELECT 1
+        FROM ${schema}.measurement_error_log mel_exists
+        JOIN ${schema}.measurement_errors me_exists ON me_exists.ErrorID = mel_exists.ErrorID
+        WHERE mel_exists.MeasurementID = cm.CoreMeasurementID
+          AND me_exists.ErrorSource = 'ingestion'
+      )
   `;
 }
 
 export function buildFailedMeasurementsSelectQuery(schema: string): string {
   return `
     SELECT
-      cm.CoreMeasurementID AS FailedMeasurementID,
-      c.PlotID AS PlotID,
-      cm.CensusID AS CensusID,
-      cm.RawTreeTag AS Tag,
-      cm.RawStemTag AS StemTag,
-      cm.RawSpCode AS SpCode,
-      cm.RawQuadrat AS Quadrat,
-      cm.RawX AS X,
-      cm.RawY AS Y,
-      cm.MeasuredDBH AS DBH,
-      cm.MeasuredHOM AS HOM,
-      cm.MeasurementDate AS Date,
-      cm.RawCodes AS Codes,
-      cm.RawComments AS Comments,
-      (SELECT GROUP_CONCAT(DISTINCT me_all.ErrorMessage ORDER BY me_all.ErrorCode SEPARATOR '; ')
-       FROM ${schema}.measurement_error_log mel_all
-       JOIN ${schema}.measurement_errors me_all ON me_all.ErrorID = mel_all.ErrorID
-       WHERE mel_all.MeasurementID = cm.CoreMeasurementID
-         AND me_all.ErrorSource = 'ingestion'
-      ) AS OriginalFailureReasons,
-      (SELECT GROUP_CONCAT(DISTINCT me_cur.ErrorMessage ORDER BY me_cur.ErrorCode SEPARATOR '; ')
-       FROM ${schema}.measurement_error_log mel_cur
-       JOIN ${schema}.measurement_errors me_cur ON me_cur.ErrorID = mel_cur.ErrorID
-       WHERE mel_cur.MeasurementID = cm.CoreMeasurementID
-         AND me_cur.ErrorSource = 'ingestion'
-         AND mel_cur.IsResolved = FALSE
-      ) AS CurrentFailureReasons,
-      (SELECT GROUP_CONCAT(DISTINCT me_cur2.ErrorMessage ORDER BY me_cur2.ErrorCode SEPARATOR '; ')
-       FROM ${schema}.measurement_error_log mel_cur2
-       JOIN ${schema}.measurement_errors me_cur2 ON me_cur2.ErrorID = mel_cur2.ErrorID
-       WHERE mel_cur2.MeasurementID = cm.CoreMeasurementID
-         AND me_cur2.ErrorSource = 'ingestion'
-         AND mel_cur2.IsResolved = FALSE
-      ) AS FailureReasons,
-      MAX(mel.CreatedAt) AS LastValidatedAt,
-      cm.UploadFileID AS FileID,
-      cm.UploadBatchID AS BatchID
-    ${buildFailedMeasurementsBaseQuery(schema)}
-    GROUP BY
-      cm.CoreMeasurementID, c.PlotID, cm.CensusID,
-      cm.RawTreeTag, cm.RawStemTag, cm.RawSpCode, cm.RawQuadrat,
-      cm.RawX, cm.RawY, cm.MeasuredDBH, cm.MeasuredHOM, cm.MeasurementDate,
-      cm.RawCodes, cm.RawComments, cm.UploadFileID, cm.UploadBatchID
+      fm.*,
+      COALESCE(fm.CurrentFailureReasons, 'Ready for reingestion') AS FailureReasons
+    FROM (
+      SELECT
+        cm.CoreMeasurementID AS FailedMeasurementID,
+        c.PlotID AS PlotID,
+        cm.CensusID AS CensusID,
+        cm.RawTreeTag AS Tag,
+        cm.RawStemTag AS StemTag,
+        cm.RawSpCode AS SpCode,
+        cm.RawQuadrat AS Quadrat,
+        cm.RawX AS X,
+        cm.RawY AS Y,
+        cm.MeasuredDBH AS DBH,
+        cm.MeasuredHOM AS HOM,
+        cm.MeasurementDate AS Date,
+        cm.RawCodes AS Codes,
+        cm.RawComments AS Comments,
+        (SELECT GROUP_CONCAT(DISTINCT me_all.ErrorMessage ORDER BY me_all.ErrorCode SEPARATOR '; ')
+         FROM ${schema}.measurement_error_log mel_all
+         JOIN ${schema}.measurement_errors me_all ON me_all.ErrorID = mel_all.ErrorID
+         WHERE mel_all.MeasurementID = cm.CoreMeasurementID
+           AND me_all.ErrorSource = 'ingestion'
+        ) AS OriginalFailureReasons,
+        (SELECT GROUP_CONCAT(DISTINCT me_cur.ErrorMessage ORDER BY me_cur.ErrorCode SEPARATOR '; ')
+         FROM ${schema}.measurement_error_log mel_cur
+         JOIN ${schema}.measurement_errors me_cur ON me_cur.ErrorID = mel_cur.ErrorID
+         WHERE mel_cur.MeasurementID = cm.CoreMeasurementID
+           AND me_cur.ErrorSource = 'ingestion'
+           AND mel_cur.IsResolved = FALSE
+        ) AS CurrentFailureReasons,
+        (SELECT MAX(COALESCE(mel_any.ResolvedAt, mel_any.CreatedAt))
+         FROM ${schema}.measurement_error_log mel_any
+         JOIN ${schema}.measurement_errors me_any ON me_any.ErrorID = mel_any.ErrorID
+         WHERE mel_any.MeasurementID = cm.CoreMeasurementID
+           AND me_any.ErrorSource = 'ingestion'
+        ) AS LastValidatedAt,
+        cm.UploadFileID AS FileID,
+        cm.UploadBatchID AS BatchID
+      ${buildFailedMeasurementsBaseQuery(schema)}
+    ) fm
   `;
 }

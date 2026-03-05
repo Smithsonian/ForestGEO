@@ -16,6 +16,7 @@ import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
 import { useUploadSession } from '@/app/hooks/useuploadsession';
 import { ETACalculator, formatTimeRemaining, createTransactionAwareQueue } from '@/components/uploadsystemhelpers/uploadprocessingutils';
+import { generateShortBatchID } from '@/config/utils';
 
 /**
  * UploadFireSQL Component
@@ -278,7 +279,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, processed, calculateOverallProgressValue, completedChunks, processedChunks, verificationStep]);
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string, _retryCount = 0) => {
+    async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
       const maxRetries = 3;
       const baseDelay = 1000; // 1 second base delay
       const operationId = `${fileName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -302,7 +303,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 plot: currentPlot,
                 census: currentCensus,
                 user: session?.user?.name ?? null,
-                fileRowSet: fileData[fileName]
+                fileRowSet: fileData[fileName],
+                ...(batchID ? { batchID } : {})
               })
             },
             300000
@@ -406,7 +408,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   const parseFileInChunks = useCallback(
-    async (file: File, delimiter: string, estimatedChunkCount: number) => {
+    async (file: File, delimiter: string, estimatedChunkCount: number, fileBatchID?: string) => {
       queue.clear();
       const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
       const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
@@ -720,7 +722,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
               queue.add(async () => {
                 try {
-                  await uploadToSql(fileCollectionRowSet, file.name);
+                  await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
                 } catch (error: unknown) {
                   const errorObj = error instanceof Error ? error : new Error(String(error));
                   ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
@@ -901,10 +903,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         // Step 3: Parse files using the detected delimiters
+        // For measurement uploads, generate one BatchID per file so all chunks share
+        // the same batch. This lets bulkingestionprocess run once per file instead of
+        // once per chunk, eliminating redundant setup/teardown overhead.
         for (const file of acceptedFiles) {
           const delimiter = fileDelimiters.get(file.name)!;
           const estimatedCount = estimatedChunkCounts.get(file.name) ?? 1;
-          await parseFileInChunks(file as File, delimiter, estimatedCount);
+          const fileBatchID = uploadForm === FormType.measurements ? generateShortBatchID() : undefined;
+          if (fileBatchID) {
+            ailogger.info(`File ${file.name}: Using consolidated BatchID ${fileBatchID} for all chunks`);
+          }
+          await parseFileInChunks(file as File, delimiter, estimatedCount, fileBatchID);
           setCompletedOperations(prev => prev + 1);
         }
         await queue.onEmpty();
@@ -1163,7 +1172,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               fetchWithTimeout(
                 `/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`,
                 { method: 'GET' },
-                480000 // 8 minute timeout to match backend enhancement
+                900000 // 15 minute timeout to match backend for consolidated single-batch-per-file processing
               )
                 .then(async response => {
                   if (!response.ok) {

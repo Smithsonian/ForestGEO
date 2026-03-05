@@ -306,11 +306,20 @@ export const failureErrorMapping: Record<string, string[]> = {
   'Invalid LocalY': ['y'],
   'Missing measurement data': ['dbh', 'hom', 'codes'],
   'Invalid quadrat name': ['quadrat'],
+  'Invalid quadrat reference': ['quadrat'],
   'Invalid species code': ['spCode'],
+  'Invalid species reference': ['spCode'],
   'Duplicate entry': ['tag', 'stemTag', 'quadrat', 'date'],
+  'Duplicate measurement row detected': ['tag', 'stemTag', 'quadrat', 'date'],
   'Quadrat mismatch': ['quadrat'],
+  'Quadrat mismatch across censuses': ['quadrat'],
   'Coordinate drift': ['x', 'y'],
-  'SQL Exception': ['tag']
+  'Coordinate drift exceeds allowed threshold': ['x', 'y'],
+  'Coordinate value is negative': ['x', 'y'],
+  'DBH must be non-negative': ['dbh'],
+  'HOM must be non-negative': ['hom'],
+  'SQL Exception': ['tag'],
+  'Ingestion SQL exception': ['tag']
 };
 
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {

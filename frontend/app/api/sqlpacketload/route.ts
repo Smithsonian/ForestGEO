@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
     // falsely classify unique chunks as duplicates. We now always ingest the chunk
     // and rely on downstream dedupe + explicit dropped-row tracking.
 
-    const batchID = generateShortBatchID();
+    const batchID = body.batchID || generateShortBatchID();
     const placeholders = Object.values(fileRowSet ?? [])
       .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .join(', ');
@@ -144,13 +144,19 @@ export async function POST(request: NextRequest) {
           [schema]
         );
 
+        // Count rows BEFORE insert so we can measure the delta (important when
+        // multiple chunks share a single BatchID under batch consolidation).
+        const expectedRowCount = Object.keys(fileRowSet ?? {}).length;
+        const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
+        const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
+        const preInsertCount = preInsertResult[0]?.count || 0;
+
         await connectionManager.executeQuery(insertSQL, values, transactionID);
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
-        const expectedRowCount = Object.keys(fileRowSet ?? {}).length;
-        const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
-        const countResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
-        const actualInsertedCount = countResult[0]?.count || 0;
+        const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
+        const postInsertCount = postInsertResult[0]?.count || 0;
+        const actualInsertedCount = postInsertCount - preInsertCount;
 
         // Check for discrepancy - this would indicate INSERT IGNORE silently dropped rows
         const droppedRowCount = expectedRowCount - actualInsertedCount;

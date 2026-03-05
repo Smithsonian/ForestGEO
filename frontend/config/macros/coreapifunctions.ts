@@ -10,14 +10,7 @@ import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinit
 import { getCookie } from '@/app/actions/cookiemanager';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ailogger from '@/ailogger';
-import {
-  INGESTION_ERROR_SOURCE,
-  ensureMeasurementErrorDefinition,
-  getIngestionErrorMessage,
-  inferIngestionErrorCode,
-  insertIngestionFailureRows,
-  revalidateEditedFailedRow
-} from '@/config/measurementerrors';
+import { insertIngestionFailureRows, refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -291,20 +284,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             failedMeasurementID
           ]);
 
-          // Clear all existing ingestion errors before revalidation
-          const clearIngestionErrorQuery = format(
-            `DELETE mel
-             FROM ??.measurement_error_log mel
-             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-             WHERE mel.MeasurementID = ? AND me.ErrorSource = ?`,
-            [schema, schema]
-          );
-          await connectionManager.executeQuery(clearIngestionErrorQuery, [failedMeasurementID, INGESTION_ERROR_SOURCE], transactionID);
-
-          // Revalidate ALL checks against the edited field values (not text-inferred)
-          const validationErrors = await revalidateEditedFailedRow(
+          // Revalidate the edited row and refresh current ingestion errors
+          // without destroying the row's historical error trail.
+          const validationErrors = await refreshIngestionErrorsForMeasurement(
             connectionManager,
             schema,
+            failedMeasurementID,
             censusID,
             {
               Tag: failedTrimmed['Tag'],
@@ -321,18 +306,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             },
             transactionID
           );
-
-          // Insert ALL applicable error codes into the error log
-          for (const { errorCode, errorMessage } of validationErrors) {
-            const errorID = await ensureMeasurementErrorDefinition(
-              connectionManager, schema, INGESTION_ERROR_SOURCE, errorCode, errorMessage, transactionID
-            );
-            const insertErrorLogQuery = format(
-              'INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)',
-              [schema]
-            );
-            await connectionManager.executeQuery(insertErrorLogQuery, [failedMeasurementID, errorID], transactionID);
-          }
 
           // Update Description with concatenated current failure reasons
           if (validationErrors.length > 0) {

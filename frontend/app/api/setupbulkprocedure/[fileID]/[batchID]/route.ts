@@ -132,7 +132,7 @@ export async function GET(
             };
           }
         },
-        { timeoutMs: 8 * 60 * 1000 } // Increased to 8 minutes for large datasets
+        { timeoutMs: 15 * 60 * 1000 } // 15 minutes for consolidated single-batch-per-file processing
       );
 
       const duration = Date.now() - startTime;

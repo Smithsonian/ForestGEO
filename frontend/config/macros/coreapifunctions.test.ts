@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PATCH, POST, DELETE } from './coreapifunctions';
 import ConnectionManager from '@/config/connectionmanager';
 import MapperFactory from '@/config/datamapper';
+import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 
 // Mock dependencies
 vi.mock('@/config/connectionmanager');
@@ -35,6 +36,10 @@ vi.mock('@/config/utils', () => ({
     return changes;
   }),
   handleUpsert: vi.fn(() => Promise.resolve({ id: 123, operation: 'inserted' }))
+}));
+vi.mock('@/config/measurementerrors', () => ({
+  insertIngestionFailureRows: vi.fn(() => Promise.resolve([1])),
+  refreshIngestionErrorsForMeasurement: vi.fn(() => Promise.resolve([]))
 }));
 
 describe('CoreAPIFunctions', () => {
@@ -444,7 +449,7 @@ describe('CoreAPIFunctions', () => {
 
   describe('PRIMARY_KEY_MAP Logic', () => {
     describe('PATCH with PRIMARY_KEY_MAP', () => {
-      it('should use FailedMeasurementID for failedmeasurements dataType', async () => {
+      it('should use FailedMeasurementID input while updating the failed coremeasurement row', async () => {
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'PATCH',
           body: JSON.stringify({
@@ -466,10 +471,75 @@ describe('CoreAPIFunctions', () => {
         expect(response.status).toBe(200);
         expect(mockConnectionManager.executeQuery).toHaveBeenCalled();
 
-        // Verify the query uses FailedMeasurementID, not '1' as column name
         const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall).toBeDefined();
-        expect(updateCall[0]).toMatch(/FailedMeasurementID/i);
+        expect(updateCall[0]).toMatch(/CoreMeasurementID/i);
+        expect(updateCall[1]).toContain(1);
+      });
+
+      it('refreshes failedmeasurement errors without deleting historical log rows', async () => {
+        const refreshMock = refreshIngestionErrorsForMeasurement as ReturnType<typeof vi.fn>;
+        refreshMock.mockResolvedValueOnce([{ errorCode: 'INVALID_SPECIES', errorMessage: 'Invalid species reference' }]);
+
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: {
+              FailedMeasurementID: 5,
+              Tag: 'TREE-5',
+              StemTag: '1',
+              SpCode: 'BAD',
+              Quadrat: 'Q01',
+              Date: '2025-01-01',
+              Comments: 'reviewed'
+            },
+            oldRow: {
+              FailedMeasurementID: 5,
+              Tag: 'TREE-5',
+              StemTag: '1',
+              SpCode: 'OLD',
+              Quadrat: 'Q01',
+              Date: '2025-01-01',
+              Comments: 'original'
+            }
+          })
+        });
+
+        mockMapper.demapData.mockReturnValue([
+          {
+            FailedMeasurementID: 5,
+            Tag: 'TREE-5',
+            StemTag: '1',
+            SpCode: 'BAD',
+            Quadrat: 'Q01',
+            Date: '2025-01-01',
+            Comments: 'reviewed'
+          }
+        ]);
+
+        const response = await PATCH(mockRequest, {
+          params: Promise.resolve({ dataType: 'failedmeasurements', slugs: ['forestgeo_panama', '5'] })
+        });
+
+        expect(response.status).toBe(200);
+        expect(refreshMock).toHaveBeenCalledWith(
+          mockConnectionManager,
+          'forestgeo_panama',
+          5,
+          1,
+          expect.objectContaining({
+            Tag: 'TREE-5',
+            StemTag: '1',
+            SpCode: 'BAD',
+            Quadrat: 'Q01'
+          }),
+          'transaction-123'
+        );
+
+        const deleteHistoryCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+          typeof call[0] === 'string' && call[0].includes('DELETE mel') && call[0].includes('measurement_error_log')
+        );
+        expect(deleteHistoryCall).toBeUndefined();
       });
 
       it('should use CoreMeasurementID for coremeasurements dataType', async () => {
@@ -550,7 +620,7 @@ describe('CoreAPIFunctions', () => {
     });
 
     describe('DELETE with PRIMARY_KEY_MAP', () => {
-      it('should use correct primary key for failedmeasurements delete', async () => {
+      it('should use FailedMeasurementID input while deleting the failed coremeasurement row', async () => {
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'DELETE',
           body: JSON.stringify({ newRow: { FailedMeasurementID: 5 } })
@@ -569,7 +639,8 @@ describe('CoreAPIFunctions', () => {
         expect(response.status).toBe(200);
 
         const deleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('DELETE'));
-        expect(deleteCall[0]).toMatch(/FailedMeasurementID/i);
+        expect(deleteCall[0]).toMatch(/CoreMeasurementID/i);
+        expect(deleteCall[1]).toEqual([5]);
       });
 
       it('should use StemGUID for stems delete', async () => {

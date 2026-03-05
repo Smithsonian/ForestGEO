@@ -80,6 +80,11 @@ describe('reingestsinglefailure API route', () => {
     expect(body.message).toBe('Success');
 
     const calls = mockConnectionManager.executeQuery.mock.calls;
+    const shiftCall = calls.find((call: any[]) => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('temporarymeasurements'));
+    expect(shiftCall).toBeDefined();
+    expect(String(shiftCall?.[0])).toContain('EXISTS (');
+    expect(String(shiftCall?.[0])).not.toContain('mel.IsResolved = FALSE');
+
     const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
     expect(syncCall).toBeDefined();
     expect(String(syncCall?.[0])).not.toContain('orig.UploadFileID');

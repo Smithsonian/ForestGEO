@@ -7,11 +7,13 @@ vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
+  const acquireApplicationLock = vi.fn();
   const withTransaction = vi.fn(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
   const instance = {
     executeQuery,
     closeConnection,
     cleanupStaleTransactions,
+    acquireApplicationLock,
     withTransaction
   };
   return {
@@ -81,6 +83,7 @@ describe('reingest API routes', () => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
     mockConnectionManager.cleanupStaleTransactions.mockResolvedValue(undefined);
+    mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
     mockConnectionManager.withTransaction.mockImplementation(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
 
@@ -116,6 +119,10 @@ describe('reingest API routes', () => {
 
       expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
       expect(mockConnectionManager.closeConnection).toHaveBeenCalledTimes(1);
+
+      const selectCall = mockConnectionManager.executeQuery.mock.calls[0];
+      expect(String(selectCall[0])).toContain('EXISTS (');
+      expect(String(selectCall[0])).not.toContain('mel.IsResolved = FALSE');
     });
 
     it('returns 200 with rowsMoved=0 when no unresolved rows exist', async () => {
@@ -127,7 +134,7 @@ describe('reingest API routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.rowsMoved).toBe(0);
-      expect(body.responseMessage).toMatch(/No unresolved ingestion-error rows/i);
+      expect(body.responseMessage).toMatch(/No failed measurement rows/i);
     });
   });
 
@@ -169,7 +176,7 @@ describe('reingest API routes', () => {
       expect(String(syncCall?.[0])).not.toContain('orig.UploadBatchID');
       expect(String(syncCall?.[0])).not.toContain('orig.SourceRowIndex');
 
-      expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(2); // stage + reconcile
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
     });
 
     it('returns 200 with 0 processed when no unresolved rows exist', async () => {
