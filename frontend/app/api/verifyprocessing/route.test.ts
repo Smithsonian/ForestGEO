@@ -41,7 +41,8 @@ describe('verifyprocessing route', () => {
     mockExecuteQuery
       .mockResolvedValueOnce([{ count: 3 }])
       .mockResolvedValueOnce([{ count: 7 }])
-      .mockResolvedValueOnce([{ count: 1 }]);
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }]);
 
     const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'));
 
@@ -52,10 +53,39 @@ describe('verifyprocessing route', () => {
       remainingCount: 3,
       totalAccounted: 8,
       filteredByUpload: true,
-      fileId: 'file-a.csv'
+      fileId: 'file-a.csv',
+      legacyRowsDetected: false,
+      mixedMetadataState: false
     });
 
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(3);
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(4);
     expect(String(mockExecuteQuery.mock.calls[1][0])).toContain('cm.UploadFileID = ?');
+    expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('cm.UploadFileID IS NULL');
+  });
+
+  it('includes legacy JSON-only rows when file-scoped metadata is mixed', async () => {
+    mockExecuteQuery
+      .mockResolvedValueOnce([{ count: 3 }])
+      .mockResolvedValueOnce([{ count: 7 }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 2 }])
+      .mockResolvedValueOnce([{ count: 4 }]);
+
+    const response = await GET(makeRequest('http://localhost/api/verifyprocessing?schema=myschema&plotID=1&censusID=2&fileId=file-a.csv'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      processedCount: 11,
+      failedCount: 1,
+      remainingCount: 3,
+      totalAccounted: 12,
+      filteredByUpload: true,
+      fileId: 'file-a.csv',
+      legacyRowsDetected: true,
+      mixedMetadataState: true
+    });
+
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(5);
+    expect(String(mockExecuteQuery.mock.calls[4][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
   });
 });

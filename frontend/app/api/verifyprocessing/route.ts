@@ -26,6 +26,10 @@ export async function GET(request: NextRequest) {
   let tempParams: (string | number)[];
   let processedParams: (string | number)[];
   let failedParams: (string | number)[];
+  let legacyProbeSQL: string | null = null;
+  let legacyProbeParams: (string | number)[] = [];
+  let legacyProcessedSQL: string | null = null;
+  let legacyProcessedParams: (string | number)[] = [];
 
   try {
     // If fileId is provided, filter temporarymeasurements and unresolved ingestion errors by it.
@@ -38,6 +42,23 @@ export async function GET(request: NextRequest) {
         'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.UploadFileID = ? AND cm.StemGUID IS NOT NULL'
       );
       processedParams = [plotID, censusID, fileId];
+      legacyProbeSQL = safeFormatQuery(
+        schema,
+        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL AND cm.UploadFileID IS NULL'
+      );
+      legacyProbeParams = [plotID, censusID];
+      legacyProcessedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NOT NULL
+           AND cm.UploadFileID IS NULL
+           AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?`
+      );
+      legacyProcessedParams = [plotID, censusID, fileId];
       failedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
@@ -93,13 +114,32 @@ export async function GET(request: NextRequest) {
     // Check how many rows currently have unresolved ingestion errors.
     const failedResult = await connectionManager.executeQuery(failedSQL, [...failedParams, INGESTION_ERROR_SOURCE]);
 
+    let processedLegacyCount = 0;
+    if (legacyProbeSQL && legacyProcessedSQL) {
+      const legacyProbeResult = await connectionManager.executeQuery(legacyProbeSQL, legacyProbeParams);
+      const legacyCandidateCount = legacyProbeResult[0]?.count || 0;
+      if (legacyCandidateCount > 0) {
+        const legacyProcessedResult = await connectionManager.executeQuery(legacyProcessedSQL, legacyProcessedParams);
+        processedLegacyCount = legacyProcessedResult[0]?.count || 0;
+      }
+    }
+
     const remainingCount = tempResult[0]?.count || 0;
-    const processedCount = processedResult[0]?.count || 0;
+    const processedDirectCount = processedResult[0]?.count || 0;
+    const processedCount = processedDirectCount + processedLegacyCount;
     const failedCount = failedResult[0]?.count || 0;
+    const legacyRowsDetected = processedLegacyCount > 0;
+    const mixedMetadataState = processedDirectCount > 0 && processedLegacyCount > 0;
 
     // Total accounted for = processed + failed (remaining in temp should be 0)
     const totalAccounted = processedCount + failedCount;
     const filteringByFile = !!fileId;
+
+    if (legacyRowsDetected) {
+      ailogger.warn(
+        `Processing verification counted ${processedLegacyCount} legacy uploadSession JSON row(s) for Plot ${plotID}, Census ${censusID}${fileId ? ` (FileID: ${fileId})` : ''}`
+      );
+    }
 
     ailogger.info(
       `Processing verification for Plot ${plotID}, Census ${censusID}${fileId ? ` (FileID: ${fileId})` : ''}: ` +
@@ -119,6 +159,8 @@ export async function GET(request: NextRequest) {
         schema,
         fileId: fileId || null,
         filteredByUpload: filteringByFile,
+        legacyRowsDetected,
+        mixedMetadataState,
         processingComplete: remainingCount === 0
       }),
       { status: HTTPResponses.OK }

@@ -392,8 +392,14 @@ class ConnectionManager {
       }, timeoutMs);
     });
 
+    // Capture the fn promise so we can handle its rejection if a timeout fires.
+    // Without this, the orphaned fn promise produces an unhandled rejection that
+    // can crash the Node.js process when it eventually fails (e.g. "No connection
+    // found for transaction" after the connection was released by rollback).
+    const fnPromise = fn(transactionId!);
+
     try {
-      const result = (await Promise.race([fn(transactionId!), timeoutPromise])) as T;
+      const result = (await Promise.race([fnPromise, timeoutPromise])) as T;
       // success path
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
@@ -422,6 +428,15 @@ class ConnectionManager {
       } catch (rbErr: unknown) {
         ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
+
+      // After rollback, the fn callback may still be in-flight. Its subsequent
+      // executeQuery calls will fail with "No connection found" because the
+      // connection was released during rollback. Swallow that eventual rejection
+      // to prevent an unhandled promise rejection crash.
+      fnPromise.catch((fnErr: unknown) => {
+        ailogger.warn(`Post-rollback callback error for transaction ${transactionId!} (expected): ${getErrorMessage(fnErr)}`);
+      });
+
       this.transactionMeta.delete(transactionId!);
       throw err;
     }

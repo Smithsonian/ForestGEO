@@ -702,6 +702,59 @@ export async function seedMeasurementErrors(connection: mysql.Connection): Promi
 }
 
 /**
+ * Backfills UploadFileID and UploadBatchID from legacy uploadSession JSON.
+ *
+ * Tests that seed legacy successful rows can call this helper before exercising
+ * verification or retry flows that now treat the direct upload tracking
+ * columns as canonical.
+ */
+export async function backfillLegacyUploadTrackingColumns(
+  connection: mysql.Connection
+): Promise<{
+  backfilledRows: number;
+  remainingRowsWithMetadataGaps: number;
+  conflictingRows: number;
+}> {
+  const [updateResult] = await connection.query<mysql.ResultSetHeader>(`
+    UPDATE coremeasurements
+    SET UploadFileID = COALESCE(
+          UploadFileID,
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.fileID')), 'null')
+        ),
+        UploadBatchID = COALESCE(
+          UploadBatchID,
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.batchID')), 'null')
+        )
+    WHERE JSON_EXTRACT(UserDefinedFields, '$.uploadSession') IS NOT NULL
+      AND (UploadFileID IS NULL OR UploadBatchID IS NULL)
+  `);
+
+  const [remainingRows] = await connection.query<mysql.RowDataPacket[]>(`
+    SELECT COUNT(*) AS count
+    FROM coremeasurements
+    WHERE JSON_EXTRACT(UserDefinedFields, '$.uploadSession') IS NOT NULL
+      AND (UploadFileID IS NULL OR UploadBatchID IS NULL)
+  `);
+
+  const [conflictingRows] = await connection.query<mysql.RowDataPacket[]>(`
+    SELECT COUNT(*) AS count
+    FROM coremeasurements
+    WHERE JSON_EXTRACT(UserDefinedFields, '$.uploadSession') IS NOT NULL
+      AND (
+        (UploadFileID IS NOT NULL AND UploadFileID <> NULLIF(JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.fileID')), 'null'))
+        OR
+        (UploadBatchID IS NOT NULL AND UploadBatchID <> NULLIF(JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.uploadSession.batchID')), 'null'))
+      )
+  `);
+
+  return {
+    backfilledRows: updateResult.affectedRows,
+    remainingRowsWithMetadataGaps: Number(remainingRows[0]?.count || 0),
+    conflictingRows: Number(conflictingRows[0]?.count || 0)
+  };
+}
+
+/**
  * Complete setup of test database with schema, procedures, and data.
  * Ensures cleanup on any failure during setup to prevent resource leaks.
  */

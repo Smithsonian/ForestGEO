@@ -1179,6 +1179,7 @@ BEGIN
         ('ingestion', 'DUPLICATE_ENTRY',             'Duplicate measurement row detected'),
         ('ingestion', 'NEGATIVE_DBH',                'DBH must be non-negative'),
         ('ingestion', 'NEGATIVE_HOM',                'HOM must be non-negative'),
+        ('ingestion', 'INVALID_COORDINATE',          'Coordinate value is negative'),
         ('ingestion', 'FIELD_TOO_LONG',              'One or more fields exceed column length limits'),
         ('ingestion', 'MISSING_MEASUREMENT_DATA',    'Missing measurement data'),
         ('ingestion', 'SQL_EXCEPTION',               'Ingestion SQL exception');
@@ -1224,6 +1225,25 @@ BEGIN
         SET @disable_triggers = 0;
         SELECT CONCAT('Batch ', vBatchID, ' already processed, skipped') as message, FALSE as batch_failed;
         LEAVE main_proc;
+    END IF;
+
+    -- If a prior run crashed mid-execution, uploadmetrics has status='processing'
+    -- and coremeasurements may have partial rows from that attempt. Clean up the
+    -- stale state so the retry can proceed cleanly instead of silently dropping
+    -- all rows via INSERT IGNORE on the ux_cm_uploadbatch_rowindex unique constraint.
+    IF EXISTS (
+        SELECT 1 FROM uploadmetrics
+        WHERE batchID = vBatchID
+          AND censusID = vCurrentCensusID
+          AND status = 'processing'
+        LIMIT 1
+    ) THEN
+        -- Remove partial coremeasurements from the crashed run
+        DELETE FROM coremeasurements
+        WHERE UploadBatchID = vBatchID AND UploadFileID = vFileID;
+        -- Reset uploadmetrics so the fresh INSERT below succeeds
+        DELETE FROM uploadmetrics
+        WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status = 'processing';
     END IF;
 
     -- Initialize metrics
@@ -1322,8 +1342,8 @@ BEGIN
             OR (me.ErrorCode = 'MISSING_FIELD_SPECIESCODE' AND vf.FailureReason LIKE '%Missing required field: SpeciesCode%')
             OR (me.ErrorCode = 'MISSING_FIELD_QUADRATNAME' AND vf.FailureReason LIKE '%Missing required field: QuadratName%')
             OR (me.ErrorCode = 'MISSING_FIELD_DATE'       AND vf.FailureReason LIKE '%Missing required field: MeasurementDate%')
-            OR (me.ErrorCode = 'MISSING_MEASUREMENT_DATA' AND (vf.FailureReason LIKE '%Missing measurement data%'
-                                                               OR vf.FailureReason LIKE '%Invalid Local%'))
+            OR (me.ErrorCode = 'MISSING_MEASUREMENT_DATA' AND vf.FailureReason LIKE '%Missing measurement data%')
+            OR (me.ErrorCode = 'INVALID_COORDINATE'       AND vf.FailureReason LIKE '%Invalid Local%')
             OR (me.ErrorCode = 'FIELD_TOO_LONG'           AND vf.FailureReason LIKE '%exceeds maximum length%')
             OR (me.ErrorCode = 'NEGATIVE_DBH'             AND vf.FailureReason LIKE '%Invalid DBH%')
             OR (me.ErrorCode = 'NEGATIVE_HOM'             AND vf.FailureReason LIKE '%Invalid HOM%')
@@ -1836,6 +1856,7 @@ BEGIN
             SELECT 1 FROM coremeasurements cm_check
             WHERE cm_check.StemGUID = s.StemGUID
               AND cm_check.CensusID = f.CensusID
+              AND cm_check.UploadFileID = vFileID
               AND cm_check.UploadBatchID = vBatchID
         )
     );
@@ -1877,6 +1898,7 @@ BEGIN
         SELECT 1 FROM coremeasurements cm_check
         WHERE cm_check.StemGUID = s.StemGUID
           AND cm_check.CensusID = f.CensusID
+          AND cm_check.UploadFileID = vFileID
           AND cm_check.UploadBatchID = vBatchID
     );
 
@@ -1970,6 +1992,7 @@ BEGIN
             AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
         INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
             AND cm.CensusID = f.CensusID AND cm.IsActive = 1
+            AND cm.UploadFileID = vFileID
             AND cm.UploadBatchID = vBatchID,
         json_table(
             if(f.Codes = '' or trim(f.Codes) = '', '[]',
@@ -2025,6 +2048,7 @@ BEGIN
     INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
+      AND cm.UploadFileID = vFileID
       AND cm.UploadBatchID = vBatchID;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
@@ -2076,6 +2100,7 @@ BEGIN
     INNER JOIN idf_first_occurrence fo ON t.TreeTag = fo.TreeTag
     WHERE cm.CensusID = vCurrentCensusID
       AND cm.IsActive = 1
+      AND cm.UploadFileID = vFileID
       AND cm.UploadBatchID = vBatchID
       AND sp.SpeciesCode != fo.SpeciesCode;
 
@@ -2124,6 +2149,7 @@ BEGIN
         JOIN stems s ON cm.StemGUID = s.StemGUID AND s.IsActive = 1
         JOIN trees t ON s.TreeID = t.TreeID AND t.IsActive = 1
     WHERE cm.CensusID = vCurrentCensusID
+      AND cm.UploadFileID = vFileID
       AND cm.UploadBatchID = vBatchID
       AND cm.MeasurementDate IS NOT NULL
       AND cm.MeasuredDBH IS NOT NULL
@@ -2146,6 +2172,7 @@ BEGIN
            vBatchRowCount, vProcessedCount, 0, 0
     FROM coremeasurements cm
     WHERE cm.CensusID = vCurrentCensusID
+      AND cm.UploadFileID = vFileID
       AND cm.UploadBatchID = vBatchID
       AND cm.MeasurementDate > DATE_ADD(NOW(), INTERVAL 10 YEAR)
     HAVING COUNT(*) > 0;
@@ -2172,13 +2199,21 @@ BEGIN
         INNER JOIN stems s_curr ON curr.StemGUID = s_curr.StemGUID
         INNER JOIN stems s_prev ON s_curr.StemCrossID IS NOT NULL
             AND (s_prev.StemCrossID = s_curr.StemCrossID OR s_prev.StemGUID = s_curr.StemCrossID)
-            AND s_prev.CensusID < vCurrentCensusID
             AND s_prev.IsActive = 1
+            -- Only compare against the most recent prior census for this stem
+            AND s_prev.CensusID = (
+                SELECT MAX(sp2.CensusID)
+                FROM stems sp2
+                WHERE (sp2.StemCrossID = s_curr.StemCrossID OR sp2.StemGUID = s_curr.StemCrossID)
+                  AND sp2.CensusID < vCurrentCensusID
+                  AND sp2.IsActive = 1
+            )
         INNER JOIN coremeasurements prev_cm ON prev_cm.StemGUID = s_prev.StemGUID
             AND prev_cm.MeasurementDate < curr.MeasurementDate
             AND prev_cm.MeasuredDBH IS NOT NULL
             AND prev_cm.IsActive = 1
         WHERE curr.CensusID = vCurrentCensusID
+          AND curr.UploadFileID = vFileID
           AND curr.UploadBatchID = vBatchID
           AND curr.MeasuredDBH IS NOT NULL
           AND curr.MeasurementDate IS NOT NULL
@@ -2201,6 +2236,7 @@ BEGIN
         SELECT COUNT(*) FROM coremeasurements cm
         WHERE cm.CensusID = vCurrentCensusID
           AND cm.StemGUID IS NOT NULL
+          AND cm.UploadFileID = vFileID
           AND cm.UploadBatchID = vBatchID
     );
     SET @unaccounted = vBatchRowCount - @final_success - vDataLossCount;
@@ -2244,22 +2280,4 @@ END $$
 
 DELIMITER ;
 
--- Upload data loss report view (idempotent, safe to re-run)
--- Surfaces batches where rows are truly unaccounted for after ingestion.
-CREATE OR REPLACE VIEW uploaddatalossreport AS
-SELECT
-    um.fileID           AS FileID,
-    um.batchID          AS BatchID,
-    um.plotID           AS PlotID,
-    um.censusID         AS CensusID,
-    um.sourceRecords    AS SourceRecords,
-    um.processedRecords AS ProcessedRecords,
-    um.failedRecords    AS FailedRecords,
-    um.missingRecords   AS MissingRecords,
-    um.status           AS Status,
-    um.errorMessage     AS ErrorMessage,
-    um.startTime        AS StartTime,
-    um.endTime          AS EndTime
-FROM uploadmetrics um
-WHERE um.status IN ('completed', 'failed')
-  AND um.missingRecords > 0;
+-- uploaddatalossreport view is defined in tablestructures.sql (canonical location for views)

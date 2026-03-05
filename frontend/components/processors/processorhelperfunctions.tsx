@@ -297,7 +297,9 @@ export async function runValidation(
       attempt++;
       transactionID = await connectionManager.beginTransaction();
 
-      const validationErrorID = await ensureMeasurementErrorDefinition(
+      // Ensure the error definition exists in the catalog before the validation
+      // SQL's subquery attempts to look it up by ErrorCode.
+      await ensureMeasurementErrorDefinition(
         connectionManager,
         schema,
         VALIDATION_ERROR_SOURCE,
@@ -334,7 +336,7 @@ export async function runValidation(
       const formattedCursorQuery = cursorQuery
         .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
         .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        .replace(/@validationProcedureID/g, validationErrorID.toString())
+        .replace(/@validationProcedureID/g, validationProcedureID.toString())
         .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
         .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`) // Process BEFORE species
         .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)

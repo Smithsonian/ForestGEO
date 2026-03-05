@@ -56,8 +56,10 @@ export async function GET(request: NextRequest) {
   // Build queries based on scope
   let processedSQL: string, failedSQL: string;
   let processedParams: any[], failedParams: any[];
-  let processedFallbackSQL: string | null = null;
-  let processedFallbackParams: any[] = [];
+  let legacyProbeSQL: string | null = null;
+  let legacyProbeParams: any[] = [];
+  let legacyProcessedSQL: string | null = null;
+  let legacyProcessedParams: any[] = [];
 
   try {
     if (scope === 'batch') {
@@ -73,19 +75,28 @@ export async function GET(request: NextRequest) {
          AND cm.UploadBatchID = ?`
       );
       processedParams = [plotID, censusID, fileID, batchID];
-      processedFallbackSQL = safeFormatQuery(
+      legacyProbeSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
          AND cm.StemGUID IS NOT NULL
-         AND cm.UploadFileID IS NULL
-         AND cm.UploadBatchID IS NULL
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?`
+         AND (cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL)`
       );
-      processedFallbackParams = [plotID, censusID, fileID, batchID];
+      legacyProbeParams = [plotID, censusID];
+      legacyProcessedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND (cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL)
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = ?`
+      );
+      legacyProcessedParams = [plotID, censusID, fileID, batchID];
 
       failedSQL = safeFormatQuery(
         schema,
@@ -115,7 +126,17 @@ export async function GET(request: NextRequest) {
          AND cm.UploadFileID = ?`
       );
       processedParams = [plotID, censusID, fileID];
-      processedFallbackSQL = safeFormatQuery(
+      legacyProbeSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID IS NULL`
+      );
+      legacyProbeParams = [plotID, censusID];
+      legacyProcessedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
@@ -123,9 +144,9 @@ export async function GET(request: NextRequest) {
          AND cm.CensusID = ?
          AND cm.StemGUID IS NOT NULL
          AND cm.UploadFileID IS NULL
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?`
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?`
       );
-      processedFallbackParams = [plotID, censusID, fileID];
+      legacyProcessedParams = [plotID, censusID, fileID];
 
       failedSQL = safeFormatQuery(
         schema,
@@ -177,18 +198,28 @@ export async function GET(request: NextRequest) {
     const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
     const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
 
-    let processedCount = processedResult[0]?.count || 0;
-    if (processedCount === 0 && processedFallbackSQL) {
-      const processedFallbackResult = await connectionManager.executeQuery(processedFallbackSQL, processedFallbackParams);
-      processedCount = processedFallbackResult[0]?.count || 0;
-      if (processedCount > 0) {
-        ailogger.info(
-          `Session verification [${scope}] fell back to legacy uploadSession JSON fields for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}`
-        );
+    const processedDirectCount = processedResult[0]?.count || 0;
+    let processedLegacyCount = 0;
+    if (legacyProbeSQL && legacyProcessedSQL) {
+      const legacyProbeResult = await connectionManager.executeQuery(legacyProbeSQL, legacyProbeParams);
+      const legacyCandidateCount = legacyProbeResult[0]?.count || 0;
+      if (legacyCandidateCount > 0) {
+        const legacyProcessedResult = await connectionManager.executeQuery(legacyProcessedSQL, legacyProcessedParams);
+        processedLegacyCount = legacyProcessedResult[0]?.count || 0;
       }
     }
+
+    const processedCount = processedDirectCount + processedLegacyCount;
     const failedCount = failedResult[0]?.count || 0;
     const totalAccounted = processedCount + failedCount;
+    const legacyRowsDetected = processedLegacyCount > 0;
+    const mixedMetadataState = processedDirectCount > 0 && processedLegacyCount > 0;
+
+    if (legacyRowsDetected) {
+      ailogger.warn(
+        `Session verification [${scope}] counted ${processedLegacyCount} legacy uploadSession JSON row(s) for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}`
+      );
+    }
 
     ailogger.info(
       `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} unresolved ingestion-error rows. Total: ${totalAccounted}`
@@ -203,7 +234,9 @@ export async function GET(request: NextRequest) {
         censusID,
         fileID: fileID || null,
         batchID: batchID || null,
-        scope
+        scope,
+        legacyRowsDetected,
+        mixedMetadataState
       }),
       { status: HTTPResponses.OK }
     );

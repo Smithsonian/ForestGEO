@@ -426,8 +426,16 @@ export async function GET(
 
     // All three steps run in a single transaction for atomicity:
     // if any step fails, everything rolls back and originals remain untouched.
+    const lockKey = `reingest:${schema}:${plotID}:${censusID}`;
     const result = await connectionManager.withTransaction(
       async (transactionID: string) => {
+        // Acquire a distributed lock to prevent concurrent reingestion for the same plot/census.
+        // Without this, two concurrent requests can corrupt each other's staging data.
+        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, transactionID, REINGESTION_TIMEOUT_MS);
+        if (!lockAcquired) {
+          throw new Error(`Another reingestion is already in progress for ${schema} plot ${plotID} census ${censusID}`);
+        }
+
         // Step 1: Stage failed rows to temporarymeasurements
         const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(
           connectionManager, schema, plotID, censusID, transactionID
@@ -439,7 +447,27 @@ export async function GET(
 
         // Step 2: Run bulkingestionprocess within the same transaction
         const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-        await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
+        const procedureResult = await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
+
+        // If the SP's EXIT HANDLER caught an internal error, it has already written
+        // diagnostic rows (uploadmetrics, uploadintegrityalerts, coremeasurements
+        // failure rows). Skip reconciliation and let the transaction commit so those
+        // diagnostic writes are preserved rather than rolled back.
+        const batchFailed =
+          procedureResult &&
+          procedureResult[0] &&
+          (procedureResult[0].records_failed > 0 || procedureResult[0].batch_failed === true);
+
+        if (batchFailed) {
+          ailogger.warn(`Reingestion batch ${batchID} failed internally: ${procedureResult[0].message}`);
+          return {
+            totalRows,
+            successfulReingestions: 0,
+            remainingFailures: totalRows,
+            batchFailed: true,
+            failureMessage: procedureResult[0].message
+          };
+        }
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
         const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(
@@ -458,6 +486,20 @@ export async function GET(
           totalProcessed: 0,
           successfulReingestions: 0,
           remainingFailures: 0
+        }),
+        { status: HTTPResponses.OK }
+      );
+    }
+
+    if ('batchFailed' in result && result.batchFailed) {
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: 'Reingestion batch failed internally — diagnostics preserved',
+          totalProcessed: result.totalRows,
+          successfulReingestions: 0,
+          remainingFailures: result.remainingFailures,
+          batchFailed: true,
+          failureMessage: result.failureMessage
         }),
         { status: HTTPResponses.OK }
       );

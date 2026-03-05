@@ -38,6 +38,7 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   DUPLICATE_ENTRY: 'Duplicate measurement row detected',
   NEGATIVE_DBH: 'DBH must be non-negative',
   NEGATIVE_HOM: 'HOM must be non-negative',
+  INVALID_COORDINATE: 'Coordinate value is negative',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
   SQL_EXCEPTION: 'Ingestion SQL exception'
@@ -64,6 +65,7 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
   if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
   if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
+  if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
 
@@ -226,7 +228,17 @@ interface FailedRowFields {
   DBH?: number | null;
   HOM?: number | null;
   Date?: string | null;
+  Codes?: string | null;
+  Comments?: string | null;
 }
+
+const FIELD_LENGTH_LIMITS = {
+  TreeTag: 20,
+  StemTag: 10,
+  SpeciesCode: 25,
+  Comments: 255,
+  Codes: 255
+} as const;
 
 /**
  * Validates edited failed-row field values against all ingestion checks
@@ -260,6 +272,23 @@ export async function revalidateEditedFailedRow(
     errors.push({ errorCode: 'MISSING_FIELD_DATE', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_FIELD_DATE'] });
   }
 
+  // Field length checks (mirrors SP column-width validations)
+  if (fields.Tag && String(fields.Tag).length > FIELD_LENGTH_LIMITS.TreeTag) {
+    errors.push({ errorCode: 'FIELD_TOO_LONG', errorMessage: `TreeTag exceeds maximum length of ${FIELD_LENGTH_LIMITS.TreeTag} characters` });
+  }
+  if (fields.StemTag && String(fields.StemTag).length > FIELD_LENGTH_LIMITS.StemTag) {
+    errors.push({ errorCode: 'FIELD_TOO_LONG', errorMessage: `StemTag exceeds maximum length of ${FIELD_LENGTH_LIMITS.StemTag} characters` });
+  }
+  if (fields.SpCode && String(fields.SpCode).length > FIELD_LENGTH_LIMITS.SpeciesCode) {
+    errors.push({ errorCode: 'FIELD_TOO_LONG', errorMessage: `SpeciesCode exceeds maximum length of ${FIELD_LENGTH_LIMITS.SpeciesCode} characters` });
+  }
+  if (fields.Comments && String(fields.Comments).length > FIELD_LENGTH_LIMITS.Comments) {
+    errors.push({ errorCode: 'FIELD_TOO_LONG', errorMessage: `Comments exceed maximum length of ${FIELD_LENGTH_LIMITS.Comments} characters` });
+  }
+  if (fields.Codes && String(fields.Codes).length > FIELD_LENGTH_LIMITS.Codes) {
+    errors.push({ errorCode: 'FIELD_TOO_LONG', errorMessage: `Codes exceed maximum length of ${FIELD_LENGTH_LIMITS.Codes} characters` });
+  }
+
   // Numeric range checks
   if (fields.DBH != null && Number(fields.DBH) < 0) {
     errors.push({ errorCode: 'NEGATIVE_DBH', errorMessage: INGESTION_ERROR_MESSAGES['NEGATIVE_DBH'] });
@@ -267,7 +296,20 @@ export async function revalidateEditedFailedRow(
   if (fields.HOM != null && Number(fields.HOM) < 0) {
     errors.push({ errorCode: 'NEGATIVE_HOM', errorMessage: INGESTION_ERROR_MESSAGES['NEGATIVE_HOM'] });
   }
-  if (fields.DBH == null && fields.HOM == null) {
+
+  // Negative coordinate checks (mirrors SP: LocalX < 0, LocalY < 0)
+  if (fields.X != null && Number(fields.X) < 0) {
+    errors.push({ errorCode: 'INVALID_COORDINATE', errorMessage: `Invalid LocalX: ${fields.X} (must be >= 0 or NULL)` });
+  }
+  if (fields.Y != null && Number(fields.Y) < 0) {
+    errors.push({ errorCode: 'INVALID_COORDINATE', errorMessage: `Invalid LocalY: ${fields.Y} (must be >= 0 or NULL)` });
+  }
+
+  // Missing measurement data (mirrors SP: DBH=0 AND HOM=0 AND no codes)
+  const dbhEmpty = fields.DBH == null || Number(fields.DBH) === 0;
+  const homEmpty = fields.HOM == null || Number(fields.HOM) === 0;
+  const codesEmpty = !fields.Codes || String(fields.Codes).trim() === '';
+  if (dbhEmpty && homEmpty && codesEmpty) {
     errors.push({ errorCode: 'MISSING_MEASUREMENT_DATA', errorMessage: INGESTION_ERROR_MESSAGES['MISSING_MEASUREMENT_DATA'] });
   }
 

@@ -299,7 +299,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
              WHERE mel.MeasurementID = ? AND me.ErrorSource = ?`,
             [schema, schema]
           );
-          await connectionManager.executeQuery(clearIngestionErrorQuery, [failedMeasurementID, INGESTION_ERROR_SOURCE]);
+          await connectionManager.executeQuery(clearIngestionErrorQuery, [failedMeasurementID, INGESTION_ERROR_SOURCE], transactionID);
 
           // Revalidate ALL checks against the edited field values (not text-inferred)
           const validationErrors = await revalidateEditedFailedRow(
@@ -315,7 +315,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               Y: failedTrimmed['Y'],
               DBH: failedTrimmed['DBH'],
               HOM: failedTrimmed['HOM'],
-              Date: failedTrimmed['Date']
+              Date: failedTrimmed['Date'],
+              Codes: failedTrimmed['Codes'],
+              Comments: failedTrimmed['Comments']
             },
             transactionID
           );
@@ -329,7 +331,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               'INSERT IGNORE INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved) VALUES (?, ?, FALSE)',
               [schema]
             );
-            await connectionManager.executeQuery(insertErrorLogQuery, [failedMeasurementID, errorID]);
+            await connectionManager.executeQuery(insertErrorLogQuery, [failedMeasurementID, errorID], transactionID);
           }
 
           // Update Description with concatenated current failure reasons

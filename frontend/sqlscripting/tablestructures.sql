@@ -1,3 +1,7 @@
+-- Ensure consistent charset across all tables to prevent collation mismatch errors
+-- (e.g., when SP sets collation_connection = 'utf8mb4_0900_ai_ci' but tables use utf8mb3).
+ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
 create table if not exists attributes
 (
     Code        varchar(10)                                                                                     not null,
@@ -479,8 +483,7 @@ create table if not exists sitespecificvalidations
     Definition          text             null,
     ChangelogDefinition text             null,
     IsEnabled           bit default b'1' not null
-)
-    charset = utf8mb4;
+);
 
 create table if not exists species
 (
@@ -618,6 +621,9 @@ create index idx_tmpm_file_batch_census
 
 create index ingest_temporarymeasurements_FBPC_index
     on temporarymeasurements (FileID, BatchID, PlotID, CensusID);
+
+create index idx_tmpm_plot_census_file_batch
+    on temporarymeasurements (PlotID, CensusID, FileID, BatchID);
 
 create index temporarymeasurements_QuadratName_index
     on temporarymeasurements (QuadratName);
@@ -757,6 +763,12 @@ create index ix_cm_cid_date_dbh_hom
 
 create index idx_cm_uploadbatch_census
     on coremeasurements (UploadBatchID, CensusID);
+
+create index idx_cm_uploadfile_census_stem
+    on coremeasurements (UploadFileID, CensusID, StemGUID);
+
+create index idx_cm_uploadfile_batch_census_stem
+    on coremeasurements (UploadFileID, UploadBatchID, CensusID, StemGUID);
 
 create unique index ux_cm_uploadbatch_rowindex
     on coremeasurements (UploadBatchID, SourceRowIndex);

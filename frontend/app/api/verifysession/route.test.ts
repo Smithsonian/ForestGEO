@@ -38,7 +38,10 @@ describe('verifysession route', () => {
   });
 
   it('uses direct upload tracking columns on the fast path for file verification', async () => {
-    mockExecuteQuery.mockResolvedValueOnce([{ count: 5 }]).mockResolvedValueOnce([{ count: 2 }]);
+    mockExecuteQuery
+      .mockResolvedValueOnce([{ count: 5 }])
+      .mockResolvedValueOnce([{ count: 2 }])
+      .mockResolvedValueOnce([{ count: 0 }]);
 
     const response = await GET(makeRequest('http://localhost/api/verifysession?schema=myschema&plotID=1&censusID=2&fileID=file-a.csv'));
 
@@ -48,34 +51,41 @@ describe('verifysession route', () => {
       failedCount: 2,
       totalAccounted: 7,
       scope: 'file',
-      fileID: 'file-a.csv'
+      fileID: 'file-a.csv',
+      legacyRowsDetected: false,
+      mixedMetadataState: false
     });
 
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(2);
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(3);
     expect(String(mockExecuteQuery.mock.calls[0][0])).toContain('cm.UploadFileID = ?');
     expect(String(mockExecuteQuery.mock.calls[0][0])).not.toContain('JSON_EXTRACT');
+    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('cm.UploadFileID IS NULL');
   });
 
-  it('falls back to legacy uploadSession JSON fields only when direct matches are absent', async () => {
+  it('sums direct and legacy uploadSession JSON rows when metadata is mixed', async () => {
     mockExecuteQuery
-      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([{ count: 2 }])
       .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 4 }]);
+      .mockResolvedValueOnce([{ count: 4 }])
+      .mockResolvedValueOnce([{ count: 3 }]);
 
     const response = await GET(makeRequest('http://localhost/api/verifysession?schema=myschema&plotID=1&censusID=2&fileID=file-a.csv&batchID=batch-1'));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      processedCount: 4,
+      processedCount: 5,
       failedCount: 1,
-      totalAccounted: 5,
+      totalAccounted: 6,
       scope: 'batch',
       fileID: 'file-a.csv',
-      batchID: 'batch-1'
+      batchID: 'batch-1',
+      legacyRowsDetected: true,
+      mixedMetadataState: true
     });
 
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(3);
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(4);
     expect(String(mockExecuteQuery.mock.calls[0][0])).toContain('cm.UploadBatchID = ?');
-    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('JSON_EXTRACT');
+    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL');
+    expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
   });
 });

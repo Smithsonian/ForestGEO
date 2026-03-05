@@ -11,11 +11,13 @@ from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
          join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID <> cm_present.CensusID and cm_past.IsActive = 1
-         join census c_past on c_past.CensusID = cm_past.CensusID and c_past.IsActive = 1
+         join census c_past on c_past.PlotID = c_present.PlotID
+              and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+              and c_past.IsActive = 1
+         join coremeasurements cm_past on cm_past.CensusID = c_past.CensusID and cm_past.IsActive = 1
          join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
          join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
-         join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
+         join plots p ON c_present.PlotID = p.PlotID
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
          join attributes a_present on a_present.Code = cma_present.Code
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
@@ -23,7 +25,6 @@ from coremeasurements cm_present
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID and
                                   e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
-  and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
   and s_past.StemTag = s_present.StemTag
   and cm_present.IsActive = 1
@@ -52,8 +53,10 @@ from coremeasurements cm_present
          join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
          join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
          join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID <> cm_present.CensusID and cm_past.IsActive = 1
-         join census c_past on c_past.CensusID = cm_past.CensusID and c_past.IsActive = 1
+         join census c_past on c_past.PlotID = c_present.PlotID
+              and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+              and c_past.IsActive = 1
+         join coremeasurements cm_past on cm_past.CensusID = c_past.CensusID and cm_past.IsActive = 1
          join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
          join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
@@ -63,7 +66,6 @@ from coremeasurements cm_present
          left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID
               and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where c_past.PlotCensusNumber >= 1
-  and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and t_past.TreeTag = t_present.TreeTag
   and s_past.StemTag = s_present.StemTag
   and cm_present.IsActive = 1
@@ -91,7 +93,8 @@ where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.MeasurementID is null
-  and sp.SpeciesID is null;', '', true);
+  and sp.SpeciesID is null
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (4, 'ValidateFindDuplicatedQuadratsByName',
         'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)',
@@ -114,7 +117,8 @@ where cm.IsValidated is null
   and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
-  and e.MeasurementID is null;',
+  and e.MeasurementID is null
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
   '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus',
@@ -145,7 +149,8 @@ from coremeasurements cm
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
   '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
@@ -160,7 +165,8 @@ where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (cm.MeasurementDate < c.StartDate or cm.MeasurementDate > c.EndDate)
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies',
         'Flagged;Different species',
@@ -187,7 +193,8 @@ from coremeasurements cm
 where cm.IsValidated is null and cm.IsActive is true
     and e.MeasurementID is null
     and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-    and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+    and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
   '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
@@ -232,7 +239,8 @@ and NOT EXISTS (
     JOIN attributes a ON cma.Code = a.Code
     WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
     AND a.Status IN (''dead'', ''stem dead'')
-);', '', true);
+)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats',
         'Flagged;Flagged;Different quadrats',
@@ -257,7 +265,8 @@ from coremeasurements cm
 where cm.IsValidated is null and cm.IsActive is true
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
   '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
@@ -287,7 +296,8 @@ and (
     or (sl.UpperBound is not null and cm.MeasuredDBH > sl.UpperBound)
 )
 and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
+and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes', 'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
@@ -305,7 +315,8 @@ where cm.IsValidated is null and cm.IsActive is true
   and ((cm.MeasuredDBH is not null and cm.MeasuredDBH <> 0)
     or (cm.MeasuredHOM is not null and cm.MeasuredHOM <> 0))
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;
 ', '', false);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
@@ -324,7 +335,8 @@ where cm.IsValidated is null and cm.IsActive is true
   and ((cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
     or (cm.MeasuredHOM is null or cm.MeasuredHOM = 0))
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', false);
 
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
 VALUES (14, 'ValidateFindInvalidAttributeCodes',
@@ -343,7 +355,8 @@ where cm.IsValidated is null
   and a.Code is null  -- Attribute code doesn''t exist in attributes table
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
         '', true)
 ON DUPLICATE KEY UPDATE
     Description = VALUES(Description),
@@ -383,7 +396,8 @@ where cm.IsValidated is null
                             else 1 end)) >= 3500
   )
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
-  and (@p_PlotID is null or c.PlotID = @p_PlotID);',
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
         '', true)
 ON DUPLICATE KEY UPDATE
     Description = VALUES(Description),
