@@ -1153,7 +1153,7 @@ BEGIN
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-                old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
+                old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
                 stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
                 species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
@@ -1259,7 +1259,7 @@ BEGIN
     );
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-        old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
+        old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
         stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
@@ -1548,15 +1548,54 @@ BEGIN
                   WHERE t.TreeTag = f.TreeTag AND s.StemTag = f.StemTag
                     AND t.CensusID < f.CensusID AND t.IsActive = 1 AND s.IsActive = 1);
 
+    CREATE INDEX idx_old_trees_id ON old_trees (id);
+
     CREATE TEMPORARY TABLE multi_stems AS
     SELECT DISTINCT f.* FROM filtered f
     WHERE EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = f.TreeTag AND t.CensusID < f.CensusID AND t.IsActive = 1)
       AND NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id);
 
+    CREATE INDEX idx_multi_stems_id ON multi_stems (id);
+
     CREATE TEMPORARY TABLE new_recruits AS
     SELECT DISTINCT f.* FROM filtered f
     WHERE NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id)
       AND NOT EXISTS (SELECT 1 FROM multi_stems ms WHERE ms.id = f.id);
+
+    ALTER TABLE filtered ADD COLUMN tree_state VARCHAR(15) DEFAULT 'new recruit';
+
+    UPDATE filtered f
+    INNER JOIN old_trees ot ON ot.id = f.id
+    SET f.tree_state = 'old tree';
+
+    UPDATE filtered f
+    INNER JOIN multi_stems ms ON ms.id = f.id
+    SET f.tree_state = 'multi stem';
+
+    CREATE TEMPORARY TABLE prev_census_stems AS
+    SELECT t.TreeTag,
+           s.StemTag,
+           s.LocalX AS PrevX,
+           s.LocalY AS PrevY,
+           q.QuadratName AS PrevQuadratName
+    FROM stems s
+    INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+    INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
+    INNER JOIN (
+        SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) AS MaxCensusID
+        FROM trees t2
+        JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+        WHERE t2.CensusID < vCurrentCensusID
+          AND t2.IsActive = 1
+          AND s2.IsActive = 1
+        GROUP BY t2.TreeTag, s2.StemTag
+    ) max_census ON t.TreeTag = max_census.TreeTag
+        AND s.StemTag = max_census.StemTag
+        AND t.CensusID = max_census.MaxCensusID
+    WHERE t.IsActive = 1
+      AND s.IsActive = 1;
+
+    CREATE INDEX idx_prev_census_stems_tags ON prev_census_stems (TreeTag, StemTag);
 
     -- ================================================================
     -- CRITICAL CROSS-CENSUS VALIDATIONS
@@ -1568,8 +1607,8 @@ BEGIN
     -- NOTE: QuadratName is unique per PlotID, so we compare QuadratNames within same plot
     CREATE TEMPORARY TABLE quadrat_mismatch_failures AS
     SELECT DISTINCT f.id, f.QuadratName as CurrentQuadrat,
-           prev_stem.PrevQuadratName as PrevQuadrat,
-           CONCAT('Quadrat mismatch: Previous census quadrat was "', prev_stem.PrevQuadratName,
+           pcs.PrevQuadratName as PrevQuadrat,
+           CONCAT('Quadrat mismatch: Previous census quadrat was "', pcs.PrevQuadratName,
                   '", current is "', f.QuadratName,
                   '". Trees cannot change quadrats between censuses. ',
                   'Please verify TreeTag is correct or contact administrator if tree was genuinely moved.')
@@ -1578,40 +1617,22 @@ BEGIN
            f.QuadratName as Quadrat, f.LocalX as X, f.LocalY as Y, f.DBH, f.HOM,
            f.MeasurementDate as Date, f.Codes, f.Comments
     FROM old_trees f
-    INNER JOIN (
-        -- Get most recent previous census stem with quadrat name
-        SELECT t.TreeTag, s.StemTag, q.QuadratName as PrevQuadratName
-        FROM stems s
-        INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
-        INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
-        INNER JOIN (
-            SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) as MaxCensusID
-            FROM trees t2
-            JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
-            WHERE t2.CensusID < vCurrentCensusID
-              AND t2.IsActive = 1
-              AND s2.IsActive = 1
-            GROUP BY t2.TreeTag, s2.StemTag
-        ) max_census ON t.TreeTag = max_census.TreeTag
-            AND s.StemTag = max_census.StemTag
-            AND t.CensusID = max_census.MaxCensusID
-        WHERE t.IsActive = 1 AND s.IsActive = 1
-    ) prev_stem ON prev_stem.TreeTag = f.TreeTag
-        AND prev_stem.StemTag = f.StemTag
-    WHERE prev_stem.PrevQuadratName != f.QuadratName;
+    INNER JOIN prev_census_stems pcs ON pcs.TreeTag = f.TreeTag
+        AND pcs.StemTag = f.StemTag
+    WHERE pcs.PrevQuadratName != f.QuadratName;
 
     -- VALIDATION 2: Coordinate Drift Detection (HARD FAILURE)
     -- Flag coordinates that drift >10m within same quadrat
     -- NOTE: Compares stems with same QuadratName (quadrat names are unique per plot)
     CREATE TEMPORARY TABLE coordinate_drift_failures AS
     SELECT DISTINCT f.id,
-           prev_stem.PrevX, prev_stem.PrevY,
+           pcs.PrevX, pcs.PrevY,
            f.LocalX as CurrentX, f.LocalY as CurrentY,
-           ROUND(SQRT(POW(f.LocalX - prev_stem.PrevX, 2) + POW(f.LocalY - prev_stem.PrevY, 2)), 2) as DriftDistance,
+           ROUND(SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)), 2) as DriftDistance,
            CONCAT('Coordinate drift: ',
-                  ROUND(SQRT(POW(f.LocalX - prev_stem.PrevX, 2) + POW(f.LocalY - prev_stem.PrevY, 2)), 2),
+                  ROUND(SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)), 2),
                   'm from previous census (>10m threshold). ',
-                  'Previous: (', prev_stem.PrevX, ', ', prev_stem.PrevY, '), ',
+                  'Previous: (', pcs.PrevX, ', ', pcs.PrevY, '), ',
                   'Current: (', f.LocalX, ', ', f.LocalY, '). ',
                   'Please verify coordinates or mark as approved if tree genuinely moved.')
            as FailureReason,
@@ -1619,32 +1640,14 @@ BEGIN
            f.QuadratName as Quadrat, f.LocalX as X, f.LocalY as Y, f.DBH, f.HOM,
            f.MeasurementDate as Date, f.Codes, f.Comments
     FROM old_trees f
-    INNER JOIN (
-        -- Get most recent previous census stem with same quadrat name
-        SELECT t.TreeTag, s.StemTag, s.LocalX as PrevX, s.LocalY as PrevY, q.QuadratName as PrevQuadratName
-        FROM stems s
-        INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
-        INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
-        INNER JOIN (
-            SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) as MaxCensusID
-            FROM trees t2
-            JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
-            WHERE t2.CensusID < vCurrentCensusID
-              AND t2.IsActive = 1
-              AND s2.IsActive = 1
-              AND s2.LocalX IS NOT NULL
-              AND s2.LocalY IS NOT NULL
-            GROUP BY t2.TreeTag, s2.StemTag
-        ) max_census ON t.TreeTag = max_census.TreeTag
-            AND s.StemTag = max_census.StemTag
-            AND t.CensusID = max_census.MaxCensusID
-        WHERE t.IsActive = 1 AND s.IsActive = 1
-    ) prev_stem ON prev_stem.TreeTag = f.TreeTag
-        AND prev_stem.StemTag = f.StemTag
-        AND prev_stem.PrevQuadratName = f.QuadratName  -- Same quadrat NAME
+    INNER JOIN prev_census_stems pcs ON pcs.TreeTag = f.TreeTag
+        AND pcs.StemTag = f.StemTag
+        AND pcs.PrevQuadratName = f.QuadratName  -- Same quadrat NAME
     WHERE f.LocalX IS NOT NULL
       AND f.LocalY IS NOT NULL
-      AND SQRT(POW(f.LocalX - prev_stem.PrevX, 2) + POW(f.LocalY - prev_stem.PrevY, 2)) > 10.0;
+      AND pcs.PrevX IS NOT NULL
+      AND pcs.PrevY IS NOT NULL
+      AND SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)) > 10.0;
 
     -- Move hard validation failures to coremeasurements as unresolved (StemGUID=NULL)
     IF EXISTS(SELECT 1 FROM quadrat_mismatch_failures) OR EXISTS(SELECT 1 FROM coordinate_drift_failures) THEN
@@ -1733,21 +1736,12 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS quadrat_mismatch_failures, coordinate_drift_failures;
 
     -- =====================================================
-    -- TREE INSERTION WITH INSERT IGNORE TRACKING
+    -- TREE INSERTION
     -- =====================================================
     CREATE TEMPORARY TABLE unique_trees_to_insert AS
     SELECT DISTINCT TreeTag, SpeciesID, CensusID FROM filtered WHERE CensusID = vCurrentCensusID;
 
     CREATE INDEX idx_trees_insert ON unique_trees_to_insert (TreeTag, SpeciesID, CensusID);
-
-    -- Count expected tree inserts
-    SET @expected_tree_inserts = (
-        SELECT COUNT(*)
-        FROM unique_trees_to_insert uti
-        LEFT JOIN trees existing ON existing.TreeTag = uti.TreeTag
-            AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
-        WHERE existing.TreeID IS NULL
-    );
 
     INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
     SELECT uti.TreeTag, uti.SpeciesID, uti.CensusID
@@ -1756,40 +1750,14 @@ BEGIN
         AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
     WHERE existing.TreeID IS NULL;
 
-    SET @actual_tree_inserts = ROW_COUNT();
-    SET @dropped_trees = @expected_tree_inserts - @actual_tree_inserts;
-
-    IF @dropped_trees > 0 THEN
-        INSERT IGNORE INTO uploadintegrityalerts (
-            uploadId, fileID, batchID, plotID, censusID,
-            type, message, severity, failedRecords
-        ) VALUES (
-            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-            'INSERT_IGNORE_DROP',
-            CONCAT(@dropped_trees, ' tree rows dropped by INSERT IGNORE (constraint violation)'),
-            'warning', @dropped_trees
-        );
-        -- NOTE: Don't add @dropped_trees to vDataLossCount here. Dropped tree
-        -- inserts don't map 1:1 to lost measurements. The orphan detection after
-        -- the measurement INSERT correctly counts actual measurement-level losses.
-    END IF;
-
     -- =====================================================
-    -- STEM INSERTION WITH INSERT IGNORE TRACKING
+    -- STEM INSERTION
     -- =====================================================
     CREATE TEMPORARY TABLE unique_stems_to_insert AS
     SELECT DISTINCT TreeTag, QuadratID, StemTag, LocalX, LocalY, CensusID, SpeciesID
     FROM filtered WHERE CensusID = vCurrentCensusID;
 
     CREATE INDEX idx_stems_insert ON unique_stems_to_insert (TreeTag, SpeciesID, CensusID);
-
-    -- Count expected stem inserts
-    SET @expected_stem_inserts = (
-        SELECT COUNT(*)
-        FROM unique_stems_to_insert usi
-        INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
-            AND t.CensusID = vCurrentCensusID AND t.IsActive = 1
-    );
 
     INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
     SELECT t.TreeID, usi.QuadratID, vCurrentCensusID, NULL,
@@ -1800,24 +1768,6 @@ BEGIN
     FROM unique_stems_to_insert usi
     INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
         AND t.CensusID = vCurrentCensusID AND t.IsActive = 1;
-
-    SET @actual_stem_inserts = ROW_COUNT();
-    SET @dropped_stems = @expected_stem_inserts - @actual_stem_inserts;
-
-    IF @dropped_stems > 0 THEN
-        INSERT IGNORE INTO uploadintegrityalerts (
-            uploadId, fileID, batchID, plotID, censusID,
-            type, message, severity, failedRecords
-        ) VALUES (
-            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-            'INSERT_IGNORE_DROP',
-            CONCAT(@dropped_stems, ' stem rows dropped by INSERT IGNORE (constraint violation)'),
-            'warning', @dropped_stems
-        );
-        -- NOTE: Don't add @dropped_stems to vDataLossCount here. One dropped stem
-        -- can orphan multiple measurements. The orphan detection after the measurement
-        -- INSERT correctly counts actual measurement-level losses.
-    END IF;
 
     CREATE TEMPORARY TABLE stem_crossid_mapping AS
     SELECT s_curr.StemGUID as CurrentStemID,
@@ -1841,25 +1791,8 @@ BEGIN
     DROP TEMPORARY TABLE stem_crossid_mapping;
 
     -- =====================================================
-    -- COREMEASUREMENTS INSERTION WITH INSERT IGNORE TRACKING
+    -- COREMEASUREMENTS INSERTION
     -- =====================================================
-
-    -- Count expected measurement inserts
-    SET @expected_cm_inserts = (
-        SELECT COUNT(*)
-        FROM filtered f
-        INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
-            AND t.CensusID = f.CensusID AND t.IsActive = 1
-        INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
-            AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
-        WHERE NOT EXISTS (
-            SELECT 1 FROM coremeasurements cm_check
-            WHERE cm_check.StemGUID = s.StemGUID
-              AND cm_check.CensusID = f.CensusID
-              AND cm_check.UploadFileID = vFileID
-              AND cm_check.UploadBatchID = vBatchID
-        )
-    );
 
     INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                          Description, UserDefinedFields, UploadFileID, UploadBatchID,
@@ -1872,11 +1805,7 @@ BEGIN
            NULLIF(f.Comments, ''),
            JSON_OBJECT(
                'treestemstate',
-               CASE
-                   WHEN EXISTS(SELECT 1 FROM old_trees ot WHERE ot.id = f.id) THEN 'old tree'
-                   WHEN EXISTS(SELECT 1 FROM multi_stems ms WHERE ms.id = f.id) THEN 'multi stem'
-                   ELSE 'new recruit'
-               END,
+               f.tree_state,
                'uploadSession', JSON_OBJECT(
                    'fileID', vFileID,
                    'batchID', vBatchID
@@ -1902,22 +1831,7 @@ BEGIN
           AND cm_check.UploadBatchID = vBatchID
     );
 
-    SET @actual_cm_inserts = ROW_COUNT();
-    SET @dropped_cm = @expected_cm_inserts - @actual_cm_inserts;
-    SET vProcessedCount = @actual_cm_inserts;
-
-    IF @dropped_cm > 0 THEN
-        INSERT IGNORE INTO uploadintegrityalerts (
-            uploadId, fileID, batchID, plotID, censusID,
-            type, message, severity, failedRecords
-        ) VALUES (
-            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-            'INSERT_IGNORE_DROP',
-            CONCAT(@dropped_cm, ' measurement rows dropped by INSERT IGNORE (constraint violation)'),
-            'warning', @dropped_cm
-        );
-        SET vDataLossCount = vDataLossCount + @dropped_cm;
-    END IF;
+    SET vProcessedCount = ROW_COUNT();
 
     -- =====================================================
     -- ORPHAN DETECTION: Catch filtered rows that passed
@@ -2127,102 +2041,11 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS same_batch_species_conflicts, idf_first_occurrence;
 
-    -- =====================================================
-    -- ENHANCEMENT: Data Quality Warnings (Info-level)
-    -- =====================================================
-
-    -- Warning 1: Same-date measurements with different DBH values
-    -- This could indicate: (A) remeasurement correction, or (B) data entry error
-    INSERT IGNORE INTO uploadintegrityalerts (
-        uploadId, fileID, batchID, plotID, censusID,
-        type, message, severity,
-        sourceRecords, processedRecords, failedRecords, missingRecords
-    )
-    SELECT vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-           'MULTIPLE_DBH_SAME_DATE',
-           CONCAT('Found ', COUNT(DISTINCT dups.TreeTag), ' tree(s) with multiple measurements on same date with different DBH values'),
-           'info',
-           vBatchRowCount, vProcessedCount, 0, 0
-    FROM (
-        SELECT t.TreeTag, s.StemTag, cm.MeasurementDate, COUNT(DISTINCT cm.MeasuredDBH) as dbh_count
-        FROM coremeasurements cm
-        JOIN stems s ON cm.StemGUID = s.StemGUID AND s.IsActive = 1
-        JOIN trees t ON s.TreeID = t.TreeID AND t.IsActive = 1
-    WHERE cm.CensusID = vCurrentCensusID
-      AND cm.UploadFileID = vFileID
-      AND cm.UploadBatchID = vBatchID
-      AND cm.MeasurementDate IS NOT NULL
-      AND cm.MeasuredDBH IS NOT NULL
-        GROUP BY t.TreeTag, s.StemTag, cm.MeasurementDate
-        HAVING dbh_count > 1
-    ) dups
-    HAVING COUNT(DISTINCT dups.TreeTag) > 0;
-
-    -- Warning 2: Future dates (>10 years from now)
-    -- Could indicate typos (e.g., 2002 → 2202)
-    INSERT IGNORE INTO uploadintegrityalerts (
-        uploadId, fileID, batchID, plotID, censusID,
-        type, message, severity,
-        sourceRecords, processedRecords, failedRecords, missingRecords
-    )
-    SELECT vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-           'FUTURE_DATE_WARNING',
-           CONCAT('Found ', COUNT(*), ' measurement(s) with dates more than 10 years in the future'),
-           'info',
-           vBatchRowCount, vProcessedCount, 0, 0
-    FROM coremeasurements cm
-    WHERE cm.CensusID = vCurrentCensusID
-      AND cm.UploadFileID = vFileID
-      AND cm.UploadBatchID = vBatchID
-      AND cm.MeasurementDate > DATE_ADD(NOW(), INTERVAL 10 YEAR)
-    HAVING COUNT(*) > 0;
-
-    -- Warning 3: Extreme growth rates (>10 cm/year DBH increase)
-    -- Detect unusually high growth rates that may indicate data entry errors.
-    -- Stems are per-census, so cross-census comparison must join via StemCrossID
-    -- (which links the same physical stem across censuses), not StemGUID.
-    INSERT IGNORE INTO uploadintegrityalerts (
-        uploadId, fileID, batchID, plotID, censusID,
-        type, message, severity,
-        sourceRecords, processedRecords, failedRecords, missingRecords
-    )
-    SELECT vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
-           'EXTREME_GROWTH_RATE',
-           CONCAT('Found ', COUNT(*), ' measurement(s) with extreme growth rates (>10 cm/year DBH increase)'),
-           'info',
-           vBatchRowCount, vProcessedCount, 0, 0
-    FROM (
-        SELECT curr.CoreMeasurementID,
-               (curr.MeasuredDBH - prev_cm.MeasuredDBH)
-                   / NULLIF(DATEDIFF(curr.MeasurementDate, prev_cm.MeasurementDate) / 365.25, 0) as growth_rate
-        FROM coremeasurements curr
-        INNER JOIN stems s_curr ON curr.StemGUID = s_curr.StemGUID
-        INNER JOIN stems s_prev ON s_curr.StemCrossID IS NOT NULL
-            AND (s_prev.StemCrossID = s_curr.StemCrossID OR s_prev.StemGUID = s_curr.StemCrossID)
-            AND s_prev.IsActive = 1
-            -- Only compare against the most recent prior census for this stem
-            AND s_prev.CensusID = (
-                SELECT MAX(sp2.CensusID)
-                FROM stems sp2
-                WHERE (sp2.StemCrossID = s_curr.StemCrossID OR sp2.StemGUID = s_curr.StemCrossID)
-                  AND sp2.CensusID < vCurrentCensusID
-                  AND sp2.IsActive = 1
-            )
-        INNER JOIN coremeasurements prev_cm ON prev_cm.StemGUID = s_prev.StemGUID
-            AND prev_cm.MeasurementDate < curr.MeasurementDate
-            AND prev_cm.MeasuredDBH IS NOT NULL
-            AND prev_cm.IsActive = 1
-        WHERE curr.CensusID = vCurrentCensusID
-          AND curr.UploadFileID = vFileID
-          AND curr.UploadBatchID = vBatchID
-          AND curr.MeasuredDBH IS NOT NULL
-          AND curr.MeasurementDate IS NOT NULL
-    ) growth
-    WHERE growth.growth_rate > 10
-    HAVING COUNT(*) > 0;
+    -- Info-level census warnings are intentionally excluded from the hot ingest path.
+    -- They can be recomputed later from persisted coremeasurements if needed.
 
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-        old_trees, multi_stems, new_recruits, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
+        old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
         stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 

@@ -269,14 +269,16 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence for measurements upload path:
-      // 1. INSERT to temporarymeasurements
-      // 2. COUNT inserted rows
-      // 3. SELECT existing changelog entry (none found)
-      // 4. INSERT new changelog entry
+      // 1. COUNT rows before insert
+      // 2. INSERT to temporarymeasurements
+      // 3. COUNT rows after insert
+      // 4. SELECT existing changelog entry (none found)
+      // 5. INSERT new changelog entry
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 0 }]) // COUNT rows before insert
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
-        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT inserted rows
+        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT rows after insert
         .mockResolvedValueOnce([]) // SELECT existing changelog entry (none found)
         .mockResolvedValueOnce({ insertId: 1 }); // INSERT new changelog entry
 
@@ -312,10 +314,11 @@ describe('Unified Changelog Tracking System', () => {
       expect(res!.status).toBe(HTTPResponses.OK);
 
       // For measurements, the code path includes:
-      // 1. INSERT to temporarymeasurements
-      // 2. COUNT from temporarymeasurements
-      // 3. SELECT from unifiedchangelog (check for existing entry)
-      // 4. INSERT into unifiedchangelog (first batch) OR UPDATE unifiedchangelog (subsequent batches)
+      // 1. COUNT from temporarymeasurements before insert
+      // 2. INSERT to temporarymeasurements
+      // 3. COUNT from temporarymeasurements after insert
+      // 4. SELECT from unifiedchangelog (check for existing entry)
+      // 5. INSERT into unifiedchangelog (first batch) OR UPDATE unifiedchangelog (subsequent batches)
 
       // Find the changelog-related queries
       const changelogQueries = exec.mock.calls.filter(call => {
@@ -357,14 +360,16 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock sequence:
-      // 1. INSERT temporarymeasurements
-      // 2. COUNT rows
-      // 3. SELECT changelog (found)
-      // 4. UPDATE changelog
+      // 1. COUNT rows before insert
+      // 2. INSERT temporarymeasurements
+      // 3. COUNT rows after insert
+      // 4. SELECT changelog (found)
+      // 5. UPDATE changelog
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT rows before insert
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
-        .mockResolvedValueOnce([{ count: 800 }]) // COUNT inserted rows
+        .mockResolvedValueOnce([{ count: 2000 }]) // COUNT rows after insert
         .mockResolvedValueOnce([
           {
             // SELECT existing changelog entry (found)
@@ -469,6 +474,7 @@ describe('Unified Changelog Tracking System', () => {
 
       let _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 0 }])
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 500 }])
         .mockResolvedValueOnce([]) // No existing entry for file1
@@ -496,6 +502,7 @@ describe('Unified Changelog Tracking System', () => {
 
       _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 0 }])
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 300 }])
         .mockResolvedValueOnce([]) // No existing entry for file2
@@ -565,6 +572,7 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
       const exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 0 }])
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce([{ count: 100 }])
         .mockResolvedValueOnce([])
@@ -600,8 +608,9 @@ describe('Unified Changelog Tracking System', () => {
       // Mock changelog insert failure but upload succeeds
       const _exec = vi
         .spyOn(cm, 'executeQuery')
+        .mockResolvedValueOnce([{ count: 0 }]) // COUNT before insert succeeds
         .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
-        .mockResolvedValueOnce([{ count: 50 }]) // COUNT succeeds
+        .mockResolvedValueOnce([{ count: 50 }]) // COUNT after insert succeeds
         .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog SELECT fails
 
       const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {

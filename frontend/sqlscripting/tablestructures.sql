@@ -26,6 +26,9 @@ create index idx_attributes_description
 create index idx_attributes_status
     on attributes (Status);
 
+create index idx_attributes_code_active
+    on attributes (Code, IsActive);
+
 -- failedmeasurements table removed: failures now stored in coremeasurements (StemGUID=NULL)
 -- with error details in measurement_error_log + measurement_errors tables.
 
@@ -322,6 +325,9 @@ create index idx_plotid
 create index idx_quadratname
     on quadrats (QuadratName);
 
+create index idx_quadrats_name_active
+    on quadrats (QuadratName, IsActive);
+
 create index idx_quadratshape
     on quadrats (QuadratShape);
 
@@ -540,6 +546,9 @@ create index idx_speciesauthority
 
 create index idx_speciescode
     on species (SpeciesCode);
+
+create index idx_species_code_active
+    on species (SpeciesCode, IsActive);
 
 create index idx_speciesname
     on species (SpeciesName);
@@ -764,6 +773,12 @@ create index ix_cm_cid_date_dbh_hom
 create index idx_cm_uploadbatch_census
     on coremeasurements (UploadBatchID, CensusID);
 
+create index idx_cm_census_active
+    on coremeasurements (CensusID, IsActive);
+
+create index idx_cm_stemguid_active
+    on coremeasurements (StemGUID, IsActive);
+
 create index idx_cm_uploadfile_census_stem
     on coremeasurements (UploadFileID, CensusID, StemGUID);
 
@@ -850,6 +865,9 @@ create index idx_stemdescription
 create index idx_stemnumber
     on stems (StemCrossID);
 
+create index idx_stems_census_crossid
+    on stems (CensusID, StemCrossID);
+
 create index idx_stems_stemtag_quadratid
     on stems (StemTag, QuadratID);
 
@@ -859,6 +877,12 @@ create index idx_stemtag
 create index idx_treeid
     on stems (TreeID);
 
+create index idx_stems_tag_tree_census_active
+    on stems (StemTag, TreeID, CensusID, IsActive);
+
+create index idx_stems_tree_quadrat_census_active
+    on stems (TreeID, QuadratID, CensusID, IsActive);
+
 create index ix_stems_treeid_stemtag_quadratid
     on stems (TreeID, StemTag, QuadratID);
 
@@ -867,6 +891,12 @@ create index idx_speciesid
 
 create index trees_TreeTag_index
     on trees (TreeTag);
+
+create index idx_trees_tag_census_active
+    on trees (TreeTag, CensusID, IsActive);
+
+create index idx_trees_tag_species_census_active
+    on trees (TreeTag, SpeciesID, CensusID, IsActive);
 
 create table if not exists unifiedchangelog
 (

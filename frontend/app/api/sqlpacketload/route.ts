@@ -51,6 +51,132 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+interface DroppedMeasurementCandidate {
+  rowOrdinal: number;
+  existingBatch: string | null;
+}
+
+type DroppedMeasurementRow = FileRow & {
+  failureReason: string;
+  sourceRowIndex: number;
+};
+
+function normalizeMeasurementDate(value: unknown): string | null {
+  return value ? moment(value).format('YYYY-MM-DD') : null;
+}
+
+function collectMeasurementValidationIssues(row: FileRow): string[] {
+  const issues: string[] = [];
+  if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
+  if (!row.spcode || row.spcode.trim() === '') issues.push('empty SpeciesCode');
+  if (!row.quadrat || row.quadrat.trim() === '') issues.push('empty QuadratName');
+  if (row.dbh !== undefined && row.dbh !== null && (isNaN(Number(row.dbh)) || Number(row.dbh) < 0)) issues.push(`invalid DBH value: ${row.dbh}`);
+  if (row.hom !== undefined && row.hom !== null && (isNaN(Number(row.hom)) || Number(row.hom) < 0)) issues.push(`invalid HOM value: ${row.hom}`);
+  if (row.lx !== undefined && row.lx !== null && isNaN(Number(row.lx))) issues.push(`invalid LocalX value: ${row.lx}`);
+  if (row.ly !== undefined && row.ly !== null && isNaN(Number(row.ly))) issues.push(`invalid LocalY value: ${row.ly}`);
+  return issues;
+}
+
+function buildDroppedMeasurementFailureReason(row: FileRow, existingBatch: string | null): string {
+  if (existingBatch) {
+    return `Duplicate row: TreeTag=${row.tag}, StemTag=${row.stemtag || 'null'}, Quadrat=${row.quadrat} already exists in batch ${existingBatch}`;
+  }
+
+  const issues = collectMeasurementValidationIssues(row);
+  if (issues.length > 0) {
+    return `Data validation failed: ${issues.join('; ')}`;
+  }
+
+  return `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${normalizeMeasurementDate(row.date)})`;
+}
+
+async function findDroppedMeasurementCandidates(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  plotID: number,
+  censusID: number,
+  chunkRows: FileRow[],
+  transactionID: string
+): Promise<DroppedMeasurementCandidate[]> {
+  const tempTable = 'dropped_row_candidates';
+  await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
+  await connectionManager.executeQuery(
+    `CREATE TEMPORARY TABLE ${tempTable} (
+      RowOrdinal INT NOT NULL PRIMARY KEY,
+      TreeTag VARCHAR(20) NULL,
+      StemTag VARCHAR(10) NULL,
+      SpeciesCode VARCHAR(25) NULL,
+      QuadratName VARCHAR(255) NULL,
+      MeasurementDate DATE NULL,
+      INDEX idx_dropped_row_candidates_match (TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate),
+      INDEX idx_dropped_row_candidates_duplicate (TreeTag, StemTag, QuadratName)
+    ) ENGINE=MEMORY`,
+    [],
+    transactionID
+  );
+
+  try {
+    const insertWidth = 6;
+    const insertBatchSize = 500;
+    for (let start = 0; start < chunkRows.length; start += insertBatchSize) {
+      const slice = chunkRows.slice(start, start + insertBatchSize);
+      const placeholders = slice.map(() => `(${Array(insertWidth).fill('?').join(',')})`).join(', ');
+      const params = slice.flatMap((row, index) => [
+        start + index + 1,
+        row.tag ?? null,
+        row.stemtag || null,
+        row.spcode ?? null,
+        row.quadrat ?? null,
+        normalizeMeasurementDate(row.date)
+      ]);
+
+      await connectionManager.executeQuery(
+        `INSERT INTO ${tempTable} (RowOrdinal, TreeTag, StemTag, SpeciesCode, QuadratName, MeasurementDate) VALUES ${placeholders}`,
+        params,
+        transactionID
+      );
+    }
+
+    const droppedRowsSQL = format(
+      `SELECT drc.RowOrdinal as rowOrdinal,
+              MIN(dup.BatchID) as existingBatch
+       FROM ${tempTable} drc
+       LEFT JOIN ??.temporarymeasurements tm
+         ON tm.FileID = ?
+        AND tm.BatchID = ?
+        AND tm.TreeTag <=> drc.TreeTag
+        AND tm.StemTag <=> drc.StemTag
+        AND tm.SpeciesCode <=> drc.SpeciesCode
+        AND tm.QuadratName <=> drc.QuadratName
+        AND tm.MeasurementDate <=> drc.MeasurementDate
+       LEFT JOIN ??.temporarymeasurements dup
+         ON dup.FileID = ?
+        AND dup.PlotID = ?
+        AND dup.CensusID = ?
+        AND dup.TreeTag <=> drc.TreeTag
+        AND dup.StemTag <=> drc.StemTag
+        AND dup.QuadratName <=> drc.QuadratName
+       WHERE tm.id IS NULL
+       GROUP BY drc.RowOrdinal
+       ORDER BY drc.RowOrdinal`,
+      [schema, schema]
+    );
+
+    const results = await connectionManager.executeQuery(droppedRowsSQL, [fileName, batchID, fileName, plotID, censusID], transactionID);
+
+    return Array.isArray(results) ? (results as DroppedMeasurementCandidate[]) : [];
+  } finally {
+    try {
+      await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${tempTable}`, [], transactionID);
+    } catch (cleanupError: unknown) {
+      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      ailogger.warn(`Failed to clean up ${tempTable}: ${message}`);
+    }
+  }
+}
+
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
@@ -110,7 +236,8 @@ export async function POST(request: NextRequest) {
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
-    const rowCount = Object.keys(fileRowSet ?? {}).length;
+    const chunkRows = Object.values(fileRowSet ?? {});
+    const rowCount = chunkRows.length;
     const contentHash = hashChunkContent(fileRowSet);
     const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, contentHash);
 
@@ -120,12 +247,10 @@ export async function POST(request: NextRequest) {
     // and rely on downstream dedupe + explicit dropped-row tracking.
 
     const batchID = body.batchID || generateShortBatchID();
-    const placeholders = Object.values(fileRowSet ?? [])
-      .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .join(', ');
-    const values = Object.values(fileRowSet ?? []).flatMap(row => {
+    const placeholders = chunkRows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+    const values = chunkRows.flatMap(row => {
       const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
-      const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
+      const formattedDate = normalizeMeasurementDate(date);
       // Convert empty/non-numeric coordinate strings to null so MySQL stores NULL instead of 0
       const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
       const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
@@ -146,7 +271,7 @@ export async function POST(request: NextRequest) {
 
         // Count rows BEFORE insert so we can measure the delta (important when
         // multiple chunks share a single BatchID under batch consolidation).
-        const expectedRowCount = Object.keys(fileRowSet ?? {}).length;
+        const expectedRowCount = chunkRows.length;
         const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
         const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
         const preInsertCount = preInsertResult[0]?.count || 0;
@@ -167,77 +292,30 @@ export async function POST(request: NextRequest) {
               `${droppedRowCount} row(s) were silently dropped by INSERT IGNORE (likely duplicates). This indicates potential data loss!`
           );
 
-          // Try to identify which rows were dropped by checking what's NOT in the temp table
-          // This is expensive but necessary to track data integrity issues
-          const droppedRows: FileRow[] = [];
-          const chunkRows = Object.values(fileRowSet);
+          const droppedCandidates = await findDroppedMeasurementCandidates(
+            connectionManager,
+            schema,
+            fileName,
+            batchID,
+            plot?.plotID ?? -1,
+            censusCookie,
+            chunkRows,
+            transactionID
+          );
+          const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
+            const row = chunkRows[candidate.rowOrdinal - 1];
+            return {
+              ...row,
+              failureReason: buildDroppedMeasurementFailureReason(row, candidate.existingBatch),
+              sourceRowIndex: candidate.rowOrdinal
+            };
+          });
 
-          for (const row of chunkRows) {
-            const formattedDate = row.date ? moment(row.date).format('YYYY-MM-DD') : null;
-            const checkSQL = format(
-              `SELECT COUNT(*) as cnt FROM ??.temporarymeasurements
-               WHERE FileID = ? AND BatchID = ? AND TreeTag = ? AND StemTag <=> ?
-               AND SpeciesCode = ? AND QuadratName = ? AND MeasurementDate <=> ?`,
-              [schema]
+          if (droppedRows.length !== droppedRowCount) {
+            ailogger.warn(
+              `Dropped-row batch detection identified ${droppedRows.length} of ${droppedRowCount} dropped row(s) for ${fileName}-${batchID}. ` +
+                `Persisted unresolved ingestion errors may be incomplete for this chunk.`
             );
-            const checkResult = await connectionManager.executeQuery(
-              checkSQL,
-              [
-                fileName,
-                batchID,
-                row.tag,
-                row.stemtag || null,
-                row.spcode,
-                row.quadrat,
-                formattedDate
-              ],
-              transactionID
-            );
-
-            if (checkResult[0]?.cnt === 0) {
-              // This row was dropped - try to identify the specific reason
-              let failureReason = 'Row dropped by INSERT IGNORE';
-
-              // Check if there's a duplicate row with same key fields in this file (different batch)
-              const duplicateCheckSQL = format(
-                `SELECT BatchID, TreeTag, StemTag, QuadratName FROM ??.temporarymeasurements
-                 WHERE FileID = ? AND PlotID = ? AND CensusID = ?
-                 AND TreeTag = ? AND StemTag <=> ? AND QuadratName = ?
-                 LIMIT 1`,
-                [schema]
-              );
-              const dupResult = await connectionManager.executeQuery(
-                duplicateCheckSQL,
-                [fileName, plot?.plotID ?? -1, censusCookie, row.tag, row.stemtag || null, row.quadrat],
-                transactionID
-              );
-
-              if (dupResult.length > 0) {
-                const existingBatch = dupResult[0].BatchID;
-                failureReason = `Duplicate row: TreeTag=${row.tag}, StemTag=${row.stemtag || 'null'}, Quadrat=${row.quadrat} already exists in batch ${existingBatch}`;
-              } else {
-                // Check for data validation issues
-                const issues: string[] = [];
-                if (!row.tag || row.tag.trim() === '') issues.push('empty TreeTag');
-                if (!row.spcode || row.spcode.trim() === '') issues.push('empty SpeciesCode');
-                if (!row.quadrat || row.quadrat.trim() === '') issues.push('empty QuadratName');
-                if (row.dbh !== undefined && row.dbh !== null && (isNaN(Number(row.dbh)) || Number(row.dbh) < 0)) issues.push(`invalid DBH value: ${row.dbh}`);
-                if (row.hom !== undefined && row.hom !== null && (isNaN(Number(row.hom)) || Number(row.hom) < 0)) issues.push(`invalid HOM value: ${row.hom}`);
-                if (row.lx !== undefined && row.lx !== null && isNaN(Number(row.lx))) issues.push(`invalid LocalX value: ${row.lx}`);
-                if (row.ly !== undefined && row.ly !== null && isNaN(Number(row.ly))) issues.push(`invalid LocalY value: ${row.ly}`);
-
-                if (issues.length > 0) {
-                  failureReason = `Data validation failed: ${issues.join('; ')}`;
-                } else {
-                  failureReason = `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${formattedDate})`;
-                }
-              }
-
-              droppedRows.push({
-                ...row,
-                failureReason
-              });
-            }
           }
 
           // Persist dropped rows as unresolved ingestion errors in coremeasurements.
@@ -246,7 +324,7 @@ export async function POST(request: NextRequest) {
               await insertIngestionFailureRows(
                 connectionManager,
                 schema,
-                droppedRows.map((row, idx) => ({
+                droppedRows.map(row => ({
                   plotID: plot?.plotID ?? -1,
                   censusID: censusCookie,
                   tag: row.tag,
@@ -262,7 +340,7 @@ export async function POST(request: NextRequest) {
                   comments: null,
                   fileID: fileName,
                   batchID,
-                  sourceRowIndex: idx + 1,
+                  sourceRowIndex: row.sourceRowIndex,
                   failureReason: row.failureReason || 'Unknown error during insert'
                 })),
                 transactionID
@@ -276,7 +354,7 @@ export async function POST(request: NextRequest) {
                 await insertIngestionFailureRows(
                   connectionManager,
                   schema,
-                  droppedRows.map((row, idx) => ({
+                  droppedRows.map(row => ({
                     plotID: plot?.plotID ?? -1,
                     censusID: censusCookie,
                     tag: row.tag,
@@ -292,7 +370,7 @@ export async function POST(request: NextRequest) {
                     comments: null,
                     fileID: fileName,
                     batchID,
-                    sourceRowIndex: idx + 1,
+                    sourceRowIndex: row.sourceRowIndex,
                     failureReason: row.failureReason || 'Unknown error during insert'
                   })),
                   transactionID
