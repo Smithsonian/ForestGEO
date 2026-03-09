@@ -67,10 +67,16 @@ BEGIN
                      left join attributes a on a.Code = ca.Code
             WHERE ca.CoreMeasurementID = cm.CoreMeasurementID)  AS Attributes,
            cm.UserDefinedFields                                 AS UserDefinedFields,
-           (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, '->', vp.Description) SEPARATOR ';')
+           (SELECT GROUP_CONCAT(
+                           COALESCE(
+                                   NULLIF(CONCAT_WS(' -> ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
+                                   me.ErrorMessage
+                           )
+                           ORDER BY me.ErrorCode SEPARATOR ';'
+                   )
             FROM measurement_error_log mel
                      JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
-                     JOIN sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                     LEFT JOIN sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
             WHERE mel.MeasurementID = cm.CoreMeasurementID
               AND mel.IsResolved = FALSE
               AND me.ErrorSource = 'validation') AS Errors
@@ -241,6 +247,8 @@ begin
 
         -- Clean up temporary tables
         DROP TEMPORARY TABLE IF EXISTS missing_trees;
+        DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
+        DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
 
         -- Re-signal the error for the application layer to handle
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = vErrorMessage;
@@ -265,23 +273,29 @@ begin
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0 AND CensusID = vCensusID;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0 AND CensusID = vCensusID;
 
-    -- Count duplicates BEFORE deletion (StemGUID + MeasurementDate duplicates)
-    SELECT COUNT(*) INTO vStemDateDupCount
-    FROM coremeasurements cm1
-    INNER JOIN coremeasurements cm2
-    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
-      AND cm1.StemGUID = cm2.StemGUID
-      AND cm1.MeasurementDate = cm2.MeasurementDate
-      AND cm1.CensusID = vCensusID;
+    -- Materialize duplicate IDs once, then delete by ID to avoid repeated self-joins.
+    DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
+    CREATE TEMPORARY TABLE stem_date_duplicate_ids AS
+    SELECT ranked.CoreMeasurementID
+    FROM (
+        SELECT cm.CoreMeasurementID,
+               ROW_NUMBER() OVER (
+                   PARTITION BY cm.StemGUID, cm.MeasurementDate
+                   ORDER BY cm.CoreMeasurementID
+               ) AS row_num
+        FROM coremeasurements cm
+        WHERE cm.CensusID = vCensusID
+          AND cm.StemGUID IS NOT NULL
+          AND cm.MeasurementDate IS NOT NULL
+    ) AS ranked
+    WHERE ranked.row_num > 1;
 
-    -- Remove duplicates based on StemGUID and MeasurementDate
-    DELETE cm1
-    FROM coremeasurements cm1
-             INNER JOIN coremeasurements cm2
-    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
-      AND cm1.StemGUID = cm2.StemGUID
-      AND cm1.MeasurementDate = cm2.MeasurementDate
-      AND cm1.CensusID = vCensusID;
+    DELETE cm
+    FROM coremeasurements cm
+             INNER JOIN stem_date_duplicate_ids dup
+                        ON dup.CoreMeasurementID = cm.CoreMeasurementID;
+    SET vStemDateDupCount = ROW_COUNT();
+    DROP TEMPORARY TABLE IF EXISTS stem_date_duplicate_ids;
 
     -- Log StemGUID+Date deduplication if any rows were removed
     IF vStemDateDupCount > 0 THEN
@@ -293,35 +307,32 @@ begin
              'info', vStemDateDupCount);
     END IF;
 
-    -- Count duplicates BEFORE deletion (TreeTag + StemTag duplicates)
-    SELECT COUNT(*) INTO vTreeStemTagDupCount
-    FROM coremeasurements cm1
-    INNER JOIN stems s1 ON cm1.StemGUID = s1.StemGUID
-    INNER JOIN trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
-    INNER JOIN coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
-    INNER JOIN stems s2 ON cm2.StemGUID = s2.StemGUID
-    INNER JOIN trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
-    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
-      AND t1.TreeTag = t2.TreeTag
-      AND s1.StemTag = s2.StemTag
-      AND cm1.CensusID = vCensusID
-      AND t1.CensusID = vCensusID
-      AND s1.CensusID = vCensusID;
+    DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
+    CREATE TEMPORARY TABLE tree_stem_tag_duplicate_ids AS
+    SELECT ranked.CoreMeasurementID
+    FROM (
+        SELECT cm.CoreMeasurementID,
+               ROW_NUMBER() OVER (
+                   PARTITION BY t.TreeTag, s.StemTag
+                   ORDER BY cm.CoreMeasurementID
+               ) AS row_num
+        FROM coremeasurements cm
+                 INNER JOIN stems s ON cm.StemGUID = s.StemGUID
+                 INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+        WHERE cm.CensusID = vCensusID
+          AND t.CensusID = vCensusID
+          AND s.CensusID = vCensusID
+          AND t.TreeTag IS NOT NULL
+          AND s.StemTag IS NOT NULL
+    ) AS ranked
+    WHERE ranked.row_num > 1;
 
-    -- Remove duplicates based on TreeTag/StemTag combinations within the same census
-    DELETE cm1
-    FROM coremeasurements cm1
-             INNER JOIN stems s1 ON cm1.StemGUID = s1.StemGUID
-             INNER JOIN trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
-             INNER JOIN coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
-             INNER JOIN stems s2 ON cm2.StemGUID = s2.StemGUID
-             INNER JOIN trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
-    WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
-      AND t1.TreeTag = t2.TreeTag
-      AND s1.StemTag = s2.StemTag
-      AND cm1.CensusID = vCensusID
-      AND t1.CensusID = vCensusID
-      AND s1.CensusID = vCensusID;
+    DELETE cm
+    FROM coremeasurements cm
+             INNER JOIN tree_stem_tag_duplicate_ids dup
+                        ON dup.CoreMeasurementID = cm.CoreMeasurementID;
+    SET vTreeStemTagDupCount = ROW_COUNT();
+    DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
 
     -- Log TreeTag+StemTag deduplication if any rows were removed
     IF vTreeStemTagDupCount > 0 THEN
@@ -393,12 +404,6 @@ BEGIN
     FROM census
     WHERE CensusID = targetCensusID;
 
-    ALTER TABLE temporarymeasurements
-        AUTO_INCREMENT = 1;
-    ALTER TABLE measurementssummary
-        AUTO_INCREMENT = 1;
-    ALTER TABLE census
-        AUTO_INCREMENT = 1;
     COMMIT;
     set foreign_key_checks = 1;
     -- Re-enable triggers after census deletion
@@ -441,12 +446,6 @@ BEGIN
     FROM census
     WHERE CensusID = targetCensusID;
 
-    ALTER TABLE temporarymeasurements
-        AUTO_INCREMENT = 1;
-    ALTER TABLE measurementssummary
-        AUTO_INCREMENT = 1;
-    ALTER TABLE census
-        AUTO_INCREMENT = 1;
     COMMIT;
     set foreign_key_checks = 1;
     -- Re-enable triggers after census deletion
@@ -1068,6 +1067,7 @@ main_proc:
 BEGIN
     DECLARE vCurrentCensusID int;
     DECLARE vCurrentPlotID int;
+    DECLARE vPreviousCensusID int DEFAULT NULL;
     DECLARE vBatchFailed BOOLEAN DEFAULT FALSE;
     DECLARE vErrorMessage TEXT DEFAULT '';
     DECLARE vErrorCode VARCHAR(10) DEFAULT '';
@@ -1085,6 +1085,7 @@ BEGIN
 
             SET vBatchFailed = TRUE;
             SET vUploadId = CONCAT(vFileID, '-', vBatchID);
+            ROLLBACK;
 
             -- Log to uploadmetrics
             INSERT IGNORE INTO uploadmetrics (
@@ -1208,6 +1209,15 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
+    SELECT c_prev.CensusID
+    INTO vPreviousCensusID
+    FROM census c_prev
+    WHERE c_prev.PlotID = vCurrentPlotID
+      AND c_prev.CensusID < vCurrentCensusID
+      AND c_prev.IsActive = 1
+    ORDER BY c_prev.CensusID DESC
+    LIMIT 1;
+
     -- ============================================================
     -- PERFORMANCE FIX: Use uploadmetrics for idempotency check
     -- instead of scanning coremeasurements with JSON extraction
@@ -1262,6 +1272,8 @@ BEGIN
         old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
         stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+
+    START TRANSACTION;
 
     -- ============================================================
     -- FIX 1: EARLY VALIDATION - REPORTS ALL ERRORS PER ROW
@@ -1474,6 +1486,7 @@ BEGIN
 
     CREATE TEMPORARY TABLE filtered AS SELECT * FROM filter_validity WHERE Valid = true;
 
+    CREATE INDEX idx_filtered_id ON filtered (id);
     CREATE INDEX idx_filtered_tree_census ON filtered (TreeTag, CensusID);
     CREATE INDEX idx_filtered_stem_tree ON filtered (StemTag, TreeTag);
     CREATE INDEX idx_filtered_species ON filtered (SpeciesID);
@@ -1543,16 +1556,43 @@ BEGIN
     CREATE TEMPORARY TABLE old_trees AS
     SELECT DISTINCT f.*
     FROM filtered f
-    WHERE EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = f.TreeTag AND t.CensusID < f.CensusID AND t.IsActive = 1)
-      AND EXISTS (SELECT 1 FROM trees t JOIN stems s ON s.TreeID = t.TreeID
-                  WHERE t.TreeTag = f.TreeTag AND s.StemTag = f.StemTag
-                    AND t.CensusID < f.CensusID AND t.IsActive = 1 AND s.IsActive = 1);
+    WHERE vPreviousCensusID IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM trees t
+        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
+        WHERE t.TreeTag = f.TreeTag
+          AND t.CensusID = vPreviousCensusID
+          AND t.IsActive = 1
+          AND c_prev.PlotID = vCurrentPlotID
+    )
+      AND EXISTS (
+        SELECT 1
+        FROM trees t
+        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
+        JOIN stems s ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+        WHERE t.TreeTag = f.TreeTag
+          AND s.StemTag = f.StemTag
+          AND t.CensusID = vPreviousCensusID
+          AND t.IsActive = 1
+          AND s.IsActive = 1
+          AND c_prev.PlotID = vCurrentPlotID
+    );
 
     CREATE INDEX idx_old_trees_id ON old_trees (id);
 
     CREATE TEMPORARY TABLE multi_stems AS
     SELECT DISTINCT f.* FROM filtered f
-    WHERE EXISTS (SELECT 1 FROM trees t WHERE t.TreeTag = f.TreeTag AND t.CensusID < f.CensusID AND t.IsActive = 1)
+    WHERE vPreviousCensusID IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM trees t
+        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
+        WHERE t.TreeTag = f.TreeTag
+          AND t.CensusID = vPreviousCensusID
+          AND t.IsActive = 1
+          AND c_prev.PlotID = vCurrentPlotID
+    )
       AND NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id);
 
     CREATE INDEX idx_multi_stems_id ON multi_stems (id);
@@ -1580,20 +1620,12 @@ BEGIN
            q.QuadratName AS PrevQuadratName
     FROM stems s
     INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+    INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
     INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
-    INNER JOIN (
-        SELECT t2.TreeTag, s2.StemTag, MAX(t2.CensusID) AS MaxCensusID
-        FROM trees t2
-        JOIN stems s2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
-        WHERE t2.CensusID < vCurrentCensusID
-          AND t2.IsActive = 1
-          AND s2.IsActive = 1
-        GROUP BY t2.TreeTag, s2.StemTag
-    ) max_census ON t.TreeTag = max_census.TreeTag
-        AND s.StemTag = max_census.StemTag
-        AND t.CensusID = max_census.MaxCensusID
     WHERE t.IsActive = 1
-      AND s.IsActive = 1;
+      AND s.IsActive = 1
+      AND c_prev.PlotID = vCurrentPlotID
+      AND t.CensusID = vPreviousCensusID;
 
     CREATE INDEX idx_prev_census_stems_tags ON prev_census_stems (TreeTag, StemTag);
 
@@ -1620,6 +1652,7 @@ BEGIN
     INNER JOIN prev_census_stems pcs ON pcs.TreeTag = f.TreeTag
         AND pcs.StemTag = f.StemTag
     WHERE pcs.PrevQuadratName != f.QuadratName;
+    CREATE INDEX idx_quadrat_mismatch_failures_id ON quadrat_mismatch_failures (id);
 
     -- VALIDATION 2: Coordinate Drift Detection (HARD FAILURE)
     -- Flag coordinates that drift >10m within same quadrat
@@ -1648,6 +1681,7 @@ BEGIN
       AND pcs.PrevX IS NOT NULL
       AND pcs.PrevY IS NOT NULL
       AND SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)) > 10.0;
+    CREATE INDEX idx_coordinate_drift_failures_id ON coordinate_drift_failures (id);
 
     -- Move hard validation failures to coremeasurements as unresolved (StemGUID=NULL)
     IF EXISTS(SELECT 1 FROM quadrat_mismatch_failures) OR EXISTS(SELECT 1 FROM coordinate_drift_failures) THEN
@@ -1725,12 +1759,24 @@ BEGIN
         SET vDataLossCount = vDataLossCount + @cross_census_failures;
 
         -- Remove failed records from filtered table
-        DELETE FROM filtered WHERE id IN (SELECT id FROM quadrat_mismatch_failures);
-        DELETE FROM filtered WHERE id IN (SELECT id FROM coordinate_drift_failures);
-        DELETE FROM old_trees WHERE id IN (SELECT id FROM quadrat_mismatch_failures);
-        DELETE FROM old_trees WHERE id IN (SELECT id FROM coordinate_drift_failures);
-        DELETE FROM multi_stems WHERE id IN (SELECT id FROM quadrat_mismatch_failures);
-        DELETE FROM multi_stems WHERE id IN (SELECT id FROM coordinate_drift_failures);
+        DELETE f
+        FROM filtered f
+                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = f.id;
+        DELETE f
+        FROM filtered f
+                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = f.id;
+        DELETE ot
+        FROM old_trees ot
+                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = ot.id;
+        DELETE ot
+        FROM old_trees ot
+                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = ot.id;
+        DELETE ms
+        FROM multi_stems ms
+                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = ms.id;
+        DELETE ms
+        FROM multi_stems ms
+                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = ms.id;
     END IF;
 
     DROP TEMPORARY TABLE IF EXISTS quadrat_mismatch_failures, coordinate_drift_failures;
@@ -1773,9 +1819,13 @@ BEGIN
     SELECT s_curr.StemGUID as CurrentStemID,
            COALESCE((SELECT s_prev.StemCrossID FROM stems s_prev
                      INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
+                        AND s_prev.CensusID = t_prev.CensusID
+                     INNER JOIN census c_prev ON c_prev.CensusID = t_prev.CensusID
                      INNER JOIN trees t_curr ON t_curr.TreeID = s_curr.TreeID
+                        AND t_curr.CensusID = s_curr.CensusID
                      WHERE t_prev.TreeTag = t_curr.TreeTag AND s_prev.StemTag = s_curr.StemTag
-                       AND t_prev.CensusID < vCurrentCensusID
+                       AND t_prev.CensusID = vPreviousCensusID
+                       AND c_prev.PlotID = vCurrentPlotID
                        AND t_prev.IsActive = 1 AND s_prev.IsActive = 1 AND s_prev.StemCrossID IS NOT NULL
                      ORDER BY t_prev.CensusID DESC LIMIT 1),
                    s_curr.StemGUID) as NewStemCrossID
@@ -1900,14 +1950,10 @@ BEGIN
         CREATE TEMPORARY TABLE tempcodes AS
         SELECT cm.CoreMeasurementID, trim(jt.code) as Code
         FROM filtered f
-        INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
-            AND t.CensusID = f.CensusID AND t.IsActive = 1
-        INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
-            AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
-        INNER JOIN coremeasurements cm ON cm.StemGUID = s.StemGUID
-            AND cm.CensusID = f.CensusID AND cm.IsActive = 1
+        INNER JOIN coremeasurements cm ON cm.SourceRowIndex = f.id
             AND cm.UploadFileID = vFileID
-            AND cm.UploadBatchID = vBatchID,
+            AND cm.UploadBatchID = vBatchID
+            AND cm.StemGUID IS NOT NULL,
         json_table(
             if(f.Codes = '' or trim(f.Codes) = '', '[]',
                concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
@@ -1945,18 +1991,13 @@ BEGIN
     INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = vCurrentCensusID
     INNER JOIN species sp ON t.SpeciesID = sp.SpeciesID
     INNER JOIN (
-        -- Get most recent previous census for each TreeTag
+        -- Compare against the immediately previous census for this plot.
         SELECT t2.TreeTag, t2.SpeciesID as PrevSpeciesID
         FROM trees t2
-        INNER JOIN (
-            SELECT TreeTag, MAX(CensusID) as MaxCensusID
-            FROM trees
-            WHERE CensusID < vCurrentCensusID
-              AND IsActive = 1
-            GROUP BY TreeTag
-        ) max_tree ON t2.TreeTag = max_tree.TreeTag
-            AND t2.CensusID = max_tree.MaxCensusID
+        INNER JOIN census c_prev ON c_prev.CensusID = t2.CensusID
         WHERE t2.IsActive = 1
+          AND t2.CensusID = vPreviousCensusID
+          AND c_prev.PlotID = vCurrentPlotID
     ) prev_tree ON prev_tree.TreeTag = t.TreeTag
         AND prev_tree.PrevSpeciesID != t.SpeciesID  -- Different species
     INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
@@ -2088,6 +2129,8 @@ BEGIN
         status = 'completed',
         endTime = NOW()
     WHERE uploadId = vUploadId;
+
+    COMMIT;
 
     SET @disable_triggers = 0;
 
