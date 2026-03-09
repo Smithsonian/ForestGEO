@@ -14,22 +14,10 @@ export class PoolMonitor {
 
   constructor(config: PoolOptions) {
     this.config = config;
-    this.pool = createPool({
-      ...config,
-      waitForConnections: true,
-      connectionLimit: config.connectionLimit ?? 30,
-      queueLimit: 0
-    });
+    this.pool = this.createManagedPool();
     this.poolClosed = false;
     ailogger.info(chalk.cyan('PoolMonitor initialized.'));
-    this.pool.on('connection', async (conn: PoolConnection) => {
-      try {
-        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
-      } catch (e: any) {
-        ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
-      }
-      this.resetInactivityTimer();
-    });
+    this.attachPoolListeners(this.pool);
 
     this.monitorPoolHealth();
     this.resetInactivityTimer();
@@ -44,11 +32,8 @@ export class PoolMonitor {
         await this.reinitializePool();
       }
 
-      connection = await this.pool.getConnection();
+      connection = await this.acquireConnectionFromCurrentPool();
       connectionAcquired = true;
-
-      connection.on('query', () => this.resetInactivityTimer());
-      connection.on('release', () => this.resetInactivityTimer());
 
       connectionAcquired = false; // Successfully returning, caller now responsible
       return connection;
@@ -66,7 +51,9 @@ export class PoolMonitor {
 
       ailogger.warn(chalk.yellow('Reinitializing pool due to connection error.'));
       await this.reinitializePool();
-      throw error;
+
+      connection = await this.acquireConnectionFromCurrentPool();
+      return connection;
     }
   }
 
@@ -109,11 +96,16 @@ export class PoolMonitor {
 
       ailogger.info(chalk.yellow('Ending pool connections...'));
       await this.pool.end();
-      this.poolClosed = true;
       ailogger.info(chalk.yellow('Pool connections ended.'));
     } catch (error: any) {
-      ailogger.error(chalk.red('Error closing connections:', error));
-      throw error;
+      if (this.isPoolClosedError(error)) {
+        ailogger.warn(chalk.yellow('Pool was already closed while ending connections.'));
+      } else {
+        ailogger.error(chalk.red('Error closing connections:', error));
+        throw error;
+      }
+    } finally {
+      this.poolClosed = true;
     }
   }
 
@@ -146,16 +138,47 @@ export class PoolMonitor {
     try {
       ailogger.info(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
-      this.pool = createPool(this.config);
+      this.pool = this.createManagedPool();
       this.poolClosed = false;
-      this.pool.on('connection', async (conn: PoolConnection) => {
-        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
-        this.resetInactivityTimer();
-      });
+      this.attachPoolListeners(this.pool);
+      this.monitorPoolHealth();
+      this.resetInactivityTimer();
       ailogger.info(chalk.cyan('Connection pool reinitialized.'));
     } catch (error: any) {
       ailogger.error(chalk.red('Error during reinitialization:', error));
+      throw error;
     }
+  }
+
+  private createManagedPool(): Pool {
+    return createPool({
+      ...this.config,
+      waitForConnections: true,
+      connectionLimit: this.config.connectionLimit ?? 30,
+      queueLimit: 0
+    });
+  }
+
+  private attachPoolListeners(pool: Pool): void {
+    pool.on('connection', async (conn: PoolConnection) => {
+      try {
+        conn.query(`SET SESSION wait_timeout=600, interactive_timeout=600`);
+      } catch (e: any) {
+        ailogger.warn(chalk.yellow('Could not set session timeout on new conn'), e);
+      }
+      this.resetInactivityTimer();
+    });
+  }
+
+  private async acquireConnectionFromCurrentPool(): Promise<PoolConnection> {
+    const connection = await this.pool.getConnection();
+    connection.on('query', () => this.resetInactivityTimer());
+    connection.on('release', () => this.resetInactivityTimer());
+    return connection;
+  }
+
+  private isPoolClosedError(error: unknown): boolean {
+    return error instanceof Error && error.message.includes('Pool is closed');
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {

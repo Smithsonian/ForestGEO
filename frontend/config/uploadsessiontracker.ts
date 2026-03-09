@@ -433,7 +433,8 @@ export async function findAbandonedSessionsNeedingCleanup(schema: string): Promi
 export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<{ temporaryDeleted: number; failedDeleted: number }> {
   let conn: PoolConnection | null = null;
   let temporaryDeleted = 0;
-  let failedDeleted = 0;
+  const failedDeleted = 0;
+  let cleanupNote = 'Cleanup: deleted 0 temp rows';
 
   try {
     conn = await getConn();
@@ -443,9 +444,39 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
 
     // Delete from temporarymeasurements
     if (session.fileId) {
-      const deleteTempSQL = `DELETE FROM ${schema}.temporarymeasurements WHERE FileID = ?`;
-      const tempResult = await runQuery(conn, deleteTempSQL, [session.fileId]);
-      temporaryDeleted = (tempResult as any).affectedRows || 0;
+      const overlappingActiveSessionsSQL = `
+        SELECT session_id
+        FROM ${schema}.upload_sessions
+        WHERE file_id = ?
+          AND plot_id = ?
+          AND census_id = ?
+          AND session_id <> ?
+          AND state IN ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing')
+          AND last_heartbeat >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+      const heartbeatTimeoutSeconds = Math.floor(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
+      const overlappingSessions = await runQuery(conn, overlappingActiveSessionsSQL, [
+        session.fileId,
+        session.plotId,
+        session.censusId,
+        session.sessionId,
+        heartbeatTimeoutSeconds
+      ]);
+
+      if (Array.isArray(overlappingSessions) && overlappingSessions.length > 0) {
+        const newerSessionId = (overlappingSessions[0] as { session_id?: string }).session_id ?? 'unknown';
+        cleanupNote = `Cleanup skipped: active session ${newerSessionId} exists for ${session.fileId}`;
+        ailogger.warn(
+          `[UploadSessionTracker] Skipping temporarymeasurement cleanup for session ${session.sessionId} because active session ${newerSessionId} exists for the same file/plot/census`
+        );
+      } else {
+        const deleteTempSQL = `DELETE FROM ${schema}.temporarymeasurements WHERE FileID = ?`;
+        const tempResult = await runQuery(conn, deleteTempSQL, [session.fileId]);
+        temporaryDeleted = (tempResult as any).affectedRows || 0;
+        cleanupNote = `Cleanup: deleted ${temporaryDeleted} temp rows`;
+      }
     }
 
     // Note: We don't automatically delete failed measurements (coremeasurements with
@@ -455,10 +486,10 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
     // Mark session as cleaned up
     const updateSQL = `
       UPDATE ${schema}.upload_sessions
-      SET state = 'cleaned_up', error_message = CONCAT(COALESCE(error_message, ''), ' | Cleanup: deleted ', ?, ' temp rows')
+      SET state = 'cleaned_up', error_message = CONCAT(COALESCE(error_message, ''), ' | ', ?)
       WHERE session_id = ?
     `;
-    await runQuery(conn, updateSQL, [temporaryDeleted, session.sessionId]);
+    await runQuery(conn, updateSQL, [cleanupNote, session.sessionId]);
 
     await runQuery(conn, 'COMMIT');
 
