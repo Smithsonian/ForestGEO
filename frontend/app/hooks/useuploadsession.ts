@@ -69,7 +69,8 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
    * Send heartbeat to server
    */
   const sendHeartbeat = useCallback(async (): Promise<boolean> => {
-    if (!sessionIdRef.current) return false;
+    // Skip heartbeat if session is already cleared (completed/abandoned/unmounting)
+    if (!sessionIdRef.current || !isMountedRef.current) return false;
 
     try {
       const response = await fetch('/api/uploadsession', {
@@ -103,8 +104,11 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       consecutiveHeartbeatFailures.current++;
       return false;
     } catch (error: unknown) {
+      // Ignore errors when component is unmounting (aborted requests)
+      if (!isMountedRef.current) return false;
+
       consecutiveHeartbeatFailures.current++;
-      ailogger.error('[useUploadSession] Heartbeat failed:', error instanceof Error ? error : new Error(String(error)));
+      ailogger.warn('[useUploadSession] Heartbeat failed:', error instanceof Error ? error : new Error(String(error)));
       onHeartbeatFailed?.(error instanceof Error ? error : new Error(String(error)));
 
       if (consecutiveHeartbeatFailures.current >= MAX_HEARTBEAT_FAILURES) {
@@ -389,18 +393,13 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
 
       // Mark session as abandoned if still active
       if (sessionIdRef.current) {
-        // Fire-and-forget cleanup
-        fetch('/api/uploadsession', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schema,
-            sessionId: sessionIdRef.current,
-            action: 'updateState',
-            state: 'abandoned',
-            errorMessage: 'Component unmounted during upload'
-          }),
-          keepalive: true // Ensure request completes even after page unload
+        const sessionId = sessionIdRef.current;
+        // Fire-and-forget cleanup. This is especially important during development,
+        // where Fast Refresh can unmount the uploader mid-file and otherwise leave
+        // partial temporary rows behind for the next retry.
+        fetch(`/api/uploadsession?schema=${schema}&sessionId=${sessionId}&cleanup=true`, {
+          method: 'DELETE',
+          keepalive: true
         }).catch(() => {
           // Ignore errors on cleanup
         });

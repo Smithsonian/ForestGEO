@@ -60,7 +60,7 @@ import {
 } from '@/config/datagridhelpers';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { redirect } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import moment from 'moment';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -85,6 +85,7 @@ import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
+import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -213,6 +214,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const router = useRouter();
   const { setLoading } = useLoading();
   // use the session
   const { data: session } = useSession();
@@ -398,7 +400,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const response = await fetch(
         `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
       );
-      if (!response.ok) throw new Error('Failed to fetch validation errors');
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Failed to fetch validation errors (${response.status}): ${errorBody}`);
+      }
       const data = await response.json();
       const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
         ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
@@ -615,12 +620,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       let csvRows = headers.join(',') + '\n';
       Object.entries(results).forEach(([_, row]) => {
         const rowValues = headers.map(header => {
+          const value =
+            header === 'Errors' || header === 'errors'
+              ? getMeasurementCsvErrorValue(row as Record<string, unknown>, validationErrors)
+              : row[header as keyof MeasurementsSummaryResult];
           if (header === 'StemGUID' || header === 'TreeID') return Number(row[header]);
           if (header === 'IsValidated') return bitToBoolean(row[header]);
-          if (header === 'MeasurementDate') return moment(new Date(row[header as keyof MeasurementsSummaryResult])).format('YYYY-MM-DD');
-          if (Object.prototype.toString.call(row[header as keyof MeasurementsSummaryResult]) === '[object Object]')
-            return `"${JSON.stringify(row[header as keyof MeasurementsSummaryResult]).replace(/"/g, '""')}"`;
-          const value = row[header as keyof MeasurementsSummaryResult];
+          if (header === 'MeasurementDate') return moment(new Date(value as any)).format('YYYY-MM-DD');
+          if (Object.prototype.toString.call(value) === '[object Object]') return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
           if (typeof value === 'string' && value.includes(',')) return `"${value.replace(/"/g, '""')}"`;
           return value ?? 'NULL';
         });
@@ -1370,8 +1377,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   }
 
+  useEffect(() => {
+    if (!currentSite || !currentPlot || !currentCensus) {
+      router.push('/dashboard');
+    }
+  }, [currentSite, currentPlot, currentCensus, router]);
+
   if (!currentSite || !currentPlot || !currentCensus) {
-    redirect('/dashboard');
+    return null;
   } else {
     return (
       <Box

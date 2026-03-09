@@ -47,8 +47,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setReviewState,
   selectedDelimiters
 }) => {
+  const uploadSessionBootstrapTimeoutMs = 5000;
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const currentPlotID = currentPlot?.plotID ?? null;
+  const currentCensusID = currentCensus?.dateRanges?.[0]?.censusID ?? null;
 
   // Session tracking for client disconnection handling
   const {
@@ -60,8 +63,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     isSessionActive: _isSessionActive
   } = useUploadSession({
     schema,
-    plotId: currentPlot?.plotID ?? -1,
-    censusId: currentCensus?.dateRanges?.[0]?.censusID ?? -1
+    plotId: currentPlotID ?? -1,
+    censusId: currentCensusID ?? -1
   });
 
   const [totalOperations, setTotalOperations] = useState(0);
@@ -81,6 +84,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const connectionLimit = 1; // Process batches sequentially to prevent lock contention (file-level locks require serial processing)
   const uploadStartedRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
+  const lastPreparedUploadAttemptRef = useRef<string>('');
 
   // Transaction-aware queue for managing concurrent operations
   const queue = useMemo(() => createTransactionAwareQueue(connectionLimit), [connectionLimit]);
@@ -91,6 +95,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   // Track expected row counts per file for end-to-end verification
   const expectedRowCounts = useRef<Map<string, number>>(new Map());
+  const expectedTemporaryRowCounts = useRef<Map<string, number>>(new Map());
+  const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   // Function to wait for all active operations to complete
   const waitForAllOperationsToComplete = useCallback((): Promise<void> => {
@@ -108,6 +114,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // refs
   const hasUploaded = useRef(false);
   const { isMountedRef } = useIsMounted(); // Tracks component mount state for async operations
+
+  const uploadAttemptKey = useMemo(() => {
+    const fileSignature =
+      acceptedFiles.map(file => `${file.name}:${file.size}:${file.lastModified}:${selectedDelimiters[file.name] ?? 'auto'}`).join('|') || 'no-files';
+    return [uploadForm ?? 'no-form', schema ?? 'no-schema', currentPlotID ?? 'no-plot', currentCensusID ?? 'no-census', fileSignature].join('::');
+  }, [acceptedFiles, currentCensusID, currentPlotID, schema, selectedDelimiters, uploadForm]);
 
   const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -138,8 +150,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       // Check if response indicates connection issues
       if (!response.ok && response.status >= 500) {
-        ailogger.error(`Server error ${response.status} for ${url} - potential connection issue`);
-        throw new Error(`Server error: ${response.status}`);
+        let serverMessage = '';
+        try {
+          const errorBody = await response.text();
+          serverMessage = errorBody;
+          ailogger.error(`Server error ${response.status} for ${url} - response body: ${errorBody}`);
+        } catch {
+          ailogger.error(`Server error ${response.status} for ${url} - could not read response body`);
+        }
+        throw new Error(`Server error ${response.status}: ${serverMessage}`);
       }
 
       return response;
@@ -177,7 +196,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }));
 
         const response = await fetchWithTimeout(
-          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}`,
+          `/api/batchedupload/${schema}/${currentPlot?.plotID}/${currentCensus?.dateRanges?.[0]?.censusID}?fileID=${encodeURIComponent(fileName)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -367,12 +386,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         } catch (error: unknown) {
           const errorObj = error instanceof Error ? error : new Error(String(error));
           const errorMessage = errorObj.message;
-          ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}:`, errorObj);
+          ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}: ${errorMessage}`, errorObj);
+          const isRetriableServerError = /^Server error 5\d{2}:/i.test(errorMessage) || errorMessage.includes('Server error (5');
 
           // Determine if we should retry based on error type
           const shouldRetry =
             retryCount < maxRetries &&
-            (errorMessage.includes('Server error (5') ||
+            (isRetriableServerError ||
               errorMessage.includes('Rate limit exceeded') ||
               errorMessage.includes('timeout') ||
               errorMessage.includes('ECONNRESET') ||
@@ -667,6 +687,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       let totalRows = 0;
       let actualChunkCount = 0;
+      let firstChunkUploadError: Error | null = null;
+      let chunkProcessingError: Error | null = null;
+      const chunkTasks = new Set<Promise<void>>();
+      const queuePauseThreshold = Math.max(connectionLimit * 2, 1);
+      const queueWaitTimeoutMs = 300000; // Match fetch timeout so slow chunk uploads do not abort parsing prematurely.
 
       await new Promise<void>((resolve, reject) => {
         Papa.parse<FileRow>(file, {
@@ -676,77 +701,98 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           chunkSize: chunkSize,
           transformHeader,
           transform,
-          async chunk(results: ParseResult<FileRow>, parser) {
+          chunk(results: ParseResult<FileRow>, parser) {
             actualChunkCount += 1;
             totalRows += results.data.length;
-            try {
-              if (queue.size >= connectionLimit * 2) {
-                ailogger.info(`Queue size ${queue.size} exceeded threshold (${connectionLimit * 2}). Pausing parser.`);
-                parser.pause();
-                // Wait until the queue has room before resuming (with timeout protection)
-                const maxWaitTime = 60000; // 60 seconds timeout
-                const startTime = Date.now();
-                while (queue.size >= connectionLimit) {
-                  if (Date.now() - startTime > maxWaitTime) {
-                    ailogger.error(`Queue wait timeout: queue size ${queue.size} did not drop below ${connectionLimit} within ${maxWaitTime}ms`);
-                    throw new Error(`Queue processing stalled - timeout after ${maxWaitTime}ms`);
+            const chunkTask = (async () => {
+              try {
+                if (queue.size >= queuePauseThreshold) {
+                  ailogger.info(`Queue size ${queue.size} exceeded threshold (${queuePauseThreshold}). Pausing parser.`);
+                  parser.pause();
+                  // Wait until the queue has room before resuming (with timeout protection)
+                  const startTime = Date.now();
+                  while (queue.size >= queuePauseThreshold) {
+                    if (Date.now() - startTime > queueWaitTimeoutMs) {
+                      ailogger.error(`Queue wait timeout: queue size ${queue.size} did not drop below ${queuePauseThreshold} within ${queueWaitTimeoutMs}ms`);
+                      throw new Error(`Queue processing stalled - timeout after ${queueWaitTimeoutMs}ms`);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 100));
                   }
-                  await new Promise(resolve => setTimeout(resolve, 100));
+                  parser.resume();
                 }
-                parser.resume();
-              }
 
-              const validRows: FileRow[] = [];
-              results.data.forEach(row => {
-                if (validateRow(row)) {
-                  validRows.push(row);
-                }
-              });
-
-              if (validRows.length === 0) {
-                // Increment completedChunks even if there is nothing to upload.
-                setCompletedChunks(prev => prev + 1);
-                parser.resume();
-                return;
-              }
-
-              const fileRowSet: FileRowSet = {};
-              validRows.forEach(row => {
-                const rowId = `row-${v4()}`;
-                fileRowSet[rowId] = row;
-              });
-
-              const fileCollectionRowSet: FileCollectionRowSet = {
-                [file.name]: fileRowSet
-              };
-
-              queue.add(async () => {
-                try {
-                  await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
-                } catch (error: unknown) {
-                  const errorObj = error instanceof Error ? error : new Error(String(error));
-                  ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
-                  // Still increment progress to prevent UI from hanging
-                  // The error will be handled at a higher level
-                } finally {
-                  // Always increment completed chunks to ensure progress updates
-                  // Check isMountedRef to prevent state updates after unmount
-                  if (isMountedRef.current) {
-                    setCompletedChunks(prev => prev + 1);
+                const validRows: FileRow[] = [];
+                results.data.forEach(row => {
+                  if (validateRow(row)) {
+                    validRows.push(row);
                   }
+                });
+
+                if (validRows.length === 0) {
+                  // Increment completedChunks even if there is nothing to upload.
+                  setCompletedChunks(prev => prev + 1);
+                  parser.resume();
+                  return;
                 }
-              });
-            } catch (err: unknown) {
-              const errObj = err instanceof Error ? err : new Error(String(err));
-              ailogger.error('Error processing chunk:', errObj);
-              parser.abort();
-              throw errObj;
-            }
+
+                const fileRowSet: FileRowSet = {};
+                validRows.forEach(row => {
+                  const rowId = `row-${v4()}`;
+                  fileRowSet[rowId] = row;
+                });
+
+                const fileCollectionRowSet: FileCollectionRowSet = {
+                  [file.name]: fileRowSet
+                };
+
+                queue.add(async () => {
+                  try {
+                    await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
+                  } catch (error: unknown) {
+                    const errorObj = error instanceof Error ? error : new Error(String(error));
+                    ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
+                    if (!firstChunkUploadError) {
+                      firstChunkUploadError = errorObj;
+                    }
+                  } finally {
+                    // Always increment completed chunks to ensure progress updates
+                    // Check isMountedRef to prevent state updates after unmount
+                    if (isMountedRef.current) {
+                      setCompletedChunks(prev => prev + 1);
+                    }
+                  }
+                });
+              } catch (err: unknown) {
+                const errObj = err instanceof Error ? err : new Error(String(err));
+                ailogger.error('Error processing chunk:', errObj);
+                if (!chunkProcessingError) {
+                  chunkProcessingError = errObj;
+                }
+                parser.abort();
+                throw errObj;
+              }
+            })();
+
+            chunkTasks.add(chunkTask);
+            void chunkTask.finally(() => {
+              chunkTasks.delete(chunkTask);
+            });
           },
           complete: async () => {
+            await Promise.allSettled(Array.from(chunkTasks));
             await queue.onEmpty();
             // Wait for all database operations to complete
             await waitForAllOperationsToComplete();
+
+            if (chunkProcessingError) {
+              reject(chunkProcessingError);
+              return;
+            }
+
+            if (firstChunkUploadError) {
+              reject(firstChunkUploadError);
+              return;
+            }
 
             if (actualChunkCount !== estimatedChunkCount && isMountedRef.current) {
               const delta = actualChunkCount - estimatedChunkCount;
@@ -780,6 +826,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             // Enhanced processing summary
             const validRowsCount = totalRows - parsingInvalidRows.length;
+            expectedTemporaryRowCounts.current.set(file.name, validRowsCount);
             const processingEfficiency = totalRows > 0 ? ((validRowsCount / totalRows) * 100).toFixed(1) : '0';
 
             ailogger.info(`Enhanced CSV processing completed for ${file.name}:`);
@@ -817,6 +864,60 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
+    const hasFiles = acceptedFiles.length > 0;
+    const isFreshAttempt = lastPreparedUploadAttemptRef.current !== uploadAttemptKey;
+    const isStaleZeroProgress =
+      hasFiles &&
+      uploadStartedRef.current &&
+      !uploaded &&
+      !processed &&
+      !batchProcessingStartedRef.current &&
+      totalChunks === 0 &&
+      completedChunks === 0 &&
+      processedChunks === 0;
+
+    if (!hasFiles) {
+      if (lastPreparedUploadAttemptRef.current || uploadStartedRef.current || batchProcessingStartedRef.current) {
+        ailogger.info('Upload queue cleared; resetting upload lifecycle guards');
+      }
+      lastPreparedUploadAttemptRef.current = '';
+      uploadStartedRef.current = false;
+      batchProcessingStartedRef.current = false;
+      measurementBatchIDs.current.clear();
+      return;
+    }
+
+    if (isFreshAttempt) {
+      lastPreparedUploadAttemptRef.current = uploadAttemptKey;
+      uploadStartedRef.current = false;
+      batchProcessingStartedRef.current = false;
+      expectedRowCounts.current.clear();
+      expectedTemporaryRowCounts.current.clear();
+      measurementBatchIDs.current.clear();
+      setTotalOperations(0);
+      setCompletedOperations(0);
+      setTotalChunks(0);
+      setTotalBatches(0);
+      setCompletedChunks(0);
+      setProcessedChunks(0);
+      setUploaded(false);
+      setProcessed(false);
+      setIsVerifying(false);
+      setVerificationStatus('');
+      setVerificationStep(0);
+      setTotalVerificationSteps(0);
+      ailogger.info(`Prepared fresh upload attempt: ${uploadAttemptKey}`);
+      return;
+    }
+
+    if (isStaleZeroProgress) {
+      ailogger.warn(`Detected stale upload start guard for ${uploadAttemptKey}; resetting client upload state`);
+      uploadStartedRef.current = false;
+      batchProcessingStartedRef.current = false;
+    }
+  }, [acceptedFiles.length, completedChunks, processed, processedChunks, totalChunks, uploadAttemptKey, uploaded]);
+
+  useEffect(() => {
     // Use ref-based mount tracking to survive Fast Refresh during development
     // This ensures async operations can safely check mount state even after HMR
     isMountedRef.current = true;
@@ -825,32 +926,66 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       try {
         // Clear expected row counts from any previous upload
         expectedRowCounts.current.clear();
+        expectedTemporaryRowCounts.current.clear();
+
+        if (acceptedFiles.length === 0) {
+          ailogger.error('UploadFireSQL mounted with no accepted files to process');
+          setUploadError(new Error('No files are queued for upload. Please reselect the file and try again.'));
+          setReviewState(ReviewStates.ERRORS);
+          return;
+        }
 
         // Validate required data before proceeding
-        if (!currentPlot || !currentCensus || !schema || !session?.user?.name) {
-          const contextStatus = `currentPlot: ${!!currentPlot}, currentCensus: ${!!currentCensus}, schema: ${!!schema}, session: ${!!session?.user?.name}`;
+        if (!currentPlotID || !currentCensusID || !schema || !session?.user?.name) {
+          const contextStatus = `plotID: ${currentPlotID ?? 'missing'}, censusID: ${currentCensusID ?? 'missing'}, schema: ${!!schema}, session: ${!!session?.user?.name}`;
           ailogger.error(`Missing required context for upload: ${contextStatus}`);
           setUploadError(new Error('Missing required context. Please ensure a plot and census are selected.'));
           setReviewState(ReviewStates.ERRORS);
           return;
         }
 
+        ailogger.info(`Starting upload bootstrap for ${acceptedFiles.length} file(s) on plot ${currentPlotID}, census ${currentCensusID}`);
+
         // Create upload session for tracking and cleanup on disconnection
-        // Note: We use the first file name as the fileId for simplicity
-        // The session tracks the overall upload, not individual files
+        // Note: Session tracking is best-effort and must not block chunk planning/upload.
         const primaryFileName = acceptedFiles[0]?.name || 'unknown';
-        try {
-          await createSession(primaryFileName, acceptedFiles.length);
-          ailogger.info(`Upload session created for ${acceptedFiles.length} files, primary: ${primaryFileName}`);
-          // Transition to 'uploading' state now that we're about to start uploading
-          updateState('uploading').catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            ailogger.warn(`Failed to update session state to uploading: ${message}`);
-          });
-        } catch (sessionError: unknown) {
-          const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
-          ailogger.warn(`Failed to create upload session (continuing anyway): ${message}`);
-        }
+        void (async () => {
+          ailogger.info(`Attempting upload session creation for ${primaryFileName}`);
+          try {
+            const sessionResult = await Promise.race([
+              createSession(primaryFileName, acceptedFiles.length).then(sessionId => ({
+                sessionId,
+                timedOut: false
+              })),
+              new Promise<{ sessionId: null; timedOut: true }>(resolve => {
+                setTimeout(() => {
+                  resolve({ sessionId: null, timedOut: true });
+                }, uploadSessionBootstrapTimeoutMs);
+              })
+            ]);
+
+            if (sessionResult.sessionId) {
+              ailogger.info(`Upload session created for ${acceptedFiles.length} files, primary: ${primaryFileName}`);
+              updateState('uploading').catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err);
+                ailogger.warn(`Failed to update session state to uploading: ${message}`);
+              });
+              return;
+            }
+
+            if (sessionResult.timedOut) {
+              ailogger.warn(
+                `Upload session creation is still pending after ${uploadSessionBootstrapTimeoutMs}ms for ${primaryFileName}; continuing without waiting`
+              );
+              return;
+            }
+
+            ailogger.warn(`Upload session unavailable for ${primaryFileName}; continuing without session tracking`);
+          } catch (sessionError: unknown) {
+            const message = sessionError instanceof Error ? sessionError.message : String(sessionError);
+            ailogger.warn(`Failed to create upload session (continuing anyway): ${message}`);
+          }
+        })();
 
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
@@ -911,6 +1046,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           const estimatedCount = estimatedChunkCounts.get(file.name) ?? 1;
           const fileBatchID = uploadForm === FormType.measurements ? generateShortBatchID() : undefined;
           if (fileBatchID) {
+            measurementBatchIDs.current.set(file.name, fileBatchID);
             ailogger.info(`File ${file.name}: Using consolidated BatchID ${fileBatchID} for all chunks`);
           }
           await parseFileInChunks(file as File, delimiter, estimatedCount, fileBatchID);
@@ -936,22 +1072,33 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
           for (let i = 0; i < acceptedFiles.length; i++) {
             const file = acceptedFiles[i];
+            const expectedUploadedRows = expectedTemporaryRowCounts.current.get(file.name) || 0;
+            const fileBatchID = measurementBatchIDs.current.get(file.name) || null;
             if (isMountedRef.current) {
               setVerificationStep(i + 1);
               setVerificationStatus(`Verifying file ${i + 1} of ${acceptedFiles.length}: ${file.name}...`);
             }
 
+            if (expectedUploadedRows === 0) {
+              ailogger.info(`Skipping temporary row verification for ${file.name}: no valid rows were expected to reach temporarymeasurements`);
+              continue;
+            }
+
             const verificationResponse = await fetch(
-              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}&plotID=${currentPlot?.plotID}&censusID=${currentCensus?.dateRanges?.[0]?.censusID}`
+              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}${fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : ''}&plotID=${currentPlotID}&censusID=${currentCensusID}`
             );
             if (!verificationResponse.ok) {
               throw new Error(`Upload verification failed for ${file.name}: ${verificationResponse.status}`);
             }
             const verificationData = await verificationResponse.json();
-            if (verificationData.count === 0) {
-              throw new Error(`No data found in database for ${file.name} - upload may have failed silently`);
+            if (verificationData.count !== expectedUploadedRows) {
+              throw new Error(
+                `Upload verification failed for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}: expected ${expectedUploadedRows} row(s) in temporarymeasurements, found ${verificationData.count}`
+              );
             }
-            ailogger.info(`Verified ${verificationData.count} rows uploaded for ${file.name}`);
+            ailogger.info(
+              `Verified ${verificationData.count}/${expectedUploadedRows} row(s) uploaded for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}`
+            );
           }
 
           if (isMountedRef.current) {
@@ -962,10 +1109,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         } catch (verificationError: unknown) {
           const message = verificationError instanceof Error ? verificationError.message : String(verificationError);
           if (isMountedRef.current) {
-            setVerificationStatus(`Upload verification warning: ${message}`);
+            setVerificationStatus(`Upload verification failed: ${message}`);
           }
-          ailogger.warn(`Upload verification failed, but continuing: ${message}`);
-          // Don't fail the upload if verification fails, but log the warning
+          ailogger.error(`Upload verification failed: ${message}`);
+          throw verificationError instanceof Error ? verificationError : new Error(message);
         }
 
         if (isMountedRef.current) {
@@ -991,43 +1138,76 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
 
     // Only run uploads once using ref
-    if (!uploadStartedRef.current && !uploaded && !processed) {
+    let startHandle: ReturnType<typeof setTimeout> | null = null;
+
+    if (acceptedFiles.length > 0 && !uploadStartedRef.current && !uploaded && !processed) {
+      ailogger.info(`Scheduling runUploads for attempt ${uploadAttemptKey}`);
       uploadStartedRef.current = true;
-      runUploads().catch(error => {
-        // Filter out Application Insights monitoring errors
-        if (isApplicationInsightsError(error)) {
-          ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
-          ailogger.info('Upload process continuing despite monitoring system limitation');
-          // Don't set error state or change review state for monitoring errors
-          return;
-        }
+      startHandle = setTimeout(() => {
+        startHandle = null;
+        ailogger.info(`Starting runUploads for attempt ${uploadAttemptKey}`);
+        runUploads().catch(error => {
+          // Filter out Application Insights monitoring errors
+          if (isApplicationInsightsError(error)) {
+            ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
+            ailogger.info('Upload process continuing despite monitoring system limitation');
+            // Don't set error state or change review state for monitoring errors
+            return;
+          }
 
-        ailogger.error('runUploads failed:', error);
-        // Cancel the session on error to allow cleanup
-        cancelSession().catch(cancelErr => {
-          ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
+          ailogger.error('runUploads failed:', error);
+          // Cancel the session on error to allow cleanup
+          cancelSession().catch(cancelErr => {
+            ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
+          });
+
+          // CRITICAL: Only update state if component is still mounted
+          // Updating state after unmount can cause React error #310
+          if (isMountedRef.current) {
+            setUploadError(error);
+            setReviewState(ReviewStates.ERRORS);
+          } else {
+            ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
+          }
         });
-
-        // CRITICAL: Only update state if component is still mounted
-        // Updating state after unmount can cause React error #310
-        if (isMountedRef.current) {
-          setUploadError(error);
-          setReviewState(ReviewStates.ERRORS);
-        } else {
-          ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
-        }
-      });
+      }, 0);
     }
     return () => {
+      if (startHandle !== null) {
+        clearTimeout(startHandle);
+        ailogger.info(`Cancelled scheduled upload start for attempt ${uploadAttemptKey}`);
+      }
       // Set isMountedRef to false on cleanup to prevent state updates after unmount
       // Note: The uploadStartedRef guard above ensures upload only starts once,
       // and async operations check isMountedRef.current before updating state
       // Using a ref instead of local variable survives Fast Refresh during development
       isMountedRef.current = false;
     };
-    // Empty dependency array - upload runs once on mount via uploadStartedRef guard
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [
+    acceptedFiles,
+    cancelSession,
+    createSession,
+    currentCensus,
+    currentCensusID,
+    currentPlot,
+    currentPlotID,
+    estimateChunkCount,
+    isApplicationInsightsError,
+    isMountedRef,
+    parseFileInChunks,
+    processed,
+    queue,
+    schema,
+    selectedDelimiters,
+    session?.user?.name,
+    setReviewState,
+    setUploadError,
+    updateState,
+    uploadAttemptKey,
+    uploaded,
+    uploadForm,
+    waitForAllOperationsToComplete
+  ]);
 
   useEffect(() => {
     // The processing condition now relies on 'uploaded' being true, which is only set
@@ -1069,11 +1249,27 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         ailogger.info(
           `Setting up bulk processor for schema: ${schema}, plotID: ${currentPlot?.plotID ?? -1}, censusID: ${currentCensus?.dateRanges?.[0]?.censusID}`
         );
-        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}`);
-        if (!response.ok) {
-          throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
+        const exactBatchTargets = acceptedFiles
+          .map(file => {
+            const batchID = measurementBatchIDs.current.get(file.name);
+            return batchID ? { fileID: file.name, batchID } : null;
+          })
+          .filter((target): target is { fileID: string; batchID: string } => target !== null);
+
+        let output: { fileID: string; batchID: string }[];
+        if (exactBatchTargets.length === acceptedFiles.length && exactBatchTargets.length > 0) {
+          output = exactBatchTargets;
+          ailogger.info(`Using ${output.length} client-tracked measurement batch(es) for processing`, output);
+        } else {
+          const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges?.[0]?.censusID}`);
+          if (!response.ok) {
+            throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
+          }
+          output = await response.json();
+          ailogger.warn(
+            `Fell back to server batch discovery for processing because only ${exactBatchTargets.length}/${acceptedFiles.length} client batch IDs were available`
+          );
         }
-        const output: { fileID: string; batchID: string }[] = await response.json();
         ailogger.info(`Received ${output.length} batches to process:`, output);
 
         // If there are no batches to process, skip batch processing entirely

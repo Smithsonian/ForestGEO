@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
   beforeEach(() => {
@@ -16,6 +17,45 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       // - performSaveAction no longer has 500ms/1000ms delays
       // - Only fetchValidationErrors() is called
       expect(true).toBe(true); // Verified in measurementscommons.tsx:565-574
+    });
+  });
+
+  describe('Bug Fix: measurement CSV export should fall back to validationErrors when summary Errors is null', () => {
+    it('returns existing Errors value when present on the row', () => {
+      expect(
+        getMeasurementCsvErrorValue(
+          {
+            CoreMeasurementID: 101,
+            Errors: 'Existing summary error'
+          },
+          {}
+        )
+      ).toBe('Existing summary error');
+    });
+
+    it('derives export error text from validationErrors when summary Errors is null', () => {
+      expect(
+        getMeasurementCsvErrorValue(
+          {
+            CoreMeasurementID: 1048722,
+            Errors: null
+          },
+          {
+            1048722: {
+              coreMeasurementID: 1048722,
+              errors: [
+                {
+                  id: 20,
+                  validationPairs: [
+                    { criterion: 'Validation 20', description: 'Species mismatch from previous census' },
+                    { criterion: 'Validation 20', description: 'Species mismatch from previous census' }
+                  ]
+                }
+              ]
+            }
+          }
+        )
+      ).toBe('Species mismatch from previous census');
     });
   });
 

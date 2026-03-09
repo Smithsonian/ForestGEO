@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { insertIngestionFailureRows } from './measurementerrors';
+import { insertIngestionFailureRows, revalidateEditedFailedRow } from './measurementerrors';
 
 vi.mock('@/ailogger', () => ({
   default: {
@@ -51,5 +51,75 @@ describe('measurementerrors helpers', () => {
     expect(logInsertCalls).toHaveLength(2);
     expect(logInsertCalls[0][1]).toEqual([77, 1001]);
     expect(logInsertCalls[1][1]).toEqual([77, 1002]);
+  });
+
+  it('keeps quadrat-mismatch rows failing during revalidation', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ cnt: 1 }])
+      .mockResolvedValueOnce([{ cnt: 1 }])
+      .mockResolvedValueOnce([{ PrevQuadratName: '1301', PrevX: 10, PrevY: 20 }]);
+
+    const connectionManager = { executeQuery } as any;
+
+    const errors = await revalidateEditedFailedRow(
+      connectionManager,
+      'forestgeo_testing',
+      4,
+      {
+        Tag: '100001',
+        StemTag: '1',
+        SpCode: 'FAGR',
+        Quadrat: '1317',
+        X: 10,
+        Y: 20,
+        DBH: 3.5,
+        HOM: 1.3,
+        Date: '2010-03-17',
+        Codes: 'LI'
+      },
+      'tx-1'
+    );
+
+    expect(errors).toContainEqual({
+      errorCode: 'QUADRAT_MISMATCH',
+      errorMessage: 'Quadrat mismatch across censuses'
+    });
+  });
+
+  it('keeps coordinate-drift rows failing during revalidation', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ cnt: 1 }])
+      .mockResolvedValueOnce([{ cnt: 1 }])
+      .mockResolvedValueOnce([{ PrevQuadratName: '1301', PrevX: 10, PrevY: 20 }]);
+
+    const connectionManager = { executeQuery } as any;
+
+    const errors = await revalidateEditedFailedRow(
+      connectionManager,
+      'forestgeo_testing',
+      4,
+      {
+        Tag: '100001',
+        StemTag: '1',
+        SpCode: 'FAGR',
+        Quadrat: '1301',
+        X: 25,
+        Y: 20,
+        DBH: 3.5,
+        HOM: 1.3,
+        Date: '2010-03-17',
+        Codes: 'LI'
+      },
+      'tx-1'
+    );
+
+    expect(errors).toContainEqual({
+      errorCode: 'COORDINATE_DRIFT',
+      errorMessage: 'Coordinate drift exceeds allowed threshold'
+    });
   });
 });

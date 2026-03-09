@@ -102,7 +102,7 @@ export default function DashboardPage() {
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
 
   // Census creation state
-  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
+  const isCreatingCensusRef = useRef(false);
 
   // Track loading state and last loaded key to prevent duplicate requests
   const loadingRef = useRef<boolean>(false);
@@ -362,7 +362,7 @@ export default function DashboardPage() {
   const handleAddCensus = useCallback(async () => {
     console.log('handleAddCensus called');
 
-    if (isCreatingCensus) {
+    if (isCreatingCensusRef.current) {
       console.log('Census creation already in progress, ignoring click');
       return;
     }
@@ -387,9 +387,9 @@ export default function DashboardPage() {
       return;
     }
 
-    setIsCreatingCensus(true);
+    isCreatingCensusRef.current = true;
     setError(null);
-    setLoading(true, 'Creating new census...');
+    setLoading(true, 'Creating new census...', undefined, 'processing');
     const startTime = Date.now();
 
     try {
@@ -417,11 +417,10 @@ export default function DashboardPage() {
       if (sourceCensusID !== undefined && sourceCensusID !== null) {
         await Promise.all(
           ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ incoming: {} })
-            });
+            const rolloverResponse = await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`);
+            if (!rolloverResponse.ok) {
+              throw new Error(`Failed to rollover ${key}: ${rolloverResponse.status}`);
+            }
           })
         );
       } else {
@@ -444,9 +443,11 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
       // Debounce: prevent rapid successive clicks
-      censusCreationTimerRef.current = setTimeout(() => setIsCreatingCensus(false), 1000);
+      censusCreationTimerRef.current = setTimeout(() => {
+        isCreatingCensusRef.current = false;
+      }, 1000);
     }
-  }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
+  }, [currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
 
   // Handle manual reset after successful plot edit
   useEffect(() => {

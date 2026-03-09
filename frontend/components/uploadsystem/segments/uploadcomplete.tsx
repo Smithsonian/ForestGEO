@@ -67,13 +67,23 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       const response = await fetch(
         `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
       );
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        ailogger.warn(`Census fetch returned ${response.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, census: 100 }));
+        setProgressText(prev => ({ ...prev, census: `Census refresh failed (server returned ${response.status}).` }));
+        setLoadStatus(prev => ({ ...prev, census: 'warning' }));
+        return;
+      }
+
       const censusRDSLoad = await response.json();
 
       // Validate that we received an array before processing
       if (!Array.isArray(censusRDSLoad)) {
         ailogger.warn('Census data response is not an array:', censusRDSLoad);
         setProgress(prev => ({ ...prev, census: 100 }));
-        setProgressText(prev => ({ ...prev, census: 'Census refresh failed (invalid server response).' }));
+        setProgressText(prev => ({ ...prev, census: 'Census refresh failed (unexpected response format).' }));
         setLoadStatus(prev => ({ ...prev, census: 'warning' }));
         return;
       }

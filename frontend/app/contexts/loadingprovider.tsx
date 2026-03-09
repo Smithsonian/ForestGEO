@@ -79,8 +79,8 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
         return updated;
       });
 
-      // Set up automatic timeout (30 seconds for most operations, 5 minutes for uploads)
-      const timeoutDuration = category === 'upload' ? 5 * 60 * 1000 : 30 * 1000;
+      // Give long-running processing flows the same budget as uploads.
+      const timeoutDuration = category === 'upload' || category === 'processing' ? 5 * 60 * 1000 : 30 * 1000;
       const timeoutId = setTimeout(() => {
         console.warn(`Operation ${operationId} timed out after ${timeoutDuration}ms`);
         endOperation(operationId);

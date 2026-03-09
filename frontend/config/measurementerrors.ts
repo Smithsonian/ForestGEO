@@ -57,7 +57,9 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('missing required field: stemtag') || text.includes('missing stemtag')) codes.push('MISSING_FIELD_STEMTAG');
   if (text.includes('missing required field: speciescode') || text.includes('missing speciescode')) codes.push('MISSING_FIELD_SPECIESCODE');
   if (text.includes('missing required field: quadratname') || text.includes('missing quadratname')) codes.push('MISSING_FIELD_QUADRATNAME');
-  if (text.includes('missing required field: date') || text.includes('missing date') || text.includes('missing measurementdate')) codes.push('MISSING_FIELD_DATE');
+  if (text.includes('missing required field: date') || text.includes('missing date') || text.includes('missing measurementdate')) {
+    codes.push('MISSING_FIELD_DATE');
+  }
   if (text.includes('invalid quadrat') || text.includes('quadrat name')) codes.push('INVALID_QUADRAT');
   if (text.includes('invalid species') || text.includes('species code')) codes.push('INVALID_SPECIES');
   if (text.includes('quadrat mismatch')) codes.push('QUADRAT_MISMATCH');
@@ -265,7 +267,6 @@ export async function insertIngestionFailureRows(
   return insertedIDs;
 }
 
-
 export interface RevalidationResult {
   errorCode: string;
   errorMessage: string;
@@ -292,6 +293,12 @@ const FIELD_LENGTH_LIMITS = {
   Comments: 255,
   Codes: 255
 } as const;
+
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 /**
  * Validates edited failed-row field values against all ingestion checks
@@ -385,6 +392,53 @@ export async function revalidateEditedFailedRow(
     const speciesResult: any[] = await connectionManager.executeQuery(speciesCheckSQL, [String(fields.SpCode).trim()], transactionID);
     if (speciesResult?.[0]?.cnt === 0) {
       errors.push({ errorCode: 'INVALID_SPECIES', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_SPECIES'] });
+    }
+  }
+
+  // Cross-census hard-failure checks. These mirror the stored procedure logic
+  // used for old trees and must remain unresolved until the edited row no longer
+  // conflicts with the latest prior census record for the same TreeTag+StemTag.
+  if (!isEmpty(fields.Tag) && !isEmpty(fields.StemTag)) {
+    const priorStemSQL = safeFormatQuery(
+      schema,
+      `SELECT q.QuadratName AS PrevQuadratName,
+              s.LocalX AS PrevX,
+              s.LocalY AS PrevY
+       FROM ??.stems s
+       INNER JOIN ??.trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+       INNER JOIN ??.quadrats q ON s.QuadratID = q.QuadratID
+       WHERE t.TreeTag = ?
+         AND s.StemTag = ?
+         AND t.CensusID < ?
+         AND t.IsActive = 1
+         AND s.IsActive = 1
+       ORDER BY t.CensusID DESC
+       LIMIT 1`,
+      [schema, schema, schema]
+    );
+    const priorStemRows: any[] = await connectionManager.executeQuery(
+      priorStemSQL,
+      [String(fields.Tag).trim(), String(fields.StemTag).trim(), censusID],
+      transactionID
+    );
+
+    const priorStem = priorStemRows?.[0];
+    if (priorStem) {
+      const currentQuadrat = isEmpty(fields.Quadrat) ? null : String(fields.Quadrat).trim();
+      const previousQuadrat = priorStem.PrevQuadratName ? String(priorStem.PrevQuadratName).trim() : null;
+
+      if (currentQuadrat && previousQuadrat && currentQuadrat !== previousQuadrat) {
+        errors.push({ errorCode: 'QUADRAT_MISMATCH', errorMessage: INGESTION_ERROR_MESSAGES['QUADRAT_MISMATCH'] });
+      } else {
+        const currentX = toFiniteNumber(fields.X);
+        const currentY = toFiniteNumber(fields.Y);
+        const previousX = toFiniteNumber(priorStem.PrevX);
+        const previousY = toFiniteNumber(priorStem.PrevY);
+
+        if (currentX !== null && currentY !== null && previousX !== null && previousY !== null && Math.hypot(currentX - previousX, currentY - previousY) > 10) {
+          errors.push({ errorCode: 'COORDINATE_DRIFT', errorMessage: INGESTION_ERROR_MESSAGES['COORDINATE_DRIFT'] });
+        }
+      }
     }
   }
 
