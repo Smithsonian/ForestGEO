@@ -9,9 +9,11 @@
  *
  * Inline Validations (accept but flag in measurement_error_log):
  * - ValidationID 14: Invalid attribute code
+ * - ValidationID 20: Species mismatch across censuses
+ * - ValidationID 21: Same-batch species conflict
  *
- * NOTE: Most cross-census validations (ValidationID 1, 2, 20, 21) run POST-INGESTION via the API layer.
- * Tests for these are in: tests/integration/post-ingestion-validations.integration.test.ts
+ * NOTE: ValidationIDs 1 and 2 run post-ingestion via the validation framework.
+ * ValidationIDs 20 and 21 are inline soft validations emitted by bulkingestionprocess.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -24,6 +26,8 @@ import {
   runBulkIngestion,
   getValidationErrors,
   getFailedMeasurements,
+  getTreeState,
+  getTreeStatesForBatch,
   seedStatusAttributes,
   setupTwoCensusScenario,
   type TestData,
@@ -477,7 +481,7 @@ describe('Inline Validation Data Tests', () => {
    * NOTE: Most soft validations (3, 5, 11) run POST-INGESTION via the API layer.
    * Tests for these are in: tests/integration/post-ingestion-validations.integration.test.ts
    *
-   * Only ValidationID 14 (Invalid Attribute Code) runs INLINE during bulkingestionprocess.
+   * ValidationIDs 14, 20, and 21 run INLINE during bulkingestionprocess.
    */
   let connection: Connection;
   let testData: TestData;

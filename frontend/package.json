@@ -19,6 +19,7 @@
     "lint": "next lint --fix --quiet && prettier --write . --log-level silent",
     "format": "prettier --write .",
     "test:unit": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run",
+    "test:integration": "node --max-old-space-size=4096 ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.mts",
     "test:component": "cypress run --component",
     "test:e2e": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
     "test:all": "npm run test:unit && npm run test:component && npm run test:e2e",

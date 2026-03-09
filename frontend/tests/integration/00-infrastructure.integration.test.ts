@@ -24,7 +24,12 @@ import {
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
-// Expected validation definitions from corequeries.sql
+function toBool(value: unknown): boolean {
+  if (Buffer.isBuffer(value)) return value[0] === 1;
+  return Boolean(value);
+}
+
+// Expected validation definitions from corequeries.sql plus inline validation metadata
 const EXPECTED_VALIDATIONS = [
   { id: 1, name: 'ValidateDBHGrowthExceedsMax' },
   { id: 2, name: 'ValidateDBHShrinkageExceedsMax' },
@@ -36,9 +41,12 @@ const EXPECTED_VALIDATIONS = [
   { id: 8, name: 'ValidateFindStemsOutsidePlots' },
   { id: 9, name: 'ValidateFindTreeStemsInDifferentQuadrats' },
   { id: 11, name: 'ValidateScreenMeasuredDiameterMinMax' },
+  { id: 12, name: 'ValidateScreenStemsWithMeasurementsButDeadAttributes' },
   { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' },
   { id: 14, name: 'ValidateFindInvalidAttributeCodes' },
-  { id: 15, name: 'ValidateFindAbnormallyHighDBH' }
+  { id: 15, name: 'ValidateFindAbnormallyHighDBH' },
+  { id: 20, name: 'SpeciesMismatchCrossCensus' },
+  { id: 21, name: 'SameBatchSpeciesConflict' }
 ] as const;
 
 // Expected core tables that must exist
@@ -120,12 +128,31 @@ describe('Infrastructure Validation', () => {
         'StemGUID',
         'CensusID',
         'MeasuredDBH',
-        'MeasurementDate'
+        'MeasurementDate',
+        'UploadFileID',
+        'UploadBatchID',
+        'RawTreeTag',
+        'RawStemTag',
+        'RawSpCode',
+        'RawQuadrat',
+        'RawX',
+        'RawY',
+        'RawCodes',
+        'RawComments',
+        'SourceRowIndex'
       ];
 
       for (const col of requiredColumns) {
         expect(columnNames).toContain(col);
       }
+    });
+
+    it('should not include legacy failed-row tables removed by the unified schema', async () => {
+      const [tables] = await connection.query<RowDataPacket[]>('SHOW TABLES');
+      const tableNames = tables.map(row => String(Object.values(row)[0]));
+
+      expect(tableNames).not.toContain('failedmeasurements');
+      expect(tableNames).not.toContain('cmverrors');
     });
 
     it('should have correct table structure for temporarymeasurements', async () => {
@@ -165,6 +192,22 @@ describe('Infrastructure Validation', () => {
 
       // The procedure should return something (even if empty)
       expect(result).toBeDefined();
+    });
+
+    it('should use the unified measurement error workflow inside bulkingestionprocess', async () => {
+      const [rows] = await connection.query<RowDataPacket[]>('SHOW CREATE PROCEDURE bulkingestionprocess');
+      expect(rows.length).toBe(1);
+
+      const definition = String(rows[0]['Create Procedure'] || '');
+      const normalizedDefinition = definition.toLowerCase();
+
+      expect(normalizedDefinition).toContain('measurement_error_log');
+      expect(normalizedDefinition).toContain('measurement_errors');
+      expect(normalizedDefinition).toContain('uploadfileid');
+      expect(normalizedDefinition).toContain('uploadbatchid');
+      expect(normalizedDefinition).toContain('sourcerowindex');
+      expect(normalizedDefinition).not.toContain('failedmeasurements');
+      expect(normalizedDefinition).not.toContain('cmverrors');
     });
   });
 
@@ -219,6 +262,22 @@ describe('Infrastructure Validation', () => {
 
       if (emptyDefinitions.length > 0) {
         throw new Error(`Validations with empty Definition: ${emptyDefinitions.join(', ')}`);
+      }
+    });
+
+    it('should model inline validations as disabled rows with empty definitions', async () => {
+      const [validations] = await connection.query<RowDataPacket[]>(
+        `SELECT ValidationID, ProcedureName, Definition, IsEnabled
+         FROM sitespecificvalidations
+         WHERE ValidationID IN (20, 21)
+         ORDER BY ValidationID`
+      );
+
+      expect(validations).toHaveLength(2);
+
+      for (const validation of validations) {
+        expect(validation.Definition ?? '').toBe('');
+        expect(toBool(validation.IsEnabled)).toBe(false);
       }
     });
   });

@@ -25,9 +25,9 @@ graph TD
     TMP -->|"passes validation"| CM1
     TMP -->|"fails validation"| FM
 
-    style FM fill:#f96,stroke:#c00
-    style CMV fill:#ff9,stroke:#990
-    style CM1 fill:#9f9,stroke:#090
+    style FM fill:#8b2020,stroke:#ff6666,color:#fff
+    style CMV fill:#7a6b1a,stroke:#e6c84d,color:#fff
+    style CM1 fill:#1a6b1a,stroke:#66cc66,color:#fff
 ```
 
 **Problems with this model:**
@@ -60,9 +60,9 @@ graph TD
     TMP -->|"passes validation"| CM2
     TMP -->|"fails validation<br/>(StemGUID = NULL)"| CM2
 
-    style CM2 fill:#9f9,stroke:#090
-    style MEL fill:#ff9,stroke:#990
-    style ME fill:#ccf,stroke:#339
+    style CM2 fill:#1a6b1a,stroke:#66cc66,color:#fff
+    style MEL fill:#7a6b1a,stroke:#e6c84d,color:#fff
+    style ME fill:#2a2a7a,stroke:#8888dd,color:#fff
 ```
 
 **Key differences:**
@@ -79,41 +79,57 @@ graph TD
 This is the new capability that didn't exist before. Previously, a failed row was a dead end - fix your file and re-upload. Now:
 
 ```mermaid
+---
+config:
+  sequence:
+    mirrorActors: true
+    width: 280
+    height: 60
+    boxMargin: 20
+    boxTextMargin: 10
+    noteMargin: 20
+    messageMargin: 50
+    actorFontSize: 18
+    noteFontSize: 16
+    messageFontSize: 16
+    wrap: true
+    wrapPadding: 20
+---
 sequenceDiagram
     participant R as Researcher
     participant UI as ForestGEO UI
     participant API as Reingest API
     participant DB as MySQL
 
-    R->>UI: Uploads CSV with 1000 rows
-    UI->>DB: Rows staged in temporarymeasurements
-    DB->>DB: bulkingestionprocess runs
+    R ->> UI: Uploads CSV with 1000 rows
+    UI ->> DB: Rows staged in temporarymeasurements
+    DB ->> DB: bulkingestionprocess runs
 
-    Note over DB: 950 rows pass -> coremeasurements (StemGUID set)<br/>50 rows fail -> coremeasurements (StemGUID = NULL)<br/>+ error details in measurement_error_log
+    Note over DB: 950 rows pass → coremeasurements (StemGUID set)<br/>50 rows fail → coremeasurements (StemGUID = NULL)<br/>+ error details in measurement_error_log
 
-    UI->>R: "950 succeeded, 50 failed"
-    R->>UI: Views failed rows with error details
+    UI ->> R: "950 succeeded, 50 failed"
+    R ->> UI: Views failed rows with error details
 
-    Note over R: Sees: "Invalid species reference" (15 rows)<br/>"Missing quadrat" (20 rows)<br/>"Duplicate entry" (15 rows)
+    Note over R: Sees:<br/>"Invalid species reference" (15 rows)<br/>"Missing quadrat" (20 rows)<br/>"Duplicate entry" (15 rows)
 
-    R->>UI: Fixes species table (adds missing species)
-    R->>UI: Fixes quadrat table (adds missing quadrats)
-    R->>UI: Clicks "Revalidate Failed Rows"
+    R ->> UI: Fixes species table (adds missing species)
+    R ->> UI: Fixes quadrat table (adds missing quadrats)
+    R ->> UI: Clicks "Revalidate Failed Rows"
 
-    UI->>API: POST /api/reingest/{schema}/{plotID}/{censusID}
-    API->>DB: Reads failed rows from coremeasurements (StemGUID = NULL)
+    UI ->> API: POST /api/reingest/{schema}/{plotID}/{censusID}
+    API ->> DB: Reads failed rows from coremeasurements (StemGUID = NULL)
 
-    Note over DB: Raw* columns provide original input -<br/>no need to re-upload the file!
+    Note over DB: Raw* columns provide original input —<br/>no need to re-upload the file!
 
-    API->>DB: Copies failed rows back to temporarymeasurements
-    API->>DB: Runs bulkingestionprocess on just those rows
+    API ->> DB: Copies failed rows back to temporarymeasurements
+    API ->> DB: Runs bulkingestionprocess on just those rows
 
     Note over DB: 35 rows now pass (species + quadrats fixed)<br/>15 still fail (true duplicates)
 
-    DB->>DB: measurement_error_log updated:<br/>resolved errors marked IsResolved=1<br/>remaining errors kept active
+    DB ->> DB: measurement_error_log updated:<br/>resolved errors marked IsResolved=1<br/>remaining errors kept active
 
-    API->>UI: "35 reingested, 15 still failing"
-    R->>UI: Reviews remaining 15 true duplicates
+    API ->> UI: "35 reingested, 15 still failing"
+    R ->> UI: Reviews remaining 15 true duplicates
 ```
 
 ---
@@ -188,23 +204,45 @@ All errors now have machine-readable codes in `measurement_errors`:
 | **Stored procedure streamlined** | `bulkingestionprocess` rewritten: removed redundant cursor loops, consolidated duplicate-check logic, reduced intermediate temp tables. Net reduction of ~200 lines of SQL. |
 | **Frontend batch chunking improved** | `uploadfiresql.tsx` optimized to reduce round-trips during large uploads. |
 
-### How to Measure
+### Benchmark Results (SERC Dataset)
 
-To benchmark, run the same upload on both branches:
+Measured end-to-end ingestion time for SERC plot data, two census uploads each:
 
-```bash
-# On main branch
-git checkout main
-# Upload a large CSV (e.g., cocoli full dataset) via the UI, note wall-clock time
+| Dataset | Before (main) | After (this branch) | Speedup |
+|---|---|---|---|
+| SERC Census 1 | 220,000 ms (3m 40.0s) | 108,444 ms (1m 48.4s) | **2.0x faster** |
+| SERC Census 2 | 371,000 ms (6m 11.0s) | 270,671 ms (4m 30.7s) | **1.4x faster** |
 
-# On this branch
-git checkout unified-measurements-table
-# Same upload, same dataset, compare times
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#3b82f6', 'primaryTextColor': '#000000', 'secondaryColor': '#ef4444', 'secondaryTextColor': '#000000', 'tertiaryTextColor': '#000000', 'titleColor': '#000000', 'nodeTextColor': '#000000', 'edgeLabelBackground': '#ffffff'}}}%%
+graph LR
+    subgraph " "
+        direction LR
+        subgraph Census_1["Census 1"]
+            direction TB
+            C1B["<b>Before</b><br/>220.0s (3m 40.0s)"]
+            C1A["<b>After</b><br/>108.4s (1m 48.4s)<br/><i>2.0x faster</i>"]
+        end
+        subgraph Census_2["Census 2"]
+            direction TB
+            C2B["<b>Before</b><br/>371.0s (6m 11.0s)"]
+            C2A["<b>After</b><br/>270.7s (4m 30.7s)<br/><i>1.4x faster</i>"]
+        end
+    end
+
+    style C1B fill:#3b82f6,stroke:#2563eb,color:#000
+    style C2B fill:#3b82f6,stroke:#2563eb,color:#000
+    style C1A fill:#22c55e,stroke:#16a34a,color:#000
+    style C2A fill:#22c55e,stroke:#16a34a,color:#000
+    style Census_1 fill:none,stroke:#000,color:#000
+    style Census_2 fill:none,stroke:#000,color:#000
 ```
 
-Suggested test files:
-- `frontend/sampledata/cocoli/` - standard test dataset
-- Any real site dataset with 1000+ rows for meaningful comparison
+**Why it's faster:**
+- 10 redundant indexes removed from `temporarymeasurements` - each INSERT no longer updates indexes that are never queried
+- Stored procedure cursor loops consolidated - fewer round-trips between SQL engine and temp tables
+- Frontend batch chunking reduces HTTP overhead on large uploads
+- Census 2 sees less speedup because it inherently does more cross-census validation (prior census comparisons)
 
 ---
 

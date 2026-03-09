@@ -854,7 +854,9 @@ const MEASUREMENT_TABLES_DELETE_ORDER = [
   'coremeasurements',      // Parent of measurement_error_log, cmattributes; child of stems
   'stems',                 // Parent of coremeasurements; child of trees, quadrats
   'trees',                 // Parent of stems; child of species, census
-  'temporarymeasurements'  // Standalone (no FKs)
+  'temporarymeasurements', // Standalone (no FKs)
+  'uploadmetrics',         // Standalone: idempotency tracking (must clear to allow re-ingestion)
+  'uploadintegrityalerts'  // Standalone: alert log
 ] as const;
 
 /**
@@ -1368,6 +1370,51 @@ export async function getFailedMeasurements(
 
   const [rows] = await connection.query<mysql.RowDataPacket[]>(query, params);
   return rows as any[];
+}
+
+/**
+ * Helper to get the treestemstate value from coremeasurements for a given batch and tree tag.
+ * The tree_state is stored in UserDefinedFields JSON as $.treestemstate.
+ * Only returns rows where StemGUID IS NOT NULL (successful ingestions).
+ */
+export async function getTreeState(
+  connection: mysql.Connection,
+  batchID: string,
+  treeTag: string
+): Promise<string | null> {
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.treestemstate')) AS treeState
+     FROM coremeasurements
+     WHERE UploadBatchID = ? AND RawTreeTag = ? AND StemGUID IS NOT NULL
+     LIMIT 1`,
+    [batchID, treeTag]
+  );
+
+  if (rows.length === 0) return null;
+  return rows[0].treeState;
+}
+
+/**
+ * Helper to get treestemstate values for all successful measurements in a batch.
+ * Returns a map of TreeTag -> treestemstate.
+ */
+export async function getTreeStatesForBatch(
+  connection: mysql.Connection,
+  batchID: string
+): Promise<Map<string, string>> {
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(
+    `SELECT RawTreeTag AS treeTag,
+            JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.treestemstate')) AS treeState
+     FROM coremeasurements
+     WHERE UploadBatchID = ? AND StemGUID IS NOT NULL`,
+    [batchID]
+  );
+
+  const stateMap = new Map<string, string>();
+  for (const row of rows) {
+    stateMap.set(row.treeTag, row.treeState);
+  }
+  return stateMap;
 }
 
 // =============================================================================

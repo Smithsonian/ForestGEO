@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
+import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 
 /**
  * Enhanced Error Handling Tests for bulkingestionprocess
@@ -27,11 +28,7 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
       }
     ];
 
-    const batchHandledInternally = !!(
-      mockProcedureResult &&
-      mockProcedureResult[0] &&
-      mockProcedureResult[0].batch_failed === true
-    );
+    const batchHandledInternally = !!(mockProcedureResult && mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true);
 
     expect(batchHandledInternally).toBe(true);
   });
@@ -47,11 +44,7 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
       }
     ];
 
-    const batchHandledInternally = !!(
-      mockProcedureResult &&
-      mockProcedureResult[0] &&
-      mockProcedureResult[0].batch_failed === true
-    );
+    const batchHandledInternally = !!(mockProcedureResult && mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true);
 
     expect(batchHandledInternally).toBe(true);
   });
@@ -67,11 +60,7 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
       }
     ];
 
-    const batchHandledInternally = !!(
-      mockProcedureResult &&
-      mockProcedureResult[0] &&
-      mockProcedureResult[0].batch_failed === true
-    );
+    const batchHandledInternally = !!(mockProcedureResult && mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true);
 
     expect(batchHandledInternally).toBe(false);
   });
@@ -80,7 +69,7 @@ describe('Enhanced Bulk Ingestion Error Handling Logic', () => {
     // Test various edge cases
     const testCases = [[], null, undefined, [{}], [{ message: null }], [{ batch_failed: null }]];
 
-    testCases.forEach((mockProcedureResult) => {
+    testCases.forEach(mockProcedureResult => {
       const batchHandledInternally = !!(
         mockProcedureResult &&
         Array.isArray(mockProcedureResult) &&
@@ -112,10 +101,7 @@ describe('setupbulkprocedure API Enhanced Error Handling', () => {
       }
     ];
 
-    const batchHandledInternally =
-      mockProcedureResult &&
-      mockProcedureResult[0] &&
-      mockProcedureResult[0].batch_failed === true;
+    const batchHandledInternally = mockProcedureResult && mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true;
 
     expect(batchHandledInternally).toBe(true);
   });
@@ -128,12 +114,47 @@ describe('setupbulkprocedure API Enhanced Error Handling', () => {
       }
     ];
 
-    const batchHandledInternally =
-      mockProcedureResult &&
-      mockProcedureResult[0] &&
-      mockProcedureResult[0].batch_failed === true;
+    const batchHandledInternally = mockProcedureResult && mockProcedureResult[0] && mockProcedureResult[0].batch_failed === true;
 
     expect(batchHandledInternally).toBe(false);
+  });
+});
+
+describe('failed initial census recovery', () => {
+  test('recovers dirty first-load census state when no completed uploads exist', () => {
+    expect(
+      shouldRecoverFailedInitialCensus({
+        completedUploads: 0,
+        incompleteUploads: 1,
+        treeCount: 38695,
+        stemCount: 69386,
+        coreMeasurementCount: 2
+      })
+    ).toBe(true);
+  });
+
+  test('does not recover when a completed upload already exists for the census', () => {
+    expect(
+      shouldRecoverFailedInitialCensus({
+        completedUploads: 1,
+        incompleteUploads: 1,
+        treeCount: 100,
+        stemCount: 100,
+        coreMeasurementCount: 100
+      })
+    ).toBe(false);
+  });
+
+  test('does not recover when there is no residual census data to clean', () => {
+    expect(
+      shouldRecoverFailedInitialCensus({
+        completedUploads: 0,
+        incompleteUploads: 1,
+        treeCount: 0,
+        stemCount: 0,
+        coreMeasurementCount: 0
+      })
+    ).toBe(false);
   });
 });
 
