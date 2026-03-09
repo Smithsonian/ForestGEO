@@ -51,6 +51,163 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
+
+function toPositiveInteger(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: string, details: Record<string, unknown>): NextResponse {
+  return new NextResponse(
+    JSON.stringify({
+      responseMessage: 'Measurement upload context mismatch',
+      error: message,
+      details
+    }),
+    { status }
+  );
+}
+
+async function validateMeasurementUploadScope(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  plot: Plot | undefined,
+  census: OrgCensus | undefined
+): Promise<{ plotID: number; censusID: number } | NextResponse> {
+  const bodyPlotID = toPositiveInteger(plot?.plotID);
+  const bodyCensusID = toPositiveInteger(census?.dateRanges?.[0]?.censusID);
+  const cookiePlotID = toPositiveInteger(await getCookie('plotID'));
+  const cookieCensusID = toPositiveInteger(await getCookie('censusID'));
+
+  if (bodyPlotID !== null && cookiePlotID !== null && bodyPlotID !== cookiePlotID) {
+    ailogger.warn(`Measurement upload for ${fileName} has plotID mismatch between request body and cookie; preferring request body`, {
+      fileName,
+      batchID,
+      bodyPlotID,
+      cookiePlotID
+    });
+  }
+
+  if (bodyCensusID !== null && cookieCensusID !== null && bodyCensusID !== cookieCensusID) {
+    ailogger.warn(`Measurement upload for ${fileName} has censusID mismatch between request body and cookie; preferring request body`, {
+      fileName,
+      batchID,
+      bodyCensusID,
+      cookieCensusID
+    });
+  }
+
+  const resolvedPlotID = bodyPlotID ?? cookiePlotID;
+  const resolvedCensusID = bodyCensusID ?? cookieCensusID;
+
+  if (resolvedPlotID === null || resolvedCensusID === null) {
+    return buildMeasurementScopeErrorResponse(HTTPResponses.INVALID_REQUEST, 'Missing plotID or censusID for measurement upload', {
+      fileName,
+      batchID,
+      bodyPlotID,
+      bodyCensusID,
+      cookiePlotID,
+      cookieCensusID
+    });
+  }
+
+  const censusScopeSQL = format(`SELECT PlotID FROM ??.census WHERE CensusID = ? LIMIT 1`, [schema]);
+  const censusScopeResult = await connectionManager.executeQuery(censusScopeSQL, [resolvedCensusID]);
+  const censusPlotID = toPositiveInteger(censusScopeResult?.[0]?.PlotID);
+
+  if (censusPlotID === null) {
+    ailogger.warn(`Rejected measurement upload for ${fileName}: census ${resolvedCensusID} not found in schema ${schema}`, {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID
+    });
+    return buildMeasurementScopeErrorResponse(HTTPResponses.INVALID_REQUEST, `Census ${resolvedCensusID} was not found in schema ${schema}`, {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID
+    });
+  }
+
+  if (censusPlotID !== resolvedPlotID) {
+    ailogger.warn(`Rejected measurement upload for ${fileName}: census ${resolvedCensusID} belongs to plot ${censusPlotID}, not ${resolvedPlotID}`, {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID,
+      censusPlotID
+    });
+    return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'censusID does not belong to the provided plotID', {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID,
+      censusPlotID
+    });
+  }
+
+  const batchScopeSQL = format(
+    `SELECT COUNT(DISTINCT PlotID) as distinctPlotCount,
+            COUNT(DISTINCT CensusID) as distinctCensusCount,
+            MIN(PlotID) as plotID,
+            MIN(CensusID) as censusID
+     FROM ??.temporarymeasurements
+     WHERE FileID = ? AND BatchID = ?`,
+    [schema]
+  );
+  const batchScopeResult = await connectionManager.executeQuery(batchScopeSQL, [fileName, batchID]);
+  const batchScope = batchScopeResult?.[0] ?? {};
+  const distinctPlotCount = Number(batchScope.distinctPlotCount ?? 0);
+  const distinctCensusCount = Number(batchScope.distinctCensusCount ?? 0);
+  const batchPlotID = toPositiveInteger(batchScope.plotID ?? batchScope.PlotID);
+  const batchCensusID = toPositiveInteger(batchScope.censusID ?? batchScope.CensusID);
+
+  if (distinctPlotCount > 1 || distinctCensusCount > 1) {
+    ailogger.error(`Rejected measurement upload for ${fileName}: existing batch ${batchID} already contains mixed plot/census scope`, {
+      fileName,
+      batchID,
+      distinctPlotCount,
+      distinctCensusCount,
+      batchPlotID,
+      batchCensusID
+    });
+    return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'Existing batch contains mixed plot/census scope', {
+      fileName,
+      batchID,
+      distinctPlotCount,
+      distinctCensusCount,
+      batchPlotID,
+      batchCensusID
+    });
+  }
+
+  if ((batchPlotID !== null && batchPlotID !== resolvedPlotID) || (batchCensusID !== null && batchCensusID !== resolvedCensusID)) {
+    ailogger.warn(`Rejected measurement upload for ${fileName}: existing batch scope does not match incoming plot/census`, {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID,
+      batchPlotID,
+      batchCensusID
+    });
+    return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'Existing batch scope does not match incoming plot/census', {
+      fileName,
+      batchID,
+      resolvedPlotID,
+      resolvedCensusID,
+      batchPlotID,
+      batchCensusID
+    });
+  }
+
+  return { plotID: resolvedPlotID, censusID: resolvedCensusID };
+}
+
 interface DroppedMeasurementCandidate {
   rowOrdinal: number;
   existingBatch: string | null;
@@ -88,6 +245,157 @@ function buildDroppedMeasurementFailureReason(row: FileRow, existingBatch: strin
   }
 
   return `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${normalizeMeasurementDate(row.date)})`;
+}
+
+function buildTemporaryMeasurementInsertParams(row: FileRow, fileName: string, batchID: string, plotID: number, censusID: number): (string | number | null)[] {
+  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
+  const formattedDate = normalizeMeasurementDate(date);
+  const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
+  const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
+
+  return [
+    fileName,
+    batchID,
+    plotID,
+    censusID,
+    tag ?? null,
+    stemtag || null,
+    spcode ?? null,
+    quadrat ?? null,
+    parsedLx,
+    parsedLy,
+    dbh ?? null,
+    hom ?? null,
+    formattedDate,
+    codes ?? null,
+    comments ?? null
+  ];
+}
+
+async function insertTemporaryMeasurementsInBatches(
+  connectionManager: ConnectionManager,
+  schema: string,
+  rows: FileRow[],
+  fileName: string,
+  batchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<void> {
+  const insertSQLPrefix = format(
+    `INSERT IGNORE INTO ??.temporarymeasurements
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      VALUES `,
+    [schema]
+  );
+
+  for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
+    const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
+    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, plotID, censusID));
+    await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
+  }
+}
+
+async function cleanupStaleMeasurementBatchesForFile(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  batchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const cleanupSQL = format(
+    `DELETE FROM ??.temporarymeasurements
+     WHERE FileID = ?
+       AND PlotID = ?
+       AND CensusID = ?
+       AND BatchID <> ?`,
+    [schema]
+  );
+  const cleanupResult = await connectionManager.executeQuery(cleanupSQL, [fileName, plotID, censusID, batchID], transactionID);
+  const deletedRows = Number((cleanupResult as { affectedRows?: number })?.affectedRows ?? 0);
+
+  if (deletedRows > 0) {
+    ailogger.warn(
+      `Removed ${deletedRows} stale temporarymeasurement row(s) for ${fileName} before starting batch ${batchID}. ` +
+        `This prevents a retry from inheriting abandoned batches for the same plot/census.`
+    );
+  }
+
+  return deletedRows;
+}
+
+/**
+ * Clean up all data from previous uploads of the same file for the same census.
+ * This allows researchers to re-upload files freely — new data fully replaces old.
+ *
+ * Removes: cmverrors (linked), coremeasurements, failedmeasurements, uploadmetrics
+ */
+async function cleanupPreviousFileUploads(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileName: string,
+  currentBatchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const findBatchesSQL = format(
+    `SELECT batchID FROM ??.uploadmetrics
+     WHERE fileID = ? AND plotID = ? AND censusID = ? AND batchID <> ?`,
+    [schema]
+  );
+  const previousBatches = await connectionManager.executeQuery(findBatchesSQL, [fileName, plotID, censusID, currentBatchID], transactionID);
+
+  if (!Array.isArray(previousBatches) || previousBatches.length === 0) return 0;
+
+  const oldBatchIDs = previousBatches.map((row: { batchID: string }) => row.batchID);
+  const placeholders = oldBatchIDs.map(() => '?').join(', ');
+
+  // Delete cmverrors linked to old coremeasurements from previous uploads
+  const deleteCmverrorsSQL = format(
+    `DELETE e FROM ??.cmverrors e
+     INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
+     WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
+    [schema, schema]
+  );
+  await connectionManager.executeQuery(deleteCmverrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+
+  // Delete old coremeasurements
+  const deleteCmSQL = format(
+    `DELETE FROM ??.coremeasurements
+     WHERE UploadFileID = ? AND CensusID = ? AND UploadBatchID IN (${placeholders})`,
+    [schema]
+  );
+  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  const deletedCmRows = Number((cmResult as { affectedRows?: number })?.affectedRows ?? 0);
+
+  // Delete old failedmeasurements
+  const deleteFailedSQL = format(
+    `DELETE FROM ??.failedmeasurements
+     WHERE FileID = ? AND CensusID = ? AND BatchID IN (${placeholders})`,
+    [schema]
+  );
+  await connectionManager.executeQuery(deleteFailedSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+
+  // Delete old uploadmetrics so the stored procedure won't skip the new batch
+  const deleteMetricsSQL = format(
+    `DELETE FROM ??.uploadmetrics
+     WHERE fileID = ? AND plotID = ? AND censusID = ? AND batchID IN (${placeholders})`,
+    [schema]
+  );
+  await connectionManager.executeQuery(deleteMetricsSQL, [fileName, plotID, censusID, ...oldBatchIDs], transactionID);
+
+  if (deletedCmRows > 0) {
+    ailogger.info(
+      `Re-upload cleanup for ${fileName}: removed ${deletedCmRows} coremeasurement(s) and associated errors ` +
+        `from ${oldBatchIDs.length} previous batch(es) for census ${censusID}`
+    );
+  }
+
+  return deletedCmRows;
 }
 
 async function findDroppedMeasurementCandidates(
@@ -226,7 +534,6 @@ export async function POST(request: NextRequest) {
   const formType: string = body.formType;
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
-  const censusCookie = Number((await getCookie('censusID')) ?? census?.dateRanges?.[0]?.censusID ?? -1);
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
@@ -238,36 +545,38 @@ export async function POST(request: NextRequest) {
   if (formType === 'measurements') {
     const chunkRows = Object.values(fileRowSet ?? {});
     const rowCount = chunkRows.length;
+    const batchID = body.batchID || generateShortBatchID();
+    let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
+    try {
+      scopeValidation = await validateMeasurementUploadScope(connectionManager, schema, fileName, batchID, plot, census);
+    } catch (error: any) {
+      ailogger.error(`Failed to validate measurement upload scope for ${fileName}-${batchID}`, error);
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: 'Failed to validate measurement upload scope',
+          error: error.message,
+          fileName,
+          batchID
+        }),
+        { status: HTTPResponses.SERVICE_UNAVAILABLE }
+      );
+    }
+    if (scopeValidation instanceof NextResponse) {
+      return scopeValidation;
+    }
+    const { plotID: resolvedPlotID, censusID: resolvedCensusID } = scopeValidation;
     const contentHash = hashChunkContent(fileRowSet);
-    const idempotencyKey = generateIdempotencyKey(fileName, plot?.plotID ?? -1, censusCookie, rowCount, contentHash);
+    const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
 
     // NOTE:
     // Sample-row duplicate short-circuit checks were removed because they could
     // falsely classify unique chunks as duplicates. We now always ingest the chunk
     // and rely on downstream dedupe + explicit dropped-row tracking.
 
-    const batchID = body.batchID || generateShortBatchID();
-    const placeholders = chunkRows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-    const values = chunkRows.flatMap(row => {
-      const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
-      const formattedDate = normalizeMeasurementDate(date);
-      // Convert empty/non-numeric coordinate strings to null so MySQL stores NULL instead of 0
-      const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
-      const parsedLy = ly !== undefined && ly !== null && ly !== '' && !isNaN(Number(ly)) ? Number(ly) : null;
-      return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, parsedLx, parsedLy, dbh, hom, formattedDate, codes, comments];
-    });
     // Retry logic for database operations
     while (retryCount <= maxRetries) {
       try {
         transactionID = await connectionManager.beginTransaction();
-
-        // Use format() for safe identifier escaping (schema + table name)
-        const insertSQL = format(
-          `INSERT IGNORE INTO ??.temporarymeasurements
-        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
-        VALUES ${placeholders}`,
-          [schema]
-        );
 
         // Count rows BEFORE insert so we can measure the delta (important when
         // multiple chunks share a single BatchID under batch consolidation).
@@ -276,7 +585,17 @@ export async function POST(request: NextRequest) {
         const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
         const preInsertCount = preInsertResult[0]?.count || 0;
 
-        await connectionManager.executeQuery(insertSQL, values, transactionID);
+        // A retry of the same file should not inherit stale batches that were left
+        // behind by an earlier interrupted upload for the same plot/census.
+        if (preInsertCount === 0) {
+          // Clean up data from any previous uploads of this file for this census.
+          // This allows researchers to re-upload freely — new data fully replaces old.
+          await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
+
+          await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
+        }
+
+        await insertTemporaryMeasurementsInBatches(connectionManager, schema, chunkRows, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
         const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
@@ -297,8 +616,8 @@ export async function POST(request: NextRequest) {
             schema,
             fileName,
             batchID,
-            plot?.plotID ?? -1,
-            censusCookie,
+            resolvedPlotID,
+            resolvedCensusID,
             chunkRows,
             transactionID
           );
@@ -325,8 +644,8 @@ export async function POST(request: NextRequest) {
                 connectionManager,
                 schema,
                 droppedRows.map(row => ({
-                  plotID: plot?.plotID ?? -1,
-                  censusID: censusCookie,
+                  plotID: resolvedPlotID,
+                  censusID: resolvedCensusID,
                   tag: row.tag,
                   stemTag: row.stemtag || null,
                   spCode: row.spcode,
@@ -355,8 +674,8 @@ export async function POST(request: NextRequest) {
                   connectionManager,
                   schema,
                   droppedRows.map(row => ({
-                    plotID: plot?.plotID ?? -1,
-                    censusID: censusCookie,
+                    plotID: resolvedPlotID,
+                    censusID: resolvedCensusID,
                     tag: row.tag,
                     stemTag: row.stemtag || null,
                     spCode: row.spcode,
@@ -395,7 +714,7 @@ export async function POST(request: NextRequest) {
                   });
                   await connectionManager.executeQuery(
                     alertSQL,
-                    [fileName, batchID, plot?.plotID ?? -1, censusCookie, alertMessage, droppedRows.length],
+                    [fileName, batchID, resolvedPlotID, resolvedCensusID, alertMessage, droppedRows.length],
                     transactionID
                   );
                   ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
@@ -418,7 +737,7 @@ export async function POST(request: NextRequest) {
              ORDER BY ChangeID DESC LIMIT 1`,
             [schema]
           );
-          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusCookie], transactionID);
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, resolvedCensusID], transactionID);
 
           if (existingEntry.length === 0) {
             // First batch for this file - insert new entry
@@ -437,7 +756,7 @@ export async function POST(request: NextRequest) {
             );
             await connectionManager.executeQuery(
               insertChangelogSQL,
-              ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusCookie],
+              ['file_upload', fileName, 'INSERT', uploadMetadata, user, resolvedPlotID, resolvedCensusID],
               transactionID
             );
           } else {

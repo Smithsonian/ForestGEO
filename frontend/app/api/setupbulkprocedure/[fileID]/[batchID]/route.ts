@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { shouldRecoverFailedInitialCensus } from '@/lib/failedinitialcensusrecovery';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -21,6 +22,110 @@ function isRequestAborted(request: NextRequest): boolean {
   } catch {
     return true;
   }
+}
+
+function toCount(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'string') return Number(value) || 0;
+  return 0;
+}
+
+async function recoverFailedInitialCensusIfNeeded(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileID: string,
+  batchID: string,
+  plotID: number,
+  censusID: number,
+  transactionID: string
+): Promise<boolean> {
+  const recoveryStateSQL = safeFormatQuery(
+    schema,
+    `SELECT
+       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status = 'completed') AS completedUploads,
+       (SELECT COUNT(*) FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')) AS incompleteUploads,
+       (SELECT COUNT(*) FROM ??.trees WHERE CensusID = ?) AS treeCount,
+       (SELECT COUNT(*) FROM ??.stems WHERE CensusID = ?) AS stemCount,
+       (SELECT COUNT(*) FROM ??.coremeasurements WHERE CensusID = ?) AS coreMeasurementCount`
+  );
+
+  const recoveryStateRows = await connectionManager.executeQuery(
+    recoveryStateSQL,
+    [plotID, censusID, plotID, censusID, censusID, censusID, censusID],
+    transactionID
+  );
+  const recoveryStateRow = recoveryStateRows[0] ?? {};
+  const recoveryState = {
+    completedUploads: toCount(recoveryStateRow.completedUploads),
+    incompleteUploads: toCount(recoveryStateRow.incompleteUploads),
+    treeCount: toCount(recoveryStateRow.treeCount),
+    stemCount: toCount(recoveryStateRow.stemCount),
+    coreMeasurementCount: toCount(recoveryStateRow.coreMeasurementCount)
+  };
+
+  if (!shouldRecoverFailedInitialCensus(recoveryState)) {
+    return false;
+  }
+
+  ailogger.warn(`Recovering dirty failed first-load census state for plot ${plotID}, census ${censusID} before processing ${fileID}-${batchID}`, {
+    plotID,
+    censusID,
+    fileID,
+    batchID,
+    recoveryState
+  });
+
+  const cleanupSteps = [
+    {
+      sql: safeFormatQuery(
+        schema,
+        'DELETE cma FROM ??.cmattributes cma INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = cma.CoreMeasurementID WHERE cm.CensusID = ?'
+      ),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(
+        schema,
+        'DELETE mel FROM ??.measurement_error_log mel INNER JOIN ??.coremeasurements cm ON mel.MeasurementID = cm.CoreMeasurementID WHERE cm.CensusID = ?'
+      ),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CensusID = ?'),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.coremeasurements WHERE CensusID = ?'),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.stems WHERE CensusID = ?'),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.trees WHERE CensusID = ?'),
+      params: [censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND NOT (FileID = ? AND BatchID = ?)'),
+      params: [plotID, censusID, fileID, batchID]
+    },
+    {
+      sql: safeFormatQuery(schema, 'DELETE FROM ??.uploadintegrityalerts WHERE PlotID = ? AND CensusID = ?'),
+      params: [plotID, censusID]
+    },
+    {
+      sql: safeFormatQuery(schema, "DELETE FROM ??.uploadmetrics WHERE PlotID = ? AND CensusID = ? AND status IN ('failed', 'processing')"),
+      params: [plotID, censusID]
+    }
+  ];
+
+  for (const step of cleanupSteps) {
+    await connectionManager.executeQuery(step.sql, step.params, transactionID);
+  }
+
+  return true;
 }
 
 export async function GET(
@@ -87,8 +192,12 @@ export async function GET(
           const plotCensusResult = await connectionManager.executeQuery(plotCensusQuery, [fileID, batchID], transactionID);
 
           let lockKey: string;
+          let currentPlotID: number | null = null;
+          let currentCensusID: number | null = null;
           if (plotCensusResult && plotCensusResult.length > 0) {
             const { PlotID, CensusID } = plotCensusResult[0];
+            currentPlotID = Number(PlotID);
+            currentCensusID = Number(CensusID);
             // Use single compound lock that includes file, plot, and census
             // This prevents concurrent processing of the same data while avoiding lock ordering issues
             lockKey = `upload:file:${fileID}:plot:${PlotID}:census:${CensusID}`;
@@ -106,6 +215,10 @@ export async function GET(
           }
           ailogger.info(`Acquired application lock: ${lockKey}`);
 
+          if (currentPlotID !== null && currentCensusID !== null) {
+            await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, transactionID);
+          }
+
           const queryStart = Date.now();
           // Use pre-validated and formatted SQL to prevent injection
           const procedureResult = await connectionManager.executeQuery(procedureSQL, [fileID, batchID], transactionID);
@@ -113,9 +226,7 @@ export async function GET(
 
           // Check if the procedure handled a batch failure internally.
           const batchHandledInternally =
-            procedureResult &&
-            procedureResult[0] &&
-            (procedureResult[0].records_failed > 0 || procedureResult[0].batch_failed === true);
+            procedureResult && procedureResult[0] && (procedureResult[0].records_failed > 0 || procedureResult[0].batch_failed === true);
 
           if (batchHandledInternally) {
             ailogger.info(`Batch ${fileID}-${batchID} was handled internally by procedure in ${queryDuration}ms`);
