@@ -78,8 +78,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                      AND COLUMN_NAME NOT LIKE '%uuid%'
                      AND COLUMN_NAME NOT LIKE 'id%'
                      AND COLUMN_NAME NOT LIKE '%_id' `;
-    const tableForColumns =
-      params.dataType === 'measurements' || params.dataType === 'failedmeasurements' ? 'coremeasurements' : params.dataType;
+    const tableForColumns = params.dataType === 'measurements' || params.dataType === 'failedmeasurements' ? 'coremeasurements' : params.dataType;
     const results = await connectionManager.executeQuery(query, [schema, tableForColumns]);
     columns = results.map((row: any) => row.COLUMN_NAME);
     if (params.dataType === 'failedmeasurements') {
@@ -214,10 +213,16 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                     FROM ${schema}.cmattributes ca
                     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
                   ) as Codes,
-                  (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR '; ')
+                  (SELECT GROUP_CONCAT(
+                            COALESCE(
+                              NULLIF(CONCAT_WS(': ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
+                              me.ErrorMessage
+                            )
+                            ORDER BY me.ErrorCode SEPARATOR '; '
+                          )
                    FROM ${schema}.measurement_error_log mel
                    JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
-                   JOIN ${schema}.sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                   LEFT JOIN ${schema}.sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
                    WHERE mel.MeasurementID = cm.CoreMeasurementID
                      AND me.ErrorSource = 'validation'
                      AND mel.IsResolved = FALSE) AS Errors
@@ -334,7 +339,7 @@ export async function POST(request: NextRequest, props: RouteProps) {
   let body: any = undefined;
   try {
     body = await request.json();
-  } catch (error: any) {
+  } catch {
     body = undefined;
   }
   return handleRequest(request, props, body);

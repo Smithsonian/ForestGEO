@@ -107,40 +107,35 @@ export async function DELETE(
     let deleteParams: any[] = [];
 
     if (tableType === 'failedmeasurements') {
-      countSQL = format(
-        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
-         FROM ??.coremeasurements cm
-         JOIN ??.census c ON c.CensusID = cm.CensusID
+      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
+      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
            AND EXISTS (
              SELECT 1
-             FROM ??.measurement_error_log mel
-             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             FROM ${schema}.measurement_error_log mel
+             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
              WHERE mel.MeasurementID = cm.CoreMeasurementID
                AND me.ErrorSource = ?
-           )`,
-        [schema, schema, schema, schema]
-      );
+           )`;
       countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
 
-      deleteSQL = format(
-        `DELETE cm
-         FROM ??.coremeasurements cm
-         JOIN ??.census c ON c.CensusID = cm.CensusID
+      deleteSQL = `DELETE cm
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
            AND EXISTS (
              SELECT 1
-             FROM ??.measurement_error_log mel
-             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             FROM ${schema}.measurement_error_log mel
+             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
              WHERE mel.MeasurementID = cm.CoreMeasurementID
                AND me.ErrorSource = ?
-           )`,
-        [schema, schema, schema, schema]
-      );
+           )`;
       deleteParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
     } else {
       const tableName = VALID_TABLE_TYPES[tableType as TableType];
@@ -248,22 +243,20 @@ export async function GET(
     let countParams: any[] = [];
 
     if (tableType === 'failedmeasurements') {
-      countSQL = format(
-        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
-         FROM ??.coremeasurements cm
-         JOIN ??.census c ON c.CensusID = cm.CensusID
+      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
+      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.StemGUID IS NULL
            AND EXISTS (
              SELECT 1
-             FROM ??.measurement_error_log mel
-             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             FROM ${schema}.measurement_error_log mel
+             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
              WHERE mel.MeasurementID = cm.CoreMeasurementID
                AND me.ErrorSource = ?
-           )`,
-        [schema, schema, schema, schema]
-      );
+           )`;
       countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
     } else {
       const tableName = VALID_TABLE_TYPES[tableType as TableType];

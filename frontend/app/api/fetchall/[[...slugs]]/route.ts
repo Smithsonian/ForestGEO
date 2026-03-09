@@ -12,16 +12,24 @@ import { getErrorMessage, getErrorCode, errorMessageContains, toError } from '@/
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value || value === 'undefined') return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+}
+
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
-  const [dataType, _plotIDParam, pcnParam] = params.slugs ?? [];
+  const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
+  const slugPlotID = parsePositiveInt(plotIDParam);
+  const slugPCN = parsePositiveInt(pcnParam);
 
   // Validate contextual values first
   const validation = await validateContextualValues(request, {
     requireSchema: true,
-    requirePlot: dataType === 'stems' || dataType === 'trees' || dataType === 'personnel' || dataType === 'census',
-    requireCensus: dataType === 'stems' || dataType === 'trees' || dataType === 'personnel',
+    requirePlot: false,
+    requireCensus: false,
     allowFallback: true,
     fallbackMessage: `Data type '${dataType}' requires active site/plot/census selections.`
   });
@@ -31,17 +39,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   }
 
   const { schema, plotID: storedPlotID, censusID } = validation.values!;
+  const effectivePlotID = storedPlotID ?? slugPlotID;
 
   // Get additional context values for specific operations
-  let storedCensusList: OrgCensus[];
-  let storedPCN: number = parseInt(pcnParam);
+  let storedCensusList: OrgCensus[] = [];
+  let storedPCN = slugPCN ?? 0;
 
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) || '[]');
     storedPCN =
-      storedCensusList.find((oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(dr => dr.censusID === censusID))?.plotCensusNumber ??
-      parseInt(pcnParam) ??
-      0;
+      storedCensusList.find((oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(dr => dr.censusID === censusID))?.plotCensusNumber ?? slugPCN ?? 0;
   } catch (e: any) {
     ailogger.warn('Failed to parse census list from cookies', e);
   }
@@ -53,10 +60,19 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     }
     let results: any;
     if (dataType === 'stems' || dataType === 'trees') {
+      if (!effectivePlotID || !storedPCN) {
+        return NextResponse.json(
+          {
+            error: `Data type '${dataType}' requires a valid plotID and plot census number.`,
+            code: 'MISSING_PLOT_OR_CENSUS'
+          },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
       const query = `SELECT st.* FROM ${schema}.${dataType} st 
       JOIN ${schema}.census c ON c.CensusID = st.CensusID and c.IsActive IS TRUE
       WHERE st.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
-      results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
+      results = await connectionManager.executeQuery(query, [effectivePlotID, storedPCN]);
     } else if (dataType === 'plots') {
       const query = `
         SELECT p.*, COUNT(q.QuadratID) AS NumQuadrats
@@ -65,6 +81,15 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'personnel') {
+      if (!effectivePlotID || !storedPCN) {
+        return NextResponse.json(
+          {
+            error: `Data type '${dataType}' requires a valid plotID and plot census number.`,
+            code: 'MISSING_PLOT_OR_CENSUS'
+          },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
       const query = `SELECT p.*, EXISTS( 
         SELECT 1 FROM ${schema}.censusactivepersonnel cap 
           JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
@@ -72,21 +97,37 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
             AND c.PlotCensusNumber = ? and c.PlotID = ? 
         ) AS CensusActive 
       FROM ${schema}.personnel p;`;
-      results = await connectionManager.executeQuery(query, [storedPCN, storedPlotID]);
+      results = await connectionManager.executeQuery(query, [storedPCN, effectivePlotID]);
     } else if (dataType === 'census') {
-      // Optionally, run a combined query to update census dates
-      const updateQuery = `UPDATE ${schema}.census c
-            JOIN (SELECT c1.PlotCensusNumber,
-                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
-                         MAX(cm.MeasurementDate) AS LastMeasurementDate
-                  FROM ${schema}.coremeasurements cm
-                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
-                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
-          SET c.StartDate = m.FirstMeasurementDate,
-              c.EndDate   = m.LastMeasurementDate;`;
-      await connectionManager.executeQuery(updateQuery);
-      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
-      results = await connectionManager.executeQuery(query, [storedPlotID]);
+      if (!effectivePlotID) {
+        return NextResponse.json(
+          {
+            error: `Data type '${dataType}' requires a valid plotID.`,
+            code: 'MISSING_PLOT'
+          },
+          { status: HTTPResponses.BAD_REQUEST }
+        );
+      }
+      const query = `SELECT c.CensusID,
+                            c.PlotID,
+                            c.PlotCensusNumber,
+                            COALESCE(m.FirstMeasurementDate, c.StartDate) AS StartDate,
+                            COALESCE(m.LastMeasurementDate, c.EndDate) AS EndDate,
+                            c.Description,
+                            c.IsActive
+                     FROM ${schema}.census c
+                     LEFT JOIN (
+                       SELECT cm.CensusID,
+                              MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                              MAX(cm.MeasurementDate) AS LastMeasurementDate
+                       FROM ${schema}.coremeasurements cm
+                       JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                       WHERE c1.PlotID = ?
+                       GROUP BY cm.CensusID
+                     ) m ON c.CensusID = m.CensusID
+                     WHERE c.PlotID = ?
+                     ORDER BY c.PlotCensusNumber DESC, c.CensusID DESC`;
+      results = await connectionManager.executeQuery(query, [effectivePlotID, effectivePlotID]);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;
       results = await connectionManager.executeQuery(query);

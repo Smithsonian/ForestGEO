@@ -23,16 +23,24 @@ export async function GET(request: NextRequest) {
     const validationErrorsQuery = `
       SELECT 
           cm.CoreMeasurementID AS CoreMeasurementID, 
-          GROUP_CONCAT(ve.ValidationID) AS ValidationErrorIDs,
-          GROUP_CONCAT(ve.Description) AS Descriptions,
-          GROUP_CONCAT(ve.Criteria) AS Criteria
+          GROUP_CONCAT(COALESCE(ve.ValidationID, me.ErrorID) ORDER BY COALESCE(ve.ValidationID, me.ErrorID)) AS ValidationErrorIDs,
+          GROUP_CONCAT(
+            COALESCE(NULLIF(ve.Description, ''), me.ErrorMessage)
+            ORDER BY COALESCE(ve.ValidationID, me.ErrorID)
+            SEPARATOR '||'
+          ) AS Descriptions,
+          GROUP_CONCAT(
+            COALESCE(NULLIF(ve.Criteria, ''), CONCAT('Validation ', me.ErrorCode))
+            ORDER BY COALESCE(ve.ValidationID, me.ErrorID)
+            SEPARATOR '||'
+          ) AS Criteria
       FROM 
           ${schema}.measurement_error_log AS cve
       JOIN
           ${schema}.measurement_errors me ON me.ErrorID = cve.ErrorID AND me.ErrorSource = 'validation' AND cve.IsResolved = FALSE
       JOIN 
           ${schema}.coremeasurements cm ON cve.MeasurementID = cm.CoreMeasurementID
-      JOIN 
+      LEFT JOIN 
           ${schema}.sitespecificvalidations AS ve ON me.ErrorCode = CAST(ve.ValidationID AS CHAR)
       JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
       JOIN ${schema}.plots p ON c.PlotID = p.PlotID
@@ -45,8 +53,8 @@ export async function GET(request: NextRequest) {
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       coreMeasurementID: row.CoreMeasurementID,
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
-      descriptions: row.Descriptions.split(','),
-      criteria: row.Criteria.split(',')
+      descriptions: row.Descriptions.split('||'),
+      criteria: row.Criteria.split('||')
     }));
     await conn.commitTransaction(transactionID ?? '');
     return new NextResponse(
