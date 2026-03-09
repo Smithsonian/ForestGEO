@@ -14,6 +14,13 @@ export const runtime = 'nodejs';
 const SINGLE_ROW_FILE_ID = 'single_row_file.csv';
 const MAX_SIGNED_INT = 2147483647;
 
+function serializeJsonParam(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 export async function GET(
   _request: NextRequest,
   props: {
@@ -31,16 +38,21 @@ export async function GET(
   }
 
   // Validate schema to prevent SQL injection
-  let maxTempIDSQL: string, shiftQuery: string, bulkProcessSQL: string;
-  let resolveIngestionSQL: string, transferErrorSQL: string, syncOriginalRowSQL: string, deleteTransientSQL: string;
+  let shiftQuery: string, bulkProcessSQL: string;
+  let resolveIngestionSQL: string,
+    transferErrorSQL: string,
+    snapshotResultSQL: string,
+    snapshotAttributesSQL: string,
+    syncOriginalRowSQL: string,
+    clearOriginalAttributesSQL: string,
+    restoreOriginalAttributesSQL: string,
+    deleteTransientSQL: string;
   try {
-    maxTempIDSQL = safeFormatQuery(schema, 'SELECT COALESCE(MAX(id), 0) as maxId FROM ??.temporarymeasurements');
     shiftQuery = safeFormatQuery(
       schema,
       `INSERT INTO ??.temporarymeasurements
-        (id, FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
        SELECT
-         ? AS id,
          ? AS FileID,
          ? AS BatchID,
          c.PlotID,
@@ -91,34 +103,66 @@ export async function GET(
          IsResolved = VALUES(IsResolved),
          ResolvedAt = VALUES(ResolvedAt)`
     );
-    // Preserve original upload metadata to avoid uniqueness conflicts with transient rows
-    // on ux_cm_uploadbatch_rowindex.
+    snapshotResultSQL = safeFormatQuery(
+      schema,
+      `SELECT
+         CensusID,
+         StemGUID,
+         IsValidated,
+         MeasurementDate,
+         MeasuredDBH,
+         MeasuredHOM,
+         Description,
+         UserDefinedFields,
+         RawTreeTag,
+         RawStemTag,
+         RawSpCode,
+         RawQuadrat,
+         RawX,
+         RawY,
+         RawCodes,
+         RawComments,
+         IsActive
+       FROM ??.coremeasurements
+       WHERE UploadFileID = ?
+         AND UploadBatchID = ?
+         AND SourceRowIndex = ?
+       LIMIT 1`
+    );
+    snapshotAttributesSQL = safeFormatQuery(
+      schema,
+      `SELECT ca.Code
+       FROM ??.cmattributes ca
+       JOIN ??.coremeasurements cm_new ON cm_new.CoreMeasurementID = ca.CoreMeasurementID
+       WHERE cm_new.UploadFileID = ?
+         AND cm_new.UploadBatchID = ?
+         AND cm_new.SourceRowIndex = ?`
+    );
+    // Preserve original upload metadata while applying the reprocessed values.
     syncOriginalRowSQL = safeFormatQuery(
       schema,
       `UPDATE ??.coremeasurements orig
-       JOIN ??.coremeasurements cm_new
-         ON cm_new.UploadFileID = ?
-         AND cm_new.UploadBatchID = ?
-         AND cm_new.SourceRowIndex = ?
-       SET orig.CensusID = cm_new.CensusID,
-           orig.StemGUID = cm_new.StemGUID,
-           orig.IsValidated = cm_new.IsValidated,
-           orig.MeasurementDate = cm_new.MeasurementDate,
-           orig.MeasuredDBH = cm_new.MeasuredDBH,
-           orig.MeasuredHOM = cm_new.MeasuredHOM,
-           orig.Description = cm_new.Description,
-           orig.UserDefinedFields = cm_new.UserDefinedFields,
-           orig.RawTreeTag = cm_new.RawTreeTag,
-           orig.RawStemTag = cm_new.RawStemTag,
-           orig.RawSpCode = cm_new.RawSpCode,
-           orig.RawQuadrat = cm_new.RawQuadrat,
-           orig.RawX = cm_new.RawX,
-           orig.RawY = cm_new.RawY,
-           orig.RawCodes = cm_new.RawCodes,
-           orig.RawComments = cm_new.RawComments,
-           orig.IsActive = cm_new.IsActive
+       SET orig.CensusID = ?,
+           orig.StemGUID = ?,
+           orig.IsValidated = ?,
+           orig.MeasurementDate = ?,
+           orig.MeasuredDBH = ?,
+           orig.MeasuredHOM = ?,
+           orig.Description = ?,
+           orig.UserDefinedFields = ?,
+           orig.RawTreeTag = ?,
+           orig.RawStemTag = ?,
+           orig.RawSpCode = ?,
+           orig.RawQuadrat = ?,
+           orig.RawX = ?,
+           orig.RawY = ?,
+           orig.RawCodes = ?,
+           orig.RawComments = ?,
+           orig.IsActive = ?
        WHERE orig.CoreMeasurementID = ?`
     );
+    clearOriginalAttributesSQL = safeFormatQuery(schema, 'DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?');
+    restoreOriginalAttributesSQL = safeFormatQuery(schema, 'INSERT IGNORE INTO ??.cmattributes (CoreMeasurementID, Code) VALUES ?');
     deleteTransientSQL = safeFormatQuery(
       schema,
       `DELETE FROM ??.coremeasurements
@@ -137,17 +181,16 @@ export async function GET(
   try {
     transactionID = await connectionManager.beginTransaction();
 
-    const maxIDResult = await connectionManager.executeQuery(maxTempIDSQL, [], transactionID);
-    const temporaryRowID = Number(maxIDResult[0]?.maxId || 0) + 1;
+    const shiftResult: any = await connectionManager.executeQuery(
+      shiftQuery,
+      [SINGLE_ROW_FILE_ID, batchID, targetMeasurementID, INGESTION_ERROR_SOURCE],
+      transactionID
+    );
+
+    const temporaryRowID = Number(shiftResult?.insertId ?? 0);
     if (temporaryRowID > MAX_SIGNED_INT) {
       throw new Error(`Temporary row id overflow for single-row reingestion: ${temporaryRowID}`);
     }
-
-    const shiftResult: any = await connectionManager.executeQuery(
-      shiftQuery,
-      [temporaryRowID, SINGLE_ROW_FILE_ID, batchID, targetMeasurementID, INGESTION_ERROR_SOURCE],
-      transactionID
-    );
 
     if (!shiftResult?.affectedRows) {
       await connectionManager.rollbackTransaction(transactionID);
@@ -156,13 +199,60 @@ export async function GET(
         { status: HTTPResponses.NOT_FOUND }
       );
     }
+    if (!Number.isInteger(temporaryRowID) || temporaryRowID <= 0) {
+      throw new Error('Single-row reingestion staging insert did not return a usable insertId');
+    }
 
     await connectionManager.executeQuery(bulkProcessSQL, [SINGLE_ROW_FILE_ID, batchID], transactionID);
 
+    const snapshotRows: any[] = await connectionManager.executeQuery(
+      snapshotResultSQL,
+      [SINGLE_ROW_FILE_ID, batchID, temporaryRowID],
+      transactionID
+    );
+    const snapshot = snapshotRows[0];
+    if (!snapshot) {
+      throw new Error(`Single-row reingestion produced no reconciliable result for SourceRowIndex ${temporaryRowID}`);
+    }
+
+    const attributeRows: Array<{ Code: string }> = await connectionManager.executeQuery(
+      snapshotAttributesSQL,
+      [SINGLE_ROW_FILE_ID, batchID, temporaryRowID],
+      transactionID
+    );
+
     await connectionManager.executeQuery(resolveIngestionSQL, [targetMeasurementID, INGESTION_ERROR_SOURCE], transactionID);
     await connectionManager.executeQuery(transferErrorSQL, [targetMeasurementID, SINGLE_ROW_FILE_ID, batchID, temporaryRowID], transactionID);
-    await connectionManager.executeQuery(syncOriginalRowSQL, [SINGLE_ROW_FILE_ID, batchID, temporaryRowID, targetMeasurementID], transactionID);
     await connectionManager.executeQuery(deleteTransientSQL, [SINGLE_ROW_FILE_ID, batchID, temporaryRowID], transactionID);
+    await connectionManager.executeQuery(
+      syncOriginalRowSQL,
+      [
+        snapshot.CensusID,
+        snapshot.StemGUID,
+        snapshot.IsValidated,
+        snapshot.MeasurementDate,
+        snapshot.MeasuredDBH,
+        snapshot.MeasuredHOM,
+        snapshot.Description,
+        serializeJsonParam(snapshot.UserDefinedFields),
+        snapshot.RawTreeTag,
+        snapshot.RawStemTag,
+        snapshot.RawSpCode,
+        snapshot.RawQuadrat,
+        snapshot.RawX,
+        snapshot.RawY,
+        snapshot.RawCodes,
+        snapshot.RawComments,
+        snapshot.IsActive,
+        targetMeasurementID
+      ],
+      transactionID
+    );
+    await connectionManager.executeQuery(clearOriginalAttributesSQL, [targetMeasurementID], transactionID);
+    if (attributeRows.length > 0) {
+      const attributeValues = attributeRows.map(row => [targetMeasurementID, row.Code]);
+      await connectionManager.executeQuery(restoreOriginalAttributesSQL, [attributeValues], transactionID);
+    }
 
     await connectionManager.commitTransaction(transactionID);
     return NextResponse.json({ message: 'Success' }, { status: HTTPResponses.OK });

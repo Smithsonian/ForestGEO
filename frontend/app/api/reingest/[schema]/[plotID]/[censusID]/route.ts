@@ -43,6 +43,11 @@ interface MoveFailedRowsResult {
   rowMappings: ReingestionRowMapping[];
 }
 
+interface BulkIngestionStatus {
+  message: string | null;
+  batchFailed: boolean;
+}
+
 /**
  * Validates and extracts context parameters from request
  * @returns Validated schema, plotID, and censusID or error response
@@ -156,25 +161,7 @@ async function moveFailedToTemporary(
   );
   await connectionManager.executeQuery(clearStaleReingestionSQL, [fileID, plotID, censusID], transactionID);
 
-  const maxIdSQL = safeFormatQuery(schema, 'SELECT COALESCE(MAX(id), 0) as maxId FROM ??.temporarymeasurements');
-  const maxIdResult = await connectionManager.executeQuery(maxIdSQL, [], transactionID);
-  const startID = Number(maxIdResult[0]?.maxId || 0);
-
-  const rowMappings: ReingestionRowMapping[] = sourceRows.map((row, idx) => {
-    const temporaryRowID = startID + idx + 1;
-    if (temporaryRowID > MAX_SIGNED_INT) {
-      throw new Error(
-        `Reingestion staging id overflow: ${temporaryRowID}. temporarymeasurements.id exceeded safe range for coremeasurements.SourceRowIndex`
-      );
-    }
-    return {
-      originalMeasurementID: row.CoreMeasurementID,
-      temporaryRowID
-    };
-  });
-
-  const values = sourceRows.map((row, idx) => [
-    rowMappings[idx].temporaryRowID,
+  const values = sourceRows.map(row => [
     fileID,
     batchID,
     row.PlotID,
@@ -195,16 +182,43 @@ async function moveFailedToTemporary(
   const insertTempSQL = safeFormatQuery(
     schema,
     `INSERT INTO ??.temporarymeasurements
-      (id, FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
      VALUES ?`
   );
-  await connectionManager.executeQuery(insertTempSQL, [values], transactionID);
+  const insertResult: any = await connectionManager.executeQuery(insertTempSQL, [values], transactionID);
+  const firstInsertId = Number(insertResult?.insertId ?? 0);
+  if (!Number.isInteger(firstInsertId) || firstInsertId <= 0) {
+    throw new Error('Reingestion staging insert did not return a usable insertId');
+  }
+
+  const rowMappings: ReingestionRowMapping[] = sourceRows.map((row, idx) => {
+    const temporaryRowID = firstInsertId + idx;
+    if (temporaryRowID > MAX_SIGNED_INT) {
+      throw new Error(
+        `Reingestion staging id overflow: ${temporaryRowID}. temporarymeasurements.id exceeded safe range for coremeasurements.SourceRowIndex`
+      );
+    }
+
+    return {
+      originalMeasurementID: row.CoreMeasurementID,
+      temporaryRowID
+    };
+  });
 
   return {
     totalRows: sourceRows.length,
     fileID,
     batchID,
     rowMappings
+  };
+}
+
+function parseBulkIngestionStatus(procedureResult: any): BulkIngestionStatus {
+  const rawRow = Array.isArray(procedureResult?.[0]) ? procedureResult[0][0] : procedureResult?.[0];
+
+  return {
+    message: typeof rawRow?.message === 'string' ? rawRow.message : null,
+    batchFailed: rawRow?.batch_failed === true
   };
 }
 
@@ -231,6 +245,96 @@ async function createReingestionMap(
     const params = chunk.flatMap(row => [row.originalMeasurementID, row.temporaryRowID]);
     await connectionManager.executeQuery(`INSERT INTO reingestion_map (OriginalID, TempRowID) VALUES ${placeholders}`, params, transactionID);
   }
+}
+
+async function createReingestionSnapshotTables(
+  connectionManager: any,
+  schema: string,
+  fileID: string,
+  batchID: string,
+  transactionID: string
+): Promise<void> {
+  await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_results', [], transactionID);
+  await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_attributes', [], transactionID);
+
+  await connectionManager.executeQuery(
+    `CREATE TEMPORARY TABLE reingestion_results (
+      OriginalID INT NOT NULL PRIMARY KEY,
+      CensusID INT NULL,
+      StemGUID INT NULL,
+      IsValidated BIT NULL,
+      MeasurementDate DATE NULL,
+      MeasuredDBH DECIMAL(12, 6) NULL,
+      MeasuredHOM DECIMAL(12, 6) NULL,
+      Description VARCHAR(255) NULL,
+      UserDefinedFields JSON NULL,
+      RawTreeTag VARCHAR(20) NULL,
+      RawStemTag VARCHAR(10) NULL,
+      RawSpCode VARCHAR(25) NULL,
+      RawQuadrat VARCHAR(255) NULL,
+      RawX DECIMAL(12, 6) NULL,
+      RawY DECIMAL(12, 6) NULL,
+      RawCodes VARCHAR(255) NULL,
+      RawComments VARCHAR(255) NULL,
+      IsActive TINYINT(1) NOT NULL
+    )`,
+    [],
+    transactionID
+  );
+
+  const snapshotResultsSQL = safeFormatQuery(
+    schema,
+    `INSERT INTO reingestion_results
+      (OriginalID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+       Description, UserDefinedFields, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+       RawCodes, RawComments, IsActive)
+     SELECT
+       rm.OriginalID,
+       cm_new.CensusID,
+       cm_new.StemGUID,
+       cm_new.IsValidated,
+       cm_new.MeasurementDate,
+       cm_new.MeasuredDBH,
+       cm_new.MeasuredHOM,
+       cm_new.Description,
+       cm_new.UserDefinedFields,
+       cm_new.RawTreeTag,
+       cm_new.RawStemTag,
+       cm_new.RawSpCode,
+       cm_new.RawQuadrat,
+       cm_new.RawX,
+       cm_new.RawY,
+       cm_new.RawCodes,
+       cm_new.RawComments,
+       cm_new.IsActive
+     FROM ??.coremeasurements cm_new
+     JOIN reingestion_map rm ON rm.TempRowID = cm_new.SourceRowIndex
+     WHERE cm_new.UploadBatchID = ?
+       AND cm_new.UploadFileID = ?`
+  );
+  await connectionManager.executeQuery(snapshotResultsSQL, [batchID, fileID], transactionID);
+
+  await connectionManager.executeQuery(
+    `CREATE TEMPORARY TABLE reingestion_attributes (
+      OriginalID INT NOT NULL,
+      Code VARCHAR(10) NOT NULL,
+      PRIMARY KEY (OriginalID, Code)
+    )`,
+    [],
+    transactionID
+  );
+
+  const snapshotAttributesSQL = safeFormatQuery(
+    schema,
+    `INSERT INTO reingestion_attributes (OriginalID, Code)
+     SELECT rm.OriginalID, ca.Code
+     FROM ??.cmattributes ca
+     JOIN ??.coremeasurements cm_new ON cm_new.CoreMeasurementID = ca.CoreMeasurementID
+     JOIN reingestion_map rm ON rm.TempRowID = cm_new.SourceRowIndex
+     WHERE cm_new.UploadBatchID = ?
+       AND cm_new.UploadFileID = ?`
+  );
+  await connectionManager.executeQuery(snapshotAttributesSQL, [batchID, fileID], transactionID);
 }
 
 async function reconcileReingestionRows(
@@ -274,42 +378,65 @@ async function reconcileReingestionRows(
     );
     await connectionManager.executeQuery(transferErrorsSQL, [batchID, fileID], transactionID);
 
-    // Preserve original upload metadata to avoid collisions with transient rows
-    // on ux_cm_uploadbatch_rowindex during reconciliation.
+    await createReingestionSnapshotTables(connectionManager, schema, fileID, batchID, transactionID);
+
+    const deleteTransientRowsSQL = safeFormatQuery(
+      schema,
+      `DELETE cm_new
+       FROM ??.coremeasurements cm_new
+       JOIN reingestion_map rm ON rm.TempRowID = cm_new.SourceRowIndex
+       WHERE cm_new.UploadBatchID = ?
+         AND cm_new.UploadFileID = ?`
+    );
+    await connectionManager.executeQuery(deleteTransientRowsSQL, [batchID, fileID], transactionID);
+
+    // Preserve original upload metadata while applying the newly ingested values
+    // back onto the original CoreMeasurementIDs.
     const syncOriginalRowsSQL = safeFormatQuery(
       schema,
       `UPDATE ??.coremeasurements orig
-       JOIN reingestion_map rm ON rm.OriginalID = orig.CoreMeasurementID
-       JOIN ??.coremeasurements cm_new
-         ON cm_new.SourceRowIndex = rm.TempRowID
-         AND cm_new.UploadBatchID = ?
-         AND cm_new.UploadFileID = ?
-       SET orig.CensusID = cm_new.CensusID,
-           orig.StemGUID = cm_new.StemGUID,
-           orig.IsValidated = cm_new.IsValidated,
-           orig.MeasurementDate = cm_new.MeasurementDate,
-           orig.MeasuredDBH = cm_new.MeasuredDBH,
-           orig.MeasuredHOM = cm_new.MeasuredHOM,
-           orig.Description = cm_new.Description,
-           orig.UserDefinedFields = cm_new.UserDefinedFields,
-           orig.RawTreeTag = cm_new.RawTreeTag,
-           orig.RawStemTag = cm_new.RawStemTag,
-           orig.RawSpCode = cm_new.RawSpCode,
-           orig.RawQuadrat = cm_new.RawQuadrat,
-           orig.RawX = cm_new.RawX,
-           orig.RawY = cm_new.RawY,
-           orig.RawCodes = cm_new.RawCodes,
-           orig.RawComments = cm_new.RawComments,
-           orig.IsActive = cm_new.IsActive`
+       JOIN reingestion_results rr ON rr.OriginalID = orig.CoreMeasurementID
+       SET orig.CensusID = rr.CensusID,
+           orig.StemGUID = rr.StemGUID,
+           orig.IsValidated = rr.IsValidated,
+           orig.MeasurementDate = rr.MeasurementDate,
+           orig.MeasuredDBH = rr.MeasuredDBH,
+           orig.MeasuredHOM = rr.MeasuredHOM,
+           orig.Description = rr.Description,
+           orig.UserDefinedFields = rr.UserDefinedFields,
+           orig.RawTreeTag = rr.RawTreeTag,
+           orig.RawStemTag = rr.RawStemTag,
+           orig.RawSpCode = rr.RawSpCode,
+           orig.RawQuadrat = rr.RawQuadrat,
+           orig.RawX = rr.RawX,
+           orig.RawY = rr.RawY,
+           orig.RawCodes = rr.RawCodes,
+           orig.RawComments = rr.RawComments,
+           orig.IsActive = rr.IsActive`
     );
-    await connectionManager.executeQuery(syncOriginalRowsSQL, [batchID, fileID], transactionID);
+    await connectionManager.executeQuery(syncOriginalRowsSQL, [], transactionID);
+
+    const clearOriginalAttributesSQL = safeFormatQuery(
+      schema,
+      `DELETE ca
+       FROM ??.cmattributes ca
+       JOIN reingestion_map rm ON rm.OriginalID = ca.CoreMeasurementID`
+    );
+    await connectionManager.executeQuery(clearOriginalAttributesSQL, [], transactionID);
+
+    const restoreAttributesSQL = safeFormatQuery(
+      schema,
+      `INSERT IGNORE INTO ??.cmattributes (CoreMeasurementID, Code)
+       SELECT OriginalID, Code
+       FROM reingestion_attributes`
+    );
+    await connectionManager.executeQuery(restoreAttributesSQL, [], transactionID);
 
     const successfulReingestionsSQL = safeFormatQuery(
       schema,
       `SELECT COUNT(*) as count
-       FROM ??.coremeasurements orig
-       JOIN reingestion_map rm ON rm.OriginalID = orig.CoreMeasurementID
-       WHERE orig.StemGUID IS NOT NULL`
+       FROM reingestion_results
+       WHERE StemGUID IS NOT NULL`
     );
     const successfulResult = await connectionManager.executeQuery(successfulReingestionsSQL, [], transactionID);
     const successfulReingestions = successfulResult[0]?.count || 0;
@@ -328,18 +455,10 @@ async function reconcileReingestionRows(
     const remainingResult = await connectionManager.executeQuery(remainingFailuresSQL, [INGESTION_ERROR_SOURCE], transactionID);
     const remainingFailures = remainingResult[0]?.count || 0;
 
-    const deleteTransientRowsSQL = safeFormatQuery(
-      schema,
-      `DELETE cm_new
-       FROM ??.coremeasurements cm_new
-       JOIN reingestion_map rm ON rm.TempRowID = cm_new.SourceRowIndex
-       WHERE cm_new.UploadBatchID = ?
-         AND cm_new.UploadFileID = ?`
-    );
-    await connectionManager.executeQuery(deleteTransientRowsSQL, [batchID, fileID], transactionID);
-
     return { successfulReingestions, remainingFailures };
   } finally {
+    await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_attributes', [], transactionID);
+    await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_results', [], transactionID);
     await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_map', [], transactionID);
   }
 }
@@ -451,33 +570,24 @@ export async function GET(
         // Step 2: Run bulkingestionprocess within the same transaction
         const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
         const procedureResult = await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
-
-        // If the SP's EXIT HANDLER caught an internal error, it has already written
-        // diagnostic rows (uploadmetrics, uploadintegrityalerts, coremeasurements
-        // failure rows). Skip reconciliation and let the transaction commit so those
-        // diagnostic writes are preserved rather than rolled back.
-        const batchFailed =
-          procedureResult &&
-          procedureResult[0] &&
-          (procedureResult[0].records_failed > 0 || procedureResult[0].batch_failed === true);
-
-        if (batchFailed) {
-          ailogger.warn(`Reingestion batch ${batchID} failed internally: ${procedureResult[0].message}`);
-          return {
-            totalRows,
-            successfulReingestions: 0,
-            remainingFailures: totalRows,
-            batchFailed: true,
-            failureMessage: procedureResult[0].message
-          };
-        }
+        const ingestionStatus = parseBulkIngestionStatus(procedureResult);
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
         const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(
           connectionManager, schema, fileID, batchID, rowMappings, transactionID
         );
 
-        return { totalRows, successfulReingestions, remainingFailures };
+        if (ingestionStatus.batchFailed) {
+          ailogger.warn(`Reingestion batch ${batchID} failed internally: ${ingestionStatus.message ?? 'Unknown failure'}`);
+        }
+
+        return {
+          totalRows,
+          successfulReingestions,
+          remainingFailures,
+          batchFailed: ingestionStatus.batchFailed,
+          failureMessage: ingestionStatus.message
+        };
       },
       { timeoutMs: REINGESTION_TIMEOUT_MS }
     );

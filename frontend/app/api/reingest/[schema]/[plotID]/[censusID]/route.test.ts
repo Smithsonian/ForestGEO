@@ -104,8 +104,7 @@ describe('reingest API routes', () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce(mockUnresolvedRows(2)) // unresolved source rows
         .mockResolvedValueOnce(undefined) // clear stale reingestion rows in temp
-        .mockResolvedValueOnce([{ maxId: 100 }]) // max temp id
-        .mockResolvedValueOnce({ affectedRows: 2 }); // insert into temp
+        .mockResolvedValueOnce({ affectedRows: 2, insertId: 101 }); // insert into temp
 
       const req = makeRequest('POST');
       const res = await POST(req, makeParams());
@@ -123,6 +122,9 @@ describe('reingest API routes', () => {
       const selectCall = mockConnectionManager.executeQuery.mock.calls[0];
       expect(String(selectCall[0])).toContain('EXISTS (');
       expect(String(selectCall[0])).not.toContain('mel.IsResolved = FALSE');
+      expect(
+        mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('SELECT COALESCE(MAX(id), 0) as maxId'))
+      ).toBe(false);
     });
 
     it('returns 200 with rowsMoved=0 when no unresolved rows exist', async () => {
@@ -143,18 +145,27 @@ describe('reingest API routes', () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce(mockUnresolvedRows(10)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
-        .mockResolvedValueOnce([{ maxId: 500 }]) // move: max temp id
-        .mockResolvedValueOnce({ affectedRows: 10 }) // move: insert temp rows
-        .mockResolvedValueOnce(undefined) // call bulkingestionprocess
+        .mockResolvedValueOnce({ affectedRows: 10, insertId: 501 }) // move: insert temp rows
+        .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed successfully: 8 records', batch_failed: false, records_failed: 0 }]]) // call bulkingestionprocess
         .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
         .mockResolvedValueOnce(undefined) // reconcile: create temp map table
         .mockResolvedValueOnce(undefined) // reconcile: insert map chunk
         .mockResolvedValueOnce(undefined) // reconcile: resolve existing ingestion errors
         .mockResolvedValueOnce(undefined) // reconcile: transfer error logs from transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient attributes
+        .mockResolvedValueOnce(undefined) // reconcile: delete transient rows
         .mockResolvedValueOnce(undefined) // reconcile: sync original rows
+        .mockResolvedValueOnce(undefined) // reconcile: clear original attributes
+        .mockResolvedValueOnce(undefined) // reconcile: restore attributes
         .mockResolvedValueOnce([{ count: 8 }]) // reconcile: successful reingestions
         .mockResolvedValueOnce([{ count: 2 }]) // reconcile: remaining failures
-        .mockResolvedValueOnce(undefined) // reconcile: delete transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_results
         .mockResolvedValueOnce(undefined); // reconcile: final drop temp map table
 
       const req = makeRequest('GET');
@@ -169,6 +180,7 @@ describe('reingest API routes', () => {
       const calls = mockConnectionManager.executeQuery.mock.calls;
       const bulkProcessCall = calls.find((call: any[]) => String(call[0]).includes('bulkingestionprocess'));
       expect(bulkProcessCall).toBeDefined();
+      expect(calls.some((call: any[]) => String(call[0]).includes('SELECT COALESCE(MAX(id), 0) as maxId'))).toBe(false);
 
       const syncCall = calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
       expect(syncCall).toBeDefined();
@@ -177,6 +189,46 @@ describe('reingest API routes', () => {
       expect(String(syncCall?.[0])).not.toContain('orig.SourceRowIndex');
 
       expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('still reconciles rows when the ingestion procedure reports partial failures', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(3)) // move: unresolved source rows
+        .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
+        .mockResolvedValueOnce({ affectedRows: 3, insertId: 41 }) // move: insert temp rows
+        .mockResolvedValueOnce([[{ message: 'Batch test-batch-id-12345 processed: 2 valid, 1 failed', batch_failed: false, records_failed: 1 }]]) // call bulkingestionprocess
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp map table
+        .mockResolvedValueOnce(undefined) // reconcile: create temp map table
+        .mockResolvedValueOnce(undefined) // reconcile: insert map chunk
+        .mockResolvedValueOnce(undefined) // reconcile: resolve existing ingestion errors
+        .mockResolvedValueOnce(undefined) // reconcile: transfer error logs from transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_results
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: create temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: snapshot transient attributes
+        .mockResolvedValueOnce(undefined) // reconcile: delete transient rows
+        .mockResolvedValueOnce(undefined) // reconcile: sync original rows
+        .mockResolvedValueOnce(undefined) // reconcile: clear original attributes
+        .mockResolvedValueOnce(undefined) // reconcile: restore attributes
+        .mockResolvedValueOnce([{ count: 2 }]) // reconcile: successful reingestions
+        .mockResolvedValueOnce([{ count: 1 }]) // reconcile: remaining failures
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_attributes
+        .mockResolvedValueOnce(undefined) // reconcile: final drop temp reingestion_results
+        .mockResolvedValueOnce(undefined); // reconcile: final drop temp map table
+
+      const req = makeRequest('GET');
+      const res = await GET(req, makeParams());
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.totalProcessed).toBe(3);
+      expect(body.successfulReingestions).toBe(2);
+      expect(body.remainingFailures).toBe(1);
+
+      const syncCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) => String(call[0]).includes('SET orig.CensusID'));
+      expect(syncCall).toBeDefined();
     });
 
     it('returns 200 with 0 processed when no unresolved rows exist', async () => {
@@ -196,9 +248,8 @@ describe('reingest API routes', () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce(mockUnresolvedRows(1)) // move: unresolved source rows
         .mockResolvedValueOnce(undefined) // move: clear stale reingestion rows
-        .mockResolvedValueOnce([{ maxId: 10 }]) // move: max temp id
-        .mockResolvedValueOnce({ affectedRows: 1 }) // move: insert temp rows
-        .mockRejectedValueOnce(new Error('Bulk ingestion failed'));
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 11 }) // move: insert temp rows
+        .mockRejectedValueOnce(new Error('Bulk ingestion failed')); // call bulkingestionprocess
 
       const req = makeRequest('GET');
       const res = await GET(req, makeParams());
@@ -215,8 +266,7 @@ describe('reingest API routes', () => {
       mockConnectionManager.executeQuery
         .mockResolvedValueOnce(mockUnresolvedRows(1))
         .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce([{ maxId: 0 }])
-        .mockResolvedValueOnce({ affectedRows: 1 });
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 1 });
 
       const req = makeRequest('POST');
       const res = await POST(req, makeParams());
@@ -230,7 +280,7 @@ describe('reingest API routes', () => {
       expect(insertCall[0]).toContain('Codes');
       const valuesParam = insertCall[1]?.[0];
       expect(Array.isArray(valuesParam)).toBe(true);
-      expect(valuesParam[0][14]).toBe('AL'); // Codes value preserved in insert payload
+      expect(valuesParam[0][13]).toBe('AL'); // Codes value preserved in insert payload
     });
   });
 });
