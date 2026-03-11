@@ -11,13 +11,13 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('measurementerrors helpers', () => {
-  it('persists every inferred ingestion error for a failed row', async () => {
+  it('persists every inferred ingestion error for a failed row with a single bulk error-log upsert', async () => {
     const executeQuery = vi
       .fn()
-      .mockResolvedValueOnce({ insertId: 77 })
       .mockResolvedValueOnce({ insertId: 1001 })
-      .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({ insertId: 1002 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ CoreMeasurementID: 77, SourceRowIndex: 1 }])
       .mockResolvedValueOnce(undefined);
 
     const connectionManager = { executeQuery } as any;
@@ -44,13 +44,49 @@ describe('measurementerrors helpers', () => {
 
     expect(insertedIDs).toEqual([77]);
 
+    const bulkMeasurementInsertCalls = executeQuery.mock.calls.filter(
+      ([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements')
+    );
+    expect(bulkMeasurementInsertCalls).toHaveLength(1);
+
+    const lookupCalls = executeQuery.mock.calls.filter(([sql]: [string]) => sql.includes('SELECT CoreMeasurementID, SourceRowIndex'));
+    expect(lookupCalls).toHaveLength(1);
+
     const logInsertCalls = executeQuery.mock.calls.filter(
       ([sql]: [string]) => sql.includes('measurement_error_log') && sql.includes('ON DUPLICATE KEY UPDATE')
     );
 
-    expect(logInsertCalls).toHaveLength(2);
-    expect(logInsertCalls[0][1]).toEqual([77, 1001]);
-    expect(logInsertCalls[1][1]).toEqual([77, 1002]);
+    expect(logInsertCalls).toHaveLength(1);
+    expect(logInsertCalls[0][1]).toEqual([77, 1001, 77, 1002]);
+  });
+
+  it('falls back to sequential inserts when batch metadata is missing', async () => {
+    const executeQuery = vi.fn().mockResolvedValueOnce({ insertId: 1001 }).mockResolvedValueOnce({ insertId: 88 }).mockResolvedValueOnce(undefined);
+
+    const connectionManager = { executeQuery } as any;
+
+    const insertedIDs = await insertIngestionFailureRows(
+      connectionManager,
+      'forestgeo_testing',
+      [
+        {
+          plotID: 1,
+          censusID: 2,
+          tag: 'T-2',
+          stemTag: '1',
+          spCode: '',
+          quadrat: '1301',
+          failureReason: 'Missing required field: SpeciesCode',
+          fileID: 'upload.csv',
+          batchID: null,
+          sourceRowIndex: null
+        }
+      ],
+      'tx-1'
+    );
+
+    expect(insertedIDs).toEqual([88]);
+    expect(executeQuery.mock.calls.some(([sql]: [string]) => sql.includes('SELECT CoreMeasurementID, SourceRowIndex'))).toBe(false);
   });
 
   it('keeps quadrat-mismatch rows failing during revalidation', async () => {

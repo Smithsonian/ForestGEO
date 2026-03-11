@@ -88,6 +88,16 @@ interface MeasurementErrorInput {
   errorMessage: string;
 }
 
+const INGESTION_FAILURE_BULK_INSERT_SIZE = 250;
+
+interface PreparedIngestionFailureRow {
+  resultIndex: number;
+  row: IngestionFailureRowInput;
+  normalizedDate: string | null;
+  sourceRowIndex: number;
+  errors: MeasurementErrorInput[];
+}
+
 export async function ensureMeasurementErrorDefinition(
   connectionManager: ConnectionManager,
   schema: string,
@@ -185,16 +195,73 @@ export async function upsertMeasurementErrors(
   }
 }
 
-export async function insertIngestionFailureRows(
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildRepeatedRowPattern(rowCount: number, rowPattern: string): string {
+  return new Array(rowCount).fill(rowPattern).join(', ');
+}
+
+function prepareIngestionFailureRows(rows: IngestionFailureRowInput[]): PreparedIngestionFailureRow[] {
+  return rows.map((row, index) => ({
+    resultIndex: index,
+    row,
+    normalizedDate: normalizeDate(row.date),
+    sourceRowIndex: row.sourceRowIndex ?? index + 1,
+    errors: inferAllIngestionErrorCodes(row.failureReason).map(code => ({
+      errorCode: code,
+      errorMessage: getIngestionErrorMessage(code, row.failureReason)
+    }))
+  }));
+}
+
+async function resolveIngestionErrorIDCache(
   connectionManager: ConnectionManager,
   schema: string,
-  rows: IngestionFailureRowInput[],
+  rows: PreparedIngestionFailureRow[],
   transactionID?: string
-): Promise<number[]> {
-  if (rows.length === 0) return [];
-
-  const insertedIDs: number[] = [];
+): Promise<Map<string, number>> {
   const errorIDCache = new Map<string, number>();
+  const uniqueErrors = new Map<string, MeasurementErrorInput>();
+
+  for (const row of rows) {
+    for (const error of row.errors) {
+      if (!uniqueErrors.has(error.errorCode)) {
+        uniqueErrors.set(error.errorCode, error);
+      }
+    }
+  }
+
+  for (const [errorCode, error] of uniqueErrors.entries()) {
+    const errorID = await ensureMeasurementErrorDefinition(
+      connectionManager,
+      schema,
+      INGESTION_ERROR_SOURCE,
+      errorCode,
+      error.errorMessage,
+      transactionID
+    );
+    errorIDCache.set(`${INGESTION_ERROR_SOURCE}:${errorCode}`, errorID);
+  }
+
+  return errorIDCache;
+}
+
+async function insertPreparedIngestionFailureRowsSequential(
+  connectionManager: ConnectionManager,
+  schema: string,
+  rows: PreparedIngestionFailureRow[],
+  transactionID: string | undefined,
+  errorIDCache: Map<string, number>
+): Promise<Map<number, number>> {
+  if (rows.length === 0) return new Map<number, number>();
+
+  const insertedIDs = new Map<number, number>();
   const insertSQL = safeFormatQuery(
     schema,
     `INSERT INTO ??.coremeasurements
@@ -219,9 +286,9 @@ export async function insertIngestionFailureRows(
        RawComments = VALUES(RawComments),
        IsValidated = FALSE`
   );
-  for (const [index, row] of rows.entries()) {
-    const normalizedDate = normalizeDate(row.date);
-    const sourceRowIndex = row.sourceRowIndex ?? index + 1;
+
+  for (const preparedRow of rows) {
+    const { row, normalizedDate, sourceRowIndex, errors } = preparedRow;
     const insertResult: any = await connectionManager.executeQuery(
       insertSQL,
       [
@@ -248,20 +315,190 @@ export async function insertIngestionFailureRows(
     if (!measurementID) {
       continue;
     }
-    insertedIDs.push(measurementID);
+    insertedIDs.set(preparedRow.resultIndex, measurementID);
 
-    await upsertMeasurementErrors(
-      connectionManager,
+    await upsertMeasurementErrors(connectionManager, schema, measurementID, INGESTION_ERROR_SOURCE, errors, transactionID, errorIDCache);
+  }
+
+  return insertedIDs;
+}
+
+async function insertPreparedIngestionFailureRowsBulk(
+  connectionManager: ConnectionManager,
+  schema: string,
+  batchID: string,
+  rows: PreparedIngestionFailureRow[],
+  transactionID: string | undefined,
+  errorIDCache: Map<string, number>
+): Promise<Map<number, number>> {
+  if (rows.length === 0) return new Map<number, number>();
+
+  const insertedIDs = new Map<number, number>();
+
+  for (const chunk of chunkArray(rows, INGESTION_FAILURE_BULK_INSERT_SIZE)) {
+    const insertSQL = safeFormatQuery(
       schema,
-      measurementID,
-      INGESTION_ERROR_SOURCE,
-      inferAllIngestionErrorCodes(row.failureReason).map(code => ({
-        errorCode: code,
-        errorMessage: getIngestionErrorMessage(code, row.failureReason)
-      })),
-      transactionID,
-      errorIDCache
+      `INSERT INTO ??.coremeasurements
+        (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
+         UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)
+       VALUES ${buildRepeatedRowPattern(chunk.length, '(?, NULL, FALSE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)')}
+       ON DUPLICATE KEY UPDATE
+         MeasurementDate = VALUES(MeasurementDate),
+         MeasuredDBH = VALUES(MeasuredDBH),
+         MeasuredHOM = VALUES(MeasuredHOM),
+         Description = VALUES(Description),
+         UploadFileID = VALUES(UploadFileID),
+         UploadBatchID = VALUES(UploadBatchID),
+         RawTreeTag = VALUES(RawTreeTag),
+         RawStemTag = VALUES(RawStemTag),
+         RawSpCode = VALUES(RawSpCode),
+         RawQuadrat = VALUES(RawQuadrat),
+         RawX = VALUES(RawX),
+         RawY = VALUES(RawY),
+         RawCodes = VALUES(RawCodes),
+         RawComments = VALUES(RawComments),
+         SourceRowIndex = VALUES(SourceRowIndex),
+         IsValidated = FALSE`
     );
+
+    const insertParams = chunk.flatMap(({ row, normalizedDate, sourceRowIndex }) => [
+      row.censusID,
+      normalizedDate,
+      row.dbh ?? null,
+      row.hom ?? null,
+      row.comments ?? null,
+      row.fileID ?? null,
+      row.batchID ?? null,
+      row.tag ?? null,
+      row.stemTag ?? null,
+      row.spCode ?? null,
+      row.quadrat ?? null,
+      row.x ?? null,
+      row.y ?? null,
+      row.codes ?? null,
+      row.comments ?? null,
+      sourceRowIndex
+    ]);
+
+    await connectionManager.executeQuery(insertSQL, insertParams, transactionID);
+
+    const rowIndexes = chunk.map(row => row.sourceRowIndex);
+    const selectSQL = safeFormatQuery(
+      schema,
+      `SELECT CoreMeasurementID, SourceRowIndex
+       FROM ??.coremeasurements
+       WHERE UploadBatchID = ?
+         AND SourceRowIndex IN (${rowIndexes.map(() => '?').join(', ')})`
+    );
+    const measurementRows: Array<{ CoreMeasurementID: number; SourceRowIndex: number }> = await connectionManager.executeQuery(
+      selectSQL,
+      [batchID, ...rowIndexes],
+      transactionID
+    );
+    const measurementIDBySourceRow = new Map(measurementRows.map(row => [row.SourceRowIndex, row.CoreMeasurementID]));
+    const missingRows = chunk.filter(row => !measurementIDBySourceRow.has(row.sourceRowIndex));
+
+    const errorLinkParams: number[] = [];
+    const seenErrorLinks = new Set<string>();
+
+    for (const row of chunk) {
+      const measurementID = measurementIDBySourceRow.get(row.sourceRowIndex);
+      if (!measurementID) {
+        continue;
+      }
+
+      insertedIDs.set(row.resultIndex, measurementID);
+
+      for (const error of row.errors) {
+        const errorID = errorIDCache.get(`${INGESTION_ERROR_SOURCE}:${error.errorCode}`);
+        if (!errorID) {
+          continue;
+        }
+
+        const dedupeKey = `${measurementID}:${errorID}`;
+        if (seenErrorLinks.has(dedupeKey)) {
+          continue;
+        }
+        seenErrorLinks.add(dedupeKey);
+        errorLinkParams.push(measurementID, errorID);
+      }
+    }
+
+    if (missingRows.length > 0) {
+      for (const [rowIndex, measurementID] of (
+        await insertPreparedIngestionFailureRowsSequential(connectionManager, schema, missingRows, transactionID, errorIDCache)
+      ).entries()) {
+        insertedIDs.set(rowIndex, measurementID);
+      }
+    }
+
+    if (errorLinkParams.length === 0) {
+      continue;
+    }
+
+    const errorLinkSQL = safeFormatQuery(
+      schema,
+      `INSERT INTO ??.measurement_error_log (MeasurementID, ErrorID, IsResolved, CreatedAt, ResolvedAt)
+       VALUES ${buildRepeatedRowPattern(errorLinkParams.length / 2, '(?, ?, FALSE, NOW(), NULL)')}
+       ON DUPLICATE KEY UPDATE
+         IsResolved = FALSE,
+         CreatedAt = NOW(),
+         ResolvedAt = NULL`
+    );
+    await connectionManager.executeQuery(errorLinkSQL, errorLinkParams, transactionID);
+  }
+
+  return insertedIDs;
+}
+
+export async function insertIngestionFailureRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  rows: IngestionFailureRowInput[],
+  transactionID?: string
+): Promise<number[]> {
+  if (rows.length === 0) return [];
+
+  const preparedRows = prepareIngestionFailureRows(rows);
+  const errorIDCache = await resolveIngestionErrorIDCache(connectionManager, schema, preparedRows, transactionID);
+
+  const bulkEligibleRows = new Map<string, PreparedIngestionFailureRow[]>();
+  const sequentialRows: PreparedIngestionFailureRow[] = [];
+
+  for (const preparedRow of preparedRows) {
+    const batchID = preparedRow.row.batchID;
+    if (!batchID?.trim()) {
+      sequentialRows.push(preparedRow);
+      continue;
+    }
+
+    const group = bulkEligibleRows.get(batchID) ?? [];
+    group.push(preparedRow);
+    bulkEligibleRows.set(batchID, group);
+  }
+
+  const insertedIDs: number[] = [];
+  const insertedIDByRow = new Map<number, number>();
+
+  for (const [batchID, batchRows] of bulkEligibleRows.entries()) {
+    for (const [rowIndex, measurementID] of (
+      await insertPreparedIngestionFailureRowsBulk(connectionManager, schema, batchID, batchRows, transactionID, errorIDCache)
+    ).entries()) {
+      insertedIDByRow.set(rowIndex, measurementID);
+    }
+  }
+
+  for (const [rowIndex, measurementID] of (
+    await insertPreparedIngestionFailureRowsSequential(connectionManager, schema, sequentialRows, transactionID, errorIDCache)
+  ).entries()) {
+    insertedIDByRow.set(rowIndex, measurementID);
+  }
+
+  for (const preparedRow of preparedRows) {
+    const measurementID = insertedIDByRow.get(preparedRow.resultIndex);
+    if (measurementID) {
+      insertedIDs.push(measurementID);
+    }
   }
 
   return insertedIDs;

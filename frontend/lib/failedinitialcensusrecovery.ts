@@ -8,6 +8,7 @@ export type FailedInitialCensusRecoveryState = {
 
 export function shouldRecoverFailedInitialCensus(state: FailedInitialCensusRecoveryState): boolean {
   const hasResidualCensusData = state.treeCount > 0 || state.stemCount > 0 || state.coreMeasurementCount > 0;
+  const hasOnlyResidualCoreMeasurements = state.treeCount === 0 && state.stemCount === 0 && state.coreMeasurementCount > 0;
 
-  return state.completedUploads === 0 && state.incompleteUploads > 0 && hasResidualCensusData;
+  return state.completedUploads === 0 && hasResidualCensusData && (state.incompleteUploads > 0 || hasOnlyResidualCoreMeasurements);
 }
