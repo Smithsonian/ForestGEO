@@ -343,7 +343,7 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
                       try {
                         ailogger.warn(`Moving ${fileID}-${batchID} to failedmeasurements due to error: ${errorMessage}`);
                         const failureResponse = await fetch(
-                          `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`
+                          `/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}&reason=${encodeURIComponent(errorMessage.slice(0, 255))}`
                         );
                         if (!failureResponse.ok) {
                           const errorData = await failureResponse.json().catch(() => ({ message: failureResponse.statusText }));

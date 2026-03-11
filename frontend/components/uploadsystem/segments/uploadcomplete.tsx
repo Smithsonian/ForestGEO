@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
 import ailogger from '@/ailogger';
@@ -97,10 +97,15 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }
       setCensusListStore(censusList); // Also update Zustand store
 
-      const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
-      if (existingCensus) {
-        await censusDispatch({ census: existingCensus });
-        setCensusStore(existingCensus); // Also update Zustand store
+      if (currentCensus) {
+        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, censusList);
+        if (reconciledCensus) {
+          await censusDispatch({ census: reconciledCensus });
+          setCensusStore(reconciledCensus); // Also update Zustand store
+        } else {
+          await censusDispatch({ census: undefined });
+          setCensusStore(undefined);
+        }
       }
       setProgress(prev => ({ ...prev, census: 100 }));
       setProgressText(prev => ({ ...prev, census: 'Census data refreshed.' }));
@@ -135,6 +140,16 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     try {
       setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
       const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+
+      if (!plotsResponse.ok) {
+        const errorBody = await plotsResponse.json().catch(() => ({}));
+        ailogger.warn(`Plots fetch returned ${plotsResponse.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, plots: 100 }));
+        setProgressText(prev => ({ ...prev, plots: `Plots refresh failed (server returned ${plotsResponse.status}).` }));
+        setLoadStatus(prev => ({ ...prev, plots: 'warning' }));
+        return;
+      }
+
       const plotsData = await plotsResponse.json();
 
       if (!plotsData || !Array.isArray(plotsData)) {
@@ -173,6 +188,16 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       const quadratsResponse = await fetch(
         `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
       );
+
+      if (!quadratsResponse.ok) {
+        const errorBody = await quadratsResponse.json().catch(() => ({}));
+        ailogger.warn(`Quadrats fetch returned ${quadratsResponse.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, quadrats: 100 }));
+        setProgressText(prev => ({ ...prev, quadrats: `Quadrats refresh failed (server returned ${quadratsResponse.status}).` }));
+        setLoadStatus(prev => ({ ...prev, quadrats: 'warning' }));
+        return;
+      }
+
       const quadratsData = await quadratsResponse.json();
 
       if (!quadratsData || !Array.isArray(quadratsData)) {
