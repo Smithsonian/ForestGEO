@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
+import { areGridSortModelsEqual, buildMeasurementTssFilters, buildMeasurementVisibleFilters, mergeMeasurementFilterModel } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
   beforeEach(() => {
@@ -56,6 +57,36 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
           }
         )
       ).toBe('Species mismatch from previous census');
+    });
+  });
+
+  describe('Bug Fix: controlled grid model updates should be idempotent', () => {
+    it('returns the previous filter model instance for semantically identical updates', () => {
+      const previousModel = {
+        items: [{ field: 'speciesCode', operator: 'contains', value: 'ACRU' }],
+        quickFilterValues: ['tag-1'],
+        visible: ['errors', 'valid', 'pending'] as const,
+        tss: ['old tree', 'multi stem', 'new recruit'] as const
+      };
+
+      const nextModel = mergeMeasurementFilterModel(previousModel, {
+        items: [{ id: 99, field: 'speciesCode', operator: 'contains', value: 'ACRU' }],
+        quickFilterValues: ['tag-1'],
+        visible: ['errors', 'valid', 'pending'],
+        tss: ['old tree', 'multi stem', 'new recruit']
+      });
+
+      expect(nextModel).toBe(previousModel);
+    });
+
+    it('builds stable visible and tree-state filters from toggle state', () => {
+      expect(buildMeasurementVisibleFilters(true, false, true)).toEqual(['errors', 'pending']);
+      expect(buildMeasurementTssFilters(true, false, true)).toEqual(['old tree', 'new recruit']);
+    });
+
+    it('treats identical sort models as equal', () => {
+      expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'asc' }])).toBe(true);
+      expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'desc' }])).toBe(false);
     });
   });
 

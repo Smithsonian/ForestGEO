@@ -23,9 +23,14 @@ interface MySQLError extends Error {
  * Returns the first schema found, or null if none
  */
 function extractSchemaFromQuery(query: string): string | null {
-  // Match patterns like: FROM schema.table, JOIN schema.table, INTO schema.table, UPDATE schema.table
+  // Match patterns like: FROM schema.table, JOIN schema.table, INTO schema.table,
+  // UPDATE schema.table, CALL schema.procedure
   // Also handles backtick-quoted identifiers
-  const schemaPatterns = [/(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.\w+/i, /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.`?\w+`?/i];
+  const schemaPatterns = [
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.\w+/i,
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.`?\w+`?/i,
+    /CALL\s+`?(\w+)`?\.`?\w+`?/i
+  ];
 
   for (const pattern of schemaPatterns) {
     const match = query.match(pattern);

@@ -55,7 +55,6 @@ import {
   MeasurementsCommonsProps,
   PendingAction,
   sortRowsByMeasurementDate,
-  TSSFilter,
   VisibleFilter
 } from '@/config/datagridhelpers';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
@@ -86,6 +85,16 @@ import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
+import {
+  areGridSortModelsEqual,
+  arePaginationModelsEqual,
+  buildMeasurementTssFilters,
+  buildMeasurementVisibleFilters,
+  mergeMeasurementFilterModel
+} from './measurementscommonsutils';
+
+// Stable reference to prevent infinite resize observer loop in MUI DataGrid
+const AUTO_ROW_HEIGHT = () => 'auto' as const;
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -179,16 +188,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>({
     items: [],
     quickFilterValues: [],
-    visible: [
-      ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
-      ...(showValidRows ? (['valid'] as VisibleFilter[]) : []),
-      ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
-    ],
-    tss: [
-      ...(showOT ? (['old tree'] as TSSFilter[]) : []),
-      ...(showMS ? (['multi stem'] as TSSFilter[]) : []),
-      ...(showNR ? (['new recruit'] as TSSFilter[]) : [])
-    ]
+    visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+    tss: buildMeasurementTssFilters(showOT, showMS, showNR)
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [errorCount, setErrorCount] = useState<number>(0);
@@ -452,34 +453,29 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
 
   useEffect(() => {
-    setFilterModel(prevModel => ({
-      ...prevModel,
-      visible: [
-        ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
-        ...(showValidRows ? (['valid'] as VisibleFilter[]) : []),
-        ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
-      ],
-      tss: [
-        ...(showOT ? (['old tree'] as TSSFilter[]) : []),
-        ...(showMS ? (['multi stem'] as TSSFilter[]) : []),
-        ...(showNR ? (['new recruit'] as TSSFilter[]) : [])
-      ]
-    }));
-    setRefresh(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setFilterModel(prevModel =>
+      mergeMeasurementFilterModel(prevModel, {
+        visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+        tss: buildMeasurementTssFilters(showOT, showMS, showNR)
+      })
+    );
   }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
 
-  // Handle refresh signal - use ref to track previous state to avoid infinite rerender
-  const previousRefresh = useRef(refresh);
+  // Handle refresh signal - use ref to guard against concurrent/redundant fetches
+  const isRefreshing = useRef(false);
   useEffect(() => {
-    // Only refresh when transitioning from false to true
-    if (refresh && !previousRefresh.current) {
-      Promise.all([runFetchPaginated(), refreshCounts()])
-        .then(() => setRefresh(false))
-        .catch(ailogger.error);
-    }
-    previousRefresh.current = refresh;
-  }, [refresh, runFetchPaginated, refreshCounts, setRefresh]);
+    if (!refresh || isRefreshing.current) return;
+    isRefreshing.current = true;
+
+    Promise.all([runFetchPaginated(), refreshCounts()])
+      .catch(ailogger.error)
+      .finally(() => {
+        isRefreshing.current = false;
+        setRefresh(false);
+      });
+    // Only trigger on refresh flag changes — callback identity changes should not re-trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -492,6 +488,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       queueMicrotask(() => {
         // Guard against state updates before mount or after unmount
         if (!isMountedRef.current) return;
+        if (areGridSortModelsEqual(sortModel, newModel)) return;
 
         setSortModel(newModel);
 
@@ -504,7 +501,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         }
       });
     },
-    [rows, isMountedRef]
+    [rows, isMountedRef, setRows, sortModel]
   );
 
   const cellHasError = useCallback(
@@ -1299,12 +1296,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   };
 
   function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => {
-      return {
-        ...prevFilterModel,
+    setFilterModel(prevFilterModel =>
+      mergeMeasurementFilterModel(prevFilterModel, {
+        items: incomingValues.items || [],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      };
-    });
+      })
+    );
   }
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
@@ -1413,6 +1410,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             loading={refresh}
             paginationMode="server"
             onPaginationModelChange={newPaginationModel => {
+              if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
+                return;
+              }
               setPaginationModel(newPaginationModel);
             }}
             onProcessRowUpdateError={(error: Error) => {
@@ -1435,10 +1435,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onSortModelChange={handleSortModelChange}
             filterModel={filterModel}
             onFilterModelChange={newFilterModel => {
-              setFilterModel(prevModel => ({
-                ...prevModel,
-                ...newFilterModel
-              }));
+              setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
             }}
             ignoreDiacritics
             initialState={{
@@ -1493,7 +1490,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             showToolbar
-            getRowHeight={() => 'auto'}
+            getRowHeight={AUTO_ROW_HEIGHT}
             isCellEditable={() => !locked}
           />
         </Box>

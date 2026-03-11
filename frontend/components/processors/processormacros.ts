@@ -61,8 +61,11 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 360000; // 360 seconds
-  const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
+  const QUERY_TIMEOUT_MS = 360000; // 360 seconds
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timer = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('Query execution timed out')), QUERY_TIMEOUT_MS);
+  });
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
@@ -83,6 +86,7 @@ export async function runQuery(connection: PoolConnection, query: string, params
     ailogger.error(chalk.red('Error message:', error.message));
     throw error;
   } finally {
+    clearTimeout(timeoutHandle);
     getPoolMonitorInstance().signalActivity();
   }
 }
