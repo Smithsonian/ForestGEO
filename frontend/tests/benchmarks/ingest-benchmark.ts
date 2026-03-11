@@ -30,6 +30,35 @@ const DB_CONFIG = {
 const SPECIES_CODES = ['ACERRU', 'QUERCO', 'PINUST', 'FAGUGR', 'BETUAL', 'TILIAA', 'FRAXAM', 'ULMUSA', 'CARYAG', 'LIQUIS'];
 const QUADRAT_COUNT = 100;
 const BULK_INSERT_CHUNK = 1000;
+type BenchmarkScenario = 'clean' | 'dirty';
+
+interface ProcedurePhaseTimings {
+  validationMs: number;
+  dedupeMs: number;
+  referenceMs: number;
+  prevLookupMs: number;
+  crossCensusMs: number;
+  treeStemInsertMs: number;
+  stemCrossIdMs: number;
+  coreInsertMs: number;
+  attributesMs: number;
+  softValidationMs: number;
+  totalDurationMs: number;
+}
+
+const EMPTY_PHASE_TIMINGS: ProcedurePhaseTimings = {
+  validationMs: 0,
+  dedupeMs: 0,
+  referenceMs: 0,
+  prevLookupMs: 0,
+  crossCensusMs: 0,
+  treeStemInsertMs: 0,
+  stemCrossIdMs: 0,
+  coreInsertMs: 0,
+  attributesMs: 0,
+  softValidationMs: 0,
+  totalDurationMs: 0
+};
 
 // ---------------------------------------------------------------------------
 // Schema / stored procedure loading (mirrors local-db-setup.ts)
@@ -174,6 +203,52 @@ function generateMeasurements(rowCount: number, quadratNames: string[], censusNu
   return rows;
 }
 
+function generateScenarioMeasurements(
+  rowCount: number,
+  quadratNames: string[],
+  censusNum: number,
+  scenario: BenchmarkScenario
+): MeasurementRow[] {
+  const rows = generateMeasurements(rowCount, quadratNames, censusNum);
+
+  if (scenario !== 'dirty' || censusNum !== 2) {
+    return rows;
+  }
+
+  const dirtyChunk = Math.max(1, Math.min(Math.floor(rowCount * 0.02), Math.floor(rowCount / 5) || 1));
+
+  for (let i = 0; i < dirtyChunk && i < rows.length; i++) {
+    rows[i].speciesCode = `INVALIDSPEC${String(i).padStart(3, '0')}`;
+  }
+
+  for (let i = dirtyChunk; i < dirtyChunk * 2 && i < rows.length; i++) {
+    rows[i].quadratName = `INVALIDQ${String(i).padStart(3, '0')}`;
+  }
+
+  for (let i = dirtyChunk * 2; i < dirtyChunk * 3 && i < rows.length; i++) {
+    const source = rows[i - dirtyChunk * 2];
+    rows[i] = {
+      ...source,
+      codes: 'A;D'
+    };
+  }
+
+  for (let i = dirtyChunk * 3; i < dirtyChunk * 4 && i < rows.length; i++) {
+    const nextQuadrat = quadratNames[(i + 1) % quadratNames.length];
+    rows[i].quadratName = nextQuadrat === rows[i].quadratName
+      ? quadratNames[(i + 2) % quadratNames.length]
+      : nextQuadrat;
+  }
+
+  for (let i = dirtyChunk * 4; i < dirtyChunk * 5 && i < rows.length; i++) {
+    rows[i].x = Number((rows[i].x + 20).toFixed(2));
+    rows[i].y = Number((rows[i].y + 20).toFixed(2));
+    rows[i].codes = 'A;BAD';
+  }
+
+  return rows;
+}
+
 /**
  * Directly insert first-census data (trees + stems + coremeasurements)
  * bypassing the stored procedure for speed.
@@ -274,6 +349,7 @@ function formatDuration(ms: number): string {
 // ---------------------------------------------------------------------------
 
 interface BenchmarkResult {
+  scenario: BenchmarkScenario;
   rowCount: number;
   seedMs: number;
   stageMs: number;
@@ -281,10 +357,58 @@ interface BenchmarkResult {
   collapserMs: number;
   totalMs: number;
   insertedRows: number;
+  phaseTimings: ProcedurePhaseTimings;
 }
 
-async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
-  const dbName = `bench_ingest_${rowCount}_${Date.now()}`;
+function extractProcedureResultRow(resultSets: any): Record<string, any> | null {
+  if (!Array.isArray(resultSets)) {
+    return resultSets && typeof resultSets === 'object' ? resultSets : null;
+  }
+
+  for (const resultSet of resultSets) {
+    if (Array.isArray(resultSet) && resultSet.length > 0 && typeof resultSet[0] === 'object' && resultSet[0] !== null && 'message' in resultSet[0]) {
+      return resultSet[0];
+    }
+  }
+
+  return null;
+}
+
+function extractPhaseTimings(resultRow: Record<string, any> | null): ProcedurePhaseTimings {
+  if (!resultRow) return EMPTY_PHASE_TIMINGS;
+
+  return {
+    validationMs: Number(resultRow.validation_ms || 0),
+    dedupeMs: Number(resultRow.dedupe_ms || 0),
+    referenceMs: Number(resultRow.reference_ms || 0),
+    prevLookupMs: Number(resultRow.prev_lookup_ms || 0),
+    crossCensusMs: Number(resultRow.cross_census_ms || 0),
+    treeStemInsertMs: Number(resultRow.tree_stem_insert_ms || 0),
+    stemCrossIdMs: Number(resultRow.stem_crossid_ms || 0),
+    coreInsertMs: Number(resultRow.core_insert_ms || 0),
+    attributesMs: Number(resultRow.attributes_ms || 0),
+    softValidationMs: Number(resultRow.soft_validation_ms || 0),
+    totalDurationMs: Number(resultRow.total_duration_ms || 0)
+  };
+}
+
+function formatPhaseTimings(phaseTimings: ProcedurePhaseTimings): string {
+  return [
+    `validation=${formatDuration(phaseTimings.validationMs)}`,
+    `dedupe=${formatDuration(phaseTimings.dedupeMs)}`,
+    `reference=${formatDuration(phaseTimings.referenceMs)}`,
+    `prev=${formatDuration(phaseTimings.prevLookupMs)}`,
+    `cross=${formatDuration(phaseTimings.crossCensusMs)}`,
+    `tree/stem=${formatDuration(phaseTimings.treeStemInsertMs)}`,
+    `crossid=${formatDuration(phaseTimings.stemCrossIdMs)}`,
+    `core=${formatDuration(phaseTimings.coreInsertMs)}`,
+    `attrs=${formatDuration(phaseTimings.attributesMs)}`,
+    `soft=${formatDuration(phaseTimings.softValidationMs)}`
+  ].join(', ');
+}
+
+async function runBenchmark(rowCount: number, scenario: BenchmarkScenario = 'clean'): Promise<BenchmarkResult> {
+  const dbName = `bench_ingest_${scenario}_${rowCount}_${Date.now()}`;
   const conn = await mysql.createConnection({ ...DB_CONFIG, database: undefined });
 
   try {
@@ -292,21 +416,10 @@ async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
     await conn.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
     await conn.query(`USE \`${dbName}\``);
 
-    console.log(`\n--- ${rowCount} rows ---`);
+    console.log(`\n--- ${scenario} / ${rowCount} rows ---`);
     console.log(`  loading schema + procs...`);
     await loadSchema(conn);
     await loadStoredProcedures(conn);
-
-    // Seed measurement_errors for ingestion error tracking
-    await conn.query(
-      `INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
-       VALUES ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
-              ('ingestion', 'EARLY_VALIDATION', 'Early validation failure'),
-              ('ingestion', 'DUPLICATE', 'Duplicate row'),
-              ('ingestion', 'SPECIES_MISMATCH', 'Species mismatch with prior census'),
-              ('ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch'),
-              ('ingestion', 'COORDINATE_DRIFT', 'Coordinate drift')`
-    );
 
     const meta = await seedBaseData(conn);
 
@@ -323,7 +436,7 @@ async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
     const batchID = `batch_001`;
     console.log(`  staging second census...`);
     const stageStart = Date.now();
-    const census2Rows = generateMeasurements(rowCount, meta.quadratNames, 2);
+    const census2Rows = generateScenarioMeasurements(rowCount, meta.quadratNames, 2, scenario);
     await stageSecondCensus(conn, meta, census2Rows, fileID, batchID);
     const stageMs = Date.now() - stageStart;
     console.log(`  staged in ${formatDuration(stageMs)}`);
@@ -333,12 +446,11 @@ async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
     const ingestStart = Date.now();
     const [ingestResult] = await conn.query<mysql.RowDataPacket[]>('CALL bulkingestionprocess(?, ?)', [fileID, batchID]);
     const ingestMs = Date.now() - ingestStart;
-    // Extract message from result (procedure returns a SELECT)
-    const resultSets = ingestResult as any;
-    const message = Array.isArray(resultSets) && resultSets.length > 0
-      ? (resultSets[resultSets.length - 1]?.[0]?.message || 'no message')
-      : 'no message';
+    const resultRow = extractProcedureResultRow(ingestResult as any);
+    const message = resultRow?.message || 'no message';
+    const phaseTimings = extractPhaseTimings(resultRow);
     console.log(`  bulkingestionprocess: ${formatDuration(ingestMs)} - ${message}`);
+    console.log(`  phase timings: ${formatPhaseTimings(phaseTimings)}`);
 
     // Run bulkingestioncollapser
     console.log(`  running bulkingestioncollapser...`);
@@ -358,7 +470,7 @@ async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
     const totalMs = stageMs + ingestMs + collapserMs;
     console.log(`  TOTAL (stage+ingest+collapser): ${formatDuration(totalMs)}`);
 
-    return { rowCount, seedMs, stageMs, ingestMs, collapserMs, totalMs, insertedRows };
+    return { scenario, rowCount, seedMs, stageMs, ingestMs, collapserMs, totalMs, insertedRows, phaseTimings };
   } finally {
     try {
       await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
@@ -373,25 +485,30 @@ async function runBenchmark(rowCount: number): Promise<BenchmarkResult> {
 
 async function main() {
   const requestedSize = parseInt(process.argv[2] || '0', 10);
-  const sizes = requestedSize > 0 ? [requestedSize] : [2000, 10000];
+  const sizes = requestedSize > 0 ? [requestedSize] : [2000, 10000, 50000];
 
   console.log('=== Bulk Ingestion Benchmark ===');
   console.log(`MySQL: ${DB_CONFIG.host}:${DB_CONFIG.port}`);
   console.log(`Stored procedures from: sqlscripting/storedprocedures.sql`);
-  console.log(`Sizes: ${sizes.join(', ')} rows`);
+  console.log(`Sizes: ${sizes.join(', ')} rows (clean) + dirty 10k`);
 
   const results: BenchmarkResult[] = [];
 
   for (const size of sizes) {
-    results.push(await runBenchmark(size));
+    results.push(await runBenchmark(size, 'clean'));
+  }
+
+  if (!requestedSize || requestedSize === 10000) {
+    results.push(await runBenchmark(requestedSize > 0 ? requestedSize : 10000, 'dirty'));
   }
 
   // Summary table
   console.log('\n=== Summary ===');
-  console.log('Rows     | Stage      | Ingest     | Collapser  | Total      | Ingested');
-  console.log('---------|------------|------------|------------|------------|--------');
+  console.log('Scenario | Rows     | Stage      | Ingest     | Collapser  | Total      | Ingested');
+  console.log('---------|----------|------------|------------|------------|------------|--------');
   for (const r of results) {
     console.log(
+      `${r.scenario.padEnd(9)}| ` +
       `${String(r.rowCount).padEnd(9)}| ` +
       `${formatDuration(r.stageMs).padEnd(11)}| ` +
       `${formatDuration(r.ingestMs).padEnd(11)}| ` +
@@ -402,9 +519,10 @@ async function main() {
   }
 
   // Extrapolation for 100k if we have 2 data points
-  if (results.length >= 2) {
-    const r1 = results[0];
-    const r2 = results[1];
+  const cleanResults = results.filter(r => r.scenario === 'clean');
+  if (cleanResults.length >= 2) {
+    const r1 = cleanResults[0];
+    const r2 = cleanResults[1];
     // Use power-law extrapolation: time = a * rows^b
     const b = Math.log(r2.ingestMs / r1.ingestMs) / Math.log(r2.rowCount / r1.rowCount);
     const a = r1.ingestMs / Math.pow(r1.rowCount, b);

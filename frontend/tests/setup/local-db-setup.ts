@@ -648,43 +648,15 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
 }
 
 /**
- * Seeds the measurement_errors catalog table with all known error codes.
+ * Ensures validation error codes exist for all loaded validation definitions.
  *
- * This must run BEFORE any validation SQL or bulkingestionprocess call, because:
- * - Validation definitions INSERT into measurement_error_log with ErrorID looked up
- *   from measurement_errors via (ErrorSource='validation', ErrorCode=ValidationID)
- * - bulkingestionprocess also seeds this table, but tests that bypass ingestion
- *   (e.g. post-ingestion validation tests using insertDirectMeasurements) need it
- *   pre-populated
- *
- * The ingestion error codes match storedprocedures.sql lines 1168-1183.
- * The validation error codes are generated from sitespecificvalidations rows.
+ * The canonical schema now seeds the ingestion error catalog and the inline
+ * validation codes used directly by bulkingestionprocess. This helper still
+ * backfills the rest of the validation catalog after sitespecificvalidations
+ * has been loaded so tests that execute validation SQL directly can resolve
+ * ErrorID values consistently.
  */
 export async function seedMeasurementErrors(connection: mysql.Connection): Promise<void> {
-  // Seed ingestion error codes (same as bulkingestionprocess)
-  await connection.query(`
-    INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
-      ('ingestion', 'MISSING_FIELD_TREETAG',    'Missing required field: TreeTag'),
-      ('ingestion', 'MISSING_FIELD_STEMTAG',     'Missing required field: StemTag'),
-      ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
-      ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
-      ('ingestion', 'MISSING_FIELD_DATE',        'Missing required field: MeasurementDate'),
-      ('ingestion', 'INVALID_QUADRAT',           'Invalid quadrat reference'),
-      ('ingestion', 'INVALID_SPECIES',           'Invalid species reference'),
-      ('ingestion', 'QUADRAT_MISMATCH',          'Quadrat mismatch across censuses'),
-      ('ingestion', 'COORDINATE_DRIFT',          'Coordinate drift exceeds allowed threshold'),
-      ('ingestion', 'DUPLICATE_ENTRY',           'Duplicate measurement row detected'),
-      ('ingestion', 'NEGATIVE_DBH',              'DBH must be non-negative'),
-      ('ingestion', 'NEGATIVE_HOM',              'HOM must be non-negative'),
-      ('ingestion', 'FIELD_TOO_LONG',            'One or more fields exceed column length limits'),
-      ('ingestion', 'MISSING_MEASUREMENT_DATA',  'Missing measurement data'),
-      ('ingestion', 'SQL_EXCEPTION',             'Ingestion SQL exception')
-  `);
-
-  // Seed validation error codes — one row per sitespecificvalidations entry.
-  // ErrorCode stores the ValidationID as a string (e.g. '1', '2', '14').
-  // Validation SQL definitions look up ErrorID via:
-  //   SELECT ErrorID FROM measurement_errors WHERE ErrorSource='validation' AND ErrorCode=CAST(@validationProcedureID AS CHAR)
   const [validations] = await connection.query<mysql.RowDataPacket[]>(
     'SELECT ValidationID, ProcedureName, Description FROM sitespecificvalidations ORDER BY ValidationID'
   );
@@ -698,7 +670,7 @@ export async function seedMeasurementErrors(connection: mysql.Connection): Promi
     );
   }
 
-  log.debug(` Seeded measurement_errors: 15 ingestion + ${validations.length} validation error codes`);
+  log.debug(` Ensured measurement_errors rows for ${validations.length} validation definitions`);
 }
 
 /**

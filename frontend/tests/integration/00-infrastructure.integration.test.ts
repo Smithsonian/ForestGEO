@@ -45,6 +45,8 @@ const EXPECTED_VALIDATIONS = [
   { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' },
   { id: 14, name: 'ValidateFindInvalidAttributeCodes' },
   { id: 15, name: 'ValidateFindAbnormallyHighDBH' },
+  { id: 17, name: 'ValidateQuadratMismatchAcrossCensuses' },
+  { id: 18, name: 'ValidateCoordinateDriftAcrossCensuses' },
   { id: 20, name: 'SpeciesMismatchCrossCensus' },
   { id: 21, name: 'SameBatchSpeciesConflict' }
 ] as const;
@@ -244,7 +246,7 @@ describe('Infrastructure Validation', () => {
 
     it('should have non-empty Definition for API validations', async () => {
       // API validations (not inline) should have SQL in their Definition field
-      const apiValidationIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 15];
+      const apiValidationIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 15, 17, 18];
 
       const [validations] = await connection.query<RowDataPacket[]>(
         `SELECT ValidationID, ProcedureName, Definition

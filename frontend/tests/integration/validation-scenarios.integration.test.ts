@@ -20,6 +20,7 @@ import {
   teardownTestDatabase,
   cleanupTestMeasurements,
   insertTestMeasurements,
+  insertDirectMeasurements,
   runBulkIngestion,
   verifyIngestionResults,
   getFailedMeasurements,
@@ -32,6 +33,28 @@ describe('Validation Scenarios Integration Tests', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
+
+  const getIngestionErrorsForFile = async (fileID: string) => {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT me.ErrorCode,
+              me.ErrorMessage,
+              cm.Description,
+              cm.RawTreeTag AS TreeTag,
+              cm.RawStemTag AS StemTag
+       FROM coremeasurements cm
+       JOIN measurement_error_log mel
+         ON mel.MeasurementID = cm.CoreMeasurementID
+        AND mel.IsResolved = FALSE
+       JOIN measurement_errors me
+         ON me.ErrorID = mel.ErrorID
+       WHERE cm.UploadFileID = ?
+         AND me.ErrorSource = 'ingestion'
+       ORDER BY cm.CoreMeasurementID, me.ErrorCode`,
+      [fileID]
+    );
+
+    return rows;
+  };
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
@@ -102,6 +125,254 @@ describe('Validation Scenarios Integration Tests', () => {
       if (failed.length > 0) {
         expect(failed[0].FailureReasons).toBeDefined();
       }
+    });
+
+    it('should fail early and preserve staged rows when the target census is missing', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await connection.query(
+        `INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate, IsActive)
+         VALUES (?, ?, ?, ?, 1)`,
+        [testData.plots[0].plotID, 99, '2026-01-01', '2026-12-31']
+      );
+
+      const [censusRows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() AS CensusID');
+      const missingCensusID = censusRows[0].CensusID;
+
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'MISSCENS001',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 10.0,
+            y: 10.0,
+            dbh: 100.0,
+            hom: 1.3,
+            date: '2026-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID: missingCensusID }
+      );
+
+      await connection.query('DELETE FROM census WHERE CensusID = ?', [missingCensusID]);
+
+      const result = await runBulkIngestion(connection, fileID, batchID);
+
+      expect(Boolean(result.batch_failed)).toBe(true);
+      expect(result.message).toContain('references missing census');
+
+      const [stagedRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?',
+        [fileID, batchID]
+      );
+      expect(stagedRows[0].rowCount).toBe(1);
+
+      const [alerts] = await connection.query<RowDataPacket[]>(
+        `SELECT type, severity
+         FROM uploadintegrityalerts
+         WHERE fileID = ? AND batchID = ?`,
+        [fileID, batchID]
+      );
+      expect(alerts.some((alert) => alert.type === 'MISSING_CENSUS_SCOPE' && alert.severity === 'critical')).toBe(true);
+    });
+
+    it('should record TREE_RESOLUTION_FAILED when only an inactive current-census tree exists', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const censusID = testData.census[0].censusID;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const [speciesRows] = await connection.query<RowDataPacket[]>(
+        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
+        [speciesCode]
+      );
+      const speciesID = speciesRows[0].SpeciesID;
+
+      await connection.query(
+        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)',
+        ['INACTTREE001', speciesID, censusID]
+      );
+
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'INACTTREE001',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 5.0,
+            y: 5.0,
+            dbh: 120.0,
+            hom: 1.3,
+            date: '2024-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID }
+      );
+
+      const result = await runBulkIngestion(connection, fileID, batchID);
+      expect(result.batch_failed, result.message).toBe(false);
+
+      const failed = await getFailedMeasurements(connection, { fileID });
+      expect(failed).toHaveLength(1);
+
+      const errorRows = await getIngestionErrorsForFile(fileID);
+      expect(errorRows.map((row) => row.ErrorCode)).toContain('TREE_RESOLUTION_FAILED');
+      expect(errorRows[0].Description).toContain('inactive');
+    });
+
+    it('should record STEM_RESOLUTION_FAILED when an inactive current-census stem blocks insertion', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const censusID = testData.census[0].censusID;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const [speciesRows] = await connection.query<RowDataPacket[]>(
+        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
+        [speciesCode]
+      );
+      const [quadratRows] = await connection.query<RowDataPacket[]>(
+        'SELECT QuadratID FROM quadrats WHERE PlotID = ? AND QuadratName = ?',
+        [testData.plots[0].plotID, quadratName]
+      );
+
+      const speciesID = speciesRows[0].SpeciesID;
+      const quadratID = quadratRows[0].QuadratID;
+
+      await connection.query(
+        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
+        ['INACTSTEM001', speciesID, censusID]
+      );
+
+      const [treeRows] = await connection.query<RowDataPacket[]>(
+        `SELECT TreeID
+         FROM trees
+         WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?`,
+        ['INACTSTEM001', speciesID, censusID]
+      );
+      const treeID = treeRows[0].TreeID;
+
+      await connection.query(
+        `INSERT INTO stems
+         (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+        [treeID, quadratID, censusID, 'S001', 7.0, 7.0]
+      );
+
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'INACTSTEM001',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 7.0,
+            y: 7.0,
+            dbh: 130.0,
+            hom: 1.3,
+            date: '2024-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID }
+      );
+
+      const result = await runBulkIngestion(connection, fileID, batchID);
+      expect(result.batch_failed, result.message).toBe(false);
+
+      const failed = await getFailedMeasurements(connection, { fileID });
+      expect(failed).toHaveLength(1);
+
+      const errorRows = await getIngestionErrorsForFile(fileID);
+      expect(errorRows.map((row) => row.ErrorCode)).toContain('STEM_RESOLUTION_FAILED');
+      expect(errorRows[0].Description).toContain('inactive');
+    });
+
+    it('should record MEASUREMENT_INSERT_SKIPPED instead of silently dropping duplicate measurements', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const censusID = testData.census[0].censusID;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertDirectMeasurements(connection, testData, censusID, [
+        {
+          treeTag: 'DUPMEAS001',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 4.0,
+          y: 4.0,
+          dbh: 150.0,
+          hom: 1.3,
+          date: '2024-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'DUPMEAS001',
+            stemTag: 'S001',
+            speciesCode,
+            quadratName,
+            x: 4.0,
+            y: 4.0,
+            dbh: 150.0,
+            hom: 1.3,
+            date: '2024-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID }
+      );
+
+      const result = await runBulkIngestion(connection, fileID, batchID);
+      expect(result.batch_failed, result.message).toBe(false);
+
+      const errorRows = await getIngestionErrorsForFile(fileID);
+      expect(errorRows.map((row) => row.ErrorCode)).toContain('MEASUREMENT_INSERT_SKIPPED');
+      expect(errorRows[0].Description).toContain('matching measurement already exists');
+
+      const [coreRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS rowCount
+         FROM coremeasurements cm
+         JOIN stems s ON s.StemGUID = cm.StemGUID
+         JOIN trees t ON t.TreeID = s.TreeID
+         WHERE t.TreeTag = ?
+           AND cm.CensusID = ?
+           AND cm.MeasurementDate = ?
+           AND cm.MeasuredDBH = ?
+           AND cm.MeasuredHOM = ?`,
+        ['DUPMEAS001', censusID, '2024-06-15', 150.0, 1.3]
+      );
+      expect(coreRows[0].rowCount).toBe(1);
     });
   });
 

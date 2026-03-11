@@ -294,6 +294,49 @@ describe('Post-Ingestion Validation Tests', () => {
       // 65.1mm SHOULD trigger - just over threshold
       expect(errors.length).toBeGreaterThan(0);
     });
+
+    it('should NOT flag growth when the current measurement also has a dead status code', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const inserted = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+        {
+          treeTag: 'GROWTHDEAD01',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 6.0,
+          y: 6.0,
+          census1DBH: 100,
+          census2DBH: 200,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await connection.query(
+        'INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)',
+        [inserted.census2MeasurementIDs[0], 'D']
+      );
+
+      await runValidationForTest(connection, VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX, {
+        censusID: census2.censusID,
+        plotID
+      });
+
+      const errors = await getValidationErrors(connection, {
+        validationID: VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX,
+        treeTag: 'GROWTHDEAD01'
+      });
+
+      expect(errors.length).toBe(0);
+    });
   });
 
   describe('ValidationID 2: DBH Shrinkage Exceeds Maximum', () => {
@@ -479,6 +522,49 @@ describe('Post-Ingestion Validation Tests', () => {
 
       // 5.1% SHOULD trigger - just over threshold
       expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('should NOT flag shrinkage when the previous-census measurement has a dead status code', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const inserted = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+        {
+          treeTag: 'SHRINKDEAD01',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 14.0,
+          y: 14.0,
+          census1DBH: 200,
+          census2DBH: 100,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await connection.query(
+        'INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)',
+        [inserted.census1MeasurementIDs[0], 'D']
+      );
+
+      await runValidationForTest(connection, VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX, {
+        censusID: census2.censusID,
+        plotID
+      });
+
+      const errors = await getValidationErrors(connection, {
+        validationID: VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX,
+        treeTag: 'SHRINKDEAD01'
+      });
+
+      expect(errors.length).toBe(0);
     });
   });
 

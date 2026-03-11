@@ -24,6 +24,10 @@ import {
   insertTestMeasurements,
   runBulkIngestion,
   getValidationErrors,
+  insertCrossCensusMeasurements,
+  runValidationForTest,
+  seedStatusAttributes,
+  setupTwoCensusScenario,
   type TestData
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
@@ -45,16 +49,117 @@ const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
 const HTTP_INTERNAL_ERROR = 500;
 
+async function cleanupValidationErrors(
+  connection: Connection,
+  validationID: number,
+  censusID?: number,
+  plotID?: number
+) {
+  const cleanupQuery = `
+    DELETE mel
+    FROM measurement_error_log mel
+    JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+    JOIN coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+    JOIN census c ON cm.CensusID = c.CensusID
+    WHERE me.ErrorSource = 'validation'
+      AND me.ErrorCode = CAST(? AS CHAR)
+      AND cm.IsValidated IS NULL
+      AND cm.IsActive = TRUE
+      ${censusID ? 'AND cm.CensusID = ?' : ''}
+      ${plotID ? 'AND c.PlotID = ?' : ''}
+  `;
+  const cleanupParams: Array<number> = [validationID];
+  if (censusID) cleanupParams.push(censusID);
+  if (plotID) cleanupParams.push(plotID);
+  await connection.query(cleanupQuery, cleanupParams);
+}
+
+async function runCombinedDBHValidationsDirect(
+  connection: Connection,
+  params: { censusID?: number; plotID?: number } = {}
+): Promise<{ success: boolean; ranGrowth: boolean; ranShrinkage: boolean }> {
+  const [validationRows] = await connection.query<RowDataPacket[]>(
+    'SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (1, 2)'
+  );
+
+  const enabledByValidation = new Map<number, boolean>(
+    validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)])
+  );
+
+  const ranGrowth = enabledByValidation.get(1) ?? false;
+  const ranShrinkage = enabledByValidation.get(2) ?? false;
+
+  if (ranGrowth) {
+    await cleanupValidationErrors(connection, 1, params.censusID, params.plotID);
+  }
+
+  if (ranShrinkage) {
+    await cleanupValidationErrors(connection, 2, params.censusID, params.plotID);
+  }
+
+  await connection.query('CALL RunSharedDBHChangeValidations(?, ?, ?, ?)', [
+    params.censusID ?? null,
+    params.plotID ?? null,
+    ranGrowth ? 1 : 0,
+    ranShrinkage ? 1 : 0
+  ]);
+
+  return { success: true, ranGrowth, ranShrinkage };
+}
+
+async function runCombinedCrossCensusLocationValidationsDirect(
+  connection: Connection,
+  params: { censusID?: number; plotID?: number } = {}
+): Promise<{ success: boolean; ranQuadratMismatch: boolean; ranCoordinateDrift: boolean }> {
+  const [validationRows] = await connection.query<RowDataPacket[]>(
+    'SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (17, 18)'
+  );
+
+  const enabledByValidation = new Map<number, boolean>(
+    validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)])
+  );
+
+  const ranQuadratMismatch = enabledByValidation.get(17) ?? false;
+  const ranCoordinateDrift = enabledByValidation.get(18) ?? false;
+
+  if (ranQuadratMismatch) {
+    await cleanupValidationErrors(connection, 17, params.censusID, params.plotID);
+  }
+
+  if (ranCoordinateDrift) {
+    await cleanupValidationErrors(connection, 18, params.censusID, params.plotID);
+  }
+
+  await connection.query('CALL RunSharedCrossCensusLocationValidations(?, ?, ?, ?)', [
+    params.censusID ?? null,
+    params.plotID ?? null,
+    ranQuadratMismatch ? 1 : 0,
+    ranCoordinateDrift ? 1 : 0
+  ]);
+
+  return { success: true, ranQuadratMismatch, ranCoordinateDrift };
+}
+
 describe('Validation API Integration Tests', () => {
   let connection: Connection;
   let testData: TestData;
   let config: { database: string };
+  let census1ID: number;
+  let census2ID: number;
+  let plotID: number;
 
   beforeAll(async () => {
     const setup = await setupTestDatabase();
     connection = setup.connection;
     testData = setup.testData;
     config = setup.config;
+    plotID = testData.plots[0].plotID;
+
+    const scenario = await setupTwoCensusScenario(connection, testData);
+    census1ID = scenario.census1.censusID;
+    census2ID = scenario.census2.censusID;
+
+    await seedStatusAttributes(connection);
   }, 90000);
 
   afterAll(async () => {
@@ -83,6 +188,8 @@ describe('Validation API Integration Tests', () => {
       expect(validationIds).toContain(6); // Outside Census Bounds
       expect(validationIds).toContain(11); // DBH Outside Species Limits
       expect(validationIds).toContain(15); // Abnormally High DBH
+      expect(validationIds).toContain(17); // Quadrat mismatch across censuses
+      expect(validationIds).toContain(18); // Coordinate drift across censuses
 
       // Verify structure
       const validation = validations.find(v => v.ValidationID === 1);
@@ -197,6 +304,294 @@ describe('Validation API Integration Tests', () => {
 
       // Error count should not increase
       expect(secondCount).toBe(firstCount);
+    });
+
+    it('should run shared DBH validations in one call when both are enabled', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
+        {
+          treeTag: 'API_SHARED_GROWTH',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 5,
+          y: 5,
+          census1DBH: 100,
+          census2DBH: 190,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        },
+        {
+          treeTag: 'API_SHARED_SHRINK',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 6,
+          y: 6,
+          census1DBH: 200,
+          census2DBH: 100,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const result = await runCombinedDBHValidationsDirect(connection, {
+        censusID: census2ID,
+        plotID
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.ranGrowth).toBe(true);
+      expect(result.ranShrinkage).toBe(true);
+
+      const growthErrors = await getValidationErrors(connection, {
+        validationID: 1,
+        treeTag: 'API_SHARED_GROWTH'
+      });
+      const shrinkageErrors = await getValidationErrors(connection, {
+        validationID: 2,
+        treeTag: 'API_SHARED_SHRINK'
+      });
+
+      expect(growthErrors.length).toBe(1);
+      expect(shrinkageErrors.length).toBe(1);
+    });
+
+    it('should not clear disabled shrinkage errors when the shared DBH path runs', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
+        {
+          treeTag: 'API_DISABLED_GROWTH',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 7,
+          y: 7,
+          census1DBH: 100,
+          census2DBH: 180,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        },
+        {
+          treeTag: 'API_DISABLED_SHRINK',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 8,
+          y: 8,
+          census1DBH: 220,
+          census2DBH: 100,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const seededShrinkageError = await runValidationForTest(connection, 2, {
+        censusID: census2ID,
+        plotID
+      });
+      expect(seededShrinkageError).toBe(true);
+
+      const beforeShrinkageErrors = await getValidationErrors(connection, {
+        validationID: 2,
+        treeTag: 'API_DISABLED_SHRINK'
+      });
+      expect(beforeShrinkageErrors.length).toBe(1);
+
+      await connection.query('UPDATE sitespecificvalidations SET IsEnabled = 0 WHERE ValidationID = 2');
+
+      try {
+        const result = await runCombinedDBHValidationsDirect(connection, {
+          censusID: census2ID,
+          plotID
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.ranGrowth).toBe(true);
+        expect(result.ranShrinkage).toBe(false);
+
+        const growthErrors = await getValidationErrors(connection, {
+          validationID: 1,
+          treeTag: 'API_DISABLED_GROWTH'
+        });
+        const afterShrinkageErrors = await getValidationErrors(connection, {
+          validationID: 2,
+          treeTag: 'API_DISABLED_SHRINK'
+        });
+
+        expect(growthErrors.length).toBe(1);
+        expect(afterShrinkageErrors.length).toBe(1);
+      } finally {
+        await connection.query('UPDATE sitespecificvalidations SET IsEnabled = 1 WHERE ValidationID = 2');
+      }
+    });
+
+    it('should run shared cross-census location validations in one call when both are enabled', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName1 = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const quadratName2 = testData.quadrats[1]?.QuadratName || testData.quadrats[1]?.Quadrat;
+
+      if (!speciesCode || !quadratName1 || !quadratName2) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
+        {
+          treeTag: 'API_SHARED_QUAD',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName1,
+          quadratName2,
+          x: 5,
+          y: 5,
+          census1DBH: 100,
+          census2DBH: 110,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        },
+        {
+          treeTag: 'API_SHARED_DRIFT',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName1,
+          x: 10,
+          y: 10,
+          x2: 25,
+          y2: 10,
+          census1DBH: 100,
+          census2DBH: 110,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const result = await runCombinedCrossCensusLocationValidationsDirect(connection, {
+        censusID: census2ID,
+        plotID
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.ranQuadratMismatch).toBe(true);
+      expect(result.ranCoordinateDrift).toBe(true);
+
+      const quadratMismatchErrors = await getValidationErrors(connection, {
+        validationID: 17,
+        treeTag: 'API_SHARED_QUAD'
+      });
+      const coordinateDriftErrors = await getValidationErrors(connection, {
+        validationID: 18,
+        treeTag: 'API_SHARED_DRIFT'
+      });
+
+      expect(quadratMismatchErrors.length).toBe(1);
+      expect(coordinateDriftErrors.length).toBe(1);
+    });
+
+    it('should not clear disabled coordinate drift errors when the shared location path runs', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName1 = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const quadratName2 = testData.quadrats[1]?.QuadratName || testData.quadrats[1]?.Quadrat;
+
+      if (!speciesCode || !quadratName1 || !quadratName2) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
+        {
+          treeTag: 'API_DISABLED_QUAD',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName1,
+          quadratName2,
+          x: 7,
+          y: 7,
+          census1DBH: 100,
+          census2DBH: 105,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        },
+        {
+          treeTag: 'API_DISABLED_DRIFT',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName1,
+          x: 8,
+          y: 8,
+          x2: 21,
+          y2: 8,
+          census1DBH: 100,
+          census2DBH: 105,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const seededCoordinateDriftError = await runValidationForTest(connection, 18, {
+        censusID: census2ID,
+        plotID
+      });
+      expect(seededCoordinateDriftError).toBe(true);
+
+      const beforeCoordinateDriftErrors = await getValidationErrors(connection, {
+        validationID: 18,
+        treeTag: 'API_DISABLED_DRIFT'
+      });
+      expect(beforeCoordinateDriftErrors.length).toBe(1);
+
+      await connection.query('UPDATE sitespecificvalidations SET IsEnabled = 0 WHERE ValidationID = 18');
+
+      try {
+        const result = await runCombinedCrossCensusLocationValidationsDirect(connection, {
+          censusID: census2ID,
+          plotID
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.ranQuadratMismatch).toBe(true);
+        expect(result.ranCoordinateDrift).toBe(false);
+
+        const quadratMismatchErrors = await getValidationErrors(connection, {
+          validationID: 17,
+          treeTag: 'API_DISABLED_QUAD'
+        });
+        const afterCoordinateDriftErrors = await getValidationErrors(connection, {
+          validationID: 18,
+          treeTag: 'API_DISABLED_DRIFT'
+        });
+
+        expect(quadratMismatchErrors.length).toBe(1);
+        expect(afterCoordinateDriftErrors.length).toBe(1);
+      } finally {
+        await connection.query('UPDATE sitespecificvalidations SET IsEnabled = 1 WHERE ValidationID = 18');
+      }
     });
   });
 
