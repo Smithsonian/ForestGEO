@@ -9,6 +9,36 @@
 
 SET @schema = DATABASE();
 
+-- Add UploadFileID (must exist before Raw* columns reference AFTER UploadBatchID)
+SELECT COUNT(*) INTO @col_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @schema
+  AND TABLE_NAME = 'coremeasurements'
+  AND COLUMN_NAME = 'UploadFileID';
+SET @sql = IF(
+    @col_exists = 0,
+    'ALTER TABLE coremeasurements ADD COLUMN UploadFileID VARCHAR(255) NULL AFTER UserDefinedFields',
+    'SELECT ''UploadFileID already exists'' AS Status'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Add UploadBatchID
+SELECT COUNT(*) INTO @col_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @schema
+  AND TABLE_NAME = 'coremeasurements'
+  AND COLUMN_NAME = 'UploadBatchID';
+SET @sql = IF(
+    @col_exists = 0,
+    'ALTER TABLE coremeasurements ADD COLUMN UploadBatchID VARCHAR(36) NULL AFTER UploadFileID',
+    'SELECT ''UploadBatchID already exists'' AS Status'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SELECT COALESCE(IS_NULLABLE, 'YES') INTO @stemguid_nullable
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema

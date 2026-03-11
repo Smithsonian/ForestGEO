@@ -16,10 +16,36 @@ CREATE TABLE IF NOT EXISTS upload_errors
     CreatedAt      DATETIME DEFAULT CURRENT_TIMESTAMP NULL
 );
 
-CREATE INDEX idx_upload_errors_file_batch
-    ON upload_errors (FileID, BatchID);
+SET @schema = DATABASE();
 
-CREATE INDEX idx_upload_errors_plot_census
-    ON upload_errors (PlotID, CensusID);
+SELECT COUNT(*) INTO @idx_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @schema
+  AND TABLE_NAME = 'upload_errors'
+  AND INDEX_NAME = 'idx_upload_errors_file_batch';
+
+SET @sql = IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_upload_errors_file_batch ON upload_errors (FileID, BatchID)',
+    'SELECT ''idx_upload_errors_file_batch already exists'' AS Status'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @schema
+  AND TABLE_NAME = 'upload_errors'
+  AND INDEX_NAME = 'idx_upload_errors_plot_census';
+
+SET @sql = IF(
+    @idx_exists = 0,
+    'CREATE INDEX idx_upload_errors_plot_census ON upload_errors (PlotID, CensusID)',
+    'SELECT ''idx_upload_errors_plot_census already exists'' AS Status'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SELECT 'Migration 17 complete: upload_errors table is available.' AS Status;

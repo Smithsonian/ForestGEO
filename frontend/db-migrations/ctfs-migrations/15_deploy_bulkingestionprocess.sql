@@ -32,6 +32,8 @@ BEGIN
     DECLARE vBatchRowCount INT DEFAULT 0;
     DECLARE vDataLossCount INT DEFAULT 0;
     DECLARE vProcessedCount INT DEFAULT 0;
+    -- Fixed-width opaque id avoids overflow when long file names are combined
+    -- with generated sub-batch ids.
     DECLARE vUploadId VARCHAR(50);
     -- FIX: Declare collation-safe variables to prevent collation mismatch errors
     -- when client connection uses different collation than database tables
@@ -46,7 +48,20 @@ BEGIN
                 vErrorCode = MYSQL_ERRNO;
 
             SET vBatchFailed = TRUE;
-            SET vUploadId = CONCAT(vFileID, '-', vBatchID);
+            SET vUploadId = LEFT(
+                SHA2(
+                    CONCAT_WS(
+                        '#',
+                        DATABASE(),
+                        COALESCE(vCurrentPlotID, 0),
+                        COALESCE(vCurrentCensusID, 0),
+                        COALESCE(vFileID, ''),
+                        COALESCE(vBatchID, '')
+                    ),
+                    256
+                ),
+                40
+            );
 
             -- Log to uploadmetrics
             INSERT IGNORE INTO uploadmetrics (
@@ -112,8 +127,6 @@ BEGIN
     SET vFileIDSafe = vFileID COLLATE utf8mb4_0900_ai_ci;
     SET vBatchIDSafe = vBatchID COLLATE utf8mb4_0900_ai_ci;
 
-    SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);
-
     -- Get census info
     SELECT CensusID, PlotID, COUNT(*)
     INTO vCurrentCensusID, vCurrentPlotID, vBatchRowCount
@@ -127,6 +140,21 @@ BEGIN
         SELECT 'No data found' as message, FALSE as batch_failed;
         LEAVE main_proc;
     END IF;
+
+    SET vUploadId = LEFT(
+        SHA2(
+            CONCAT_WS(
+                '#',
+                DATABASE(),
+                COALESCE(vCurrentPlotID, 0),
+                COALESCE(vCurrentCensusID, 0),
+                COALESCE(vFileIDSafe, ''),
+                COALESCE(vBatchIDSafe, '')
+            ),
+            256
+        ),
+        40
+    );
 
     -- ============================================================
     -- PERFORMANCE FIX: Use uploadmetrics for idempotency check
