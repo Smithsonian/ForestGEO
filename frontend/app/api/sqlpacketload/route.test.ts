@@ -1,11 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 const { getCookieMock, authMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
   authMock: vi.fn()
 }));
+
+const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = vi.hoisted(() => {
+  class MockUploadSessionOwnershipError extends Error {
+    status: number;
+
+    constructor(message: string, status: number = 409) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  return {
+    requireUploadSessionOwnershipMock: vi.fn(),
+    MockUploadSessionOwnershipError
+  };
+});
 
 vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
@@ -39,6 +56,15 @@ vi.mock('@/config/utils', async importOriginal => {
     generateShortBatchID: () => 'test-batch-id'
   };
 });
+
+vi.mock('@/config/uploadsessiontracker', () => ({
+  requireUploadSessionOwnership: requireUploadSessionOwnershipMock,
+  UploadSessionOwnershipError: MockUploadSessionOwnershipError,
+  UploadSessionState: {
+    INITIALIZED: 'initialized',
+    UPLOADING: 'uploading'
+  }
+}));
 
 vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: vi.fn().mockResolvedValue([])
@@ -99,7 +125,10 @@ function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}
 
   const req = new Request('http://localhost/api/sqlpacketload', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-upload-session-id': 'session-1'
+    },
     body: JSON.stringify(body)
   }) as any;
   req.json = async () => body;
@@ -113,8 +142,10 @@ describe('sqlpacketload measurement scope validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
+    vi.mocked(insertIngestionFailureRows).mockResolvedValue([]);
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     getCookieMock.mockResolvedValue(undefined);
+    requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -138,7 +169,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -153,7 +184,7 @@ describe('sqlpacketload measurement scope validation', () => {
   it('rejects when census does not belong to the provided plot', async () => {
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ PlotID: 99 }]);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -166,7 +197,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ PlotID: 22 }])
       .mockResolvedValueOnce([{ distinctPlotCount: 1, distinctCensusCount: 1, plotID: 22, censusID: 99 }]);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -186,7 +217,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -197,6 +228,25 @@ describe('sqlpacketload measurement scope validation', () => {
     );
     expect(insertCall).toBeDefined();
     expect(insertCall[1].slice(0, 4)).toEqual(['SERC_census1_2025.csv', 'batch-1', 22, 32]);
+  });
+
+  it('rejects measurement uploads when the upload session does not own the scope', async () => {
+    requireUploadSessionOwnershipMock.mockRejectedValueOnce(
+      new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409)
+    );
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'Upload session expired before measurement chunk upload',
+      fileName: 'SERC_census1_2025.csv',
+      batchID: 'batch-1'
+    });
   });
 
   it('splits large measurement chunks into multiple temporarymeasurements inserts', async () => {
@@ -231,7 +281,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
-    const res = await POST(makeMeasurementRequest({ fileRowSet: largeRowSet }));
+    const res = (await POST(makeMeasurementRequest({ fileRowSet: largeRowSet })))!;
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -257,7 +307,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(200);
 
@@ -297,7 +347,7 @@ describe('sqlpacketload measurement scope validation', () => {
       // changelog insert
       .mockResolvedValueOnce(undefined);
 
-    const res = await POST(makeMeasurementRequest());
+    const res = (await POST(makeMeasurementRequest()))!;
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -316,5 +366,82 @@ describe('sqlpacketload measurement scope validation', () => {
         String(call[0]).includes('BatchID IN')
     );
     expect(deleteFailedCall).toBeDefined();
+  });
+
+  it('logs dropped-row alert metadata with a bounded uploadId when unresolved-ingestion persistence fails twice', async () => {
+    const twoRowSet = {
+      'row-1': {
+        tag: '100001',
+        stemtag: '1',
+        spcode: 'FAGR',
+        quadrat: '1011',
+        lx: '202',
+        ly: '104.5',
+        dbh: '3.5',
+        hom: '1.30',
+        date: '2010-03-17',
+        codes: 'LI',
+        comments: ''
+      },
+      'row-2': {
+        tag: '100002',
+        stemtag: '1',
+        spcode: 'FAGR',
+        quadrat: '1011',
+        lx: '203',
+        ly: '105.5',
+        dbh: '4.5',
+        hom: '1.40',
+        date: '2010-03-17',
+        codes: 'LI',
+        comments: ''
+      }
+    };
+
+    vi.mocked(insertIngestionFailureRows)
+      .mockRejectedValueOnce(new Error('first persistence failure'))
+      .mockRejectedValueOnce(new Error('second persistence failure'));
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ rowOrdinal: 2, existingBatch: null }])
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeMeasurementRequest({ fileRowSet: twoRowSet })))!;
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      insertedCount: 1,
+      droppedCount: 1,
+      dataIntegrityWarning: true
+    });
+
+    const alertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT INTO forestgeo_testing.uploadintegrityalerts') &&
+      String(call[0]).includes('FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS')
+    );
+
+    expect(alertCall).toBeDefined();
+    expect(String(alertCall[0])).toContain('uploadId, fileID, batchID, plotID, censusID');
+    expect(String(alertCall[0])).toContain('sourceRecords, processedRecords, failedRecords, missingRecords');
+    expect(alertCall[1]).toHaveLength(10);
+    expect(alertCall[1][0]).toMatch(/^[a-f0-9]{40}$/);
+    expect(alertCall[1].slice(1, 5)).toEqual(['SERC_census1_2025.csv', 'batch-1', 22, 32]);
+    expect(alertCall[1][6]).toBe(2);
+    expect(alertCall[1][7]).toBe(1);
+    expect(alertCall[1][8]).toBe(1);
+    expect(alertCall[1][9]).toBe(0);
   });
 });

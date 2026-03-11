@@ -3,18 +3,38 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   props: {
     params: Promise<{ schema: string; plotID: string; censusID: string }>;
   }
 ) {
   const { schema, plotID, censusID } = await props.params;
+  const sessionId = request.headers.get('x-upload-session-id');
+  const numericPlotID = Number(plotID);
+  const numericCensusID = Number(censusID);
+
+  try {
+    await requireUploadSessionOwnership({
+      schema,
+      sessionId,
+      plotId: numericPlotID,
+      censusId: numericCensusID,
+      allowedStates: [UploadSessionState.UPLOADED, UploadSessionState.PROCESSING, UploadSessionState.COLLAPSING],
+      contextLabel: `batch discovery for plot ${plotID}, census ${censusID}`
+    });
+  } catch (error: unknown) {
+    if (error instanceof UploadSessionOwnershipError) {
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: error.status });
+    }
+    throw error;
+  }
 
   const connectionManager = ConnectionManager.getInstance();
 

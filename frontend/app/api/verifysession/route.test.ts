@@ -41,6 +41,7 @@ describe('verifysession route', () => {
     mockExecuteQuery
       .mockResolvedValueOnce([{ count: 5 }])
       .mockResolvedValueOnce([{ count: 2 }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }]);
 
     const response = await GET(makeRequest('http://localhost/api/verifysession?schema=myschema&plotID=1&censusID=2&fileID=file-a.csv'));
@@ -49,6 +50,7 @@ describe('verifysession route', () => {
     expect(await response.json()).toMatchObject({
       processedCount: 5,
       failedCount: 2,
+      remainingCount: 1,
       totalAccounted: 7,
       scope: 'file',
       fileID: 'file-a.csv',
@@ -56,16 +58,18 @@ describe('verifysession route', () => {
       mixedMetadataState: false
     });
 
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(3);
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(4);
     expect(String(mockExecuteQuery.mock.calls[0][0])).toContain('cm.UploadFileID = ?');
     expect(String(mockExecuteQuery.mock.calls[0][0])).not.toContain('JSON_EXTRACT');
-    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('cm.UploadFileID IS NULL');
+    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('temporarymeasurements');
+    expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('cm.UploadFileID IS NULL');
   });
 
   it('sums direct and legacy uploadSession JSON rows when metadata is mixed', async () => {
     mockExecuteQuery
       .mockResolvedValueOnce([{ count: 2 }])
       .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([{ count: 4 }])
       .mockResolvedValueOnce([{ count: 3 }]);
 
@@ -75,6 +79,7 @@ describe('verifysession route', () => {
     expect(await response.json()).toMatchObject({
       processedCount: 5,
       failedCount: 1,
+      remainingCount: 0,
       totalAccounted: 6,
       scope: 'batch',
       fileID: 'file-a.csv',
@@ -83,9 +88,10 @@ describe('verifysession route', () => {
       mixedMetadataState: true
     });
 
-    expect(mockExecuteQuery).toHaveBeenCalledTimes(4);
-    expect(String(mockExecuteQuery.mock.calls[0][0])).toContain('cm.UploadBatchID = ?');
-    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain('cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL');
-    expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
+    expect(mockExecuteQuery).toHaveBeenCalledTimes(5);
+    expect(String(mockExecuteQuery.mock.calls[0][0])).toContain("cm.UploadBatchID LIKE CONCAT(?, '__sub%')");
+    expect(String(mockExecuteQuery.mock.calls[2][0])).toContain("tm.BatchID LIKE CONCAT(?, '__sub%')");
+    expect(String(mockExecuteQuery.mock.calls[3][0])).toContain('cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL');
+    expect(String(mockExecuteQuery.mock.calls[4][0])).toContain('JSON_UNQUOTE(JSON_EXTRACT');
   });
 });

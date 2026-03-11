@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { insertIngestionFailureRows } from '@/config/measurementerrors';
-import { validateSchemaOrThrow, safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import ailogger from '@/ailogger';
+import { moveTemporaryBatchToFailedMeasurements, moveTemporarySubBatchesToFailedMeasurements } from '@/lib/batchfailuretransfer';
+import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState } from '@/config/uploadsessiontracker';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+export const maxDuration = 900;
 
 // FAILURE PROCESS -- IF A BATCH EXCEEDS ALLOWED ATTEMPTS, MOVE IT TO FAILED & MOVE ON
 export async function GET(
@@ -17,9 +19,14 @@ export async function GET(
   }
 ) {
   const schema = request.nextUrl.searchParams.get('schema');
+  const failureReason = (request.nextUrl.searchParams.get('reason') || 'Batch moved after max attempts').slice(0, 255);
   const { fileID, batchID } = await props.params;
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+  const sessionId = request.headers.get('x-upload-session-id');
+  if (!sessionId) {
+    return new NextResponse(JSON.stringify({ error: 'Upload session is required for batch failure handling' }), { status: HTTPResponses.CONFLICT });
   }
 
   try {
@@ -29,55 +36,47 @@ export async function GET(
   }
 
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | null = null;
   try {
-    transactionID = await connectionManager.beginTransaction();
-    const selectTempSQL = safeFormatQuery(
+    const scopeSQL = safeFormatQuery(
       schema,
-      `SELECT id, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments
+      `SELECT PlotID, CensusID
        FROM ??.temporarymeasurements
-       WHERE FileID = ? AND BatchID = ?`
+       WHERE FileID = ?
+         AND (BatchID = ? OR BatchID LIKE ?)
+       GROUP BY PlotID, CensusID
+       LIMIT 1`
     );
-    const sourceRows: any[] = await connectionManager.executeQuery(
-      selectTempSQL,
-      [fileID, batchID],
-      transactionID
-    );
-
-    if (sourceRows.length > 0) {
-      await insertIngestionFailureRows(
-        connectionManager,
+    const scopeRows = await connectionManager.executeQuery(scopeSQL, [fileID, batchID, `${batchID}__sub%`]);
+    if (Array.isArray(scopeRows) && scopeRows.length > 0) {
+      await requireUploadSessionOwnership({
         schema,
-        sourceRows.map((row, idx) => ({
-          plotID: row.PlotID,
-          censusID: row.CensusID,
-          tag: row.TreeTag,
-          stemTag: row.StemTag,
-          spCode: row.SpeciesCode,
-          quadrat: row.QuadratName,
-          x: row.LocalX,
-          y: row.LocalY,
-          dbh: row.DBH,
-          hom: row.HOM,
-          date: row.MeasurementDate,
-          codes: row.Codes,
-          comments: row.Comments,
-          fileID,
-          batchID,
-          sourceRowIndex: row.id ?? idx + 1,
-          failureReason: 'Batch moved after max attempts'
-        })),
-        transactionID
-      );
+        sessionId,
+        plotId: Number(scopeRows[0].PlotID),
+        censusId: Number(scopeRows[0].CensusID),
+        allowedStates: [UploadSessionState.PROCESSING, UploadSessionState.COLLAPSING],
+        contextLabel: `batch failure handling for ${fileID}-${batchID}`
+      });
     }
 
-    const deleteTempSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?');
-    await connectionManager.executeQuery(deleteTempSQL, [fileID, batchID], transactionID);
+    // After sub-batching, remaining rows may have sub-batch IDs (e.g. batchID__sub001).
+    // Try exact match first, then fall back to moving all sub-batches for this file.
+    let movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, schema, fileID, batchID, failureReason);
 
-    await connectionManager.commitTransaction(transactionID);
-    ailogger.warn(`Moved ${sourceRows.length} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}`);
+    if (movedRows === 0) {
+      const subBatchPrefix = `${batchID}__sub`;
+      movedRows = await moveTemporarySubBatchesToFailedMeasurements(connectionManager, schema, fileID, subBatchPrefix, failureReason);
+      if (movedRows > 0) {
+        ailogger.warn(
+          `Moved ${movedRows} sub-batched temporary rows to unresolved coremeasurements for ${fileID} (prefix: ${subBatchPrefix}). Reason: ${failureReason}`
+        );
+      }
+    } else {
+      ailogger.warn(`Moved ${movedRows} temporary rows to unresolved coremeasurements for ${fileID}-${batchID}. Reason: ${failureReason}`);
+    }
   } catch (error: any) {
-    await connectionManager.rollbackTransaction(transactionID ?? '');
+    if (error instanceof UploadSessionOwnershipError) {
+      return new NextResponse(JSON.stringify({ error: error.message }), { status: error.status });
+    }
     ailogger.error(`failure transfer for ${fileID}-${batchID}:`, error);
     return new NextResponse(
       JSON.stringify({

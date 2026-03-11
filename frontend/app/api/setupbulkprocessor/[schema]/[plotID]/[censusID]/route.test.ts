@@ -9,6 +9,10 @@ const { loggerInfo, loggerWarn, loggerError, loggerDebug } = vi.hoisted(() => ({
   loggerDebug: vi.fn()
 }));
 
+const { requireUploadSessionOwnershipMock } = vi.hoisted(() => ({
+  requireUploadSessionOwnershipMock: vi.fn()
+}));
+
 vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
   const instance = { executeQuery };
@@ -23,6 +27,23 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema: string, sql: string) => sql.replace(/\?\?/g, schema))
 }));
 
+vi.mock('@/config/uploadsessiontracker', () => ({
+  requireUploadSessionOwnership: requireUploadSessionOwnershipMock,
+  UploadSessionOwnershipError: class UploadSessionOwnershipError extends Error {
+    status: number;
+
+    constructor(message: string, status: number = 409) {
+      super(message);
+      this.status = status;
+    }
+  },
+  UploadSessionState: {
+    UPLOADED: 'uploaded',
+    PROCESSING: 'processing',
+    COLLAPSING: 'collapsing'
+  }
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: loggerInfo,
@@ -34,7 +55,10 @@ vi.mock('@/ailogger', () => ({
 
 function makeRequest() {
   const url = new URL('http://localhost/api/setupbulkprocessor/forestgeo_testing/22/6');
-  const req = new Request(url.toString(), { method: 'GET' }) as any;
+  const req = new Request(url.toString(), {
+    method: 'GET',
+    headers: { 'x-upload-session-id': 'session-1' }
+  }) as any;
   req.nextUrl = url;
   return req;
 }
@@ -52,6 +76,7 @@ function makeProps() {
 describe('GET /api/setupbulkprocessor/[schema]/[plotID]/[censusID]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
   });
 
   it('returns only the latest batch per file from temporarymeasurements', async () => {

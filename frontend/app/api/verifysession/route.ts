@@ -9,6 +9,10 @@ import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+function buildBatchPrefixPredicate(columnRef: string): string {
+  return `(${columnRef} = ? OR ${columnRef} LIKE CONCAT(?, '__sub%'))`;
+}
+
 /**
  * Session-Based Upload Verification Endpoint
  *
@@ -54,8 +58,8 @@ export async function GET(request: NextRequest) {
   const scope = batchID ? 'batch' : fileID ? 'file' : 'all';
 
   // Build queries based on scope
-  let processedSQL: string, failedSQL: string;
-  let processedParams: any[], failedParams: any[];
+  let processedSQL: string, failedSQL: string, remainingSQL: string;
+  let processedParams: any[], failedParams: any[], remainingParams: any[];
   let legacyProbeSQL: string | null = null;
   let legacyProbeParams: any[] = [];
   let legacyProcessedSQL: string | null = null;
@@ -72,9 +76,9 @@ export async function GET(request: NextRequest) {
          AND cm.CensusID = ?
          AND cm.StemGUID IS NOT NULL
          AND cm.UploadFileID = ?
-         AND cm.UploadBatchID = ?`
+         AND ${buildBatchPrefixPredicate('cm.UploadBatchID')}`
       );
-      processedParams = [plotID, censusID, fileID, batchID];
+      processedParams = [plotID, censusID, fileID, batchID, batchID];
       legacyProbeSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
@@ -108,12 +112,21 @@ export async function GET(request: NextRequest) {
          WHERE c.PlotID = ?
            AND cm.CensusID = ?
            AND cm.UploadFileID = ?
-           AND cm.UploadBatchID = ?
+           AND ${buildBatchPrefixPredicate('cm.UploadBatchID')}
            AND cm.StemGUID IS NULL
            AND mel.IsResolved = FALSE
            AND me.ErrorSource = ?`
       );
-      failedParams = [plotID, censusID, fileID, batchID, INGESTION_ERROR_SOURCE];
+      failedParams = [plotID, censusID, fileID, batchID, batchID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.temporarymeasurements tm
+         WHERE tm.PlotID = ?
+           AND tm.CensusID = ?
+           AND tm.FileID = ?
+           AND ${buildBatchPrefixPredicate('tm.BatchID')}`
+      );
+      remainingParams = [plotID, censusID, fileID, batchID, batchID];
     } else if (scope === 'file') {
       // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
@@ -163,6 +176,14 @@ export async function GET(request: NextRequest) {
            AND me.ErrorSource = ?`
       );
       failedParams = [plotID, censusID, fileID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.temporarymeasurements tm
+         WHERE tm.PlotID = ?
+           AND tm.CensusID = ?
+           AND tm.FileID = ?`
+      );
+      remainingParams = [plotID, censusID, fileID];
     } else {
       // Query all files for this plot/census (cumulative total)
       processedSQL = safeFormatQuery(
@@ -185,6 +206,8 @@ export async function GET(request: NextRequest) {
            AND me.ErrorSource = ?`
       );
       failedParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
+      remainingParams = [plotID, censusID];
     }
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifysession: ${schema}`);
@@ -197,6 +220,7 @@ export async function GET(request: NextRequest) {
     // Execute queries
     const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
     const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
+    const remainingResult = await connectionManager.executeQuery(remainingSQL, remainingParams);
 
     const processedDirectCount = processedResult[0]?.count || 0;
     let processedLegacyCount = 0;
@@ -211,6 +235,7 @@ export async function GET(request: NextRequest) {
 
     const processedCount = processedDirectCount + processedLegacyCount;
     const failedCount = failedResult[0]?.count || 0;
+    const remainingCount = remainingResult[0]?.count || 0;
     const totalAccounted = processedCount + failedCount;
     const legacyRowsDetected = processedLegacyCount > 0;
     const mixedMetadataState = processedDirectCount > 0 && processedLegacyCount > 0;
@@ -229,6 +254,7 @@ export async function GET(request: NextRequest) {
       JSON.stringify({
         processedCount,
         failedCount,
+        remainingCount,
         totalAccounted,
         plotID,
         censusID,
@@ -248,6 +274,7 @@ export async function GET(request: NextRequest) {
         details: error.message,
         processedCount: 0,
         failedCount: 0,
+        remainingCount: 0,
         totalAccounted: 0
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }

@@ -16,6 +16,7 @@ import { format } from 'mysql2/promise';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 
 /**
  * Generate idempotency key for a batch of data
@@ -43,6 +44,14 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
   const data = sortedRows.join('|');
   // Use full SHA-256 hash for better collision resistance
   return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+function buildUploadId(schema: string, plotID: number, censusID: number, fileID: string, batchID: string, purpose: string = 'upload'): string {
+  return crypto
+    .createHash('sha256')
+    .update([schema, plotID, censusID, fileID, batchID, purpose].join('#'))
+    .digest('hex')
+    .slice(0, 40);
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -168,14 +177,10 @@ async function validateMeasurementUploadScope(
   const batchCensusID = toPositiveInteger(batchScope.censusID ?? batchScope.CensusID);
 
   if (distinctPlotCount > 1 || distinctCensusCount > 1) {
-    ailogger.error(`Rejected measurement upload for ${fileName}: existing batch ${batchID} already contains mixed plot/census scope`, {
-      fileName,
-      batchID,
-      distinctPlotCount,
-      distinctCensusCount,
-      batchPlotID,
-      batchCensusID
-    });
+    ailogger.error(
+      `Rejected measurement upload for ${fileName}: existing batch ${batchID} already contains mixed plot/census scope ` +
+        `(plots=${distinctPlotCount}, censuses=${distinctCensusCount}, batchPlotID=${batchPlotID}, batchCensusID=${batchCensusID})`
+    );
     return buildMeasurementScopeErrorResponse(HTTPResponses.CONFLICT, 'Existing batch contains mixed plot/census scope', {
       fileName,
       batchID,
@@ -546,6 +551,7 @@ export async function POST(request: NextRequest) {
     const chunkRows = Object.values(fileRowSet ?? {});
     const rowCount = chunkRows.length;
     const batchID = body.batchID || generateShortBatchID();
+    const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
     try {
       scopeValidation = await validateMeasurementUploadScope(connectionManager, schema, fileName, batchID, plot, census);
@@ -565,6 +571,32 @@ export async function POST(request: NextRequest) {
       return scopeValidation;
     }
     const { plotID: resolvedPlotID, censusID: resolvedCensusID } = scopeValidation;
+
+    try {
+      await requireUploadSessionOwnership({
+        schema,
+        sessionId,
+        plotId: resolvedPlotID,
+        censusId: resolvedCensusID,
+        allowedStates: [TrackedUploadSessionState.INITIALIZED, TrackedUploadSessionState.UPLOADING],
+        contextLabel: `measurement chunk upload for ${fileName}-${batchID}`
+      });
+    } catch (error: unknown) {
+      if (error instanceof UploadSessionOwnershipError) {
+        ailogger.warn(`Rejected measurement upload for ${fileName}-${batchID}: ${error.message}`);
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: 'Upload session conflict',
+            error: error.message,
+            fileName,
+            batchID
+          }),
+          { status: error.status }
+        );
+      }
+      throw error;
+    }
+
     const contentHash = hashChunkContent(fileRowSet);
     const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
 
@@ -623,11 +655,10 @@ export async function POST(request: NextRequest) {
           );
           const droppedRows: DroppedMeasurementRow[] = droppedCandidates.map(candidate => {
             const row = chunkRows[candidate.rowOrdinal - 1];
-            return {
-              ...row,
+            return Object.assign({}, row, {
               failureReason: buildDroppedMeasurementFailureReason(row, candidate.existingBatch),
               sourceRowIndex: candidate.rowOrdinal
-            };
+            }) as DroppedMeasurementRow;
           });
 
           if (droppedRows.length !== droppedRowCount) {
@@ -700,10 +731,19 @@ export async function POST(request: NextRequest) {
 
                 // Critical: log to uploadintegrityalerts so data loss is not silent.
                 try {
+                  const alertUploadId = buildUploadId(
+                    schema,
+                    resolvedPlotID,
+                    resolvedCensusID,
+                    fileName,
+                    batchID,
+                    'failed-insert-to-unresolved-coremeasurements'
+                  );
                   const alertSQL = format(
                     `INSERT INTO ??.uploadintegrityalerts
-                     (fileID, batchID, plotID, censusID, type, message, severity, failedRecords)
-                     VALUES (?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?)`,
+                     (uploadId, fileID, batchID, plotID, censusID, type, message, severity,
+                      sourceRecords, processedRecords, failedRecords, missingRecords)
+                     VALUES (?, ?, ?, ?, ?, 'FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS', ?, 'critical', ?, ?, ?, ?)`,
                     [schema]
                   );
                   const alertMessage = JSON.stringify({
@@ -714,7 +754,7 @@ export async function POST(request: NextRequest) {
                   });
                   await connectionManager.executeQuery(
                     alertSQL,
-                    [fileName, batchID, resolvedPlotID, resolvedCensusID, alertMessage, droppedRows.length],
+                    [alertUploadId, fileName, batchID, resolvedPlotID, resolvedCensusID, alertMessage, expectedRowCount, actualInsertedCount, droppedRows.length, 0],
                     transactionID
                   );
                   ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
