@@ -7,6 +7,12 @@ import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
+type ValidationExecutionResult = { procedureName: string; success: boolean; error?: string };
+
+const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
+const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
+const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
+const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
 
 /**
  * Converts camelCase or PascalCase validation names to human-readable format
@@ -159,11 +165,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   const performValidations = useCallback(async () => {
     try {
-      const validationProcedureNames = Object.keys(validationMessages);
-
-      // Run validations in parallel for better performance
-      // Use Promise.allSettled to handle individual failures without stopping other validations
-      const validationPromises = validationProcedureNames.map(async procedureName => {
+      const runSingleValidation = async (procedureName: string): Promise<ValidationExecutionResult[]> => {
         const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
 
         try {
@@ -180,8 +182,16 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             })
           });
 
+          const payload = await response.json().catch(() => null);
+
           if (!response.ok) {
-            throw new Error(`Error executing ${procedureName}`);
+            const serverError = payload?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing ${procedureName}: ${serverError}`);
+          }
+
+          if (payload === false || payload?.success === false) {
+            const serverError = payload?.error || 'unknown server error';
+            throw new Error(`Validation returned failure for ${procedureName}: ${serverError}`);
           }
 
           if (isMounted.current) {
@@ -191,7 +201,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             }));
           }
 
-          return { procedureName, success: true };
+          return [{ procedureName, success: true }];
         } catch (error: any) {
           if (error.name === 'AbortError') {
             ailogger.info(`Fetch aborted for ${procedureName}`);
@@ -207,9 +217,123 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             }));
           }
 
-          return { procedureName, success: false, error: error.message };
+          return [{ procedureName, success: false, error: error.message }];
         }
-      });
+      };
+
+      const runCombinedDBHValidation = async (): Promise<ValidationExecutionResult[]> => {
+        try {
+          const response = await fetch('/api/validations/procedures/shared-dbh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortControllerRef.current?.signal,
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
+              p_PlotID: plotID
+            })
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || payload?.success === false) {
+            const serverError = payload?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing shared DBH validations: ${serverError}`);
+          }
+
+          if (isMounted.current) {
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [DBH_GROWTH_PROCEDURE]: 100,
+              [DBH_SHRINKAGE_PROCEDURE]: 100
+            }));
+          }
+
+          return [
+            { procedureName: DBH_GROWTH_PROCEDURE, success: true },
+            { procedureName: DBH_SHRINKAGE_PROCEDURE, success: true }
+          ];
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            ailogger.info('Fetch aborted for shared DBH validations');
+            throw error;
+          }
+
+          ailogger.warn(`Shared DBH validation path failed, falling back to individual calls: ${error.message}`);
+          const fallbackResults = await Promise.all([
+            runSingleValidation(DBH_GROWTH_PROCEDURE),
+            runSingleValidation(DBH_SHRINKAGE_PROCEDURE)
+          ]);
+          return fallbackResults.flat();
+        }
+      };
+
+      const runCombinedCrossCensusLocationValidation = async (): Promise<ValidationExecutionResult[]> => {
+        try {
+          const response = await fetch('/api/validations/procedures/shared-cross-census-location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortControllerRef.current?.signal,
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
+              p_PlotID: plotID
+            })
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || payload?.success === false) {
+            const serverError = payload?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing shared cross-census location validations: ${serverError}`);
+          }
+
+          if (isMounted.current) {
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [QUADRAT_MISMATCH_PROCEDURE]: 100,
+              [COORDINATE_DRIFT_PROCEDURE]: 100
+            }));
+          }
+
+          return [
+            { procedureName: QUADRAT_MISMATCH_PROCEDURE, success: true },
+            { procedureName: COORDINATE_DRIFT_PROCEDURE, success: true }
+          ];
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            ailogger.info('Fetch aborted for shared cross-census location validations');
+            throw error;
+          }
+
+          ailogger.warn(`Shared cross-census location validation path failed, falling back to individual calls: ${error.message}`);
+          const fallbackResults = await Promise.all([
+            runSingleValidation(QUADRAT_MISMATCH_PROCEDURE),
+            runSingleValidation(COORDINATE_DRIFT_PROCEDURE)
+          ]);
+          return fallbackResults.flat();
+        }
+      };
+
+      const validationProcedureNames = Object.keys(validationMessages);
+      const shouldUseCombinedDBHPath = Boolean(validationMessages[DBH_GROWTH_PROCEDURE] && validationMessages[DBH_SHRINKAGE_PROCEDURE]);
+      const shouldUseCombinedCrossCensusLocationPath = Boolean(
+        validationMessages[QUADRAT_MISMATCH_PROCEDURE] && validationMessages[COORDINATE_DRIFT_PROCEDURE]
+      );
+      const standaloneValidationNames = validationProcedureNames.filter(procedureName =>
+        !(
+          (shouldUseCombinedDBHPath &&
+            (procedureName === DBH_GROWTH_PROCEDURE || procedureName === DBH_SHRINKAGE_PROCEDURE)) ||
+          (shouldUseCombinedCrossCensusLocationPath &&
+            (procedureName === QUADRAT_MISMATCH_PROCEDURE || procedureName === COORDINATE_DRIFT_PROCEDURE))
+        )
+      );
+
+      const validationPromises = standaloneValidationNames.map(procedureName => runSingleValidation(procedureName));
+      if (shouldUseCombinedDBHPath) {
+        validationPromises.push(runCombinedDBHValidation());
+      }
+      if (shouldUseCombinedCrossCensusLocationPath) {
+        validationPromises.push(runCombinedCrossCensusLocationValidation());
+      }
 
       // Wait for all validations to complete (or fail)
       const results = await Promise.allSettled(validationPromises);
@@ -223,8 +347,9 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       }
 
       // Log validation summary
-      const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
-      const failCount = results.filter(r => r.status === 'fulfilled' && !r.value?.success).length;
+      const flattenedResults = results.flatMap(result => (result.status === 'fulfilled' ? result.value : []));
+      const successCount = flattenedResults.filter(result => result.success).length;
+      const failCount = flattenedResults.filter(result => !result.success).length;
       ailogger.info(`Parallel validation complete: ${successCount} succeeded, ${failCount} failed`);
 
       try {

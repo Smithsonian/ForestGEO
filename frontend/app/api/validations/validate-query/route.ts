@@ -36,8 +36,12 @@ export async function POST(request: NextRequest) {
 
     // Basic syntax validation - try to explain the query without executing it
     try {
-      const explainQuery = `EXPLAIN ${query}`;
-      await connectionManager.executeQuery(explainQuery);
+      if (isStoredProcedureCall(query)) {
+        await validateStoredProcedureCall(connectionManager, schema, query, validationResult);
+      } else {
+        const explainQuery = `EXPLAIN ${query}`;
+        await connectionManager.executeQuery(explainQuery);
+      }
     } catch (error: any) {
       validationResult.isValid = false;
 
@@ -203,6 +207,13 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
   const queryUpper = query.toUpperCase();
   const queryLower = query.toLowerCase();
 
+  if (isStoredProcedureCall(query)) {
+    if (!query.includes('@p_PlotID') || !query.includes('@p_CensusID')) {
+      validationResult.warnings.push('Stored-procedure validation calls should include @p_PlotID and @p_CensusID arguments for proper plot/census filtering');
+    }
+    return;
+  }
+
   // Check for required INSERT INTO measurement_error_log structure.
   if (!queryUpper.includes('INSERT INTO MEASUREMENT_ERROR_LOG')) {
     validationResult.errors.push('Validation queries must INSERT INTO measurement_error_log table');
@@ -248,5 +259,46 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
   // Check for DISTINCT usage
   if (!queryUpper.includes('SELECT DISTINCT')) {
     validationResult.warnings.push('Consider using SELECT DISTINCT to avoid duplicate error records');
+  }
+}
+
+function isStoredProcedureCall(query: string): boolean {
+  return /^\s*CALL\s+/i.test(query);
+}
+
+function extractProcedureName(query: string): string | null {
+  const match = query.match(/^\s*CALL\s+`?([A-Za-z0-9_]+)`?\s*\(/i);
+  return match?.[1] ?? null;
+}
+
+async function validateStoredProcedureCall(
+  connectionManager: ConnectionManager,
+  schema: string,
+  query: string,
+  validationResult: ValidationResponse
+): Promise<void> {
+  const procedureName = extractProcedureName(query);
+
+  if (!procedureName) {
+    validationResult.isValid = false;
+    validationResult.errors.push('Stored procedure calls must use the form CALL ProcedureName(...)');
+    return;
+  }
+
+  const routines = await connectionManager.executeQuery(
+    `
+      SELECT ROUTINE_NAME
+      FROM INFORMATION_SCHEMA.ROUTINES
+      WHERE ROUTINE_SCHEMA = ?
+        AND ROUTINE_TYPE = 'PROCEDURE'
+        AND ROUTINE_NAME = ?
+      LIMIT 1
+    `,
+    [schema, procedureName]
+  );
+
+  if (routines.length === 0) {
+    validationResult.isValid = false;
+    validationResult.errors.push(`Stored procedure '${procedureName}' does not exist in schema '${schema}'`);
   }
 }
