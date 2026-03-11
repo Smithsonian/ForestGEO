@@ -653,13 +653,14 @@ export async function findAbandonedSessionsNeedingCleanup(schema: string): Promi
  * Clean up orphaned data for a session
  */
 export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<{ temporaryDeleted: number; failedDeleted: number }> {
-  let conn: PoolConnection | null = null;
+  const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | null = null;
   let temporaryDeleted = 0;
   let failedDeleted = 0;
   let cleanupNote = 'Cleanup: deleted 0 temp rows';
 
   try {
-    conn = await getConn();
+    transactionID = await connectionManager.beginTransaction();
 
     // Move orphaned temporarymeasurements for the whole scope once no other active scope owner exists.
     if (session.fileId) {
@@ -675,12 +676,11 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
         LIMIT 1
       `;
       const heartbeatTimeoutSeconds = Math.floor(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
-      const overlappingSessions = await runQuery(conn, overlappingActiveSessionsSQL, [
-        session.plotId,
-        session.censusId,
-        session.sessionId,
-        heartbeatTimeoutSeconds
-      ]);
+      const overlappingSessions = await connectionManager.executeQuery(
+        overlappingActiveSessionsSQL,
+        [session.plotId, session.censusId, session.sessionId, heartbeatTimeoutSeconds],
+        transactionID ?? undefined
+      );
 
       if (Array.isArray(overlappingSessions) && overlappingSessions.length > 0) {
         const newerSessionId = (overlappingSessions[0] as { session_id?: string }).session_id ?? 'unknown';
@@ -696,7 +696,7 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
             AND CensusID = ?
           ORDER BY FileID, BatchID
         `;
-        const batchRows = await runQuery(conn, selectBatchSQL, [session.plotId, session.censusId]);
+        const batchRows = await connectionManager.executeQuery(selectBatchSQL, [session.plotId, session.censusId], transactionID ?? undefined);
         const batches = Array.isArray(batchRows)
           ? batchRows
               .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
@@ -705,11 +705,12 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
 
         for (const { fileId, batchId } of batches) {
           const movedRows = await moveTemporaryBatchToFailedMeasurements(
-            ConnectionManager.getInstance(),
+            connectionManager,
             schema,
             fileId,
             batchId,
-            'Upload session cleaned up after abandonment'
+            'Upload session cleaned up after abandonment',
+            transactionID ?? undefined
           );
           temporaryDeleted += movedRows;
           failedDeleted += movedRows;
@@ -725,16 +726,18 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
       SET state = 'cleaned_up', error_message = CONCAT(COALESCE(error_message, ''), ' | ', ?)
       WHERE session_id = ?
     `;
-    await runQuery(conn, updateSQL, [cleanupNote, session.sessionId]);
+    await connectionManager.executeQuery(updateSQL, [cleanupNote, session.sessionId], transactionID ?? undefined);
+    await connectionManager.commitTransaction(transactionID!);
 
     ailogger.info(`[UploadSessionTracker] Cleaned up session ${session.sessionId}: ${temporaryDeleted} temporary rows deleted`);
 
     return { temporaryDeleted, failedDeleted };
   } catch (error: unknown) {
+    if (transactionID) {
+      await connectionManager.rollbackTransaction(transactionID);
+    }
     ailogger.error(`[UploadSessionTracker] Failed to cleanup session ${session.sessionId}:`, error instanceof Error ? error : new Error(String(error)));
     throw error;
-  } finally {
-    if (conn) conn.release();
   }
 }
 
