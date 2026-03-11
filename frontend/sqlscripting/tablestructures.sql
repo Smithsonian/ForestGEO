@@ -328,6 +328,9 @@ create index idx_quadratname
 create index idx_quadrats_name_active
     on quadrats (QuadratName, IsActive);
 
+create index idx_quadrats_plot_name_active
+    on quadrats (PlotID, QuadratName, IsActive);
+
 create index idx_quadratshape
     on quadrats (QuadratShape);
 
@@ -799,6 +802,34 @@ create table if not exists measurement_errors
         unique (ErrorSource, ErrorCode)
 );
 
+insert ignore into measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
+values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag'),
+       ('ingestion', 'MISSING_FIELD_STEMTAG', 'Missing required field: StemTag'),
+       ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
+       ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
+       ('ingestion', 'MISSING_FIELD_DATE', 'Missing required field: MeasurementDate'),
+       ('ingestion', 'INVALID_QUADRAT', 'Invalid quadrat reference'),
+       ('ingestion', 'INVALID_SPECIES', 'Invalid species reference'),
+       ('ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch across censuses'),
+       ('ingestion', 'COORDINATE_DRIFT', 'Coordinate drift exceeds allowed threshold'),
+       ('ingestion', 'DUPLICATE_ENTRY', 'Duplicate measurement row detected'),
+       ('ingestion', 'NEGATIVE_DBH', 'DBH must be non-negative'),
+       ('ingestion', 'NEGATIVE_HOM', 'HOM must be non-negative'),
+       ('ingestion', 'INVALID_COORDINATE', 'Coordinate value is negative'),
+       ('ingestion', 'FIELD_TOO_LONG', 'One or more fields exceed column length limits'),
+       ('ingestion', 'MISSING_MEASUREMENT_DATA', 'Missing measurement data'),
+       ('ingestion', 'AMBIGUOUS_PREVIOUS_MATCH', 'Ambiguous previous census match'),
+       ('ingestion', 'MISSING_CENSUS_FOR_TREE', 'Tree insert blocked by missing census'),
+       ('ingestion', 'MISSING_SPECIES_FOR_TREE', 'Tree insert blocked by missing species'),
+       ('ingestion', 'TREE_RESOLUTION_FAILED', 'Tree resolution failed after tree materialization'),
+       ('ingestion', 'STEM_TREE_RESOLUTION_FAILED', 'Stem resolution failed because no active tree matched'),
+       ('ingestion', 'STEM_RESOLUTION_FAILED', 'Stem resolution failed after stem materialization'),
+       ('ingestion', 'MEASUREMENT_INSERT_SKIPPED', 'Measurement insert skipped during core materialization'),
+       ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
+       ('validation', '14', 'Invalid attribute code'),
+       ('validation', '20', 'Species mismatch from previous census'),
+       ('validation', '21', 'Same-batch species conflict');
+
 create table if not exists measurement_error_log
 (
     MeasurementID int                               not null,
@@ -1031,7 +1062,11 @@ create table if not exists upload_sessions
     created_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null,
     updated_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP,
     error_message     text                                                                                                                                       null,
-    idempotency_key   varchar(255)                                                                                                                               null
+    idempotency_key   varchar(255)                                                                                                                               null,
+    active_scope_key  varchar(255) as (case
+                                           when (`state` in ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing'))
+                                               then concat_ws('#', `schema_name`, `plot_id`, `census_id`)
+                                           else null end) stored
 );
 
 create index idx_state
@@ -1045,6 +1080,9 @@ create index idx_plot_census
 
 create index idx_idempotency
     on upload_sessions (idempotency_key);
+
+create unique index uq_upload_sessions_active_scope
+    on upload_sessions (active_scope_key);
 
 create table if not exists uploadintegrityalerts
 (

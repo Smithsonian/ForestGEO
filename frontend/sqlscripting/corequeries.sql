@@ -2,82 +2,15 @@ set foreign_key_checks = 0;
 
 truncate sitespecificvalidations;
 
+-- ValidationIDs 1 and 2 intentionally delegate to RunSharedDBHChangeValidations().
+-- Keep the shared candidate SQL in that helper only; do not duplicate it here.
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
-VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', '
-insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
-from coremeasurements cm_present
-         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
-         join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
-         join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join census c_past on c_past.PlotID = c_present.PlotID
-              and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-              and c_past.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID = c_past.CensusID and cm_past.IsActive = 1
-         join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
-         join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
-         join plots p ON c_present.PlotID = p.PlotID
-         join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_past on a_past.Code = cma_past.Code
-         left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID and
-                                  e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
-where c_past.PlotCensusNumber >= 1
-  and t_past.TreeTag = t_present.TreeTag
-  and s_past.StemTag = s_present.StemTag
-  and cm_present.IsActive = 1
-  and a_present.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and a_past.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and cm_present.IsValidated is null and cm_past.IsValidated = 1
-  and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
-  and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
-  and e.MeasurementID is null
-  and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (case p.DefaultDBHUnits
-                                                            when \'km\' THEN 1000000
-                                                            when \'hm\' THEN 100000
-                                                            when \'dam\' THEN 10000
-                                                            when \'m\' THEN 1000
-                                                            when \'dm\' THEN 100
-                                                            when \'cm\' THEN 10
-                                                            when \'mm\' THEN 1
-                                                            else 1 end) > 65
-on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
+VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH',
+        'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
-VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', '
-insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
-from coremeasurements cm_present
-         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
-         join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
-         join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join census c_past on c_past.PlotID = c_present.PlotID
-              and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-              and c_past.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID = c_past.CensusID and cm_past.IsActive = 1
-         join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
-         join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
-         join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_past on a_past.Code = cma_past.Code
-         left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID
-              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
-where c_past.PlotCensusNumber >= 1
-  and t_past.TreeTag = t_present.TreeTag
-  and s_past.StemTag = s_present.StemTag
-  and cm_present.IsActive = 1
-  and a_present.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and a_past.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and cm_present.IsValidated is null and cm_past.IsValidated = 1
-  and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
-  and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
-  and e.MeasurementID is null
-  and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95))
-on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
+VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH',
+        'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)',
@@ -398,6 +331,31 @@ where cm.IsValidated is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
 on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;',
+        '', true)
+ON DUPLICATE KEY UPDATE
+    Description = VALUES(Description),
+    Criteria = VALUES(Criteria),
+    Definition = VALUES(Definition),
+    IsEnabled = VALUES(IsEnabled);
+
+-- ValidationIDs 17 and 18 intentionally delegate to RunSharedCrossCensusLocationValidations().
+-- Keep the shared candidate SQL in that helper only; do not duplicate it here.
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+VALUES (17, 'ValidateQuadratMismatchAcrossCensuses',
+        'Quadrat mismatch with previous census for same TreeTag/StemTag',
+        'quadratName;treeTag;stemTag',
+        'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0);',
+        '', true)
+ON DUPLICATE KEY UPDATE
+    Description = VALUES(Description),
+    Criteria = VALUES(Criteria),
+    Definition = VALUES(Definition),
+    IsEnabled = VALUES(IsEnabled);
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled)
+VALUES (18, 'ValidateCoordinateDriftAcrossCensuses',
+        'Coordinate drift exceeds 10m versus previous census for same TreeTag/StemTag',
+        'stemLocalX;stemLocalY;treeTag;stemTag',
+        'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 0, 1);',
         '', true)
 ON DUPLICATE KEY UPDATE
     Description = VALUES(Description),

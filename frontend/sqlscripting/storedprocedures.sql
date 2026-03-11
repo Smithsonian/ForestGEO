@@ -246,6 +246,9 @@ begin
     DECLARE vPlotID INT DEFAULT 0;
     DECLARE vStemDateDupCount INT DEFAULT 0;
     DECLARE vTreeStemTagDupCount INT DEFAULT 0;
+    DECLARE vUploadId VARCHAR(50);
+    DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';
+    DECLARE vAlertBatchID VARCHAR(50);
 
     -- Error handler with proper rollback for transaction atomicity
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -268,6 +271,10 @@ begin
 
     -- Get PlotID for alert logging
     SELECT PlotID INTO vPlotID FROM census WHERE CensusID = vCensusID LIMIT 1;
+    SET vAlertBatchID = CONCAT('census-', vCensusID);
+    -- Collapser alerts are census-scoped, so use a fixed-width synthetic upload id
+    -- instead of relying on file/batch names from the ingest path.
+    SET vUploadId = LEFT(SHA2(CONCAT_WS('#', DATABASE(), 'collapser', COALESCE(vPlotID, 0), vCensusID), 256), 40);
 
     -- Start atomic transaction - all changes succeed or all fail together
     START TRANSACTION;
@@ -312,11 +319,15 @@ begin
     -- Log StemGUID+Date deduplication if any rows were removed
     IF vStemDateDupCount > 0 THEN
         INSERT INTO uploadintegrityalerts
-            (plotID, censusID, type, message, severity, failedRecords)
+            (uploadId, fileID, batchID, plotID, censusID,
+             type, message, severity,
+             sourceRecords, processedRecords, failedRecords, missingRecords)
         VALUES
-            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+             'COLLAPSER_DEDUPLICATION',
              CONCAT('Removed ', vStemDateDupCount, ' duplicate rows (same StemGUID+MeasurementDate)'),
-             'info', vStemDateDupCount);
+             'info',
+             0, 0, vStemDateDupCount, 0);
     END IF;
 
     DROP TEMPORARY TABLE IF EXISTS tree_stem_tag_duplicate_ids;
@@ -349,11 +360,15 @@ begin
     -- Log TreeTag+StemTag deduplication if any rows were removed
     IF vTreeStemTagDupCount > 0 THEN
         INSERT INTO uploadintegrityalerts
-            (plotID, censusID, type, message, severity, failedRecords)
+            (uploadId, fileID, batchID, plotID, censusID,
+             type, message, severity,
+             sourceRecords, processedRecords, failedRecords, missingRecords)
         VALUES
-            (vPlotID, vCensusID, 'COLLAPSER_DEDUPLICATION',
+            (vUploadId, vAlertFileID, vAlertBatchID, vPlotID, vCensusID,
+             'COLLAPSER_DEDUPLICATION',
              CONCAT('Removed ', vTreeStemTagDupCount, ' duplicate rows (same TreeTag+StemTag in census)'),
-             'info', vTreeStemTagDupCount);
+             'info',
+             0, 0, vTreeStemTagDupCount, 0);
     END IF;
 
     -- Commit all changes atomically
@@ -1379,6 +1394,8 @@ BEGIN
     DECLARE vBatchScopeGroups INT DEFAULT 0;
     DECLARE vDataLossCount INT DEFAULT 0;
     DECLARE vProcessedCount INT DEFAULT 0;
+    -- Fixed-width opaque id avoids overflow when long file names are combined
+    -- with generated sub-batch ids.
     DECLARE vUploadId VARCHAR(50);
     DECLARE vProcStart DATETIME(6) DEFAULT NOW(6);
     DECLARE vStageStart DATETIME(6);
@@ -1401,7 +1418,20 @@ BEGIN
                 vErrorCode = MYSQL_ERRNO;
 
             SET vBatchFailed = TRUE;
-            SET vUploadId = CONCAT(vFileID, '-', vBatchID);
+            SET vUploadId = LEFT(
+                SHA2(
+                    CONCAT_WS(
+                        '#',
+                        DATABASE(),
+                        COALESCE(vCurrentPlotID, 0),
+                        COALESCE(vCurrentCensusID, 0),
+                        COALESCE(vFileID, ''),
+                        COALESCE(vBatchID, '')
+                    ),
+                    256
+                ),
+                40
+            );
             ROLLBACK;
 
             -- Log to uploadmetrics
@@ -1483,8 +1513,6 @@ BEGIN
     -- FIX: Set connection collation to match database to prevent collation errors in JSON_TABLE
     SET collation_connection = 'utf8mb4_0900_ai_ci';
 
-    SET vUploadId = CONCAT(vFileID, '-', vBatchID);
-
     -- Get batch scope
     SELECT CensusID, PlotID
     INTO vCurrentCensusID, vCurrentPlotID
@@ -1503,6 +1531,21 @@ BEGIN
         SELECT 'No data found' as message, FALSE as batch_failed;
         LEAVE main_proc;
     END IF;
+
+    SET vUploadId = LEFT(
+        SHA2(
+            CONCAT_WS(
+                '#',
+                DATABASE(),
+                COALESCE(vCurrentPlotID, 0),
+                COALESCE(vCurrentCensusID, 0),
+                COALESCE(vFileID, ''),
+                COALESCE(vBatchID, '')
+            ),
+            256
+        ),
+        40
+    );
 
     SELECT COUNT(*)
     INTO vBatchScopeGroups
