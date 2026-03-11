@@ -25,7 +25,7 @@ import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
@@ -144,12 +144,39 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
       const censusList = await createAndUpdateCensusList(censusArray);
       if (censusListDispatch) censusListDispatch({ censusList });
+
+      if (censusDispatch && currentCensus) {
+        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, censusList);
+        const persistedCensusID = currentCensus.dateRanges?.[0]?.censusID;
+        const reconciledCensusID = reconciledCensus?.dateRanges?.[0]?.censusID;
+
+        if (!reconciledCensus) {
+          ailogger.warn(
+            `Clearing stale census selection for schema ${currentSite.schemaName}, plot ${currentPlot.plotID}: persisted census ${persistedCensusID ?? 'unknown'} no longer exists`
+          );
+          await censusDispatch({ census: undefined });
+        } else if (persistedCensusID !== reconciledCensusID) {
+          ailogger.info(
+            `Reconciled stale census selection for schema ${currentSite.schemaName}, plot ${currentPlot.plotID}: ${persistedCensusID} -> ${reconciledCensusID}`
+          );
+          await censusDispatch({ census: reconciledCensus });
+        }
+      }
+
       censusListLoad.setLoaded();
     } catch (error) {
       ailogger.error('Failed to fetch census data:', error instanceof Error ? error : undefined);
       censusListLoad.setError();
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, censusListDispatch, censusListLoad]);
+  }, [
+    currentSite?.schemaName,
+    currentPlot?.plotID,
+    currentCensus?.dateRanges?.[0]?.censusID,
+    currentCensus?.plotCensusNumber,
+    censusDispatch,
+    censusListDispatch,
+    censusListLoad
+  ]);
 
   const fetchQuadratDataFn = useCallback(async () => {
     // Note: plotCensusNumber can be 0, so use nullish check instead of falsy check

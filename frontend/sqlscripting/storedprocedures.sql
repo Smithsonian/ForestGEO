@@ -9,6 +9,8 @@ drop procedure if exists refresh_failedmeasurements_current;
 -- NOTE: reingestfailedrows, reviewfailed, refresh_failedmeasurements_current are legacy
 -- procedures that operated on the now-removed failedmeasurements table.
 -- They are dropped above but NOT recreated below.
+drop procedure if exists RunSharedDBHChangeValidations;
+drop procedure if exists RunSharedCrossCensusLocationValidations;
 drop procedure if exists reinsertdefaultvalidations;
 drop procedure if exists reinsertdefaultpostvalidations;
 
@@ -62,30 +64,38 @@ BEGIN
            cm.MeasuredHOM                                       AS MeasuredHOM,
            cm.IsValidated                                       AS IsValidated,
            cm.Description                                       AS Description,
-           (SELECT GROUP_CONCAT(DISTINCT a.Code SEPARATOR '; ')
-            FROM cmattributes ca
-                     left join attributes a on a.Code = ca.Code
-            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID)  AS Attributes,
+           attr_summary.Attributes                              AS Attributes,
            cm.UserDefinedFields                                 AS UserDefinedFields,
-           (SELECT GROUP_CONCAT(
-                           COALESCE(
-                                   NULLIF(CONCAT_WS(' -> ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
-                                   me.ErrorMessage
-                           )
-                           ORDER BY me.ErrorCode SEPARATOR ';'
-                   )
-            FROM measurement_error_log mel
-                     JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
-                     LEFT JOIN sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
-            WHERE mel.MeasurementID = cm.CoreMeasurementID
-              AND mel.IsResolved = FALSE
-              AND me.ErrorSource = 'validation') AS Errors
+           validation_errors.Errors                             AS Errors
     FROM coremeasurements cm
              join census c ON cm.CensusID = c.CensusID
              join stems st ON cm.StemGUID = st.StemGUID and st.CensusID = c.CensusID
              join trees t on t.CensusID = c.CensusID and t.TreeID = st.TreeID
              join species sp on t.SpeciesID = sp.SpeciesID
-             join quadrats q on q.QuadratID = st.QuadratID;
+             join quadrats q on q.QuadratID = st.QuadratID
+             LEFT JOIN (
+                 SELECT ca.CoreMeasurementID,
+                        GROUP_CONCAT(DISTINCT a.Code SEPARATOR '; ') AS Attributes
+                 FROM cmattributes ca
+                          LEFT JOIN attributes a ON a.Code = ca.Code
+                 GROUP BY ca.CoreMeasurementID
+             ) attr_summary ON attr_summary.CoreMeasurementID = cm.CoreMeasurementID
+             LEFT JOIN (
+                 SELECT mel.MeasurementID,
+                        GROUP_CONCAT(
+                                COALESCE(
+                                        NULLIF(CONCAT_WS(' -> ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
+                                        me.ErrorMessage
+                                )
+                                ORDER BY me.ErrorCode SEPARATOR ';'
+                        ) AS Errors
+                 FROM measurement_error_log mel
+                          JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+                          LEFT JOIN sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                 WHERE mel.IsResolved = FALSE
+                   AND me.ErrorSource = 'validation'
+                 GROUP BY mel.MeasurementID
+             ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID;
 
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
@@ -206,9 +216,7 @@ BEGIN
            g.GenusAuthority                                    AS GenusAuthority,
            f.FamilyID                                          AS FamilyID,
            f.Family                                            AS Family,
-           (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
-            FROM cmattributes ca
-            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
+           view_attrs.Attributes                               AS Attributes,
            cm.UserDefinedFields                                AS UserDefinedFields
     FROM coremeasurements cm
              JOIN census c ON cm.CensusID = c.CensusID
@@ -219,8 +227,12 @@ BEGIN
              LEFT JOIN family f ON g.FamilyID = f.FamilyID
              LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
              LEFT JOIN plots p ON q.PlotID = p.PlotID
-             LEFT JOIN cmattributes ca ON ca.CoreMeasurementID = cm.CoreMeasurementID
-             LEFT JOIN attributes a ON a.Code = ca.Code
+             LEFT JOIN (
+                 SELECT ca.CoreMeasurementID,
+                        GROUP_CONCAT(ca.Code SEPARATOR '; ') AS Attributes
+                 FROM cmattributes ca
+                 GROUP BY ca.CoreMeasurementID
+             ) view_attrs ON view_attrs.CoreMeasurementID = cm.CoreMeasurementID
     WHERE cm.StemGUID IS NOT NULL;
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
@@ -718,6 +730,351 @@ begin
             'dead stems by species, organized to determine which species (if any) are struggling', true);
 end $$
 
+-- Single source of truth for the shared DBH change candidate logic used by ValidationIDs 1 and 2.
+-- Keep both validation definitions as CALLs to this helper. Do not duplicate or inline this SQL
+-- in future enhancements, or the growth/shrinkage semantics and dead-status handling will drift.
+create
+    definer = azureroot@`%` procedure RunSharedDBHChangeValidations(
+    IN p_CensusID int,
+    IN p_PlotID int,
+    IN p_RunGrowth tinyint,
+    IN p_RunShrinkage tinyint
+)
+shared_dbh:
+BEGIN
+    DECLARE vRunGrowth tinyint DEFAULT 0;
+    DECLARE vRunShrinkage tinyint DEFAULT 0;
+    DECLARE vGrowthErrorID int DEFAULT NULL;
+    DECLARE vShrinkageErrorID int DEFAULT NULL;
+
+    SELECT CASE
+               WHEN p_RunGrowth = 1
+                   AND EXISTS (SELECT 1 FROM sitespecificvalidations WHERE ValidationID = 1 AND IsEnabled = TRUE)
+                   THEN 1
+               ELSE 0
+               END,
+           CASE
+               WHEN p_RunShrinkage = 1
+                   AND EXISTS (SELECT 1 FROM sitespecificvalidations WHERE ValidationID = 2 AND IsEnabled = TRUE)
+                   THEN 1
+               ELSE 0
+               END
+    INTO vRunGrowth, vRunShrinkage;
+
+    IF vRunGrowth = 0 AND vRunShrinkage = 0 THEN
+        LEAVE shared_dbh;
+    END IF;
+
+    IF vRunGrowth = 1 THEN
+        SELECT me.ErrorID
+        INTO vGrowthErrorID
+        FROM measurement_errors me
+        WHERE me.ErrorSource = 'validation'
+          AND me.ErrorCode = '1'
+        LIMIT 1;
+
+        IF vGrowthErrorID IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Missing measurement_errors row for ValidationID 1';
+        END IF;
+    END IF;
+
+    IF vRunShrinkage = 1 THEN
+        SELECT me.ErrorID
+        INTO vShrinkageErrorID
+        FROM measurement_errors me
+        WHERE me.ErrorSource = 'validation'
+          AND me.ErrorCode = '2'
+        LIMIT 1;
+
+        IF vShrinkageErrorID IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Missing measurement_errors row for ValidationID 2';
+        END IF;
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
+    CREATE TEMPORARY TABLE dbh_change_candidates
+    (
+        CoreMeasurementID    int        NOT NULL PRIMARY KEY,
+        HasGrowthViolation   tinyint(1) NOT NULL,
+        HasShrinkageViolation tinyint(1) NOT NULL,
+        KEY idx_growth_violation (HasGrowthViolation, CoreMeasurementID),
+        KEY idx_shrink_violation (HasShrinkageViolation, CoreMeasurementID)
+    );
+
+    INSERT INTO dbh_change_candidates (CoreMeasurementID, HasGrowthViolation, HasShrinkageViolation)
+    SELECT cm_present.CoreMeasurementID,
+           MAX(CASE
+                   WHEN (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (CASE p.DefaultDBHUnits
+                                                                              WHEN 'km' THEN 1000000
+                                                                              WHEN 'hm' THEN 100000
+                                                                              WHEN 'dam' THEN 10000
+                                                                              WHEN 'm' THEN 1000
+                                                                              WHEN 'dm' THEN 100
+                                                                              WHEN 'cm' THEN 10
+                                                                              WHEN 'mm' THEN 1
+                                                                              ELSE 1 END) > 65 THEN 1
+                   ELSE 0
+               END) AS HasGrowthViolation,
+           MAX(CASE
+                   WHEN cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95) THEN 1
+                   ELSE 0
+               END) AS HasShrinkageViolation
+    FROM coremeasurements cm_present
+             JOIN census c_present
+                  ON cm_present.CensusID = c_present.CensusID
+                      AND c_present.IsActive = 1
+             JOIN stems s_present
+                  ON s_present.StemGUID = cm_present.StemGUID
+                      AND s_present.CensusID = cm_present.CensusID
+                      AND s_present.IsActive = 1
+             JOIN trees t_present
+                  ON t_present.TreeID = s_present.TreeID
+                      AND t_present.CensusID = s_present.CensusID
+                      AND t_present.IsActive = 1
+             JOIN plots p
+                  ON c_present.PlotID = p.PlotID
+             JOIN census c_past
+                  ON c_past.PlotID = c_present.PlotID
+                      AND c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+                      AND c_past.IsActive = 1
+             JOIN trees t_past
+                  ON t_past.CensusID = c_past.CensusID
+                      AND t_past.TreeTag = t_present.TreeTag
+                      AND t_past.IsActive = 1
+             JOIN stems s_past
+                  ON s_past.TreeID = t_past.TreeID
+                      AND s_past.CensusID = c_past.CensusID
+                      AND s_past.StemTag = s_present.StemTag
+                      AND s_past.IsActive = 1
+             JOIN coremeasurements cm_past
+                  ON cm_past.StemGUID = s_past.StemGUID
+                      AND cm_past.CensusID = c_past.CensusID
+                      AND cm_past.IsActive = 1
+                      AND cm_past.IsValidated = 1
+    WHERE cm_present.IsActive = 1
+      AND cm_present.IsValidated IS NULL
+      AND (p_CensusID IS NULL OR cm_present.CensusID = p_CensusID)
+      AND (p_PlotID IS NULL OR c_present.PlotID = p_PlotID)
+      AND cm_past.MeasuredDBH > 0
+      AND NOT EXISTS (
+        SELECT 1
+        FROM cmattributes cma_present
+                 JOIN attributes a_present
+                      ON a_present.Code = cma_present.Code
+                          AND a_present.IsActive = 1
+        WHERE cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
+          AND a_present.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+    )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM cmattributes cma_past
+                 JOIN attributes a_past
+                      ON a_past.Code = cma_past.Code
+                          AND a_past.IsActive = 1
+        WHERE cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
+          AND a_past.Status IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted')
+    )
+    GROUP BY cm_present.CoreMeasurementID;
+
+    IF vRunGrowth = 1 THEN
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+        SELECT candidate.CoreMeasurementID, vGrowthErrorID
+        FROM dbh_change_candidates candidate
+                 LEFT JOIN measurement_error_log e
+                           ON e.MeasurementID = candidate.CoreMeasurementID
+                               AND e.ErrorID = vGrowthErrorID
+        WHERE candidate.HasGrowthViolation = 1
+          AND e.MeasurementID IS NULL
+        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+    END IF;
+
+    IF vRunShrinkage = 1 THEN
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+        SELECT candidate.CoreMeasurementID, vShrinkageErrorID
+        FROM dbh_change_candidates candidate
+                 LEFT JOIN measurement_error_log e
+                           ON e.MeasurementID = candidate.CoreMeasurementID
+                               AND e.ErrorID = vShrinkageErrorID
+        WHERE candidate.HasShrinkageViolation = 1
+          AND e.MeasurementID IS NULL
+        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS dbh_change_candidates;
+END $$
+
+-- Single source of truth for the shared cross-census location candidate logic used by ValidationIDs 17 and 18.
+-- Keep both validation definitions as CALLs to this helper. Do not duplicate or inline this SQL
+-- in future enhancements, or quadrat-mismatch / coordinate-drift semantics can drift between paths.
+create
+    definer = azureroot@`%` procedure RunSharedCrossCensusLocationValidations(
+    IN p_CensusID int,
+    IN p_PlotID int,
+    IN p_RunQuadratMismatch tinyint,
+    IN p_RunCoordinateDrift tinyint
+)
+shared_cross_census_location:
+BEGIN
+    DECLARE vRunQuadratMismatch tinyint DEFAULT 0;
+    DECLARE vRunCoordinateDrift tinyint DEFAULT 0;
+    DECLARE vQuadratMismatchErrorID int DEFAULT NULL;
+    DECLARE vCoordinateDriftErrorID int DEFAULT NULL;
+
+    SELECT CASE
+               WHEN p_RunQuadratMismatch = 1
+                   AND EXISTS (SELECT 1 FROM sitespecificvalidations WHERE ValidationID = 17 AND IsEnabled = TRUE)
+                   THEN 1
+               ELSE 0
+               END,
+           CASE
+               WHEN p_RunCoordinateDrift = 1
+                   AND EXISTS (SELECT 1 FROM sitespecificvalidations WHERE ValidationID = 18 AND IsEnabled = TRUE)
+                   THEN 1
+               ELSE 0
+               END
+    INTO vRunQuadratMismatch, vRunCoordinateDrift;
+
+    IF vRunQuadratMismatch = 0 AND vRunCoordinateDrift = 0 THEN
+        LEAVE shared_cross_census_location;
+    END IF;
+
+    IF vRunQuadratMismatch = 1 THEN
+        SELECT me.ErrorID
+        INTO vQuadratMismatchErrorID
+        FROM measurement_errors me
+        WHERE me.ErrorSource = 'validation'
+          AND me.ErrorCode = '17'
+        LIMIT 1;
+
+        IF vQuadratMismatchErrorID IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Missing measurement_errors row for ValidationID 17';
+        END IF;
+    END IF;
+
+    IF vRunCoordinateDrift = 1 THEN
+        SELECT me.ErrorID
+        INTO vCoordinateDriftErrorID
+        FROM measurement_errors me
+        WHERE me.ErrorSource = 'validation'
+          AND me.ErrorCode = '18'
+        LIMIT 1;
+
+        IF vCoordinateDriftErrorID IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Missing measurement_errors row for ValidationID 18';
+        END IF;
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_scope;
+    CREATE TEMPORARY TABLE current_cross_census_scope
+    (
+        CoreMeasurementID  int            NOT NULL PRIMARY KEY,
+        PreviousCensusID   int            NOT NULL,
+        TreeTag            varchar(20)    NOT NULL,
+        StemTag            varchar(10)    NOT NULL,
+        CurrentQuadratName varchar(255)   NULL,
+        CurrentLocalX      decimal(12, 6) NULL,
+        CurrentLocalY      decimal(12, 6) NULL,
+        KEY idx_scope_prev_tags (PreviousCensusID, TreeTag, StemTag)
+    );
+
+    INSERT INTO current_cross_census_scope (CoreMeasurementID, PreviousCensusID, TreeTag, StemTag, CurrentQuadratName, CurrentLocalX, CurrentLocalY)
+    SELECT cm.CoreMeasurementID,
+           c_prev.CensusID,
+           t.TreeTag,
+           s.StemTag,
+           q_cur.QuadratName,
+           s.LocalX,
+           s.LocalY
+    FROM coremeasurements cm
+             JOIN census c
+                  ON c.CensusID = cm.CensusID
+                      AND c.IsActive = 1
+             JOIN census c_prev
+                  ON c_prev.PlotID = c.PlotID
+                      AND c_prev.PlotCensusNumber = c.PlotCensusNumber - 1
+                      AND c_prev.IsActive = 1
+             JOIN stems s
+                  ON s.StemGUID = cm.StemGUID
+                      AND s.CensusID = cm.CensusID
+                      AND s.IsActive = 1
+             JOIN trees t
+                  ON t.TreeID = s.TreeID
+                      AND t.CensusID = s.CensusID
+                      AND t.IsActive = 1
+             JOIN quadrats q_cur
+                  ON q_cur.QuadratID = s.QuadratID
+                      AND q_cur.IsActive = 1
+    WHERE cm.IsActive = 1
+      AND cm.IsValidated IS NULL
+      AND cm.StemGUID IS NOT NULL
+      AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
+      AND (p_PlotID IS NULL OR c.PlotID = p_PlotID);
+
+    DROP TEMPORARY TABLE IF EXISTS cross_census_location_candidates;
+    CREATE TEMPORARY TABLE cross_census_location_candidates
+    (
+        CoreMeasurementID  int        NOT NULL PRIMARY KEY,
+        HasQuadratMismatch tinyint(1) NOT NULL,
+        HasCoordinateDrift tinyint(1) NOT NULL,
+        KEY idx_quadrat_mismatch (HasQuadratMismatch, CoreMeasurementID),
+        KEY idx_coordinate_drift (HasCoordinateDrift, CoreMeasurementID)
+    );
+
+    INSERT INTO cross_census_location_candidates (CoreMeasurementID, HasQuadratMismatch, HasCoordinateDrift)
+    SELECT scope.CoreMeasurementID,
+           MAX(CASE
+                   WHEN q_prev.QuadratName <> scope.CurrentQuadratName THEN 1
+                   ELSE 0
+               END) AS HasQuadratMismatch,
+           MAX(CASE
+                   WHEN scope.CurrentLocalX IS NOT NULL
+                       AND scope.CurrentLocalY IS NOT NULL
+                       AND s_prev.LocalX IS NOT NULL
+                       AND s_prev.LocalY IS NOT NULL
+                       AND ((scope.CurrentLocalX - s_prev.LocalX) * (scope.CurrentLocalX - s_prev.LocalX)) +
+                           ((scope.CurrentLocalY - s_prev.LocalY) * (scope.CurrentLocalY - s_prev.LocalY)) > 100
+                       THEN 1
+                   ELSE 0
+               END) AS HasCoordinateDrift
+    FROM current_cross_census_scope scope
+             JOIN trees t_prev
+                  ON t_prev.CensusID = scope.PreviousCensusID
+                      AND t_prev.TreeTag = scope.TreeTag
+                      AND t_prev.IsActive = 1
+             JOIN stems s_prev
+                  ON s_prev.TreeID = t_prev.TreeID
+                      AND s_prev.CensusID = scope.PreviousCensusID
+                      AND s_prev.StemTag = scope.StemTag
+                      AND s_prev.IsActive = 1
+             JOIN quadrats q_prev
+                  ON q_prev.QuadratID = s_prev.QuadratID
+                      AND q_prev.IsActive = 1
+    GROUP BY scope.CoreMeasurementID;
+
+    IF vRunQuadratMismatch = 1 THEN
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+        SELECT candidate.CoreMeasurementID, vQuadratMismatchErrorID
+        FROM cross_census_location_candidates candidate
+        WHERE candidate.HasQuadratMismatch = 1
+        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+    END IF;
+
+    IF vRunCoordinateDrift = 1 THEN
+        INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+        SELECT candidate.CoreMeasurementID, vCoordinateDriftErrorID
+        FROM cross_census_location_candidates candidate
+        WHERE candidate.HasCoordinateDrift = 1
+        ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
+    END IF;
+
+    DROP TEMPORARY TABLE IF EXISTS cross_census_location_candidates;
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_scope;
+END $$
+
 create
     definer = azureroot@`%` procedure reinsertdefaultvalidations()
 begin
@@ -725,81 +1082,16 @@ begin
 
     truncate sitespecificvalidations;
 
+    -- ValidationIDs 1 and 2 intentionally delegate to RunSharedDBHChangeValidations().
+    -- Keep the shared candidate SQL in that helper only; do not duplicate it here.
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', '
-insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
-from coremeasurements cm_present
-         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
-         join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
-         join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID <> cm_present.CensusID and cm_past.IsActive = 1
-         join census c_past on c_past.CensusID = cm_past.CensusID and c_past.IsActive = 1
-         join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
-         join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
-         join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
-         join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_past on a_past.Code = cma_past.Code
-         left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID and
-                                  e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
-where c_past.PlotCensusNumber >= 1
-  and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-  and t_past.TreeTag = t_present.TreeTag
-  and s_past.StemTag = s_present.StemTag
-  and cm_present.IsActive = 1
-  and a_present.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and a_past.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and cm_present.IsValidated is null and cm_past.IsValidated = 1
-  and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
-  and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
-  and e.MeasurementID is null
-  and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (case p.DefaultDBHUnits
-                                                            when \'km\' THEN 1000000
-                                                            when \'hm\' THEN 100000
-                                                            when \'dam\' THEN 10000
-                                                            when \'m\' THEN 1000
-                                                            when \'dm\' THEN 100
-                                                            when \'cm\' THEN 10
-                                                            when \'mm\' THEN 1
-                                                            else 1 end) > 65
-on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
+    VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH',
+            'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
-    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', '
-insert into measurement_error_log (MeasurementID, ErrorID)
-select distinct cm_present.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
-from coremeasurements cm_present
-         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive = 1
-         join stems s_present on s_present.StemGUID = cm_present.StemGUID and s_present.CensusID = cm_present.CensusID and s_present.IsActive = 1
-         join trees t_present on t_present.TreeID = s_present.TreeID and t_present.CensusID = s_present.CensusID and t_present.IsActive = 1
-         join coremeasurements cm_past on cm_past.CensusID <> cm_present.CensusID and cm_past.IsActive = 1
-         join census c_past on c_past.CensusID = cm_past.CensusID and c_past.IsActive = 1
-         join stems s_past on s_past.StemGUID = cm_past.StemGUID and s_past.CensusID = cm_past.CensusID and s_past.IsActive = 1
-         join trees t_past on t_past.TreeID = s_past.TreeID and t_past.CensusID = s_past.CensusID and t_past.IsActive = 1
-         join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_past on a_past.Code = cma_past.Code
-         left join measurement_error_log e on e.MeasurementID = cm_present.CoreMeasurementID
-              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
-where c_past.PlotCensusNumber >= 1
-  and c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
-  and t_past.TreeTag = t_present.TreeTag
-  and s_past.StemTag = s_present.StemTag
-  and cm_present.IsActive = 1
-  and a_present.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and a_past.Status not in (''dead'', ''stem dead'', ''broken below'', ''missing'', ''omitted'')
-  and cm_present.IsValidated is null and cm_past.IsValidated = 1
-  and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
-  and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
-  and e.MeasurementID is null
-  and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95))
-on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
+    VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH',
+            'CALL RunSharedDBHChangeValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
     VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)',
@@ -1013,6 +1305,18 @@ and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
     INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                          ChangelogDefinition, IsEnabled)
+    VALUES (17, 'ValidateQuadratMismatchAcrossCensuses',
+            'Quadrat mismatch with previous census for same TreeTag/StemTag',
+            'quadratName;treeTag;stemTag',
+            'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0);', '', true);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
+    VALUES (18, 'ValidateCoordinateDriftAcrossCensuses',
+            'Coordinate drift exceeds 10m versus previous census for same TreeTag/StemTag',
+            'stemLocalX;stemLocalY;treeTag;stemTag',
+            'CALL RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 0, 1);', '', true);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
     VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes',
             'Invalid DBH;Invalid HOM;DEAD-state attribute(s)',
             'measuredDBH;measuredHOM;attributes', 'insert into measurement_error_log (MeasurementID, ErrorID)
@@ -1072,9 +1376,22 @@ BEGIN
     DECLARE vErrorMessage TEXT DEFAULT '';
     DECLARE vErrorCode VARCHAR(10) DEFAULT '';
     DECLARE vBatchRowCount INT DEFAULT 0;
+    DECLARE vBatchScopeGroups INT DEFAULT 0;
     DECLARE vDataLossCount INT DEFAULT 0;
     DECLARE vProcessedCount INT DEFAULT 0;
     DECLARE vUploadId VARCHAR(50);
+    DECLARE vProcStart DATETIME(6) DEFAULT NOW(6);
+    DECLARE vStageStart DATETIME(6);
+    DECLARE vValidationMs INT DEFAULT 0;
+    DECLARE vDedupeMs INT DEFAULT 0;
+    DECLARE vReferenceMs INT DEFAULT 0;
+    DECLARE vPrevLookupMs INT DEFAULT 0;
+    DECLARE vCrossCensusMs INT DEFAULT 0;
+    DECLARE vTreeStemInsertMs INT DEFAULT 0;
+    DECLARE vStemCrossIdMs INT DEFAULT 0;
+    DECLARE vCoreInsertMs INT DEFAULT 0;
+    DECLARE vAttributesMs INT DEFAULT 0;
+    DECLARE vSoftValidationMs INT DEFAULT 0;
 
     -- Error handler with proper logging
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -1138,24 +1455,24 @@ BEGIN
             WHERE FileID = vFileID AND BatchID = vBatchID
             ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
 
-            -- Seed error definitions (idempotent)
-            INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
-            VALUES ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception');
-
             -- Link to error log
             INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-            SELECT cm.CoreMeasurementID,
-                (SELECT me.ErrorID FROM measurement_errors me
-                 WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'SQL_EXCEPTION' LIMIT 1),
-                FALSE
+            SELECT cm.CoreMeasurementID, me.ErrorID, FALSE
             FROM coremeasurements cm
+            JOIN measurement_errors me
+                ON me.ErrorSource = 'ingestion' AND me.ErrorCode = 'SQL_EXCEPTION'
             WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
 
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
-            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-                old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-                stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+                classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
+                requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
+                prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
+                current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+                unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+                core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+                orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
                 species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
             SELECT CONCAT('Batch ', vBatchID, ' failed: ', vErrorCode) as message, TRUE as batch_failed;
@@ -1166,46 +1483,133 @@ BEGIN
     -- FIX: Set connection collation to match database to prevent collation errors in JSON_TABLE
     SET collation_connection = 'utf8mb4_0900_ai_ci';
 
-    -- Seed all ingestion error codes (idempotent)
-    INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
-        ('ingestion', 'MISSING_FIELD_TREETAG',      'Missing required field: TreeTag'),
-        ('ingestion', 'MISSING_FIELD_STEMTAG',       'Missing required field: StemTag'),
-        ('ingestion', 'MISSING_FIELD_SPECIESCODE',   'Missing required field: SpeciesCode'),
-        ('ingestion', 'MISSING_FIELD_QUADRATNAME',   'Missing required field: QuadratName'),
-        ('ingestion', 'MISSING_FIELD_DATE',          'Missing required field: MeasurementDate'),
-        ('ingestion', 'INVALID_QUADRAT',             'Invalid quadrat reference'),
-        ('ingestion', 'INVALID_SPECIES',             'Invalid species reference'),
-        ('ingestion', 'QUADRAT_MISMATCH',            'Quadrat mismatch across censuses'),
-        ('ingestion', 'COORDINATE_DRIFT',            'Coordinate drift exceeds allowed threshold'),
-        ('ingestion', 'DUPLICATE_ENTRY',             'Duplicate measurement row detected'),
-        ('ingestion', 'NEGATIVE_DBH',                'DBH must be non-negative'),
-        ('ingestion', 'NEGATIVE_HOM',                'HOM must be non-negative'),
-        ('ingestion', 'INVALID_COORDINATE',          'Coordinate value is negative'),
-        ('ingestion', 'FIELD_TOO_LONG',              'One or more fields exceed column length limits'),
-        ('ingestion', 'MISSING_MEASUREMENT_DATA',    'Missing measurement data'),
-        ('ingestion', 'SQL_EXCEPTION',               'Ingestion SQL exception');
-
-    -- Seed validation error codes used by soft validations and attribute checks.
-    -- These are normally created by the validation procedures, but must exist
-    -- before the first upload so soft validation INSERTs don't silently fail.
-    INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage) VALUES
-        ('validation', '14', 'Invalid attribute code'),
-        ('validation', '20', 'Species mismatch from previous census'),
-        ('validation', '21', 'Same-batch species conflict');
-
     SET vUploadId = CONCAT(vFileID, '-', vBatchID);
 
-    -- Get census info
-    SELECT CensusID, PlotID, COUNT(*)
-    INTO vCurrentCensusID, vCurrentPlotID, vBatchRowCount
+    -- Get batch scope
+    SELECT CensusID, PlotID
+    INTO vCurrentCensusID, vCurrentPlotID
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID
     GROUP BY CensusID, PlotID
     LIMIT 1;
 
+    SELECT COUNT(*)
+    INTO vBatchRowCount
+    FROM temporarymeasurements
+    WHERE FileID = vFileID AND BatchID = vBatchID;
+
     IF vBatchRowCount = 0 THEN
         SET @disable_triggers = 0;
         SELECT 'No data found' as message, FALSE as batch_failed;
+        LEAVE main_proc;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO vBatchScopeGroups
+    FROM (
+        SELECT 1
+        FROM temporarymeasurements
+        WHERE FileID = vFileID AND BatchID = vBatchID
+        GROUP BY CensusID, PlotID
+    ) batch_scopes;
+
+    IF vBatchScopeGroups != 1 THEN
+        SET vErrorMessage = CONCAT('Batch ', vBatchID, ' contains mixed plot/census scope and cannot be processed safely');
+
+        INSERT INTO uploadmetrics (
+            uploadId, fileID, batchID, schema_name, plotID, censusID,
+            sourceRecords, processedRecords, failedRecords, missingRecords,
+            dataLossDetected, status, errorMessage, startTime, endTime
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, DATABASE(),
+            COALESCE(vCurrentPlotID, 0), COALESCE(vCurrentCensusID, 0),
+            vBatchRowCount, 0, vBatchRowCount, 0,
+            1, 'failed', LEFT(vErrorMessage, 255), NOW(6), NOW(6)
+        )
+        ON DUPLICATE KEY UPDATE
+            status = 'failed',
+            sourceRecords = vBatchRowCount,
+            failedRecords = vBatchRowCount,
+            missingRecords = 0,
+            dataLossDetected = 1,
+            errorMessage = LEFT(vErrorMessage, 255),
+            endTime = NOW(6);
+
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, COALESCE(vCurrentPlotID, 0), COALESCE(vCurrentCensusID, 0),
+            'MIXED_BATCH_SCOPE',
+            LEFT(vErrorMessage, 255),
+            'critical',
+            vBatchRowCount, 0, vBatchRowCount, 0
+        );
+
+        SET @disable_triggers = 0;
+        SELECT vErrorMessage AS message,
+               TRUE AS batch_failed,
+               vBatchRowCount AS records_failed,
+               0 AS validation_ms, 0 AS dedupe_ms, 0 AS reference_ms,
+               0 AS prev_lookup_ms, 0 AS cross_census_ms,
+               0 AS tree_stem_insert_ms, 0 AS stem_crossid_ms,
+               0 AS core_insert_ms, 0 AS attributes_ms,
+               0 AS soft_validation_ms,
+               0 AS total_duration_ms;
+        LEAVE main_proc;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM census c
+        WHERE c.CensusID = vCurrentCensusID
+          AND c.PlotID = vCurrentPlotID
+        LIMIT 1
+    ) THEN
+        SET vErrorMessage = CONCAT('Batch ', vBatchID, ' references missing census ', vCurrentCensusID, ' for plot ', vCurrentPlotID);
+
+        INSERT INTO uploadmetrics (
+            uploadId, fileID, batchID, schema_name, plotID, censusID,
+            sourceRecords, processedRecords, failedRecords, missingRecords,
+            dataLossDetected, status, errorMessage, startTime, endTime
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, DATABASE(),
+            COALESCE(vCurrentPlotID, 0), COALESCE(vCurrentCensusID, 0),
+            vBatchRowCount, 0, vBatchRowCount, 0,
+            1, 'failed', LEFT(vErrorMessage, 255), NOW(6), NOW(6)
+        )
+        ON DUPLICATE KEY UPDATE
+            status = 'failed',
+            sourceRecords = vBatchRowCount,
+            failedRecords = vBatchRowCount,
+            missingRecords = 0,
+            dataLossDetected = 1,
+            errorMessage = LEFT(vErrorMessage, 255),
+            endTime = NOW(6);
+
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, COALESCE(vCurrentPlotID, 0), COALESCE(vCurrentCensusID, 0),
+            'MISSING_CENSUS_SCOPE',
+            LEFT(vErrorMessage, 255),
+            'critical',
+            vBatchRowCount, 0, vBatchRowCount, 0
+        );
+
+        SET @disable_triggers = 0;
+        SELECT vErrorMessage AS message,
+               TRUE AS batch_failed,
+               vBatchRowCount AS records_failed,
+               0 AS validation_ms, 0 AS dedupe_ms, 0 AS reference_ms,
+               0 AS prev_lookup_ms, 0 AS cross_census_ms,
+               0 AS tree_stem_insert_ms, 0 AS stem_crossid_ms,
+               0 AS core_insert_ms, 0 AS attributes_ms,
+               0 AS soft_validation_ms,
+               0 AS total_duration_ms;
         LEAVE main_proc;
     END IF;
 
@@ -1268,98 +1672,88 @@ BEGIN
         'processing', NOW()
     );
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-        old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-        stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+        classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
+        requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
+        prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+        core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+        orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
     START TRANSACTION;
 
+    CREATE TEMPORARY TABLE hard_failure_rows
+    (
+        SourceRowIndex BIGINT UNSIGNED NOT NULL,
+        ErrorCode      VARCHAR(50)     NOT NULL,
+        FailureReason  VARCHAR(255)    NOT NULL,
+        PRIMARY KEY (SourceRowIndex, ErrorCode),
+        KEY idx_hard_failure_errorcode (ErrorCode)
+    );
+
     -- ============================================================
-    -- FIX 1: EARLY VALIDATION - REPORTS ALL ERRORS PER ROW
-    -- Uses CONCAT_WS with IF() instead of CASE so every failing
-    -- check is captured, not just the first one.
+    -- STAGE 1: EARLY VALIDATION
     -- ============================================================
+    SET vStageStart = NOW(6);
+
     CREATE TEMPORARY TABLE validation_failures AS
-    SELECT tm.*,
-        CONCAT_WS('; ',
-            IF(tm.TreeTag IS NULL OR TRIM(tm.TreeTag) = '',
-                'Missing required field: TreeTag', NULL),
-            IF(tm.StemTag IS NULL OR TRIM(tm.StemTag) = '',
-                'Missing required field: StemTag', NULL),
-            IF(tm.SpeciesCode IS NULL OR TRIM(tm.SpeciesCode) = '',
-                'Missing required field: SpeciesCode', NULL),
-            IF(tm.QuadratName IS NULL OR TRIM(tm.QuadratName) = '',
-                'Missing required field: QuadratName', NULL),
-            IF(tm.MeasurementDate IS NULL,
-                'Missing required field: MeasurementDate', NULL),
-            -- String length validations (CRITICAL - prevent SQL errors)
-            IF(LENGTH(tm.TreeTag) > 20,
-                CONCAT('TreeTag exceeds maximum length of 20 characters: "', LEFT(tm.TreeTag, 25), '..." (', LENGTH(tm.TreeTag), ' chars)'), NULL),
-            IF(LENGTH(tm.StemTag) > 10,
-                CONCAT('StemTag exceeds maximum length of 10 characters: "', tm.StemTag, '" (', LENGTH(tm.StemTag), ' chars)'), NULL),
-            IF(LENGTH(tm.SpeciesCode) > 25,
-                CONCAT('SpeciesCode exceeds maximum length of 25 characters: "', tm.SpeciesCode, '" (', LENGTH(tm.SpeciesCode), ' chars)'), NULL),
-            IF(tm.Comments IS NOT NULL AND LENGTH(tm.Comments) > 255,
-                CONCAT('Comments exceed maximum length of 255 characters (', LENGTH(tm.Comments), ' chars, truncated)'), NULL),
-            IF(tm.Codes IS NOT NULL AND LENGTH(tm.Codes) > 255,
-                CONCAT('Codes exceed maximum length of 255 characters (', LENGTH(tm.Codes), ' chars, truncated)'), NULL),
-            -- Numeric validations
-            IF(tm.DBH < 0,
-                CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)'), NULL),
-            IF(tm.HOM < 0,
-                CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)'), NULL),
-            -- NULL coordinates are allowed (tag-only censuses don't collect XY).
-            -- Negative coordinates are always invalid.
-            IF(tm.LocalX < 0, CONCAT('Invalid LocalX: ', tm.LocalX), NULL),
-            IF(tm.LocalY < 0, CONCAT('Invalid LocalY: ', tm.LocalY), NULL),
-            IF(tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = ''),
-                'Missing measurement data: DBH and HOM both 0 with no codes', NULL)
-        ) as FailureReason
+    SELECT tm.id,
+           LEFT(CONCAT_WS('; ',
+               IF(tm.TreeTag IS NULL OR TRIM(tm.TreeTag) = '',
+                   'Missing required field: TreeTag', NULL),
+               IF(tm.StemTag IS NULL OR TRIM(tm.StemTag) = '',
+                   'Missing required field: StemTag', NULL),
+               IF(tm.SpeciesCode IS NULL OR TRIM(tm.SpeciesCode) = '',
+                   'Missing required field: SpeciesCode', NULL),
+               IF(tm.QuadratName IS NULL OR TRIM(tm.QuadratName) = '',
+                   'Missing required field: QuadratName', NULL),
+               IF(tm.MeasurementDate IS NULL,
+                   'Missing required field: MeasurementDate', NULL),
+               IF(LENGTH(tm.TreeTag) > 20,
+                   CONCAT('TreeTag exceeds maximum length of 20 characters: "', LEFT(tm.TreeTag, 25), '..." (', LENGTH(tm.TreeTag), ' chars)'), NULL),
+               IF(LENGTH(tm.StemTag) > 10,
+                   CONCAT('StemTag exceeds maximum length of 10 characters: "', tm.StemTag, '" (', LENGTH(tm.StemTag), ' chars)'), NULL),
+               IF(LENGTH(tm.SpeciesCode) > 25,
+                   CONCAT('SpeciesCode exceeds maximum length of 25 characters: "', tm.SpeciesCode, '" (', LENGTH(tm.SpeciesCode), ' chars)'), NULL),
+               IF(tm.Comments IS NOT NULL AND LENGTH(tm.Comments) > 255,
+                   CONCAT('Comments exceed maximum length of 255 characters (', LENGTH(tm.Comments), ' chars, truncated)'), NULL),
+               IF(tm.Codes IS NOT NULL AND LENGTH(tm.Codes) > 255,
+                   CONCAT('Codes exceed maximum length of 255 characters (', LENGTH(tm.Codes), ' chars, truncated)'), NULL),
+               IF(tm.DBH < 0,
+                   CONCAT('Invalid DBH: ', tm.DBH, ' (must be >= 0 or NULL)'), NULL),
+               IF(tm.HOM < 0,
+                   CONCAT('Invalid HOM: ', tm.HOM, ' (must be >= 0 or NULL)'), NULL),
+               IF(tm.LocalX < 0, CONCAT('Invalid LocalX: ', tm.LocalX), NULL),
+               IF(tm.LocalY < 0, CONCAT('Invalid LocalY: ', tm.LocalY), NULL),
+               IF(tm.DBH = 0 AND tm.HOM = 0 AND (tm.Codes IS NULL OR TRIM(tm.Codes) = ''),
+                   'Missing measurement data: DBH and HOM both 0 with no codes', NULL)
+           ), 255) AS FailureReason
     FROM temporarymeasurements tm
     WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID AND tm.CensusID = vCurrentCensusID
     HAVING FailureReason IS NOT NULL AND FailureReason != '';
 
+    CREATE INDEX idx_validation_failures_id ON validation_failures (id);
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT vf.id, err.ErrorCode, vf.FailureReason
+    FROM validation_failures vf
+    JOIN (
+        SELECT 'Missing required field: TreeTag' AS pattern, 'MISSING_FIELD_TREETAG' AS ErrorCode
+        UNION ALL SELECT 'Missing required field: StemTag', 'MISSING_FIELD_STEMTAG'
+        UNION ALL SELECT 'Missing required field: SpeciesCode', 'MISSING_FIELD_SPECIESCODE'
+        UNION ALL SELECT 'Missing required field: QuadratName', 'MISSING_FIELD_QUADRATNAME'
+        UNION ALL SELECT 'Missing required field: MeasurementDate', 'MISSING_FIELD_DATE'
+        UNION ALL SELECT 'Missing measurement data', 'MISSING_MEASUREMENT_DATA'
+        UNION ALL SELECT 'Invalid Local', 'INVALID_COORDINATE'
+        UNION ALL SELECT 'exceeds maximum length', 'FIELD_TOO_LONG'
+        UNION ALL SELECT 'Invalid DBH', 'NEGATIVE_DBH'
+        UNION ALL SELECT 'Invalid HOM', 'NEGATIVE_HOM'
+    ) err ON vf.FailureReason LIKE CONCAT('%', err.pattern, '%');
+
     IF EXISTS(SELECT 1 FROM validation_failures) THEN
-        SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
-
-        -- Insert unresolved rows into coremeasurements (StemGUID=NULL)
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(MeasurementDate, '1900-01-01'), NULLIF(DBH, 0), NULLIF(HOM, 0),
-            LEFT(FailureReason, 255), vFileID, vBatchID,
-            NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-            LocalX, LocalY, NULLIF(Codes, ''), NULLIF(Comments, ''),
-            id, 1
-        FROM validation_failures
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
-
-        -- Link ALL matching error codes per row (not just the first).
-        -- Cross-joins each failed row with all ingestion error codes, then
-        -- filters to only (row, code) pairs where the FailureReason contains
-        -- text matching that code. One row with 3 errors gets 3 log entries.
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID, me.ErrorID, FALSE
-        FROM coremeasurements cm
-        JOIN validation_failures vf ON vf.id = cm.SourceRowIndex
-        JOIN measurement_errors me ON me.ErrorSource = 'ingestion'
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL
-          AND (
-            (me.ErrorCode = 'MISSING_FIELD_TREETAG'      AND vf.FailureReason LIKE '%Missing required field: TreeTag%')
-            OR (me.ErrorCode = 'MISSING_FIELD_STEMTAG'    AND vf.FailureReason LIKE '%Missing required field: StemTag%')
-            OR (me.ErrorCode = 'MISSING_FIELD_SPECIESCODE' AND vf.FailureReason LIKE '%Missing required field: SpeciesCode%')
-            OR (me.ErrorCode = 'MISSING_FIELD_QUADRATNAME' AND vf.FailureReason LIKE '%Missing required field: QuadratName%')
-            OR (me.ErrorCode = 'MISSING_FIELD_DATE'       AND vf.FailureReason LIKE '%Missing required field: MeasurementDate%')
-            OR (me.ErrorCode = 'MISSING_MEASUREMENT_DATA' AND vf.FailureReason LIKE '%Missing measurement data%')
-            OR (me.ErrorCode = 'INVALID_COORDINATE'       AND vf.FailureReason LIKE '%Invalid Local%')
-            OR (me.ErrorCode = 'FIELD_TOO_LONG'           AND vf.FailureReason LIKE '%exceeds maximum length%')
-            OR (me.ErrorCode = 'NEGATIVE_DBH'             AND vf.FailureReason LIKE '%Invalid DBH%')
-            OR (me.ErrorCode = 'NEGATIVE_HOM'             AND vf.FailureReason LIKE '%Invalid HOM%')
-          );
+        SET @validation_fail_count = (SELECT COUNT(*) FROM validation_failures);
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -1368,78 +1762,61 @@ BEGIN
         ) VALUES (
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'VALIDATION_FAILURE',
-            CONCAT(vDataLossCount, ' records failed validation (NULL required fields or invalid values)'),
+            CONCAT(@validation_fail_count, ' records failed validation (NULL required fields or invalid values)'),
             'warning',
-            vBatchRowCount, 0, vDataLossCount, 0
+            vBatchRowCount, 0, @validation_fail_count, 0
         );
     END IF;
 
+    SET vValidationMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
+
     -- ============================================================
-    -- FIX 2: DUPLICATE DETECTION WITH EXPLICIT LOGGING
+    -- STAGE 2: DEDUPLICATION
     -- ============================================================
+    SET vStageStart = NOW(6);
+
     CREATE TEMPORARY TABLE initial_dup_filter AS
-    SELECT min(id) as id,
-           COUNT(*) as duplicate_count,
+    SELECT MIN(id) AS id,
+           COUNT(*) AS duplicate_count,
            FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
            QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Codes IS NOT NULL AND TRIM(Codes) != '' THEN TRIM(Codes) END
-                   ORDER BY Codes SEPARATOR ';'), '') as Codes,
+                   ORDER BY Codes SEPARATOR ';'), '') AS Codes,
            NULLIF(GROUP_CONCAT(DISTINCT CASE WHEN Comments IS NOT NULL AND TRIM(Comments) != '' THEN TRIM(Comments) END
-                   ORDER BY Comments SEPARATOR ' | '), '') as Comments
+                   ORDER BY Comments SEPARATOR ' | '), '') AS Comments
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
       AND id NOT IN (SELECT id FROM validation_failures)
     GROUP BY FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
              QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
 
-    IF EXISTS(SELECT 1 FROM initial_dup_filter WHERE duplicate_count > 1) THEN
-        SET @dup_count = (SELECT SUM(duplicate_count - 1) FROM initial_dup_filter WHERE duplicate_count > 1);
+    CREATE INDEX idx_dup_filter_id ON initial_dup_filter (id);
+    CREATE INDEX idx_dup_tree_species ON initial_dup_filter (TreeTag, SpeciesCode);
+    CREATE INDEX idx_dup_quadrat ON initial_dup_filter (QuadratName);
 
-        -- Insert duplicate rows into coremeasurements as unresolved failures (StemGUID=NULL)
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
-            LEFT(CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id), 255),
-            vFileID, vBatchID,
-            NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
-            tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
-            tm.id, 1
-        FROM temporarymeasurements tm
-        INNER JOIN initial_dup_filter idf
-            ON tm.FileID = idf.FileID AND tm.BatchID = idf.BatchID
-            AND tm.TreeTag = idf.TreeTag AND tm.StemTag = idf.StemTag
-            AND tm.SpeciesCode = idf.SpeciesCode AND tm.QuadratName = idf.QuadratName
-            AND tm.LocalX <=> idf.LocalX
-            AND tm.LocalY <=> idf.LocalY
-            AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
-            AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
-            AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
-        WHERE tm.id != idf.id AND idf.duplicate_count > 1
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+    CREATE TEMPORARY TABLE duplicate_failures AS
+    SELECT tm.id,
+           LEFT(CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id), 255) AS FailureReason
+    FROM temporarymeasurements tm
+    INNER JOIN initial_dup_filter idf
+        ON tm.FileID = idf.FileID AND tm.BatchID = idf.BatchID
+        AND tm.TreeTag = idf.TreeTag AND tm.StemTag = idf.StemTag
+        AND tm.SpeciesCode = idf.SpeciesCode AND tm.QuadratName = idf.QuadratName
+        AND tm.LocalX <=> idf.LocalX
+        AND tm.LocalY <=> idf.LocalY
+        AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
+        AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
+        AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
+    WHERE tm.id != idf.id AND idf.duplicate_count > 1;
 
-        -- Link duplicates to error log
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID,
-            (SELECT me.ErrorID FROM measurement_errors me
-             WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'DUPLICATE_ENTRY' LIMIT 1),
-            FALSE
-        FROM coremeasurements cm
-        JOIN temporarymeasurements tm ON tm.id = cm.SourceRowIndex
-        INNER JOIN initial_dup_filter idf
-            ON tm.FileID = idf.FileID AND tm.BatchID = idf.BatchID
-            AND tm.TreeTag = idf.TreeTag AND tm.StemTag = idf.StemTag
-            AND tm.SpeciesCode = idf.SpeciesCode AND tm.QuadratName = idf.QuadratName
-            AND tm.LocalX <=> idf.LocalX
-            AND tm.LocalY <=> idf.LocalY
-            AND COALESCE(tm.DBH, 0) = COALESCE(idf.DBH, 0)
-            AND COALESCE(tm.HOM, 0) = COALESCE(idf.HOM, 0)
-            AND COALESCE(tm.MeasurementDate, '1900-01-01') = COALESCE(idf.MeasurementDate, '1900-01-01')
-        WHERE tm.id != idf.id AND idf.duplicate_count > 1
-          AND cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
+    CREATE INDEX idx_duplicate_failures_id ON duplicate_failures (id);
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT id, 'DUPLICATE_ENTRY', FailureReason
+    FROM duplicate_failures;
+
+    IF EXISTS(SELECT 1 FROM duplicate_failures) THEN
+        SET @dup_count = (SELECT COUNT(*) FROM duplicate_failures);
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -1453,81 +1830,65 @@ BEGIN
             vBatchRowCount, 0, @dup_count, 0
         );
 
-        SET vDataLossCount = vDataLossCount + @dup_count;
-
         UPDATE uploadmetrics
         SET duplicatesDetected = 1
         WHERE uploadId = vUploadId;
     END IF;
 
-    CREATE INDEX idx_dup_tree_species ON initial_dup_filter (TreeTag, SpeciesCode);
-    CREATE INDEX idx_dup_quadrat ON initial_dup_filter (QuadratName);
+    SET vDedupeMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
-    -- Continue with rest of original procedure...
+    -- ============================================================
+    -- STAGE 3: REFERENCE LOOKUPS
+    -- ============================================================
+    SET vStageStart = NOW(6);
+
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
-           IFNULL(i.StemTag, '') as StemTag, i.SpeciesCode, i.QuadratName,
+           IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
            i.LocalX, i.LocalY,
-           IFNULL(i.DBH, 0) as DBH, IFNULL(i.HOM, 0) as HOM,
+           IFNULL(i.DBH, 0) AS DBH, IFNULL(i.HOM, 0) AS HOM,
            i.MeasurementDate, i.Codes, i.Comments,
            CASE
                WHEN tq.QuadratID IS NULL THEN CONCAT('Invalid quadrat name: "', i.QuadratName, '" not found in database')
                WHEN ts.SpeciesID IS NULL THEN CONCAT('Invalid species code: "', i.SpeciesCode, '" not found in database')
                ELSE NULL
-           END as FailureReason,
-           CASE WHEN tq.QuadratID IS NULL OR ts.SpeciesID IS NULL THEN false ELSE true END as Valid,
+           END AS FailureReason,
+           CASE WHEN tq.QuadratID IS NULL OR ts.SpeciesID IS NULL THEN FALSE ELSE TRUE END AS Valid,
            tq.QuadratID, ts.SpeciesID
     FROM initial_dup_filter i
-    LEFT JOIN quadrats tq ON tq.QuadratName = i.QuadratName AND tq.PlotID = i.PlotID AND tq.IsActive = 1
-    LEFT JOIN species ts ON ts.SpeciesCode = i.SpeciesCode AND ts.IsActive = 1;
+    LEFT JOIN quadrats tq
+        ON tq.PlotID = i.PlotID AND tq.QuadratName = i.QuadratName AND tq.IsActive = 1
+    LEFT JOIN species ts
+        ON ts.SpeciesCode = i.SpeciesCode AND ts.IsActive = 1;
 
     CREATE INDEX idx_validity_valid ON filter_validity (Valid);
     CREATE INDEX idx_validity_tree ON filter_validity (TreeTag, SpeciesID, CensusID);
 
-    CREATE TEMPORARY TABLE filtered AS SELECT * FROM filter_validity WHERE Valid = true;
+    CREATE TEMPORARY TABLE filtered AS
+    SELECT *
+    FROM filter_validity
+    WHERE Valid = TRUE;
 
     CREATE INDEX idx_filtered_id ON filtered (id);
     CREATE INDEX idx_filtered_tree_census ON filtered (TreeTag, CensusID);
     CREATE INDEX idx_filtered_stem_tree ON filtered (StemTag, TreeTag);
     CREATE INDEX idx_filtered_species ON filtered (SpeciesID);
 
-    IF EXISTS(SELECT 1 FROM filter_validity WHERE Valid = false) THEN
-        SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = false);
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT fv.id,
+           CASE
+               WHEN fv.FailureReason LIKE '%invalid quadrat%' OR fv.FailureReason LIKE '%quadrat name%'
+                   THEN 'INVALID_QUADRAT'
+               WHEN fv.FailureReason LIKE '%invalid species%' OR fv.FailureReason LIKE '%species code%'
+                   THEN 'INVALID_SPECIES'
+               ELSE 'SQL_EXCEPTION'
+           END,
+           LEFT(fv.FailureReason, 255)
+    FROM filter_validity fv
+    WHERE fv.Valid = FALSE;
 
-        -- Insert invalid-reference rows into coremeasurements as unresolved failures (StemGUID=NULL)
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(MeasurementDate, '1900-01-01'), NULLIF(DBH, 0), NULLIF(HOM, 0),
-            LEFT(FailureReason, 255), vFileID, vBatchID,
-            NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
-            LocalX, LocalY, NULLIF(Codes, ''), NULLIF(Comments, ''),
-            id, 1
-        FROM filter_validity WHERE Valid = false
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
-
-        -- Link to error log with variable error codes.
-        -- At this stage, only invalid references reach here (missing fields
-        -- were already caught by early validation), so only match against
-        -- actual invalid quadrat/species messages from filter_validity.
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID, me.ErrorID, FALSE
-        FROM coremeasurements cm
-        JOIN (
-            SELECT id, CASE
-                WHEN FailureReason LIKE '%invalid quadrat%' OR FailureReason LIKE '%quadrat name%'
-                    THEN 'INVALID_QUADRAT'
-                WHEN FailureReason LIKE '%invalid species%' OR FailureReason LIKE '%species code%'
-                    THEN 'INVALID_SPECIES'
-                ELSE 'SQL_EXCEPTION'
-            END AS ErrorCode
-            FROM filter_validity WHERE Valid = false
-        ) src ON src.id = cm.SourceRowIndex
-        JOIN measurement_errors me ON me.ErrorSource = 'ingestion' AND me.ErrorCode = src.ErrorCode
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
+    IF EXISTS(SELECT 1 FROM filter_validity WHERE Valid = FALSE) THEN
+        SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = FALSE);
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -1541,8 +1902,6 @@ BEGIN
             vBatchRowCount, 0, @invalid_count, 0
         );
 
-        SET vDataLossCount = vDataLossCount + @invalid_count;
-
         UPDATE uploadmetrics
         SET referentialIntegrityPassed = 0
         WHERE uploadId = vUploadId;
@@ -1552,138 +1911,207 @@ BEGIN
         WHERE uploadId = vUploadId;
     END IF;
 
-    -- Rest of original procedure (stem categorization, tree/stem insertion, measurements)
-    CREATE TEMPORARY TABLE old_trees AS
-    SELECT DISTINCT f.*
+    SET vReferenceMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
+
+    -- ============================================================
+    -- STAGE 4: PREVIOUS CENSUS LOOKUPS AND AMBIGUITY GUARDS
+    -- ============================================================
+    SET vStageStart = NOW(6);
+
+    IF vPreviousCensusID IS NOT NULL THEN
+        CREATE TEMPORARY TABLE requested_prev_trees AS
+        SELECT DISTINCT TreeTag
+        FROM filtered;
+
+        CREATE INDEX idx_requested_prev_trees_tag ON requested_prev_trees (TreeTag);
+
+        CREATE TEMPORARY TABLE requested_prev_stems AS
+        SELECT DISTINCT TreeTag, StemTag
+        FROM filtered;
+
+        CREATE INDEX idx_requested_prev_stems_tags ON requested_prev_stems (TreeTag, StemTag);
+
+        CREATE TEMPORARY TABLE prev_tree_lookup AS
+        SELECT rpt.TreeTag,
+               COUNT(*) AS MatchCount,
+               MIN(t.SpeciesID) AS PrevSpeciesID
+        FROM requested_prev_trees rpt
+        INNER JOIN trees t ON t.TreeTag = rpt.TreeTag
+        WHERE t.IsActive = 1
+          AND t.CensusID = vPreviousCensusID
+        GROUP BY rpt.TreeTag;
+
+        CREATE INDEX idx_prev_tree_lookup_tag ON prev_tree_lookup (TreeTag);
+
+        CREATE TEMPORARY TABLE prev_stem_lookup AS
+        SELECT rps.TreeTag,
+               rps.StemTag,
+               COUNT(*) AS MatchCount,
+               MIN(s.LocalX) AS PrevX,
+               MIN(s.LocalY) AS PrevY,
+               MIN(q.QuadratName) AS PrevQuadratName,
+               MIN(s.StemCrossID) AS PrevStemCrossID
+        FROM requested_prev_stems rps
+        INNER JOIN trees t
+            ON t.TreeTag = rps.TreeTag
+            AND t.CensusID = vPreviousCensusID
+            AND t.IsActive = 1
+        INNER JOIN stems s
+            ON s.TreeID = t.TreeID
+            AND s.CensusID = t.CensusID
+            AND s.StemTag = rps.StemTag
+            AND s.IsActive = 1
+        INNER JOIN quadrats q
+            ON s.QuadratID = q.QuadratID
+            AND q.IsActive = 1
+        GROUP BY rps.TreeTag, rps.StemTag;
+
+        CREATE INDEX idx_prev_stem_lookup_tags ON prev_stem_lookup (TreeTag, StemTag);
+
+        CREATE TEMPORARY TABLE prev_match_ambiguities AS
+        SELECT f.id,
+               LEFT(CONCAT_WS('; ',
+                   CASE
+                       WHEN COALESCE(ptl.MatchCount, 0) > 1
+                           THEN CONCAT('Ambiguous previous census tree match: TreeTag "', f.TreeTag,
+                                       '" matched ', ptl.MatchCount, ' active trees in census ', vPreviousCensusID)
+                   END,
+                   CASE
+                       WHEN COALESCE(psl.MatchCount, 0) > 1
+                           THEN CONCAT('Ambiguous previous census stem match: TreeTag "', f.TreeTag,
+                                       '" StemTag "', f.StemTag, '" matched ', psl.MatchCount,
+                                       ' active stems in census ', vPreviousCensusID)
+                   END
+               ), 255) AS FailureReason
+        FROM filtered f
+        LEFT JOIN prev_tree_lookup ptl ON ptl.TreeTag = f.TreeTag
+        LEFT JOIN prev_stem_lookup psl ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag
+        WHERE COALESCE(ptl.MatchCount, 0) > 1 OR COALESCE(psl.MatchCount, 0) > 1;
+
+        CREATE INDEX idx_prev_match_ambiguities_id ON prev_match_ambiguities (id);
+    ELSE
+        CREATE TEMPORARY TABLE prev_tree_lookup
+        (
+            TreeTag       VARCHAR(20) NOT NULL,
+            MatchCount    INT         NOT NULL,
+            PrevSpeciesID INT         NULL,
+            PRIMARY KEY (TreeTag)
+        );
+
+        CREATE TEMPORARY TABLE prev_stem_lookup
+        (
+            TreeTag         VARCHAR(20)   NOT NULL,
+            StemTag         VARCHAR(10)   NOT NULL,
+            MatchCount      INT           NOT NULL,
+            PrevX           DECIMAL(12,6) NULL,
+            PrevY           DECIMAL(12,6) NULL,
+            PrevQuadratName VARCHAR(255)  NULL,
+            PrevStemCrossID INT           NULL,
+            PRIMARY KEY (TreeTag, StemTag)
+        );
+
+        CREATE TEMPORARY TABLE prev_match_ambiguities
+        (
+            id            BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            FailureReason VARCHAR(255)    NOT NULL
+        );
+    END IF;
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT pma.id, 'AMBIGUOUS_PREVIOUS_MATCH', pma.FailureReason
+    FROM prev_match_ambiguities pma;
+
+    IF EXISTS(SELECT 1 FROM prev_match_ambiguities) THEN
+        SET @prev_ambiguity_count = (SELECT COUNT(*) FROM prev_match_ambiguities);
+
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'PREV_CENSUS_AMBIGUITY',
+            CONCAT(@prev_ambiguity_count, ' records matched multiple active previous-census identities and were left unresolved'),
+            'warning',
+            vBatchRowCount, 0, @prev_ambiguity_count, 0
+        );
+
+        DELETE f
+        FROM filtered f
+        INNER JOIN prev_match_ambiguities pma ON pma.id = f.id;
+    END IF;
+
+    CREATE TEMPORARY TABLE classified_filtered AS
+    SELECT f.*,
+           CASE
+               WHEN COALESCE(psl.MatchCount, 0) = 1 THEN 'old tree'
+               WHEN COALESCE(ptl.MatchCount, 0) = 1 THEN 'multi stem'
+               ELSE 'new recruit'
+           END AS tree_state
     FROM filtered f
-    WHERE vPreviousCensusID IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM trees t
-        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
-        WHERE t.TreeTag = f.TreeTag
-          AND t.CensusID = vPreviousCensusID
-          AND t.IsActive = 1
-          AND c_prev.PlotID = vCurrentPlotID
-    )
-      AND EXISTS (
-        SELECT 1
-        FROM trees t
-        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
-        JOIN stems s ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
-        WHERE t.TreeTag = f.TreeTag
-          AND s.StemTag = f.StemTag
-          AND t.CensusID = vPreviousCensusID
-          AND t.IsActive = 1
-          AND s.IsActive = 1
-          AND c_prev.PlotID = vCurrentPlotID
-    );
+    LEFT JOIN prev_tree_lookup ptl ON ptl.TreeTag = f.TreeTag
+    LEFT JOIN prev_stem_lookup psl ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag;
 
-    CREATE INDEX idx_old_trees_id ON old_trees (id);
+    CREATE INDEX idx_classified_id ON classified_filtered (id);
+    CREATE INDEX idx_classified_tree_census ON classified_filtered (TreeTag, CensusID);
+    CREATE INDEX idx_classified_stem_tree ON classified_filtered (StemTag, TreeTag);
+    CREATE INDEX idx_classified_species ON classified_filtered (SpeciesID);
+    CREATE INDEX idx_classified_resolution ON classified_filtered (CensusID, TreeTag, SpeciesID, StemTag, QuadratID);
 
-    CREATE TEMPORARY TABLE multi_stems AS
-    SELECT DISTINCT f.* FROM filtered f
-    WHERE vPreviousCensusID IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM trees t
-        INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
-        WHERE t.TreeTag = f.TreeTag
-          AND t.CensusID = vPreviousCensusID
-          AND t.IsActive = 1
-          AND c_prev.PlotID = vCurrentPlotID
-    )
-      AND NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id);
-
-    CREATE INDEX idx_multi_stems_id ON multi_stems (id);
-
-    CREATE TEMPORARY TABLE new_recruits AS
-    SELECT DISTINCT f.* FROM filtered f
-    WHERE NOT EXISTS (SELECT 1 FROM old_trees ot WHERE ot.id = f.id)
-      AND NOT EXISTS (SELECT 1 FROM multi_stems ms WHERE ms.id = f.id);
-
-    ALTER TABLE filtered ADD COLUMN tree_state VARCHAR(15) DEFAULT 'new recruit';
-
-    UPDATE filtered f
-    INNER JOIN old_trees ot ON ot.id = f.id
-    SET f.tree_state = 'old tree';
-
-    UPDATE filtered f
-    INNER JOIN multi_stems ms ON ms.id = f.id
-    SET f.tree_state = 'multi stem';
-
-    CREATE TEMPORARY TABLE prev_census_stems AS
-    SELECT t.TreeTag,
-           s.StemTag,
-           s.LocalX AS PrevX,
-           s.LocalY AS PrevY,
-           q.QuadratName AS PrevQuadratName
-    FROM stems s
-    INNER JOIN trees t ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
-    INNER JOIN census c_prev ON c_prev.CensusID = t.CensusID
-    INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
-    WHERE t.IsActive = 1
-      AND s.IsActive = 1
-      AND c_prev.PlotID = vCurrentPlotID
-      AND t.CensusID = vPreviousCensusID;
-
-    CREATE INDEX idx_prev_census_stems_tags ON prev_census_stems (TreeTag, StemTag);
+    SET vPrevLookupMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- ================================================================
-    -- CRITICAL CROSS-CENSUS VALIDATIONS
-    -- These validations check consistency with previous census data
+    -- STAGE 5: CROSS-CENSUS HARD VALIDATIONS
     -- ================================================================
+    SET vStageStart = NOW(6);
 
-    -- VALIDATION 1: Quadrat Change Detection (HARD FAILURE)
-    -- Trees cannot physically move between quadrats between censuses
-    -- NOTE: QuadratName is unique per PlotID, so we compare QuadratNames within same plot
     CREATE TEMPORARY TABLE quadrat_mismatch_failures AS
-    SELECT DISTINCT f.id, f.QuadratName as CurrentQuadrat,
-           pcs.PrevQuadratName as PrevQuadrat,
-           CONCAT('Quadrat mismatch: Previous census quadrat was "', pcs.PrevQuadratName,
-                  '", current is "', f.QuadratName,
-                  '". Trees cannot change quadrats between censuses. ',
-                  'Please verify TreeTag is correct or contact administrator if tree was genuinely moved.')
-           as FailureReason,
-           f.PlotID, f.CensusID, f.TreeTag as Tag, f.StemTag, f.SpeciesCode as SpCode,
-           f.QuadratName as Quadrat, f.LocalX as X, f.LocalY as Y, f.DBH, f.HOM,
-           f.MeasurementDate as Date, f.Codes, f.Comments
-    FROM old_trees f
-    INNER JOIN prev_census_stems pcs ON pcs.TreeTag = f.TreeTag
-        AND pcs.StemTag = f.StemTag
-    WHERE pcs.PrevQuadratName != f.QuadratName;
+    SELECT DISTINCT f.id,
+           f.QuadratName AS CurrentQuadrat,
+           psl.PrevQuadratName AS PrevQuadrat,
+           LEFT(CONCAT('Quadrat mismatch: Previous census quadrat was "', psl.PrevQuadratName,
+                       '", current is "', f.QuadratName,
+                       '". Trees cannot change quadrats between censuses. ',
+                       'Please verify TreeTag is correct or contact administrator if tree was genuinely moved.'), 255)
+               AS FailureReason
+    FROM classified_filtered f
+    INNER JOIN prev_stem_lookup psl
+        ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag AND psl.MatchCount = 1
+    WHERE f.tree_state = 'old tree'
+      AND psl.PrevQuadratName != f.QuadratName;
+
     CREATE INDEX idx_quadrat_mismatch_failures_id ON quadrat_mismatch_failures (id);
 
-    -- VALIDATION 2: Coordinate Drift Detection (HARD FAILURE)
-    -- Flag coordinates that drift >10m within same quadrat
-    -- NOTE: Compares stems with same QuadratName (quadrat names are unique per plot)
     CREATE TEMPORARY TABLE coordinate_drift_failures AS
     SELECT DISTINCT f.id,
-           pcs.PrevX, pcs.PrevY,
-           f.LocalX as CurrentX, f.LocalY as CurrentY,
-           ROUND(SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)), 2) as DriftDistance,
-           CONCAT('Coordinate drift: ',
-                  ROUND(SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)), 2),
-                  'm from previous census (>10m threshold). ',
-                  'Previous: (', pcs.PrevX, ', ', pcs.PrevY, '), ',
-                  'Current: (', f.LocalX, ', ', f.LocalY, '). ',
-                  'Please verify coordinates or mark as approved if tree genuinely moved.')
-           as FailureReason,
-           f.PlotID, f.CensusID, f.TreeTag as Tag, f.StemTag, f.SpeciesCode as SpCode,
-           f.QuadratName as Quadrat, f.LocalX as X, f.LocalY as Y, f.DBH, f.HOM,
-           f.MeasurementDate as Date, f.Codes, f.Comments
-    FROM old_trees f
-    INNER JOIN prev_census_stems pcs ON pcs.TreeTag = f.TreeTag
-        AND pcs.StemTag = f.StemTag
-        AND pcs.PrevQuadratName = f.QuadratName  -- Same quadrat NAME
-    WHERE f.LocalX IS NOT NULL
+           LEFT(CONCAT('Coordinate drift: ',
+                       ROUND(SQRT(POW(f.LocalX - psl.PrevX, 2) + POW(f.LocalY - psl.PrevY, 2)), 2),
+                       'm from previous census (>10m threshold). ',
+                       'Previous: (', psl.PrevX, ', ', psl.PrevY, '), ',
+                       'Current: (', f.LocalX, ', ', f.LocalY, '). ',
+                       'Please verify coordinates or mark as approved if tree genuinely moved.'), 255)
+               AS FailureReason
+    FROM classified_filtered f
+    INNER JOIN prev_stem_lookup psl
+        ON psl.TreeTag = f.TreeTag AND psl.StemTag = f.StemTag
+        AND psl.MatchCount = 1 AND psl.PrevQuadratName = f.QuadratName
+    WHERE f.tree_state = 'old tree'
+      AND f.LocalX IS NOT NULL
       AND f.LocalY IS NOT NULL
-      AND pcs.PrevX IS NOT NULL
-      AND pcs.PrevY IS NOT NULL
-      AND SQRT(POW(f.LocalX - pcs.PrevX, 2) + POW(f.LocalY - pcs.PrevY, 2)) > 10.0;
+      AND psl.PrevX IS NOT NULL
+      AND psl.PrevY IS NOT NULL
+      AND SQRT(POW(f.LocalX - psl.PrevX, 2) + POW(f.LocalY - psl.PrevY, 2)) > 10.0;
+
     CREATE INDEX idx_coordinate_drift_failures_id ON coordinate_drift_failures (id);
 
-    -- Move hard validation failures to coremeasurements as unresolved (StemGUID=NULL)
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT id, 'QUADRAT_MISMATCH', FailureReason
+    FROM quadrat_mismatch_failures;
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT id, 'COORDINATE_DRIFT', FailureReason
+    FROM coordinate_drift_failures;
+
     IF EXISTS(SELECT 1 FROM quadrat_mismatch_failures) OR EXISTS(SELECT 1 FROM coordinate_drift_failures) THEN
         SET @cross_census_failures = (
             SELECT COUNT(*) FROM (
@@ -1693,57 +2121,6 @@ BEGIN
             ) combined
         );
 
-        -- Insert quadrat mismatch failures into coremeasurements (StemGUID=NULL)
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(Date, '1900-01-01'), NULLIF(DBH, 0), NULLIF(HOM, 0),
-            LEFT(FailureReason, 255), vFileID, vBatchID,
-            NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-            X, Y, NULLIF(Codes, ''), NULLIF(Comments, ''),
-            id, 1
-        FROM quadrat_mismatch_failures
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
-
-        -- Link quadrat mismatch to error log
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID,
-            (SELECT me.ErrorID FROM measurement_errors me
-             WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'QUADRAT_MISMATCH' LIMIT 1),
-            FALSE
-        FROM coremeasurements cm
-        JOIN quadrat_mismatch_failures src ON src.id = cm.SourceRowIndex
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
-
-        -- Insert coordinate drift failures into coremeasurements (StemGUID=NULL)
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(Date, '1900-01-01'), NULLIF(DBH, 0), NULLIF(HOM, 0),
-            LEFT(FailureReason, 255), vFileID, vBatchID,
-            NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
-            X, Y, NULLIF(Codes, ''), NULLIF(Comments, ''),
-            id, 1
-        FROM coordinate_drift_failures
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
-
-        -- Link coordinate drift to error log
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID,
-            (SELECT me.ErrorID FROM measurement_errors me
-             WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'COORDINATE_DRIFT' LIMIT 1),
-            FALSE
-        FROM coremeasurements cm
-        JOIN coordinate_drift_failures src ON src.id = cm.SourceRowIndex
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL;
-
-        -- Alert for cross-census validation failures
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
             type, message, severity,
@@ -1756,106 +2133,367 @@ BEGIN
             vBatchRowCount, 0, @cross_census_failures, 0
         );
 
-        SET vDataLossCount = vDataLossCount + @cross_census_failures;
-
-        -- Remove failed records from filtered table
         DELETE f
-        FROM filtered f
-                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = f.id;
-        DELETE f
-        FROM filtered f
-                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = f.id;
-        DELETE ot
-        FROM old_trees ot
-                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = ot.id;
-        DELETE ot
-        FROM old_trees ot
-                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = ot.id;
-        DELETE ms
-        FROM multi_stems ms
-                 INNER JOIN quadrat_mismatch_failures qmf ON qmf.id = ms.id;
-        DELETE ms
-        FROM multi_stems ms
-                 INNER JOIN coordinate_drift_failures cdf ON cdf.id = ms.id;
+        FROM classified_filtered f
+        INNER JOIN (
+            SELECT id FROM quadrat_mismatch_failures
+            UNION
+            SELECT id FROM coordinate_drift_failures
+        ) failed ON failed.id = f.id;
     END IF;
+
+    SET vCrossCensusMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     DROP TEMPORARY TABLE IF EXISTS quadrat_mismatch_failures, coordinate_drift_failures;
 
     -- =====================================================
-    -- TREE INSERTION
+    -- STAGE 6: TREE/STEM RESOLUTION
     -- =====================================================
-    CREATE TEMPORARY TABLE unique_trees_to_insert AS
-    SELECT DISTINCT TreeTag, SpeciesID, CensusID FROM filtered WHERE CensusID = vCurrentCensusID;
+    SET vStageStart = NOW(6);
 
-    CREATE INDEX idx_trees_insert ON unique_trees_to_insert (TreeTag, SpeciesID, CensusID);
+    CREATE TEMPORARY TABLE tree_insert_candidates AS
+    SELECT DISTINCT cf.TreeTag,
+           cf.SpeciesID,
+           cf.CensusID
+    FROM classified_filtered cf
+    WHERE cf.CensusID = vCurrentCensusID;
 
-    INSERT IGNORE INTO trees (TreeTag, SpeciesID, CensusID)
-    SELECT uti.TreeTag, uti.SpeciesID, uti.CensusID
-    FROM unique_trees_to_insert uti
-    LEFT JOIN trees existing ON existing.TreeTag = uti.TreeTag
-        AND existing.CensusID = uti.CensusID AND existing.SpeciesID = uti.SpeciesID
-    WHERE existing.TreeID IS NULL;
+    CREATE INDEX idx_tree_insert_candidates_key
+        ON tree_insert_candidates (TreeTag, SpeciesID, CensusID);
+
+    CREATE TEMPORARY TABLE tree_insert_failures AS
+    SELECT cf.id AS SourceRowIndex,
+           CASE
+               WHEN c.CensusID IS NULL THEN 'MISSING_CENSUS_FOR_TREE'
+               WHEN s.SpeciesID IS NULL THEN 'MISSING_SPECIES_FOR_TREE'
+               WHEN t_any.TreeID IS NOT NULL AND t_active.TreeID IS NULL THEN 'TREE_RESOLUTION_FAILED'
+           END AS ErrorCode,
+           LEFT(
+               CASE
+                   WHEN c.CensusID IS NULL
+                       THEN CONCAT('Tree insert blocked: census ', cf.CensusID,
+                                   ' no longer exists for TreeTag "', cf.TreeTag, '"')
+                   WHEN s.SpeciesID IS NULL
+                       THEN CONCAT('Tree insert blocked: species ', cf.SpeciesID,
+                                   ' for TreeTag "', cf.TreeTag, '" is missing or inactive')
+                   WHEN t_any.TreeID IS NOT NULL AND t_active.TreeID IS NULL
+                       THEN CONCAT('Tree resolution failed: matching tree exists but is inactive for TreeTag "',
+                                   cf.TreeTag, '" in census ', cf.CensusID)
+               END,
+               255
+           ) AS FailureReason
+    FROM classified_filtered cf
+    LEFT JOIN census c
+        ON c.CensusID = cf.CensusID
+        AND c.PlotID = vCurrentPlotID
+    LEFT JOIN species s
+        ON s.SpeciesID = cf.SpeciesID
+        AND s.IsActive = 1
+    LEFT JOIN trees t_any
+        ON t_any.TreeTag = cf.TreeTag
+        AND t_any.SpeciesID = cf.SpeciesID
+        AND t_any.CensusID = cf.CensusID
+    LEFT JOIN trees t_active
+        ON t_active.TreeTag = cf.TreeTag
+        AND t_active.SpeciesID = cf.SpeciesID
+        AND t_active.CensusID = cf.CensusID
+        AND t_active.IsActive = 1
+    WHERE cf.CensusID = vCurrentCensusID
+      AND (
+          c.CensusID IS NULL
+          OR s.SpeciesID IS NULL
+          OR (t_any.TreeID IS NOT NULL AND t_active.TreeID IS NULL)
+      );
+
+    CREATE INDEX idx_tree_insert_failures_row
+        ON tree_insert_failures (SourceRowIndex);
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT tif.SourceRowIndex, tif.ErrorCode, tif.FailureReason
+    FROM tree_insert_failures tif
+    WHERE tif.ErrorCode IS NOT NULL;
+
+    INSERT INTO trees (TreeTag, SpeciesID, CensusID)
+    SELECT tic.TreeTag, tic.SpeciesID, tic.CensusID
+    FROM tree_insert_candidates tic
+    LEFT JOIN census c
+        ON c.CensusID = tic.CensusID
+        AND c.PlotID = vCurrentPlotID
+    LEFT JOIN species s
+        ON s.SpeciesID = tic.SpeciesID
+        AND s.IsActive = 1
+    LEFT JOIN trees t_any
+        ON t_any.TreeTag = tic.TreeTag
+        AND t_any.SpeciesID = tic.SpeciesID
+        AND t_any.CensusID = tic.CensusID
+    WHERE c.CensusID IS NOT NULL
+      AND s.SpeciesID IS NOT NULL
+      AND t_any.TreeID IS NULL;
+
+    CREATE TEMPORARY TABLE current_tree_lookup AS
+    SELECT DISTINCT t.TreeID,
+           t.TreeTag,
+           t.SpeciesID,
+           t.CensusID
+    FROM trees t
+    INNER JOIN classified_filtered cf
+        ON cf.TreeTag = t.TreeTag
+        AND cf.SpeciesID = t.SpeciesID
+        AND cf.CensusID = t.CensusID
+        AND cf.CensusID = vCurrentCensusID
+    WHERE t.IsActive = 1;
+
+    CREATE INDEX idx_current_tree_lookup_tree ON current_tree_lookup (TreeTag, SpeciesID, CensusID);
+    CREATE INDEX idx_current_tree_lookup_id ON current_tree_lookup (TreeID, CensusID);
+
+    CREATE TEMPORARY TABLE stem_resolution_rows AS
+    SELECT cf.id,
+           cf.CensusID,
+           cf.TreeTag,
+           cf.StemTag,
+           cf.SpeciesCode,
+           cf.QuadratName,
+           cf.LocalX,
+           cf.LocalY,
+           cf.DBH,
+           cf.HOM,
+           cf.MeasurementDate,
+           cf.Codes,
+           cf.Comments,
+           cf.QuadratID,
+           cf.SpeciesID,
+           cf.tree_state,
+           ctl.TreeID,
+           CASE
+               WHEN psl.MatchCount = 1 AND psl.PrevStemCrossID IS NOT NULL THEN psl.PrevStemCrossID
+               ELSE NULL
+           END AS PrevStemCrossID
+    FROM classified_filtered cf
+    INNER JOIN current_tree_lookup ctl
+        ON ctl.TreeTag = cf.TreeTag
+        AND ctl.SpeciesID = cf.SpeciesID
+        AND ctl.CensusID = vCurrentCensusID
+    LEFT JOIN prev_stem_lookup psl
+        ON psl.TreeTag = cf.TreeTag
+        AND psl.StemTag = cf.StemTag
+    WHERE cf.CensusID = vCurrentCensusID;
+
+    CREATE INDEX idx_stem_resolution_rows_id ON stem_resolution_rows (id);
+    CREATE INDEX idx_stem_resolution_rows_tree ON stem_resolution_rows (TreeID, CensusID, StemTag);
+
+    CREATE TEMPORARY TABLE unresolved_stem_rows
+    (
+        SourceRowIndex BIGINT UNSIGNED NOT NULL,
+        ErrorCode      VARCHAR(50)     NOT NULL,
+        FailureReason  VARCHAR(255)    NOT NULL,
+        PRIMARY KEY (SourceRowIndex, ErrorCode),
+        KEY idx_unresolved_stem_error (ErrorCode)
+    );
+
+    INSERT INTO unresolved_stem_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT cf.id,
+           'STEM_TREE_RESOLUTION_FAILED',
+           LEFT(CONCAT('Stem resolution failed: no active tree matched TreeTag "', cf.TreeTag,
+                       '" / SpeciesID ', cf.SpeciesID, ' in census ', cf.CensusID), 255)
+    FROM classified_filtered cf
+    LEFT JOIN current_tree_lookup ctl
+        ON ctl.TreeTag = cf.TreeTag
+        AND ctl.SpeciesID = cf.SpeciesID
+        AND ctl.CensusID = cf.CensusID
+    LEFT JOIN tree_insert_failures tif
+        ON tif.SourceRowIndex = cf.id
+    WHERE cf.CensusID = vCurrentCensusID
+      AND ctl.TreeID IS NULL
+      AND tif.SourceRowIndex IS NULL;
+
+    CREATE TEMPORARY TABLE stem_insert_candidates AS
+    SELECT DISTINCT srr.TreeID,
+           srr.QuadratID,
+           srr.CensusID,
+           srr.PrevStemCrossID AS StemCrossID,
+           CASE
+               WHEN TRIM(COALESCE(srr.StemTag, '')) = '' THEN NULL
+               ELSE TRIM(srr.StemTag)
+           END AS StemTag,
+           srr.LocalX,
+           srr.LocalY
+    FROM stem_resolution_rows srr;
+
+    CREATE INDEX idx_stem_insert_candidates_key
+        ON stem_insert_candidates (TreeID, CensusID, StemTag);
+
+    -- Inline StemCrossID inheritance: set PrevStemCrossID at INSERT time for
+    -- stems that have an unambiguous match in the previous census. Existing
+    -- same-tree/same-stem rows are skipped explicitly and resolved below.
+    INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
+    SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID,
+           sic.StemTag, sic.LocalX, sic.LocalY, 0, NULL, 1
+    FROM stem_insert_candidates sic
+    LEFT JOIN stems s_existing
+        ON s_existing.TreeID = sic.TreeID
+        AND s_existing.CensusID = sic.CensusID
+        AND s_existing.StemTag <=> sic.StemTag
+    WHERE s_existing.StemGUID IS NULL;
+
+    CREATE TEMPORARY TABLE current_stem_lookup AS
+    SELECT DISTINCT srr.id,
+           s.StemGUID
+    FROM stem_resolution_rows srr
+    INNER JOIN stems s
+        ON s.TreeID = srr.TreeID
+        AND s.CensusID = srr.CensusID
+        AND s.StemTag <=> srr.StemTag
+        AND s.QuadratID = srr.QuadratID
+        AND s.IsActive = 1;
+
+    CREATE INDEX idx_current_stem_lookup_id
+        ON current_stem_lookup (id, StemGUID);
+
+    INSERT INTO unresolved_stem_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT srr.id,
+           'STEM_RESOLUTION_FAILED',
+           LEFT(
+               CASE
+                   WHEN s_blocking.StemGUID IS NOT NULL AND s_blocking.IsActive = 0
+                       THEN CONCAT('Stem resolution failed: matching TreeID ', srr.TreeID,
+                                   ' / StemTag "', srr.StemTag, '" exists but is inactive in census ', srr.CensusID)
+                   WHEN s_blocking.StemGUID IS NOT NULL AND s_blocking.IsActive = 1
+                        AND s_blocking.QuadratID <> srr.QuadratID
+                       THEN CONCAT('Stem resolution failed: TreeTag "', srr.TreeTag,
+                                   '" / StemTag "', srr.StemTag,
+                                   '" already exists in a different quadrat for census ', srr.CensusID)
+                   ELSE CONCAT('Stem resolution failed: no active stem matched TreeTag "',
+                               srr.TreeTag, '" / StemTag "', srr.StemTag,
+                               '" after stem materialization')
+               END,
+               255
+           )
+    FROM stem_resolution_rows srr
+    LEFT JOIN current_stem_lookup csl
+        ON csl.id = srr.id
+    LEFT JOIN stems s_blocking
+        ON s_blocking.TreeID = srr.TreeID
+        AND s_blocking.CensusID = srr.CensusID
+        AND s_blocking.StemTag <=> srr.StemTag
+    WHERE csl.StemGUID IS NULL;
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT usr.SourceRowIndex, usr.ErrorCode, usr.FailureReason
+    FROM unresolved_stem_rows usr;
+
+    CREATE TEMPORARY TABLE resolved_batch_rows AS
+    SELECT srr.id,
+           srr.CensusID,
+           srr.TreeTag,
+           srr.StemTag,
+           srr.SpeciesCode,
+           srr.QuadratName,
+           srr.LocalX,
+           srr.LocalY,
+           srr.DBH,
+           srr.HOM,
+           srr.MeasurementDate,
+           srr.Codes,
+           srr.Comments,
+           srr.QuadratID,
+           srr.SpeciesID,
+           srr.tree_state,
+           csl.StemGUID
+    FROM stem_resolution_rows srr
+    INNER JOIN current_stem_lookup csl
+        ON csl.id = srr.id;
+
+    CREATE INDEX idx_resolved_batch_rows_id ON resolved_batch_rows (id);
+    CREATE INDEX idx_resolved_batch_rows_stem ON resolved_batch_rows (StemGUID);
+
+    SET vTreeStemInsertMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- =====================================================
-    -- STEM INSERTION
+    -- STAGE 7: STEMCROSSID SELF-ASSIGN FOR NEW STEMS
+    -- Inherited StemCrossIDs were set inline during stem INSERT (Stage 6).
+    -- Remaining NULL StemCrossIDs are new stems that self-assign their StemGUID.
     -- =====================================================
-    CREATE TEMPORARY TABLE unique_stems_to_insert AS
-    SELECT DISTINCT TreeTag, QuadratID, StemTag, LocalX, LocalY, CensusID, SpeciesID
-    FROM filtered WHERE CensusID = vCurrentCensusID;
-
-    CREATE INDEX idx_stems_insert ON unique_stems_to_insert (TreeTag, SpeciesID, CensusID);
-
-    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
-    SELECT t.TreeID, usi.QuadratID, vCurrentCensusID, NULL,
-           CASE WHEN TRIM(COALESCE(usi.StemTag, '')) = '' THEN NULL ELSE TRIM(usi.StemTag) END,
-           usi.LocalX,
-           usi.LocalY,
-           0, NULL, 1
-    FROM unique_stems_to_insert usi
-    INNER JOIN trees t ON t.TreeTag = usi.TreeTag AND t.SpeciesID = usi.SpeciesID
-        AND t.CensusID = vCurrentCensusID AND t.IsActive = 1;
-
-    CREATE TEMPORARY TABLE stem_crossid_mapping AS
-    SELECT s_curr.StemGUID as CurrentStemID,
-           COALESCE((SELECT s_prev.StemCrossID FROM stems s_prev
-                     INNER JOIN trees t_prev ON s_prev.TreeID = t_prev.TreeID
-                        AND s_prev.CensusID = t_prev.CensusID
-                     INNER JOIN census c_prev ON c_prev.CensusID = t_prev.CensusID
-                     INNER JOIN trees t_curr ON t_curr.TreeID = s_curr.TreeID
-                        AND t_curr.CensusID = s_curr.CensusID
-                     WHERE t_prev.TreeTag = t_curr.TreeTag AND s_prev.StemTag = s_curr.StemTag
-                       AND t_prev.CensusID = vPreviousCensusID
-                       AND c_prev.PlotID = vCurrentPlotID
-                       AND t_prev.IsActive = 1 AND s_prev.IsActive = 1 AND s_prev.StemCrossID IS NOT NULL
-                     ORDER BY t_prev.CensusID DESC LIMIT 1),
-                   s_curr.StemGUID) as NewStemCrossID
-    FROM stems s_curr
-    WHERE s_curr.CensusID = vCurrentCensusID AND s_curr.StemCrossID IS NULL;
-
-    CREATE INDEX idx_mapping_stemid ON stem_crossid_mapping (CurrentStemID);
+    SET vStageStart = NOW(6);
 
     UPDATE stems s
-    INNER JOIN stem_crossid_mapping scm ON s.StemGUID = scm.CurrentStemID
-    SET s.StemCrossID = scm.NewStemCrossID;
+    INNER JOIN (
+        SELECT DISTINCT StemGUID
+        FROM resolved_batch_rows
+    ) batch_stems ON batch_stems.StemGUID = s.StemGUID
+    SET s.StemCrossID = s.StemGUID
+    WHERE s.StemCrossID IS NULL;
 
-    DROP TEMPORARY TABLE stem_crossid_mapping;
+    SET vStemCrossIdMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- =====================================================
-    -- COREMEASUREMENTS INSERTION
+    -- STAGE 8: COREMEASUREMENTS AND HARD FAILURE MATERIALIZATION
     -- =====================================================
+    SET vStageStart = NOW(6);
 
-    INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                         Description, UserDefinedFields, UploadFileID, UploadBatchID,
-                                         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-                                         RawCodes, RawComments, SourceRowIndex, IsActive)
-    SELECT f.CensusID, s.StemGUID, null,
-           f.MeasurementDate,
-           NULLIF(f.DBH, 0),
-           NULLIF(f.HOM, 0),
-           NULLIF(f.Comments, ''),
+    CREATE TEMPORARY TABLE core_insert_failures
+    (
+        SourceRowIndex BIGINT UNSIGNED NOT NULL,
+        ErrorCode      VARCHAR(50)     NOT NULL,
+        FailureReason  VARCHAR(255)    NOT NULL,
+        PRIMARY KEY (SourceRowIndex, ErrorCode),
+        KEY idx_core_insert_failures_error (ErrorCode)
+    );
+
+    INSERT INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT rbr.id,
+           'MEASUREMENT_INSERT_SKIPPED',
+           LEFT(
+               CASE
+                   WHEN cm_existing_row.CoreMeasurementID IS NOT NULL AND cm_existing_row.StemGUID IS NOT NULL
+                       THEN CONCAT('Measurement insert skipped: batch source row already materialized as CoreMeasurementID ',
+                                   cm_existing_row.CoreMeasurementID)
+                   WHEN cm_existing_row.CoreMeasurementID IS NOT NULL AND cm_existing_row.StemGUID IS NULL
+                       THEN CONCAT('Measurement insert skipped: batch source row already exists as unresolved CoreMeasurementID ',
+                                   cm_existing_row.CoreMeasurementID)
+                   WHEN cm_existing_measure.CoreMeasurementID IS NOT NULL
+                       THEN CONCAT('Measurement insert skipped: matching measurement already exists as CoreMeasurementID ',
+                                   cm_existing_measure.CoreMeasurementID,
+                                   ' for StemGUID ', rbr.StemGUID)
+                   ELSE 'Measurement insert skipped: resolved row was not eligible for insertion'
+               END,
+               255
+           )
+    FROM resolved_batch_rows rbr
+    LEFT JOIN coremeasurements cm_existing_row
+        ON cm_existing_row.UploadBatchID = vBatchID
+        AND cm_existing_row.UploadFileID = vFileID
+        AND cm_existing_row.SourceRowIndex = rbr.id
+    LEFT JOIN coremeasurements cm_existing_measure
+        ON cm_existing_measure.StemGUID = rbr.StemGUID
+        AND cm_existing_measure.CensusID = rbr.CensusID
+        AND cm_existing_measure.MeasurementDate <=> rbr.MeasurementDate
+        AND cm_existing_measure.MeasuredDBH <=> NULLIF(rbr.DBH, 0)
+        AND cm_existing_measure.MeasuredHOM <=> NULLIF(rbr.HOM, 0)
+    WHERE cm_existing_row.CoreMeasurementID IS NOT NULL
+       OR cm_existing_measure.CoreMeasurementID IS NOT NULL;
+
+    CREATE TEMPORARY TABLE core_insert_candidates AS
+    SELECT rbr.*
+    FROM resolved_batch_rows rbr
+    LEFT JOIN core_insert_failures cif
+        ON cif.SourceRowIndex = rbr.id
+    WHERE cif.SourceRowIndex IS NULL;
+
+    CREATE INDEX idx_core_insert_candidates_id ON core_insert_candidates (id);
+    CREATE INDEX idx_core_insert_candidates_stem ON core_insert_candidates (StemGUID);
+
+    INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+                                  Description, UserDefinedFields, UploadFileID, UploadBatchID,
+                                  RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+                                  RawCodes, RawComments, SourceRowIndex, IsActive)
+    SELECT cic.CensusID, cic.StemGUID, NULL,
+           cic.MeasurementDate,
+           NULLIF(cic.DBH, 0),
+           NULLIF(cic.HOM, 0),
+           NULLIF(cic.Comments, ''),
            JSON_OBJECT(
                'treestemstate',
-               f.tree_state,
+               cic.tree_state,
                'uploadSession', JSON_OBJECT(
                    'fileID', vFileID,
                    'batchID', vBatchID
@@ -1863,75 +2501,62 @@ BEGIN
            ),
            vFileID,
            vBatchID,
-           f.TreeTag, f.StemTag, f.SpeciesCode, f.QuadratName,
-           f.LocalX, f.LocalY, f.Codes, f.Comments,
-           f.id,
+           cic.TreeTag, cic.StemTag, cic.SpeciesCode, cic.QuadratName,
+           cic.LocalX, cic.LocalY, cic.Codes, cic.Comments,
+           cic.id,
            1
-    FROM filtered f
-    INNER JOIN trees t ON t.TreeTag = f.TreeTag AND t.SpeciesID = f.SpeciesID
-        AND t.CensusID = f.CensusID AND t.IsActive = 1
-    INNER JOIN stems s ON s.TreeID = t.TreeID AND s.StemTag = f.StemTag
-        AND s.QuadratID = f.QuadratID AND s.CensusID = f.CensusID AND s.IsActive = 1
-    -- Idempotency check: prevent duplicate processing of the same batch
-    WHERE NOT EXISTS (
-        SELECT 1 FROM coremeasurements cm_check
-        WHERE cm_check.StemGUID = s.StemGUID
-          AND cm_check.CensusID = f.CensusID
-          AND cm_check.UploadFileID = vFileID
-          AND cm_check.UploadBatchID = vBatchID
-    );
+    FROM core_insert_candidates cic;
 
     SET vProcessedCount = ROW_COUNT();
 
-    -- =====================================================
-    -- ORPHAN DETECTION: Catch filtered rows that passed
-    -- validation but have no coremeasurements entry.
-    -- This happens when tree or stem INSERT IGNORE drops
-    -- prevent measurement insertion (the INNER JOIN on
-    -- stems finds nothing). Counts actual measurement-level
-    -- losses instead of tree/stem-level INSERT IGNORE drops.
-    -- =====================================================
-    SET @orphaned_filtered = (
-        SELECT COUNT(*)
-        FROM filtered f
-        WHERE NOT EXISTS (
-            SELECT 1 FROM coremeasurements cm
-            WHERE cm.SourceRowIndex = f.id
-              AND cm.UploadBatchID = vBatchID
-              AND cm.UploadFileID = vFileID
-        )
+    CREATE TEMPORARY TABLE resolved_coremeasurements AS
+    SELECT cic.id,
+           cic.TreeTag,
+           cic.SpeciesID,
+           cic.SpeciesCode,
+           cic.Codes,
+           cm.CoreMeasurementID
+    FROM core_insert_candidates cic
+    INNER JOIN coremeasurements cm
+        ON cm.SourceRowIndex = cic.id
+        AND cm.UploadFileID = vFileID
+        AND cm.UploadBatchID = vBatchID
+        AND cm.StemGUID IS NOT NULL;
+
+    CREATE INDEX idx_resolved_coremeasurements_id ON resolved_coremeasurements (id);
+    CREATE INDEX idx_resolved_coremeasurements_tree ON resolved_coremeasurements (TreeTag, SpeciesID);
+
+    CREATE TEMPORARY TABLE orphaned_rows
+    (
+        id            BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+        FailureReason VARCHAR(255)    NOT NULL
     );
 
-    IF @orphaned_filtered > 0 THEN
-        INSERT IGNORE INTO coremeasurements
-            (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-             Description, UploadFileID, UploadBatchID,
-             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
-             RawCodes, RawComments, SourceRowIndex, IsActive)
-        SELECT vCurrentCensusID, NULL, FALSE,
-            NULLIF(f.MeasurementDate, '1900-01-01'), NULLIF(f.DBH, 0), NULLIF(f.HOM, 0),
-            'Tree/stem resolution failed: row passed validation but no matching stem could be created',
-            vFileID, vBatchID,
-            NULLIF(f.TreeTag, ''), NULLIF(f.StemTag, ''), NULLIF(f.SpeciesCode, ''), NULLIF(f.QuadratName, ''),
-            f.LocalX, f.LocalY, NULLIF(f.Codes, ''), NULLIF(f.Comments, ''),
-            f.id, 1
-        FROM filtered f
-        WHERE NOT EXISTS (
-            SELECT 1 FROM coremeasurements cm
-            WHERE cm.SourceRowIndex = f.id
-              AND cm.UploadBatchID = vBatchID
-              AND cm.UploadFileID = vFileID
-        )
-        ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+    INSERT INTO orphaned_rows (id, FailureReason)
+    SELECT cic.id,
+           'Measurement insert skipped: row passed resolution but no batch coremeasurement row was created'
+    FROM core_insert_candidates cic
+    LEFT JOIN resolved_coremeasurements rcm ON rcm.id = cic.id
+    WHERE rcm.CoreMeasurementID IS NULL;
 
-        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
-        SELECT cm.CoreMeasurementID,
-            (SELECT me.ErrorID FROM measurement_errors me
-             WHERE me.ErrorSource = 'ingestion' AND me.ErrorCode = 'SQL_EXCEPTION' LIMIT 1),
-            FALSE
-        FROM coremeasurements cm
-        WHERE cm.UploadBatchID = vBatchID AND cm.UploadFileID = vFileID AND cm.StemGUID IS NULL
-          AND cm.Description = 'Tree/stem resolution failed: row passed validation but no matching stem could be created';
+    CREATE INDEX idx_orphaned_rows_id ON orphaned_rows (id);
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT cif.SourceRowIndex, cif.ErrorCode, cif.FailureReason
+    FROM core_insert_failures cif;
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT id, 'MEASUREMENT_INSERT_SKIPPED', LEFT(FailureReason, 255)
+    FROM orphaned_rows;
+
+    IF EXISTS(SELECT 1 FROM core_insert_failures) OR EXISTS(SELECT 1 FROM orphaned_rows) THEN
+        SET @orphaned_filtered = (
+            SELECT COUNT(*) FROM (
+                SELECT SourceRowIndex FROM core_insert_failures
+                UNION
+                SELECT id FROM orphaned_rows
+            ) unresolved_measurements
+        );
 
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
@@ -1939,27 +2564,68 @@ BEGIN
         ) VALUES (
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'ORPHANED_MEASUREMENT',
-            CONCAT(@orphaned_filtered, ' measurement(s) passed validation but tree/stem resolution failed (INSERT IGNORE constraint violation)'),
+            CONCAT(@orphaned_filtered, ' measurement(s) passed validation but no batch measurement row could be created'),
             'critical', @orphaned_filtered
         );
-
-        SET vDataLossCount = vDataLossCount + @orphaned_filtered;
     END IF;
 
-    IF EXISTS(SELECT 1 FROM filtered WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
+    INSERT IGNORE INTO coremeasurements
+        (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+         Description, UploadFileID, UploadBatchID,
+         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+         RawCodes, RawComments, SourceRowIndex, IsActive)
+    SELECT vCurrentCensusID, NULL, FALSE,
+           NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
+           grouped_failures.FailureReason,
+           vFileID, vBatchID,
+           NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
+           tm.LocalX, tm.LocalY, NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
+           tm.id, 1
+    FROM (
+        SELECT SourceRowIndex,
+               LEFT(GROUP_CONCAT(DISTINCT FailureReason ORDER BY ErrorCode SEPARATOR '; '), 255) AS FailureReason
+        FROM hard_failure_rows
+        GROUP BY SourceRowIndex
+    ) grouped_failures
+    INNER JOIN temporarymeasurements tm ON tm.id = grouped_failures.SourceRowIndex
+    LEFT JOIN coremeasurements cm_existing
+        ON cm_existing.UploadBatchID = vBatchID
+        AND cm_existing.UploadFileID = vFileID
+        AND cm_existing.SourceRowIndex = grouped_failures.SourceRowIndex
+    WHERE tm.FileID = vFileID
+      AND tm.BatchID = vBatchID
+      AND (cm_existing.CoreMeasurementID IS NULL OR cm_existing.StemGUID IS NULL)
+    ON DUPLICATE KEY UPDATE IsValidated = FALSE, Description = VALUES(Description);
+
+    INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+    SELECT DISTINCT cm.CoreMeasurementID, me.ErrorID, FALSE
+    FROM hard_failure_rows hfr
+    INNER JOIN coremeasurements cm
+        ON cm.UploadBatchID = vBatchID
+        AND cm.UploadFileID = vFileID
+        AND cm.SourceRowIndex = hfr.SourceRowIndex
+        AND cm.StemGUID IS NULL
+    INNER JOIN measurement_errors me
+        ON me.ErrorSource = 'ingestion' AND me.ErrorCode = hfr.ErrorCode;
+
+    SET vDataLossCount = COALESCE((SELECT COUNT(DISTINCT SourceRowIndex) FROM hard_failure_rows), 0);
+    SET vCoreInsertMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
+
+    -- =====================================================
+    -- STAGE 9: ATTRIBUTE MATERIALIZATION
+    -- =====================================================
+    SET vStageStart = NOW(6);
+
+    IF EXISTS(SELECT 1 FROM resolved_coremeasurements WHERE Codes IS NOT NULL AND TRIM(Codes) != '') THEN
         CREATE TEMPORARY TABLE tempcodes AS
-        SELECT cm.CoreMeasurementID, trim(jt.code) as Code
-        FROM filtered f
-        INNER JOIN coremeasurements cm ON cm.SourceRowIndex = f.id
-            AND cm.UploadFileID = vFileID
-            AND cm.UploadBatchID = vBatchID
-            AND cm.StemGUID IS NOT NULL,
+        SELECT rcm.CoreMeasurementID, TRIM(jt.code) AS Code
+        FROM resolved_coremeasurements rcm,
         json_table(
-            if(f.Codes = '' or trim(f.Codes) = '', '[]',
-               concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
+            IF(rcm.Codes = '' OR TRIM(rcm.Codes) = '', '[]',
+               CONCAT('["', REPLACE(TRIM(rcm.Codes), ';', '","'), '"]')),
             '$[*]' columns (code varchar(10) COLLATE utf8mb4_0900_ai_ci path '$')
         ) jt
-        WHERE f.Codes is not null AND trim(f.Codes) != '';
+        WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '';
 
         INSERT IGNORE INTO cmattributes (CoreMeasurementID, Code)
         SELECT tc.CoreMeasurementID, tc.Code
@@ -1970,41 +2636,24 @@ BEGIN
         SELECT DISTINCT tc.CoreMeasurementID, me.ErrorID, FALSE
         FROM tempcodes tc
         LEFT JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1
-        JOIN measurement_errors me ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'
+        INNER JOIN measurement_errors me
+            ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'
         WHERE a.Code IS NULL;
     END IF;
 
-    -- =====================================================
-    -- SOFT VALIDATIONS: Accept but flag in measurement_error_log
-    -- =====================================================
+    SET vAttributesMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
-    -- VALIDATION 3: Species Mismatch Detection (SOFT - Accept but Flag)
-    -- TreeTag with different SpeciesID than previous census
+    -- =====================================================
+    -- STAGE 10: SOFT VALIDATIONS
+    -- =====================================================
+    SET vStageStart = NOW(6);
+
     CREATE TEMPORARY TABLE species_mismatch_records AS
-    SELECT DISTINCT cm.CoreMeasurementID,
-           t.TreeTag,
-           sp.SpeciesCode as CurrentSpeciesCode,
-           prev_tree.PrevSpeciesID,
-           sp_prev.SpeciesCode as PrevSpeciesCode
-    FROM coremeasurements cm
-    INNER JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = vCurrentCensusID
-    INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = vCurrentCensusID
-    INNER JOIN species sp ON t.SpeciesID = sp.SpeciesID
-    INNER JOIN (
-        -- Compare against the immediately previous census for this plot.
-        SELECT t2.TreeTag, t2.SpeciesID as PrevSpeciesID
-        FROM trees t2
-        INNER JOIN census c_prev ON c_prev.CensusID = t2.CensusID
-        WHERE t2.IsActive = 1
-          AND t2.CensusID = vPreviousCensusID
-          AND c_prev.PlotID = vCurrentPlotID
-    ) prev_tree ON prev_tree.TreeTag = t.TreeTag
-        AND prev_tree.PrevSpeciesID != t.SpeciesID  -- Different species
-    INNER JOIN species sp_prev ON prev_tree.PrevSpeciesID = sp_prev.SpeciesID
-    WHERE cm.CensusID = vCurrentCensusID
-      AND cm.IsActive = 1
-      AND cm.UploadFileID = vFileID
-      AND cm.UploadBatchID = vBatchID;
+    SELECT DISTINCT rcm.CoreMeasurementID
+    FROM resolved_coremeasurements rcm
+    INNER JOIN prev_tree_lookup ptl ON ptl.TreeTag = rcm.TreeTag
+        AND ptl.MatchCount = 1
+        AND ptl.PrevSpeciesID != rcm.SpeciesID;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT smr.CoreMeasurementID, me.ErrorID, FALSE
@@ -2029,35 +2678,21 @@ BEGIN
 
     DROP TEMPORARY TABLE IF EXISTS species_mismatch_records;
 
-    -- VALIDATION 4: Same-Batch TreeTag with Different SpeciesID (SOFT - Accept but Flag)
-    -- Multiple rows in same batch with same TreeTag but different SpeciesID
-    -- Snapshot first occurrence per TreeTag into a separate temp table
-    -- to avoid MySQL error 1137 (Can't reopen table) from self-joining initial_dup_filter
     DROP TEMPORARY TABLE IF EXISTS idf_first_occurrence;
     CREATE TEMPORARY TABLE idf_first_occurrence AS
     SELECT TreeTag, SpeciesCode
     FROM (
         SELECT TreeTag, SpeciesCode,
                ROW_NUMBER() OVER (PARTITION BY TreeTag ORDER BY id) as rn
-        FROM initial_dup_filter
+        FROM resolved_batch_rows
     ) ranked
     WHERE rn = 1;
 
     CREATE TEMPORARY TABLE same_batch_species_conflicts AS
-    SELECT DISTINCT cm.CoreMeasurementID,
-           t.TreeTag,
-           sp.SpeciesCode as CurrentSpeciesCode,
-           fo.SpeciesCode as FirstSpeciesCode
-    FROM coremeasurements cm
-    INNER JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = vCurrentCensusID
-    INNER JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = vCurrentCensusID
-    INNER JOIN species sp ON t.SpeciesID = sp.SpeciesID
-    INNER JOIN idf_first_occurrence fo ON t.TreeTag = fo.TreeTag
-    WHERE cm.CensusID = vCurrentCensusID
-      AND cm.IsActive = 1
-      AND cm.UploadFileID = vFileID
-      AND cm.UploadBatchID = vBatchID
-      AND sp.SpeciesCode != fo.SpeciesCode;
+    SELECT DISTINCT rcm.CoreMeasurementID
+    FROM resolved_coremeasurements rcm
+    INNER JOIN idf_first_occurrence fo ON rcm.TreeTag = fo.TreeTag
+    WHERE rcm.SpeciesCode != fo.SpeciesCode;
 
     INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
     SELECT DISTINCT sbsc.CoreMeasurementID, me.ErrorID, FALSE
@@ -2081,13 +2716,19 @@ BEGIN
     END IF;
 
     DROP TEMPORARY TABLE IF EXISTS same_batch_species_conflicts, idf_first_occurrence;
+    SET vSoftValidationMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- Info-level census warnings are intentionally excluded from the hot ingest path.
     -- They can be recomputed later from persisted coremeasurements if needed.
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, filter_validity, filtered, validation_failures,
-        old_trees, multi_stems, new_recruits, prev_census_stems, unique_trees_to_insert, unique_stems_to_insert, tempcodes,
-        stem_crossid_mapping, pre_insert_check, idf_first_occurrence, same_batch_species_conflicts,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+        classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
+        requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
+        prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
+        current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+        unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+        core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+        orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
     DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
@@ -2105,29 +2746,71 @@ BEGIN
     );
     SET @unaccounted = vBatchRowCount - @final_success - vDataLossCount;
 
-    -- Log reconciliation mismatch if any rows are unaccounted for
     IF @unaccounted != 0 THEN
+        SET vErrorMessage = CONCAT('Reconciliation mismatch: ', vBatchRowCount, ' input, ',
+                                   @final_success, ' success, ', vDataLossCount,
+                                   ' failed, ', @unaccounted, ' unaccounted');
+
+        -- Log the mismatch as an integrity alert but COMMIT the successfully processed data.
+        -- Rolling back would destroy all valid trees/stems/measurements for the entire batch
+        -- due to a potentially benign counting discrepancy.
+        COMMIT;
+
         INSERT IGNORE INTO uploadintegrityalerts (
             uploadId, fileID, batchID, plotID, censusID,
             type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords
         ) VALUES (
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'RECONCILIATION_MISMATCH',
-            CONCAT('Reconciliation: ', vBatchRowCount, ' input, ', @final_success, ' success (in batch), ',
-                   vDataLossCount, ' failed/deduplicated, ', @unaccounted, ' unaccounted'),
+            LEFT(vErrorMessage, 255),
             IF(@unaccounted > 0, 'critical', 'warning'),
             vBatchRowCount, @final_success, vDataLossCount, ABS(@unaccounted)
         );
+
+        UPDATE uploadmetrics
+        SET processedRecords = @final_success,
+            failedRecords = vDataLossCount,
+            missingRecords = ABS(@unaccounted),
+            dataLossDetected = 1,
+            durationMs = TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000,
+            status = 'completed',
+            errorMessage = LEFT(vErrorMessage, 255),
+            endTime = NOW(6)
+        WHERE uploadId = vUploadId;
+
+        DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+            classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
+            requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
+            prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
+            current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
+            unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
+            core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+            orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
+            species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
+
+        SET @disable_triggers = 0;
+
+        SELECT vErrorMessage as message,
+               FALSE as batch_failed,
+               ABS(@unaccounted) as records_failed,
+               vValidationMs AS validation_ms, vDedupeMs AS dedupe_ms, vReferenceMs AS reference_ms,
+               vPrevLookupMs AS prev_lookup_ms, vCrossCensusMs AS cross_census_ms,
+               vTreeStemInsertMs AS tree_stem_insert_ms, vStemCrossIdMs AS stem_crossid_ms,
+               vCoreInsertMs AS core_insert_ms, vAttributesMs AS attributes_ms,
+               vSoftValidationMs AS soft_validation_ms,
+               TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000 AS total_duration_ms;
+        LEAVE main_proc;
     END IF;
 
     -- Final metrics update
     UPDATE uploadmetrics
     SET processedRecords = vProcessedCount,
         failedRecords = vDataLossCount,
-        missingRecords = ABS(@unaccounted),
-        dataLossDetected = IF(vDataLossCount > 0 OR @unaccounted != 0, 1, 0),
+        missingRecords = 0,
+        dataLossDetected = IF(vDataLossCount > 0, 1, 0),
+        durationMs = TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000,
         status = 'completed',
-        endTime = NOW()
+        endTime = NOW(6)
     WHERE uploadId = vUploadId;
 
     COMMIT;
@@ -2137,10 +2820,22 @@ BEGIN
     IF vDataLossCount > 0 THEN
         SELECT CONCAT('Batch ', vBatchID, ' processed: ', vProcessedCount, ' valid, ',
                       vDataLossCount, ' failed (see measurement_error_log and uploadintegrityalerts)') as message,
-               FALSE as batch_failed, vDataLossCount as records_failed;
+               FALSE as batch_failed, vDataLossCount as records_failed,
+               vValidationMs AS validation_ms, vDedupeMs AS dedupe_ms, vReferenceMs AS reference_ms,
+               vPrevLookupMs AS prev_lookup_ms, vCrossCensusMs AS cross_census_ms,
+               vTreeStemInsertMs AS tree_stem_insert_ms, vStemCrossIdMs AS stem_crossid_ms,
+               vCoreInsertMs AS core_insert_ms, vAttributesMs AS attributes_ms,
+               vSoftValidationMs AS soft_validation_ms,
+               TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000 AS total_duration_ms;
     ELSE
         SELECT CONCAT('Batch ', vBatchID, ' processed successfully: ', vProcessedCount, ' records') as message,
-               FALSE as batch_failed, 0 as records_failed;
+               FALSE as batch_failed, 0 as records_failed,
+               vValidationMs AS validation_ms, vDedupeMs AS dedupe_ms, vReferenceMs AS reference_ms,
+               vPrevLookupMs AS prev_lookup_ms, vCrossCensusMs AS cross_census_ms,
+               vTreeStemInsertMs AS tree_stem_insert_ms, vStemCrossIdMs AS stem_crossid_ms,
+               vCoreInsertMs AS core_insert_ms, vAttributesMs AS attributes_ms,
+               vSoftValidationMs AS soft_validation_ms,
+               TIMESTAMPDIFF(MICROSECOND, vProcStart, NOW(6)) DIV 1000 AS total_duration_ms;
     END IF;
 END $$
 

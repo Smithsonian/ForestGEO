@@ -9,8 +9,8 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, useOrgCensusListContext, useOrgCensusListDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import { useOrgCensusContext, useOrgCensusDispatch, useOrgCensusListContext, useOrgCensusListDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
@@ -63,6 +63,7 @@ export default function DashboardPage() {
   const currentCensus = useOrgCensusContext();
   const censusListContext = useOrgCensusListContext();
   const censusListDispatch = useOrgCensusListDispatch();
+  const censusDispatch = useOrgCensusDispatch();
   const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
@@ -190,7 +191,7 @@ export default function DashboardPage() {
       setError(errorMessage);
       ailogger.error('Aggregated dashboard metrics error:', e);
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID]);
 
   const loadChangelogHistory = useCallback(async () => {
     if (!currentSite || !currentPlot || !currentCensus) {
@@ -245,7 +246,7 @@ export default function DashboardPage() {
         setIsLoading(false);
       }
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   // Memoized event handlers to prevent unnecessary re-renders
   const handleFeedbackKeyDown = useCallback(
@@ -295,12 +296,18 @@ export default function DashboardPage() {
       const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
       const updatedCensusList = await createAndUpdateCensusList(censusArray);
       if (censusListDispatch) await censusListDispatch({ censusList: updatedCensusList });
+
+      if (censusDispatch && currentCensus) {
+        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, updatedCensusList);
+        await censusDispatch({ census: reconciledCensus });
+      }
+
       console.log('Census list refreshed successfully');
     } catch (error) {
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, censusListDispatch]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID, currentCensus?.plotCensusNumber, censusDispatch, censusListDispatch]);
 
   // Census handlers
   const handleCensusDelete = useCallback((census: CensusWithStats | OrgCensusRDS) => {
