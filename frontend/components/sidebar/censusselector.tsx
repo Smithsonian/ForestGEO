@@ -9,6 +9,7 @@
 
 import { Select, Option, Typography, Stack, SelectOption, Box } from '@mui/joy';
 import { useAppStore } from '@/config/store/appstore';
+import { submitCookie } from '@/app/actions/cookiemanager';
 
 export default function CensusSelector() {
   const currentCensus = useAppStore(state => state.currentCensus);
@@ -67,15 +68,18 @@ export default function CensusSelector() {
   const handleCensusChange = (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
     try {
       if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) {
+        void submitCookie('censusID', '');
         setCensus(undefined);
       } else {
         const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
         const selectedCensus = censusList?.find(census => census?.plotCensusNumber === selectedPlotCensusNumber) || undefined;
+        void submitCookie('censusID', selectedCensus?.dateRanges?.[0]?.censusID?.toString() ?? '');
         setCensus(selectedCensus);
       }
     } catch (error) {
       console.error('Error changing census:', error);
       // Reset to undefined to prevent stale state
+      void submitCookie('censusID', '');
       setCensus(undefined);
     }
   };
