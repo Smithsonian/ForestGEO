@@ -231,37 +231,37 @@ describe('ApiWrapper', () => {
     it('should wait between retries', async () => {
       vi.useFakeTimers();
 
-      let callCount = 0;
-      (global.fetch as any).mockImplementation(() => {
-        callCount++;
-        return Promise.reject(new Error('connection refused'));
-      });
-
-      const promise = ApiWrapper.fetch('/api/test', {}, {
-        retryAttempts: 3,
-        retryDelay: 100, // Use shorter delay for faster tests
-        showErrorAlert: false
-      });
-
-      // First attempt happens immediately
-      await vi.waitFor(() => expect(callCount).toBe(1));
-
-      // Advance time for first retry delay
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.waitFor(() => expect(callCount).toBe(2));
-
-      // Advance time for second retry delay
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.waitFor(() => expect(callCount).toBe(3));
-
-      // Catch the rejection to prevent unhandled promise rejection
       try {
-        await promise;
-      } catch (error: any) {
-        expect(error.message).toBe('connection refused');
-      }
+        let callCount = 0;
+        (global.fetch as any).mockImplementation(() => {
+          callCount++;
+          return Promise.reject(new Error('connection refused'));
+        });
 
-      vi.useRealTimers();
+        const promise = ApiWrapper.fetch('/api/test', {}, {
+          retryAttempts: 3,
+          retryDelay: 100, // Use shorter delay for faster tests
+          showErrorAlert: false
+        });
+        const settledPromise = promise.catch(error => error);
+
+        // First attempt happens immediately
+        await vi.waitFor(() => expect(callCount).toBe(1));
+
+        // Advance time for first retry delay
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(callCount).toBe(2));
+
+        // Advance time for second retry delay
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(callCount).toBe(3));
+
+        const error = await settledPromise;
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe('connection refused');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should identify retryable errors correctly', async () => {

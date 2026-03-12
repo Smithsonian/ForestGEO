@@ -20,8 +20,8 @@ do
     # Change to frontend directory and run tests
     cd frontend || exit 1
 
-    # Run npm test (vitest run)
-    if ! npm test; then
+    # Run the actual unit-test script used by CI
+    if ! npm run test:unit; then
       echo ""
       echo "❌ Tests failed! Push aborted."
       echo "Please fix the failing tests before pushing to $remote_branch"

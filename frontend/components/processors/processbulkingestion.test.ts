@@ -13,11 +13,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processBulkIngestionCollapser, processBulkIngestionProcessor, TemporaryMeasurement } from './processbulkingestion';
 import ConnectionManager from '@/config/connectionmanager';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 // Mock dependencies
 vi.mock('@/config/connectionmanager');
 vi.mock('@/config/utils/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema, query) => query.replace(/\?\?/g, schema))
+}));
+vi.mock('@/config/measurementerrors', () => ({
+  insertIngestionFailureRows: vi.fn(async () => undefined)
 }));
 vi.mock('@/config/utils', async importOriginal => {
   const actual = (await importOriginal()) as object;
@@ -601,11 +605,9 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
       }
     ];
 
-    // The duplicate gets inserted into unresolved coremeasurements via insertIngestionFailureRows first (1 call),
-    // then only 1 valid measurement continues through the pipeline.
+    // The duplicate is routed through insertIngestionFailureRows, then only
+    // the deduped valid measurement continues through the pipeline.
     mockConnectionManager.executeQuery
-      // insertFailedMeasurements (duplicate row 2)
-      .mockResolvedValueOnce([])
       // validateQuadrat (row 1 only — row 2 was deduped)
       .mockResolvedValueOnce([{ count: 1 }])
       // validateSpecies (row 1)
@@ -637,8 +639,18 @@ describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
 
     await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
 
-    // KEY ASSERTION: The first executeQuery call should be the unresolved coremeasurements insert
-    const firstCall = mockConnectionManager.executeQuery.mock.calls[0];
-    expect(firstCall[0]).toContain('coremeasurements');
+    expect(insertIngestionFailureRows).toHaveBeenCalledTimes(1);
+    expect(insertIngestionFailureRows).toHaveBeenCalledWith(
+      mockConnectionManager,
+      'forestgeo_test',
+      expect.arrayContaining([
+        expect.objectContaining({
+          tag: 'T100',
+          stemTag: 'S1',
+          fileID: 'test.csv',
+          batchID: 'batch-1'
+        })
+      ])
+    );
   });
 });

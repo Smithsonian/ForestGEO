@@ -59,6 +59,7 @@ describe('ValidationRow - Functional Tests', () => {
     // Mock URL.createObjectURL and revokeObjectURL for JSDOM
     global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
     global.URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
 
   afterEach(() => {

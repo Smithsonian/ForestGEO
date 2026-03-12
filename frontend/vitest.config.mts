@@ -4,7 +4,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import { loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => ({
-  plugins: [tsconfigPaths(), react()],
+  plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] }), react()],
   test: {
     environment: 'jsdom',
     setupFiles: ['setup.ts'],

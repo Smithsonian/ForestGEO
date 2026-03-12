@@ -97,6 +97,22 @@ vi.mock('@/auth', () => ({
   }))
 }));
 
+vi.mock('@/config/uploadsessiontracker', () => ({
+  requireUploadSessionOwnership: vi.fn(async () => undefined),
+  UploadSessionOwnershipError: class UploadSessionOwnershipError extends Error {
+    status: number;
+
+    constructor(message: string, status: number = 409) {
+      super(message);
+      this.status = status;
+    }
+  },
+  UploadSessionState: {
+    INITIALIZED: 'initialized',
+    UPLOADING: 'uploading'
+  }
+}));
+
 // Import handlers AFTER mocks
 import { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 import { GET as CLEARCENSUS_GET } from '../clearcensus/route';
@@ -116,6 +132,40 @@ function makeRequest(url: string, method: string = 'GET', body?: any): any {
 
 function makeParams(dataType: string, slugs?: string[]): { params: Promise<{ dataType: string; slugs?: string[] }> } {
   return { params: Promise.resolve({ dataType, slugs }) };
+}
+
+function mockMeasurementUploadQueries(
+  exec: any,
+  options: {
+    preInsertCount?: number;
+    postInsertCount?: number;
+    existingEntry?: any[];
+    changelogResult?: unknown;
+    changelogError?: Error;
+  } = {}
+) {
+  const {
+    preInsertCount = 1,
+    postInsertCount = preInsertCount + 1,
+    existingEntry = [],
+    changelogResult = {},
+    changelogError
+  } = options;
+
+  exec
+    .mockResolvedValueOnce([{ PlotID: 1 }])
+    .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+    .mockResolvedValueOnce([{ count: preInsertCount }])
+    .mockResolvedValueOnce({})
+    .mockResolvedValueOnce([{ count: postInsertCount }]);
+
+  if (changelogError) {
+    exec.mockRejectedValueOnce(changelogError);
+    return exec;
+  }
+
+  exec.mockResolvedValueOnce(existingEntry).mockResolvedValueOnce(changelogResult);
+  return exec;
 }
 
 describe('Unified Changelog Tracking System', () => {
@@ -268,19 +318,12 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-6');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      // Mock sequence for measurements upload path:
-      // 1. COUNT rows before insert
-      // 2. INSERT to temporarymeasurements
-      // 3. COUNT rows after insert
-      // 4. SELECT existing changelog entry (none found)
-      // 5. INSERT new changelog entry
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 0 }]) // COUNT rows before insert
-        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
-        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT rows after insert
-        .mockResolvedValueOnce([]) // SELECT existing changelog entry (none found)
-        .mockResolvedValueOnce({ insertId: 1 }); // INSERT new changelog entry
+      const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        existingEntry: [],
+        changelogResult: { insertId: 1 }
+      });
 
       const fileRowSet = {
         'row-1': {
@@ -348,7 +391,7 @@ describe('Unified Changelog Tracking System', () => {
         const metadata = JSON.parse(params[3]);
         expect(metadata.fileName).toBe('measurements.csv');
         expect(metadata.formType).toBe('measurements');
-        expect(metadata.rowCount).toBe(1200);
+        expect(metadata.rowCount).toBe(1);
         expect(metadata.batchCount).toBe(1);
       }
     });
@@ -359,30 +402,22 @@ describe('Unified Changelog Tracking System', () => {
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-7');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      // Mock sequence:
-      // 1. COUNT rows before insert
-      // 2. INSERT temporarymeasurements
-      // 3. COUNT rows after insert
-      // 4. SELECT changelog (found)
-      // 5. UPDATE changelog
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 1200 }]) // COUNT rows before insert
-        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements
-        .mockResolvedValueOnce([{ count: 2000 }]) // COUNT rows after insert
-        .mockResolvedValueOnce([
+      const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        existingEntry: [
           {
-            // SELECT existing changelog entry (found)
             ChangeID: 1,
             NewRowState: JSON.stringify({
               fileName: 'measurements.csv',
               formType: 'measurements',
-              rowCount: 1200,
+              rowCount: 1,
               batchCount: 1
             })
           }
-        ])
-        .mockResolvedValueOnce({}); // UPDATE changelog entry
+        ],
+        changelogResult: {}
+      });
 
       const fileRowSet = {
         'row-1': {
@@ -423,7 +458,7 @@ describe('Unified Changelog Tracking System', () => {
       if (changelogUpdate) {
         const [_sql, params] = changelogUpdate as [string, any[]];
         const metadata = JSON.parse(params[0]);
-        expect(metadata.rowCount).toBe(2000); // 1200 + 800
+        expect(metadata.rowCount).toBe(2);
         expect(metadata.batchCount).toBe(2); // 1 + 1
       }
     });
@@ -472,13 +507,12 @@ describe('Unified Changelog Tracking System', () => {
       let _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9a');
       let _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      let _exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 0 }])
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce([{ count: 500 }])
-        .mockResolvedValueOnce([]) // No existing entry for file1
-        .mockResolvedValueOnce({});
+      let _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        existingEntry: [],
+        changelogResult: {}
+      });
 
       const req1 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
         schema: 'testschema',
@@ -500,13 +534,12 @@ describe('Unified Changelog Tracking System', () => {
       _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
       _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
-      _exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 0 }])
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce([{ count: 300 }])
-        .mockResolvedValueOnce([]) // No existing entry for file2
-        .mockResolvedValueOnce({});
+      _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        existingEntry: [],
+        changelogResult: {}
+      });
 
       const req2 = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
         schema: 'testschema',
@@ -570,13 +603,12 @@ describe('Unified Changelog Tracking System', () => {
 
       const _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-11');
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
-      const exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 0 }])
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce([{ count: 100 }])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce({});
+      const exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        existingEntry: [],
+        changelogResult: {}
+      });
 
       const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
         schema: 'testschema',
@@ -606,12 +638,11 @@ describe('Unified Changelog Tracking System', () => {
       const _commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
 
       // Mock changelog insert failure but upload succeeds
-      const _exec = vi
-        .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce([{ count: 0 }]) // COUNT before insert succeeds
-        .mockResolvedValueOnce({}) // INSERT to temporarymeasurements succeeds
-        .mockResolvedValueOnce([{ count: 50 }]) // COUNT after insert succeeds
-        .mockRejectedValueOnce(new Error('Changelog table locked')); // Changelog SELECT fails
+      const _exec = mockMeasurementUploadQueries(vi.spyOn(cm, 'executeQuery'), {
+        preInsertCount: 1,
+        postInsertCount: 2,
+        changelogError: new Error('Changelog table locked')
+      });
 
       const req = makeRequest('http://localhost/api/sqlpacketload', 'POST', {
         schema: 'testschema',
