@@ -9,6 +9,7 @@ import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
+import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -251,20 +252,7 @@ export async function POST(
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
               ${(() => {
-                const visibleConditions = filterModel.visible
-                  .map(v => {
-                    switch (v) {
-                      case 'valid':
-                        return `vft.IsValidated = TRUE`;
-                      case 'errors':
-                        return `vft.IsValidated = FALSE`;
-                      case 'pending':
-                        return `vft.IsValidated IS NULL`;
-                      default:
-                        return null;
-                    }
-                  })
-                  .filter(Boolean);
+                const visibleConditions = filterModel.visible.map(v => buildMeasurementVisibleConditionSql(schema, 'vft', v)).filter(Boolean);
                 return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
               })()}
               ${(() => {

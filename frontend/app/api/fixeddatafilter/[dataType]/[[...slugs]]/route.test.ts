@@ -222,8 +222,9 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     const [, paginatedSQL] = exec.mock.calls; // second call is the paginated query
     const sqlStr = String(paginatedSQL);
     // sanity that our extra conditions were embedded
-    expect(sqlStr).toMatch(/IsValidated = TRUE/);
-    expect(sqlStr).toMatch(/IsValidated IS NULL/);
+    expect(sqlStr).toMatch(/measurement_error_log mel/);
+    expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT EXISTS/);
+    expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT EXISTS/);
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\)/);
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('old tree'\), '\$\.treestemstate'\)/);
 
