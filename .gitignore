@@ -55,6 +55,7 @@ next-env.d.ts
 frontend/liquibase/
 
 *.sh
+!frontend/db-migrations/unified-measurements-migrations/run-branch-refresh.sh
 *.properties
 .jscpd
 CLAUDE.md

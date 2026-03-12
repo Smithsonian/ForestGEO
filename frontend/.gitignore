@@ -10,6 +10,7 @@
 
 # testing
 /coverage
+.env.testing.azure
 
 # next.js
 /.next/

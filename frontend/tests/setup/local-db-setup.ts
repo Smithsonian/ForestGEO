@@ -146,13 +146,15 @@ async function connectWithRetry(
 
   for (let attempt = 1; attempt <= retryConfig.maxRetries; attempt++) {
     try {
+      const isRemoteHost = config.host !== 'localhost' && config.host !== '127.0.0.1';
       const connection = await mysql.createConnection({
         host: config.host,
         user: config.user,
         password: config.password,
         port: config.port,
         multipleStatements: true,
-        charset: 'UTF8MB4_0900_AI_CI'
+        charset: 'UTF8MB4_0900_AI_CI',
+        ...(isRemoteHost && { ssl: { rejectUnauthorized: false } })
       });
 
       // Verify connection is actually working

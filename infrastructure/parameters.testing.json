@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "testing"
+    },
+    "location": {
+      "value": "centralus"
+    },
+    "mysqlAdminUser": {
+      "value": "azureroot"
+    },
+    "mysqlAdminPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/6b21b577-e408-4d46-8749-b67b37f08b9c/resourceGroups/forestgeo-rg/providers/Microsoft.KeyVault/vaults/forestgeo-app-key-vault"
+        },
+        "secretName": "mysql-testing-admin-password"
+      }
+    },
+    "mysqlSkuName": {
+      "value": "Standard_B1ms"
+    },
+    "mysqlSkuTier": {
+      "value": "Burstable"
+    },
+    "mysqlStorageGb": {
+      "value": 20
+    },
+    "appServiceSkuName": {
+      "value": "B1"
+    },
+    "nodeVersion": {
+      "value": "24-lts"
+    },
+    "storageRedundancy": {
+      "value": "Standard_LRS"
+    }
+  }
+}
