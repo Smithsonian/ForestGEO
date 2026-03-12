@@ -96,6 +96,8 @@ function mockSuccessfulProcedureRun() {
   cm.executeQuery
     .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
     .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
+    .mockResolvedValueOnce({ affectedRows: 0 })
+    .mockResolvedValueOnce([])
     .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
 }
 
@@ -149,6 +151,8 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
       .mockResolvedValue({})
       .mockResolvedValue({})
       .mockResolvedValue({})
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
 
     const res = await GET(makeRequest(), makeProps());
@@ -169,5 +173,65 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     ).toBe(
       false
     );
+  });
+
+  it('removes stale unresolved rows from prior same-file batches before processing', async () => {
+    const cm = ConnectionManager.getInstance() as any;
+    cm.acquireApplicationLock.mockResolvedValue(true);
+    cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    cm.executeQuery
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+      .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
+      .mockResolvedValueOnce({ affectedRows: 244 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(200);
+
+    const staleFailureCleanupCall = cm.executeQuery.mock.calls.find(([sql]: [string]) => {
+      const normalizedSql = String(sql);
+      return (
+        normalizedSql.includes('DELETE FROM forestgeo_testing.coremeasurements') &&
+        normalizedSql.includes('StemGUID IS NULL') &&
+        normalizedSql.includes('UploadFileID = ?') &&
+        normalizedSql.includes('NOT (UploadBatchID <=> ?)')
+      );
+    });
+
+    expect(staleFailureCleanupCall).toBeDefined();
+  });
+
+  it('removes stale unresolved ingestion rows that match the current staged upload even when the file name changed', async () => {
+    const cm = ConnectionManager.getInstance() as any;
+    cm.acquireApplicationLock.mockResolvedValue(true);
+    cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    cm.executeQuery
+      .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
+      .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce([{ 1: 1 }])
+      .mockResolvedValueOnce({ affectedRows: 244 })
+      .mockResolvedValueOnce([[{ records_failed: 0, batch_failed: 0, message: 'ok' }], {}]);
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(200);
+
+    const staleFailureCleanupCall = cm.executeQuery.mock.calls.find(([sql]: [string]) => {
+      const normalizedSql = String(sql);
+      return (
+        normalizedSql.includes('DELETE cm') &&
+        normalizedSql.includes('JOIN forestgeo_testing.measurement_error_log mel') &&
+        normalizedSql.includes("me.ErrorSource = 'ingestion'") &&
+        normalizedSql.includes('JOIN forestgeo_testing.temporarymeasurements tm') &&
+        normalizedSql.includes('tm.FileID = ?') &&
+        normalizedSql.includes('tm.BatchID = ?') &&
+        normalizedSql.includes('NOT (cm.UploadFileID <=> ? AND cm.UploadBatchID <=> ?)')
+      );
+    });
+
+    expect(staleFailureCleanupCall).toBeDefined();
   });
 });

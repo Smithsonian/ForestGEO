@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { insertIngestionFailureRows, revalidateEditedFailedRow } from './measurementerrors';
+import { buildFailedMeasurementsSelectQuery, insertIngestionFailureRows, revalidateEditedFailedRow } from './measurementerrors';
 
 vi.mock('@/ailogger', () => ({
   default: {
@@ -11,6 +11,12 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('measurementerrors helpers', () => {
+  it('includes stored coremeasurement descriptions in failed-measurements queries', () => {
+    const sql = buildFailedMeasurementsSelectQuery('forestgeo_testing');
+
+    expect(sql).toContain('cm.Description AS Description');
+  });
+
   it('persists every inferred ingestion error for a failed row with a single bulk error-log upsert', async () => {
     const executeQuery = vi
       .fn()

@@ -158,6 +158,86 @@ async function recoverFailedInitialCensusIfNeeded(
   return true;
 }
 
+async function cleanupMatchedUnresolvedIngestionFailuresForBatch(
+  connectionManager: ConnectionManager,
+  schema: string,
+  fileID: string,
+  batchID: string,
+  censusID: number,
+  transactionID: string
+): Promise<number> {
+  const sameFileDeleteSQL = safeFormatQuery(
+    schema,
+    `DELETE FROM ??.coremeasurements
+     WHERE CensusID = ?
+       AND StemGUID IS NULL
+       AND UploadFileID = ?
+       AND NOT (UploadBatchID <=> ?)`
+  );
+
+  const sameFileDeleteResult = await connectionManager.executeQuery(sameFileDeleteSQL, [censusID, fileID, batchID], transactionID);
+  const sameFileDeletedRows = toCount(sameFileDeleteResult?.affectedRows);
+
+  if (sameFileDeletedRows > 0) {
+    ailogger.warn(`Removed ${sameFileDeletedRows} stale unresolved row(s) from prior same-file upload batches for ${fileID}-${batchID}`);
+  }
+
+  const crossFileCandidatesSQL = safeFormatQuery(
+    schema,
+    `SELECT 1
+     FROM ??.coremeasurements
+     WHERE CensusID = ?
+       AND StemGUID IS NULL
+       AND UploadFileID IS NOT NULL
+       AND NOT (UploadFileID <=> ?)
+     LIMIT 1`
+  );
+
+  const crossFileCandidateRows = await connectionManager.executeQuery(crossFileCandidatesSQL, [censusID, fileID], transactionID);
+  if (!Array.isArray(crossFileCandidateRows) || crossFileCandidateRows.length === 0) {
+    return sameFileDeletedRows;
+  }
+
+  const deleteSQL = safeFormatQuery(
+    schema,
+    `DELETE cm
+     FROM ??.coremeasurements cm
+     INNER JOIN ??.measurement_error_log mel
+       ON mel.MeasurementID = cm.CoreMeasurementID
+      AND mel.IsResolved = FALSE
+     INNER JOIN ??.measurement_errors me
+       ON me.ErrorID = mel.ErrorID
+      AND me.ErrorSource = 'ingestion'
+     INNER JOIN ??.temporarymeasurements tm
+       ON tm.CensusID = cm.CensusID
+      AND tm.FileID = ?
+      AND tm.BatchID = ?
+      AND tm.TreeTag <=> cm.RawTreeTag
+      AND tm.StemTag <=> cm.RawStemTag
+      AND tm.SpeciesCode <=> cm.RawSpCode
+      AND tm.QuadratName <=> cm.RawQuadrat
+      AND tm.LocalX <=> cm.RawX
+      AND tm.LocalY <=> cm.RawY
+      AND tm.DBH <=> cm.MeasuredDBH
+      AND tm.HOM <=> cm.MeasuredHOM
+      AND tm.MeasurementDate <=> cm.MeasurementDate
+      AND tm.Codes <=> cm.RawCodes
+      AND tm.Comments <=> cm.RawComments
+     WHERE cm.CensusID = ?
+       AND cm.StemGUID IS NULL
+       AND NOT (cm.UploadFileID <=> ? AND cm.UploadBatchID <=> ?)`
+  );
+
+  const deleteResult = await connectionManager.executeQuery(deleteSQL, [fileID, batchID, censusID, fileID, batchID], transactionID);
+  const deletedRows = toCount(deleteResult?.affectedRows);
+
+  if (deletedRows > 0) {
+    ailogger.warn(`Removed ${deletedRows} stale unresolved row(s) from prior cross-file uploads that matched ${fileID}-${batchID}`);
+  }
+
+  return sameFileDeletedRows + deletedRows;
+}
+
 /**
  * Splits a large batch into sub-batches of INGESTION_BATCH_SIZE by updating
  * the BatchID column on subsets of rows. Returns the list of sub-batch IDs
@@ -396,6 +476,17 @@ export async function GET(
 
         // Recovery check (uses original batchID before any splitting)
         await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, transactionID);
+
+        // If the same census is re-uploaded under a new filename, remove any old
+        // unresolved ingestion rows that exactly match the currently staged rows.
+        await cleanupMatchedUnresolvedIngestionFailuresForBatch(
+          connectionManager,
+          schema,
+          fileID,
+          batchID,
+          currentCensusID,
+          transactionID
+        );
 
         // Split into sub-batches if needed (UPDATE within same transaction)
         const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, transactionID);

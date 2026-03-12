@@ -734,6 +734,7 @@ export function buildFailedMeasurementsSelectQuery(schema: string): string {
         cm.MeasurementDate AS Date,
         cm.RawCodes AS Codes,
         cm.RawComments AS Comments,
+        cm.Description AS Description,
         (SELECT GROUP_CONCAT(DISTINCT me_all.ErrorMessage ORDER BY me_all.ErrorCode SEPARATOR '; ')
          FROM ${schema}.measurement_error_log mel_all
          JOIN ${schema}.measurement_errors me_all ON me_all.ErrorID = mel_all.ErrorID

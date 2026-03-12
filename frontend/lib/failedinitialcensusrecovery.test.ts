@@ -26,13 +26,25 @@ describe('shouldRecoverFailedInitialCensus', () => {
     ).toBe(true);
   });
 
-  it('does not recover when a completed upload already exists', () => {
+  it('does not recover orphaned failed coremeasurements when a completed upload already exists', () => {
     expect(
       shouldRecoverFailedInitialCensus({
         completedUploads: 1,
         incompleteUploads: 0,
         treeCount: 0,
         stemCount: 0,
+        coreMeasurementCount: 244
+      })
+    ).toBe(false);
+  });
+
+  it('does not recover when a completed upload already exists', () => {
+    expect(
+      shouldRecoverFailedInitialCensus({
+        completedUploads: 1,
+        incompleteUploads: 0,
+        treeCount: 10,
+        stemCount: 10,
         coreMeasurementCount: 244
       })
     ).toBe(false);

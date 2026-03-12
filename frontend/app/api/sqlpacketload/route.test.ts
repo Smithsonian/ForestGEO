@@ -328,7 +328,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ count: 0 }])
       // cleanupPreviousFileUploads: find old batches
       .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
-      // cleanupPreviousFileUploads: delete cmverrors
+      // cleanupPreviousFileUploads: delete measurement_error_log
       .mockResolvedValueOnce({ affectedRows: 5 })
       // cleanupPreviousFileUploads: delete coremeasurements
       .mockResolvedValueOnce({ affectedRows: 131 })
@@ -354,6 +354,11 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-test');
 
+    const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) => String(call[0]).includes('DELETE mel FROM forestgeo_testing.measurement_error_log')
+    );
+    expect(deleteValidationErrorsCall).toBeDefined();
+
     const deleteCmCall = mockConnectionManager.executeQuery.mock.calls.find(
       (call: any[]) => String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements') && String(call[0]).includes('UploadFileID')
     );
@@ -366,6 +371,41 @@ describe('sqlpacketload measurement scope validation', () => {
         String(call[0]).includes('BatchID IN')
     );
     expect(deleteFailedCall).toBeDefined();
+  });
+
+  it('falls back past missing legacy cleanup tables during re-upload', async () => {
+    const missingError = Object.assign(new Error("Table 'forestgeo_testing.measurement_error_log' doesn't exist"), {
+      code: 'ER_NO_SUCH_TABLE'
+    });
+    const missingFailedTableError = Object.assign(new Error("Table 'forestgeo_testing.failedmeasurements' doesn't exist"), {
+      code: 'ER_NO_SUCH_TABLE'
+    });
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
+      .mockRejectedValueOnce(missingError)
+      .mockResolvedValueOnce({ affectedRows: 5 })
+      .mockResolvedValueOnce({ affectedRows: 131 })
+      .mockRejectedValueOnce(missingFailedTableError)
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeMeasurementRequest()))!;
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ insertedCount: 1 });
+
+    const legacyDeleteCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE e FROM forestgeo_testing.cmverrors')
+    );
+    expect(legacyDeleteCall).toBeDefined();
   });
 
   it('logs dropped-row alert metadata with a bounded uploadId when unresolved-ingestion persistence fails twice', async () => {

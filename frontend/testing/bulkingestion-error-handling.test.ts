@@ -145,6 +145,18 @@ describe('failed initial census recovery', () => {
     ).toBe(false);
   });
 
+  test('does not recover coremeasurement-only residue when a completed upload already exists', () => {
+    expect(
+      shouldRecoverFailedInitialCensus({
+        completedUploads: 1,
+        incompleteUploads: 0,
+        treeCount: 0,
+        stemCount: 0,
+        coreMeasurementCount: 100
+      })
+    ).toBe(false);
+  });
+
   test('does not recover when there is no residual census data to clean', () => {
     expect(
       shouldRecoverFailedInitialCensus({

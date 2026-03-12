@@ -54,6 +54,16 @@ function buildUploadId(schema: string, plotID: number, censusID: number, fileID:
     .slice(0, 40);
 }
 
+function isMissingTableError(error: unknown, tableName?: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as { code?: string; message?: string; sqlMessage?: string };
+  const message = `${candidate.message ?? ''} ${candidate.sqlMessage ?? ''}`.toLowerCase();
+  const tableMatch = tableName ? message.includes(tableName.toLowerCase()) : true;
+
+  return (candidate.code === 'ER_NO_SUCH_TABLE' || message.includes("doesn't exist") || message.includes('does not exist')) && tableMatch;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
@@ -336,7 +346,7 @@ async function cleanupStaleMeasurementBatchesForFile(
  * Clean up all data from previous uploads of the same file for the same census.
  * This allows researchers to re-upload files freely — new data fully replaces old.
  *
- * Removes: cmverrors (linked), coremeasurements, failedmeasurements, uploadmetrics
+ * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
  */
 async function cleanupPreviousFileUploads(
   connectionManager: ConnectionManager,
@@ -359,14 +369,29 @@ async function cleanupPreviousFileUploads(
   const oldBatchIDs = previousBatches.map((row: { batchID: string }) => row.batchID);
   const placeholders = oldBatchIDs.map(() => '?').join(', ');
 
-  // Delete cmverrors linked to old coremeasurements from previous uploads
-  const deleteCmverrorsSQL = format(
-    `DELETE e FROM ??.cmverrors e
-     INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
+  // Delete validation error links linked to old coremeasurements from previous uploads.
+  // Prefer the unified measurement_error_log table, but fall back to cmverrors in legacy schemas.
+  const deleteValidationErrorsSQL = format(
+    `DELETE mel FROM ??.measurement_error_log mel
+     INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
      WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
     [schema, schema]
   );
-  await connectionManager.executeQuery(deleteCmverrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  try {
+    await connectionManager.executeQuery(deleteValidationErrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'measurement_error_log')) {
+      throw error;
+    }
+
+    const deleteLegacyValidationErrorsSQL = format(
+      `DELETE e FROM ??.cmverrors e
+       INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
+       WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
+      [schema, schema]
+    );
+    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  }
 
   // Delete old coremeasurements
   const deleteCmSQL = format(
@@ -383,7 +408,14 @@ async function cleanupPreviousFileUploads(
      WHERE FileID = ? AND CensusID = ? AND BatchID IN (${placeholders})`,
     [schema]
   );
-  await connectionManager.executeQuery(deleteFailedSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  try {
+    await connectionManager.executeQuery(deleteFailedSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  } catch (error: unknown) {
+    if (!isMissingTableError(error, 'failedmeasurements')) {
+      throw error;
+    }
+    ailogger.info(`Skipping failedmeasurements cleanup for ${fileName}: legacy table does not exist in ${schema}`);
+  }
 
   // Delete old uploadmetrics so the stored procedure won't skip the new batch
   const deleteMetricsSQL = format(
