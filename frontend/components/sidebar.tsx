@@ -724,6 +724,7 @@ export default function Sidebar(props: SidebarProps) {
       // Check for sub-links
       switch (linkHref) {
         case '/summary':
+        case '/errors':
           return !isAllValiditiesTrue;
         case '/subquadrats':
           return !validity['quadrats'];
@@ -946,6 +947,7 @@ export default function Sidebar(props: SidebarProps) {
                       if (isDataIncomplete) {
                         switch (href) {
                           case '/summary':
+                          case '/errors':
                             return 'Missing supporting data!';
                           case '/subquadrats':
                             return 'Subquadrats cannot be viewed until quadrats are valid.';
@@ -963,6 +965,7 @@ export default function Sidebar(props: SidebarProps) {
                       switch (href) {
                         case '/measurementshub':
                         case '/summary':
+                        case '/errors':
                           return !isAllValiditiesTrue;
                         case '/subquadrats':
                           return !validity['quadrats'];
@@ -1075,9 +1078,10 @@ export default function Sidebar(props: SidebarProps) {
                               <List size={'md'}>
                                 {item.expanded.map((link, _subIndex) => {
                                   const SubIcon = link.icon;
+                                  const isMeasurementsViewLink = link.href === '/summary' || link.href === '/errors';
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
-                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
+                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (isMeasurementsViewLink && !isAllValiditiesTrue));
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
@@ -1125,18 +1129,14 @@ export default function Sidebar(props: SidebarProps) {
                                                 }}
                                               >
                                                 <Badge
-                                                  color={link.href === '/summary' ? 'warning' : 'danger'}
-                                                  variant={
-                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'
-                                                  }
-                                                  badgeContent={
-                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
-                                                  }
-                                                  invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
-                                                  aria-label={
-                                                    link.href === '/summary'
+                                                  color={isMeasurementsViewLink ? 'warning' : 'danger'}
+                                                  variant={isMeasurementsViewLink ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'}
+                                                  badgeContent={isMeasurementsViewLink ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined}
+                                                  invisible={isMeasurementsViewLink ? isAllValiditiesTrue : !isDataIncomplete}
+                                                    aria-label={
+                                                    isMeasurementsViewLink
                                                       ? !isAllValiditiesTrue
-                                                        ? 'Warning: Summary contains incomplete data sections'
+                                                        ? 'Warning: Measurements views contain incomplete data sections'
                                                         : undefined
                                                       : isDataIncomplete
                                                         ? 'Error: Missing required data for this section'

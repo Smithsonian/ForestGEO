@@ -11,6 +11,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -98,6 +99,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: VisibilityIcon
       },
       {
+        label: 'View Errors',
+        href: '/errors',
+        tip: 'review failed measurements',
+        icon: ErrorOutlineIcon
+      },
+      {
         label: 'Post-Census Statistics',
         href: '/postvalidation',
         tip: '',
@@ -137,6 +144,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Dashboard';
     case '/measurementshub/summary':
       return 'View Data';
+    case '/measurementshub/errors':
+      return 'View Errors';
     case '/measurementshub/postvalidation':
       return 'Post-Census Statistics';
     case '/measurementshub/recentchanges':

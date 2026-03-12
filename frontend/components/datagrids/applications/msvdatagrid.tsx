@@ -2,7 +2,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar, Typography } from '@mui/joy';
@@ -17,6 +17,7 @@ import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
+import { useRouter } from 'next/navigation';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -45,11 +46,20 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   errors: ''
 };
 
-export default function MeasurementsSummaryViewDataGrid() {
+interface MeasurementsSummaryViewDataGridProps {
+  autoOpenFailedMeasurements?: boolean;
+  failedMeasurementsCloseRedirectHref?: string;
+}
+
+export default function MeasurementsSummaryViewDataGrid({
+  autoOpenFailedMeasurements = false,
+  failedMeasurementsCloseRedirectHref
+}: MeasurementsSummaryViewDataGridProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { setLoading } = useLoading();
+  const router = useRouter();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
@@ -73,6 +83,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const hasAutoOpenedFailedMeasurementsRef = useRef(false);
 
   useEffect(() => {
     // Guard: only call if FSM is open AND schemaName is defined
@@ -82,6 +93,15 @@ export default function MeasurementsSummaryViewDataGrid() {
       );
     }
   }, [openFSM, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+
+  useEffect(() => {
+    if (!autoOpenFailedMeasurements || hasAutoOpenedFailedMeasurementsRef.current) {
+      return;
+    }
+
+    hasAutoOpenedFailedMeasurementsRef.current = true;
+    setOpenFSM(true);
+  }, [autoOpenFailedMeasurements]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -132,6 +152,19 @@ export default function MeasurementsSummaryViewDataGrid() {
     }
   }
 
+  const handleCloseFailedMeasurementsModal = async () => {
+    if (dataReingested) {
+      await reloadMSV();
+      setDataReingested(false);
+    }
+
+    setOpenFSM(false);
+
+    if (failedMeasurementsCloseRedirectHref) {
+      router.replace(failedMeasurementsCloseRedirectHref);
+    }
+  };
+
   return (
     <>
       {globalError && (
@@ -179,16 +212,7 @@ export default function MeasurementsSummaryViewDataGrid() {
       <FailedMeasurementsModal
         open={openFSM}
         setReingested={setDataReingested}
-        handleCloseModal={async () => {
-          if (dataReingested) {
-            reloadMSV().then(() => {
-              setOpenFSM(false);
-              setDataReingested(false);
-            });
-          } else {
-            setOpenFSM(false);
-          }
-        }}
+        handleCloseModal={handleCloseFailedMeasurementsModal}
       />
       <MeasurementsCommons
         gridType={'measurementssummary'}
@@ -220,7 +244,6 @@ export default function MeasurementsSummaryViewDataGrid() {
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
           { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
         ]}
-        failedTrigger={() => setOpenFSM(true)}
       />
       <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
         <Snackbar
