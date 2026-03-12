@@ -67,6 +67,17 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
   const MAX_HEARTBEAT_FAILURES = 3;
 
   /**
+   * Stop heartbeat interval
+   */
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+      ailogger.info('[useUploadSession] Stopped heartbeat interval');
+    }
+  }, []);
+
+  /**
    * Send heartbeat to server
    */
   const sendHeartbeat = useCallback(async (): Promise<boolean> => {
@@ -89,16 +100,17 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
         return true;
       }
 
-      // Session not found or expired
+      // A 404 means the server no longer recognizes this session. Clear it
+      // immediately so the uploader cannot keep reusing a dead session ID.
       if (response.status === 404) {
         ailogger.warn('[useUploadSession] Session expired or not found');
-        consecutiveHeartbeatFailures.current++;
-        if (consecutiveHeartbeatFailures.current >= MAX_HEARTBEAT_FAILURES) {
-          if (isMountedRef.current) {
-            setSession(prev => ({ ...prev, isActive: false, error: 'Session expired' }));
-          }
-          onSessionExpired?.();
+        consecutiveHeartbeatFailures.current = MAX_HEARTBEAT_FAILURES;
+        stopHeartbeat();
+        sessionIdRef.current = null;
+        if (isMountedRef.current) {
+          setSession(prev => ({ ...prev, sessionId: null, isActive: false, error: 'Session expired' }));
         }
+        onSessionExpired?.();
         return false;
       }
 
@@ -120,7 +132,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       }
       return false;
     }
-  }, [schema, onSessionExpired, onHeartbeatFailed]);
+  }, [schema, onSessionExpired, onHeartbeatFailed, stopHeartbeat]);
 
   /**
    * Start heartbeat interval
@@ -136,17 +148,6 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
 
     ailogger.info(`[useUploadSession] Started heartbeat interval (${heartbeatInterval}ms)`);
   }, [heartbeatInterval, sendHeartbeat]);
-
-  /**
-   * Stop heartbeat interval
-   */
-  const stopHeartbeat = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-      ailogger.info('[useUploadSession] Stopped heartbeat interval');
-    }
-  }, []);
 
   /**
    * Create a new upload session
@@ -409,6 +410,9 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       // Mark session as abandoned if still active
       if (sessionIdRef.current) {
         const sessionId = sessionIdRef.current;
+        // Clear the ref first so any stale async work from an unmounted uploader
+        // cannot keep reusing a session that is being torn down.
+        sessionIdRef.current = null;
         // Fire-and-forget cleanup. This is especially important during development,
         // where Fast Refresh can unmount the uploader mid-file and otherwise leave
         // partial temporary rows behind for the next retry.

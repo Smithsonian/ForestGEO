@@ -16,6 +16,13 @@ import ailogger from '@/ailogger';
 import { detectDelimiter, validateDelimiter } from '@/components/uploadsystemhelpers/delimiterdetection';
 import { useUploadSession } from '@/app/hooks/useuploadsession';
 import { ETACalculator, formatTimeRemaining, createTransactionAwareQueue } from '@/components/uploadsystemhelpers/uploadprocessingutils';
+import {
+  buildUploadSessionRestartRequiredError,
+  getApiErrorMessage,
+  isUploadSessionRestartRequiredError,
+  parseUploadSessionConflict,
+  readResponsePayload
+} from '@/components/uploadsystemhelpers/uploadsessionconflicts';
 import { generateShortBatchID } from '@/config/utils';
 
 function createAbortError(message: string): Error {
@@ -78,6 +85,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const currentCensus = useOrgCensusContext();
   const currentPlotID = currentPlot?.plotID ?? null;
   const currentCensusID = currentCensus?.dateRanges?.[0]?.censusID ?? null;
+  const fatalUploadErrorRef = useRef<Error | null>(null);
+
+  const markFatalUploadError = useCallback((error: Error): Error => {
+    if (!fatalUploadErrorRef.current) {
+      fatalUploadErrorRef.current = error;
+    }
+    return fatalUploadErrorRef.current;
+  }, []);
+
+  const handleUploadSessionExpired = useCallback(() => {
+    markFatalUploadError(buildUploadSessionRestartRequiredError('the upload could continue'));
+  }, [markFatalUploadError]);
 
   // Session tracking for client disconnection handling
   const {
@@ -91,7 +110,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   } = useUploadSession({
     schema,
     plotId: currentPlotID ?? -1,
-    censusId: currentCensusID ?? -1
+    censusId: currentCensusID ?? -1,
+    onSessionExpired: handleUploadSessionExpired
   });
 
   const [totalOperations, setTotalOperations] = useState(0);
@@ -110,6 +130,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const chunkSize = 1024 * 256; // 256KB chunks: reduces batch count ~8x vs 32KB (critical for 100k+ row uploads)
   const connectionLimit = 1; // Process batches sequentially to prevent lock contention (file-level locks require serial processing)
   const uploadStartedRef = useRef<boolean>(false);
+  const uploadRunningRef = useRef<boolean>(false);
   const batchProcessingStartedRef = useRef<boolean>(false);
   const lastPreparedUploadAttemptRef = useRef<string>('');
 
@@ -127,6 +148,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const measurementBatchIDs = useRef<Map<string, string>>(new Map());
 
   const getRequiredUploadSessionId = useCallback((): string => {
+    if (fatalUploadErrorRef.current) {
+      throw fatalUploadErrorRef.current;
+    }
+
     const currentSessionId = getCurrentSessionId();
     if (!currentSessionId) {
       throw new Error('Upload session is not active');
@@ -228,6 +253,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       upstreamSignal?.removeEventListener('abort', abortFromUpstream);
     }
   }, []);
+
+  const buildClientResponseError = useCallback(
+    async (response: Response, context: string): Promise<Error> => {
+      const payload = await readResponsePayload(response);
+      const uploadSessionConflict = parseUploadSessionConflict(payload);
+
+      if (response.status === 409 && uploadSessionConflict?.restartRequired) {
+        return markFatalUploadError(buildUploadSessionRestartRequiredError(context, payload));
+      }
+
+      if (response.status === 409 && uploadSessionConflict) {
+        return new Error(`Upload session conflict while ${context}: ${uploadSessionConflict.message}`);
+      }
+
+      const apiErrorMessage = getApiErrorMessage(payload);
+      return new Error(`Client error (${response.status}): ${apiErrorMessage || response.statusText || 'Unknown client error'}`);
+    },
+    [markFatalUploadError]
+  );
 
   const abortRecoveryVerification = useCallback(() => {
     const controller = recoveryVerificationAbortRef.current;
@@ -436,6 +480,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
+      if (!isMountedRef.current) {
+        throw createAbortError(`Upload cancelled before starting ${fileName}`);
+      }
+
       const maxRetries = 3;
       const baseDelay = 1000; // 1 second base delay
       const operationId = `${fileName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -447,6 +495,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // Use iterative retry loop instead of recursion to prevent stack overflow
       for (let retryCount = 0; retryCount <= maxRetries; retryCount++) {
         try {
+          if (!isMountedRef.current) {
+            throw createAbortError(`Upload cancelled before retrying ${fileName}`);
+          }
+
           const response = await fetchWithTimeout(
             `/api/sqlpacketload`,
             {
@@ -476,8 +528,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             } else if (response.status === 429) {
               throw new Error(`Rate limit exceeded (${response.status}): Too many requests. Please wait before retrying.`);
             } else if (response.status >= 400) {
-              const errorText = await response.text().catch(() => 'Unknown client error');
-              throw new Error(`Client error (${response.status}): ${errorText}`);
+              throw await buildClientResponseError(response, `uploading ${fileName}`);
             } else {
               throw new Error(`API returned status ${response.status}`);
             }
@@ -526,6 +577,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         } catch (error: unknown) {
           const errorObj = error instanceof Error ? error : new Error(String(error));
           const errorMessage = errorObj.message;
+
+          if (errorObj.name === 'AbortError') {
+            activeOperations.current.delete(operationId);
+            if (activeOperations.current.size === 0) {
+              operationCompletionCallbacks.current.forEach(callback => callback());
+              operationCompletionCallbacks.current = [];
+            }
+            throw errorObj;
+          }
+
           ailogger.error(`Upload attempt ${retryCount + 1}/${maxRetries + 1} failed for ${fileName}: ${errorMessage}`, errorObj);
           const isRetriableServerError = /^Server error 5\d{2}:/i.test(errorMessage) || errorMessage.includes('Server error (5');
 
@@ -564,7 +625,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // If we reach here, all retries failed but error wasn't thrown (shouldn't happen)
       throw new Error(`Upload failed for ${fileName} after ${maxRetries + 1} attempts`);
     },
-    [uploadForm, currentPlot, currentCensus, session, schema, fetchWithTimeout, getRequiredUploadSessionId]
+    [uploadForm, currentPlot, currentCensus, session, schema, fetchWithTimeout, getRequiredUploadSessionId, isMountedRef, buildClientResponseError]
   );
 
   const parseFileInChunks = useCallback(
@@ -846,6 +907,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             totalRows += results.data.length;
             const chunkTask = (async () => {
               try {
+                if (!isMountedRef.current) {
+                  parser.abort();
+                  throw createAbortError(`Parsing cancelled for ${file.name}`);
+                }
+
+                if (fatalUploadErrorRef.current) {
+                  parser.abort();
+                  throw fatalUploadErrorRef.current;
+                }
+
                 if (queue.size >= queuePauseThreshold) {
                   ailogger.info(`Queue size ${queue.size} exceeded threshold (${queuePauseThreshold}). Pausing parser.`);
                   parser.pause();
@@ -886,13 +957,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 };
 
                 queue.add(async () => {
+                  if (!isMountedRef.current) {
+                    return;
+                  }
+
+                  if (fatalUploadErrorRef.current) {
+                    return;
+                  }
+
                   try {
                     await uploadToSql(fileCollectionRowSet, file.name, fileBatchID);
                   } catch (error: unknown) {
                     const errorObj = error instanceof Error ? error : new Error(String(error));
+                    if (errorObj.name === 'AbortError') {
+                      return;
+                    }
+                    if (isUploadSessionRestartRequiredError(errorObj)) {
+                      markFatalUploadError(errorObj);
+                      queue.clear();
+                      parser.abort();
+                    }
                     ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
                     if (!firstChunkUploadError) {
-                      firstChunkUploadError = errorObj;
+                      firstChunkUploadError = fatalUploadErrorRef.current ?? errorObj;
                     }
                   } finally {
                     // Always increment completed chunks to ensure progress updates
@@ -904,9 +991,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 });
               } catch (err: unknown) {
                 const errObj = err instanceof Error ? err : new Error(String(err));
+                if (errObj.name === 'AbortError') {
+                  return;
+                }
+                if (isUploadSessionRestartRequiredError(errObj)) {
+                  markFatalUploadError(errObj);
+                }
                 ailogger.error('Error processing chunk:', errObj);
                 if (!chunkProcessingError) {
-                  chunkProcessingError = errObj;
+                  chunkProcessingError = fatalUploadErrorRef.current ?? errObj;
                 }
                 parser.abort();
                 throw errObj;
@@ -924,8 +1017,18 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             // Wait for all database operations to complete
             await waitForAllOperationsToComplete();
 
+            if (!isMountedRef.current) {
+              resolve();
+              return;
+            }
+
             if (chunkProcessingError) {
               reject(chunkProcessingError);
+              return;
+            }
+
+            if (fatalUploadErrorRef.current) {
+              reject(fatalUploadErrorRef.current);
               return;
             }
 
@@ -999,7 +1102,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setCompletedChunks,
       setTotalChunks,
       pushErrorRowsToFailedMeasurements,
-      waitForAllOperationsToComplete
+      waitForAllOperationsToComplete,
+      markFatalUploadError
     ]
   );
 
@@ -1023,6 +1127,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       lastPreparedUploadAttemptRef.current = '';
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
+      fatalUploadErrorRef.current = null;
       measurementBatchIDs.current.clear();
       return;
     }
@@ -1031,6 +1136,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       lastPreparedUploadAttemptRef.current = uploadAttemptKey;
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
+      fatalUploadErrorRef.current = null;
       expectedRowCounts.current.clear();
       expectedTemporaryRowCounts.current.clear();
       measurementBatchIDs.current.clear();
@@ -1050,7 +1156,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return;
     }
 
-    if (isStaleZeroProgress) {
+    if (isStaleZeroProgress && !uploadRunningRef.current) {
       ailogger.warn(`Detected stale upload start guard for ${uploadAttemptKey}; resetting client upload state`);
       uploadStartedRef.current = false;
       batchProcessingStartedRef.current = false;
@@ -1067,6 +1173,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Clear expected row counts from any previous upload
         expectedRowCounts.current.clear();
         expectedTemporaryRowCounts.current.clear();
+
+        if (fatalUploadErrorRef.current) {
+          throw fatalUploadErrorRef.current;
+        }
 
         if (acceptedFiles.length === 0) {
           ailogger.error('UploadFireSQL mounted with no accepted files to process');
@@ -1165,6 +1275,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Critical: Wait for all database operations to complete before marking as uploaded
         await waitForAllOperationsToComplete();
 
+        if (fatalUploadErrorRef.current) {
+          throw fatalUploadErrorRef.current;
+        }
+
         // Start upload verification process with UI feedback
         if (isMountedRef.current) {
           setIsVerifying(true);
@@ -1237,51 +1351,63 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       } catch (error: unknown) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error('Upload error:', errorObj);
+        if (errorObj.name === 'AbortError') {
+          ailogger.info(`Upload bootstrap aborted for ${uploadAttemptKey}`);
+          return;
+        }
+        if (!isUploadSessionRestartRequiredError(errorObj)) {
+          ailogger.error('Upload error:', errorObj);
+        }
         throw errorObj;
       }
     }
 
-    // Only run uploads once using ref
-    let startHandle: ReturnType<typeof setTimeout> | null = null;
-
-    if (acceptedFiles.length > 0 && !uploadStartedRef.current && !uploaded && !processed) {
-      ailogger.info(`Scheduling runUploads for attempt ${uploadAttemptKey}`);
+    // Only run uploads once using ref.  Start synchronously (not via setTimeout)
+    // so the cleanup function cannot cancel the upload before it begins.  The
+    // guard useEffect resets several state variables on fresh attempts, and each
+    // setState triggers a re-render that runs this cleanup.  A setTimeout(fn, 0)
+    // is always cleared before it fires in that scenario, leaving the upload
+    // permanently stuck at 0%.
+    if (acceptedFiles.length > 0 && !uploadStartedRef.current && !uploadRunningRef.current && !uploaded && !processed) {
+      ailogger.info(`Starting runUploads for attempt ${uploadAttemptKey}`);
       uploadStartedRef.current = true;
-      startHandle = setTimeout(() => {
-        startHandle = null;
-        ailogger.info(`Starting runUploads for attempt ${uploadAttemptKey}`);
-        runUploads().catch(error => {
-          // Filter out Application Insights monitoring errors
-          if (isApplicationInsightsError(error)) {
-            ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
-            ailogger.info('Upload process continuing despite monitoring system limitation');
-            // Don't set error state or change review state for monitoring errors
-            return;
-          }
+      uploadRunningRef.current = true;
+      runUploads().then(() => {
+        uploadRunningRef.current = false;
+      }).catch(error => {
+        uploadRunningRef.current = false;
+        if (error instanceof Error && error.name === 'AbortError') {
+          ailogger.info(`runUploads aborted for attempt ${uploadAttemptKey}`);
+          return;
+        }
 
-          ailogger.error('runUploads failed:', error);
+        // Filter out Application Insights monitoring errors
+        if (isApplicationInsightsError(error)) {
+          ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
+          ailogger.info('Upload process continuing despite monitoring system limitation');
+          // Don't set error state or change review state for monitoring errors
+          return;
+        }
+
+        ailogger.error('runUploads failed:', error);
+        if (!isUploadSessionRestartRequiredError(error)) {
           // Cancel the session and clean up staged temp data on error.
           cancelSession(true).catch(cancelErr => {
             ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
           });
+        }
 
-          // CRITICAL: Only update state if component is still mounted
-          // Updating state after unmount can cause React error #310
-          if (isMountedRef.current) {
-            setUploadError(error);
-            setReviewState(ReviewStates.ERRORS);
-          } else {
-            ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
-          }
-        });
-      }, 0);
+        // CRITICAL: Only update state if component is still mounted
+        // Updating state after unmount can cause React error #310
+        if (isMountedRef.current) {
+          setUploadError(error);
+          setReviewState(ReviewStates.ERRORS);
+        } else {
+          ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
+        }
+      });
     }
     return () => {
-      if (startHandle !== null) {
-        clearTimeout(startHandle);
-        ailogger.info(`Cancelled scheduled upload start for attempt ${uploadAttemptKey}`);
-      }
       abortRecoveryVerification();
       // Set isMountedRef to false on cleanup to prevent state updates after unmount
       // Note: The uploadStartedRef guard above ensures upload only starts once,
@@ -1346,6 +1472,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       ailogger.info('Starting batch processing phase (guarded by ref)');
 
       async function runProcessBatches() {
+        if (fatalUploadErrorRef.current) {
+          throw fatalUploadErrorRef.current;
+        }
+
         setProcessedChunks(0);
 
         // Update session state to processing
@@ -1372,7 +1502,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
           });
           if (!response.ok) {
-            throw new Error(`Failed to setup bulk processor: ${response.status} - ${response.statusText}`);
+            throw await buildClientResponseError(response, 'discovering staged batches for processing');
           }
           output = await response.json();
           ailogger.warn(
@@ -1414,8 +1544,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               }
             });
             if (!collapserResponse.ok) {
-              const errorText = await collapserResponse.text().catch(() => 'Unknown error');
-              throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
+              throw await buildClientResponseError(collapserResponse, 'running data consolidation');
             }
             const collapserData = await collapserResponse.json();
 
@@ -1487,7 +1616,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               )
                 .then(async response => {
                   if (!response.ok) {
-                    throw new Error(`API returned status ${response.status} for batch ${fileID}-${batchID}`);
+                    throw await buildClientResponseError(response, `processing batch ${fileID}-${batchID}`);
                   }
                   const result = await response.json();
 
@@ -1520,6 +1649,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   if (isMonitoringError) {
                     ailogger.warn(`Batch ${fileID}-${batchID} encountered monitoring system error (not data error): ${errorMessage}`);
                     // Don't try to move to failedmeasurements for monitoring errors
+                  } else if (isUploadSessionRestartRequiredError(e)) {
+                    markFatalUploadError(e);
+                    queue.clear();
+                    ailogger.warn(`Stopping batch processing for ${fileID}-${batchID}: ${errorMessage}`);
                   } else {
                     ailogger.error(`Error processing batch ${fileID}-${batchID}:`, e);
                     // A dropped HTTP response does not necessarily mean the server-side batch failed.
@@ -1562,7 +1695,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
                   // Still increment progress even for failed batches so UI doesn't hang
                   // Check isMountedRef to prevent state updates after unmount
-                  if (isMountedRef.current) {
+                  if (isMountedRef.current && !isUploadSessionRestartRequiredError(e)) {
                     setProcessedChunks(prev => {
                       const newValue = prev + 1;
                       ailogger.info(
@@ -1585,6 +1718,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             ailogger.info(`Starting batch processing for ${fileID} with ${batchTasks.length} batches`);
             for (const batchTask of batchTasks) {
               queue.add(async () => {
+                if (fatalUploadErrorRef.current) {
+                  return;
+                }
                 await batchTask();
               });
             }
@@ -1598,6 +1734,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Wait for all batch processing to complete, then increment completedOperations once
         await queue.onEmpty();
+
+        if (fatalUploadErrorRef.current) {
+          throw fatalUploadErrorRef.current;
+        }
 
         // Check if component is still mounted before continuing with verification
         if (!isMountedRef.current) {
@@ -1667,8 +1807,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
           });
           if (!collapserResponse.ok) {
-            const errorText = await collapserResponse.text().catch(() => 'Unknown error');
-            throw new Error(`Collapser failed: ${collapserResponse.status} - ${errorText}`);
+            throw await buildClientResponseError(collapserResponse, 'running data consolidation');
           }
           const collapserData = await collapserResponse.json();
 
@@ -1777,6 +1916,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       runProcessBatches().catch(error => {
+        if (error instanceof Error && error.name === 'AbortError') {
+          ailogger.info('Batch processing aborted before completion');
+          return;
+        }
+
         // Filter out Application Insights monitoring errors
         if (isApplicationInsightsError(error)) {
           ailogger.warn('Application Insights monitoring error detected during batch processing (not a data processing error):', error);
@@ -1786,9 +1930,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         // Cancel the session and clean up staged temp data on processing error.
-        cancelSession(true).catch(cancelErr => {
-          ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
-        });
+        if (!isUploadSessionRestartRequiredError(error)) {
+          cancelSession(true).catch(cancelErr => {
+            ailogger.warn(`Failed to cancel upload session after processing error: ${cancelErr.message}`);
+          });
+        }
 
         // CRITICAL: Only update state if component is still mounted
         // Updating state after unmount can cause React error #310
@@ -1815,7 +1961,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     setReviewState,
     setUploadError,
     fetchWithTimeout,
+    buildClientResponseError,
     getRequiredUploadSessionId,
+    markFatalUploadError,
     updateState,
     verifyBatchOutcomeAfterRequestFailure,
     isApplicationInsightsError
