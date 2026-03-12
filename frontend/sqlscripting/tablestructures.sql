@@ -194,6 +194,9 @@ create index idx_enddate
 create index idx_plotcensusnumber
     on census (PlotCensusNumber);
 
+create index idx_census_plot_pcn_active
+    on census (PlotID, PlotCensusNumber, IsActive);
+
 create index idx_plotid
     on census (PlotID);
 
@@ -779,6 +782,9 @@ create index idx_cm_uploadbatch_census
 create index idx_cm_census_active
     on coremeasurements (CensusID, IsActive);
 
+create index idx_cm_census_validated_stem
+    on coremeasurements (CensusID, IsValidated, IsActive, StemGUID);
+
 create index idx_cm_stemguid_active
     on coremeasurements (StemGUID, IsActive);
 
@@ -914,6 +920,9 @@ create index idx_stems_tag_tree_census_active
 create index idx_stems_tree_quadrat_census_active
     on stems (TreeID, QuadratID, CensusID, IsActive);
 
+create index idx_stems_census_tree_tag_active
+    on stems (CensusID, TreeID, StemTag, IsActive);
+
 create index ix_stems_treeid_stemtag_quadratid
     on stems (TreeID, StemTag, QuadratID);
 
@@ -925,6 +934,9 @@ create index trees_TreeTag_index
 
 create index idx_trees_tag_census_active
     on trees (TreeTag, CensusID, IsActive);
+
+create index idx_trees_census_tag_active
+    on trees (CensusID, TreeTag, IsActive);
 
 create index idx_trees_tag_species_census_active
     on trees (TreeTag, SpeciesID, CensusID, IsActive);
