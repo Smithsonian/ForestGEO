@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-32 in order against a target schema.
+# Runs migrations 16-33 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -43,6 +43,7 @@ ORDERED_MIGRATIONS=(
     "30_seed_ingestion_integrity_error_codes.sql"
     "31_add_upload_session_scope_lock.sql"
     "32_add_cross_census_validation_indexes.sql"
+    "33_refresh_measurements_summary_procedure.sql"
 )
 
 # ---------------------------------------------------------------------------
@@ -249,7 +250,7 @@ restore_backup() {
 }
 
 # ---------------------------------------------------------------------------
-# Deploy stored procedures (needed after migration 23)
+# Deploy stored procedures when a migration requires a routine refresh
 # ---------------------------------------------------------------------------
 deploy_stored_procedures() {
     if [[ ! -f "$STORED_PROCEDURES_FILE" ]]; then
@@ -362,11 +363,11 @@ main() {
         log_success "Applied: $file (${duration}s)"
         applied_count=$((applied_count + 1))
 
-        # After migration 23, deploy the new stored procedures
-        if [[ "$file" == "23_update_bulkingestionprocess.sql" ]]; then
-            log_info "Migration 23 dropped legacy procedures. Deploying new stored procedures..."
+        # Some migrations rely on the canonical storedprocedures.sql deployment
+        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" ]]; then
+            log_info "Migration $file requires a stored procedure redeploy. Deploying stored procedures..."
             if ! deploy_stored_procedures; then
-                log_error "Stored procedure deployment failed after migration 23."
+                log_error "Stored procedure deployment failed after $file."
                 failed_migration="$file (stored procedures)"
                 break
             fi
