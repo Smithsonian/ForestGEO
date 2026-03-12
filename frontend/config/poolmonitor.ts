@@ -232,10 +232,26 @@ export class PoolMonitor {
 
     this.inactivityTimer = setTimeout(async () => {
       const { live } = await this.logAndReturnConnections();
-      if (live.length === 0) {
+
+      // Check ConnectionManager for active transactions — a long-running stored
+      // procedure (e.g. cross-census validation on 200K+ rows) won't appear in the
+      // processlist query (INFO IS NULL filter excludes executing queries) but still
+      // holds a transaction that must not be interrupted by pool shutdown.
+      let hasActiveTransactions = false;
+      try {
+        const { ConnectionManager } = await import('./connectionmanager');
+        hasActiveTransactions = ConnectionManager.getInstance().hasActiveTransactions();
+      } catch {
+        // ConnectionManager not available — proceed with processlist check only.
+      }
+
+      if (live.length === 0 && !hasActiveTransactions) {
         ailogger.info(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
         await this.closeAllConnections();
         ailogger.info(chalk.red('Graceful shutdown complete.'));
+      } else if (hasActiveTransactions) {
+        ailogger.info(chalk.yellow('Inactivity timer fired but active transactions exist — deferring shutdown.'));
+        this.resetInactivityTimer();
       }
     }, 3600000); // 1 hour in milliseconds
   }

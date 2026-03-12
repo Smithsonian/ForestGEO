@@ -447,6 +447,10 @@ class ConnectionManager {
     }
   }
 
+  public hasActiveTransactions(): boolean {
+    return this.transactionConnections.size > 0;
+  }
+
   public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {
     const threshold = maxAgeMs ?? this.DEFAULT_TX_TIMEOUT_MS * 2; // e.g., twice default
     const now = Date.now();
