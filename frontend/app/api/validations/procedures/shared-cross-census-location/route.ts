@@ -5,6 +5,11 @@ import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
 
+// Cross-census validations JOIN across large tables and can legitimately
+// take several minutes on 200K+ row datasets.  Allow up to 10 minutes so
+// the request isn't killed by the platform while the procedure is running.
+export const maxDuration = 600;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

@@ -266,9 +266,24 @@ function isStoredProcedureCall(query: string): boolean {
   return /^\s*CALL\s+/i.test(query);
 }
 
-function extractProcedureName(query: string): string | null {
-  const match = query.match(/^\s*CALL\s+`?([A-Za-z0-9_]+)`?\s*\(/i);
-  return match?.[1] ?? null;
+interface StoredProcedureReference {
+  schemaName: string | null;
+  procedureName: string;
+}
+
+function extractStoredProcedureReference(query: string): StoredProcedureReference | null {
+  const match = query.match(/^\s*CALL\s+(?:(`?[A-Za-z0-9_]+`?)\s*\.\s*)?(`?[A-Za-z0-9_]+`?)\s*\(/i);
+  if (!match) {
+    return null;
+  }
+
+  const schemaName = match[1] ? match[1].replace(/`/g, '') : null;
+  const procedureName = match[2]?.replace(/`/g, '');
+  if (!procedureName) {
+    return null;
+  }
+
+  return { schemaName, procedureName };
 }
 
 async function validateStoredProcedureCall(
@@ -277,11 +292,21 @@ async function validateStoredProcedureCall(
   query: string,
   validationResult: ValidationResponse
 ): Promise<void> {
-  const procedureName = extractProcedureName(query);
+  const procedureReference = extractStoredProcedureReference(query);
 
-  if (!procedureName) {
+  if (!procedureReference) {
     validationResult.isValid = false;
-    validationResult.errors.push('Stored procedure calls must use the form CALL ProcedureName(...)');
+    validationResult.errors.push('Stored procedure calls must use the form CALL ProcedureName(...) or CALL schema.ProcedureName(...)');
+    return;
+  }
+
+  const routineSchema = procedureReference.schemaName ?? schema;
+
+  if (procedureReference.schemaName && procedureReference.schemaName.toLowerCase() !== schema.toLowerCase()) {
+    validationResult.isValid = false;
+    validationResult.errors.push(
+      `Stored procedure call targets schema '${procedureReference.schemaName}', but the selected schema is '${schema}'`
+    );
     return;
   }
 
@@ -294,11 +319,11 @@ async function validateStoredProcedureCall(
         AND ROUTINE_NAME = ?
       LIMIT 1
     `,
-    [schema, procedureName]
+    [routineSchema, procedureReference.procedureName]
   );
 
   if (routines.length === 0) {
     validationResult.isValid = false;
-    validationResult.errors.push(`Stored procedure '${procedureName}' does not exist in schema '${schema}'`);
+    validationResult.errors.push(`Stored procedure '${procedureReference.procedureName}' does not exist in schema '${routineSchema}'`);
   }
 }

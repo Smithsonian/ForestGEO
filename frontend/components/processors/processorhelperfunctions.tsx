@@ -270,8 +270,13 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 //   }
 // };
 
-function isDeadlockError(error: any) {
-  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;
+function isRetryableValidationLockError(error: any) {
+  return (
+    error?.code === 'ER_LOCK_DEADLOCK' ||
+    error?.errno === 1213 ||
+    error?.code === 'ER_LOCK_WAIT_TIMEOUT' ||
+    error?.errno === 1205
+  );
 }
 
 type ValidationExecutionParams = {
@@ -283,12 +288,14 @@ type CombinedDBHValidationResult = {
   success: boolean;
   ranGrowth: boolean;
   ranShrinkage: boolean;
+  error?: string;
 };
 
 type CombinedCrossCensusLocationValidationResult = {
   success: boolean;
   ranQuadratMismatch: boolean;
   ranCoordinateDrift: boolean;
+  error?: string;
 };
 
 function mysqlBoolToBoolean(value: any): boolean {
@@ -304,13 +311,17 @@ async function prepareValidationRun(
   transactionID: string,
   params: ValidationExecutionParams
 ): Promise<void> {
+  // Ensure error definition exists OUTSIDE the transaction (auto-commit) so
+  // the INSERT ON DUPLICATE KEY UPDATE lock is released immediately rather
+  // than being held for the duration of the potentially long-running
+  // validation stored procedure.  This prevents lock-wait timeouts when
+  // multiple validations run in parallel.
   await ensureMeasurementErrorDefinition(
     connectionManager,
     schema,
     VALIDATION_ERROR_SOURCE,
     String(validationProcedureID),
-    `Validation ${validationProcedureName}`,
-    transactionID
+    `Validation ${validationProcedureName}`
   );
 
   const cleanupQuery = `
@@ -402,9 +413,9 @@ export async function runValidation(
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {
-      if (isDeadlockError(e)) {
+      if (isRetryableValidationLockError(e)) {
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
@@ -413,7 +424,7 @@ export async function runValidation(
           return false;
         }
 
-        ailogger.info(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
+        ailogger.info(`Validation attempt ${attempt}: retryable lock error encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -504,18 +515,23 @@ export async function runCombinedDBHValidations(
       await connectionManager.commitTransaction(transactionID);
       return { success: true, ranGrowth, ranShrinkage };
     } catch (e: any) {
-      if (isDeadlockError(e)) {
+      if (isRetryableValidationLockError(e)) {
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          ailogger.error(`Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
             ailogger.error('Rollback error:', rollbackError);
           }
-          return { success: false, ranGrowth: false, ranShrinkage: false };
+          return {
+            success: false,
+            ranGrowth: false,
+            ranShrinkage: false,
+            error: `Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to lock contention/timeouts`
+          };
         }
 
-        ailogger.info(`Combined DBH validation attempt ${attempt}: deadlock encountered. Retrying after ${delay}ms...`);
+        ailogger.info(`Combined DBH validation attempt ${attempt}: retryable lock error encountered. Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -530,13 +546,18 @@ export async function runCombinedDBHValidations(
         } catch (rollbackError: any) {
           ailogger.error('Rollback error:', rollbackError);
         }
-        return { success: false, ranGrowth: false, ranShrinkage: false };
+        return { success: false, ranGrowth: false, ranShrinkage: false, error: e.message };
       }
     }
   }
 
   ailogger.error(`Combined DBH validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
-  return { success: false, ranGrowth: false, ranShrinkage: false };
+  return {
+    success: false,
+    ranGrowth: false,
+    ranShrinkage: false,
+    error: `Combined DBH validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`
+  };
 }
 
 export async function runCombinedCrossCensusLocationValidations(
@@ -594,28 +615,57 @@ export async function runCombinedCrossCensusLocationValidations(
       }
 
       if (ranQuadratMismatch || ranCoordinateDrift) {
+        // Set a 10-minute MySQL statement timeout so an unoptimised query
+        // cannot run for 54+ minutes and orphan a connection.  10 minutes
+        // is needed for large cross-census comparisons (e.g. 212K × 192K rows).
+        const CROSS_CENSUS_TIMEOUT_MS = 10 * 60 * 1000;
         await connectionManager.executeQuery(
-          `CALL ${schema}.RunSharedCrossCensusLocationValidations(?, ?, ?, ?)`,
-          [params.p_CensusID ?? null, params.p_PlotID ?? null, ranQuadratMismatch ? 1 : 0, ranCoordinateDrift ? 1 : 0],
+          `SET SESSION MAX_EXECUTION_TIME = ${CROSS_CENSUS_TIMEOUT_MS}`,
+          [],
           transactionID
         );
+
+        try {
+          await connectionManager.executeQuery(
+            `CALL ${schema}.RunSharedCrossCensusLocationValidations(?, ?, ?, ?)`,
+            [params.p_CensusID ?? null, params.p_PlotID ?? null, ranQuadratMismatch ? 1 : 0, ranCoordinateDrift ? 1 : 0],
+            transactionID
+          );
+        } finally {
+          // Always reset MAX_EXECUTION_TIME so it doesn't leak to other queries
+          // that reuse this pooled connection after rollback.
+          try {
+            await connectionManager.executeQuery(
+              'SET SESSION MAX_EXECUTION_TIME = 0',
+              [],
+              transactionID
+            );
+          } catch {
+            // Connection may already be dead after a timeout — swallow safely.
+          }
+        }
       }
 
       await connectionManager.commitTransaction(transactionID);
       return { success: true, ranQuadratMismatch, ranCoordinateDrift };
     } catch (e: any) {
-      if (isDeadlockError(e)) {
+      if (isRetryableValidationLockError(e)) {
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          ailogger.error(`Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
             ailogger.error('Rollback error:', rollbackError);
           }
-          return { success: false, ranQuadratMismatch: false, ranCoordinateDrift: false };
+          return {
+            success: false,
+            ranQuadratMismatch: false,
+            ranCoordinateDrift: false,
+            error: `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to lock contention/timeouts`
+          };
         }
 
-        ailogger.info(`Combined cross-census location validation attempt ${attempt}: deadlock encountered. Retrying after ${delay}ms...`);
+        ailogger.info(`Combined cross-census location validation attempt ${attempt}: retryable lock error encountered. Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -630,13 +680,23 @@ export async function runCombinedCrossCensusLocationValidations(
         } catch (rollbackError: any) {
           ailogger.error('Rollback error:', rollbackError);
         }
-        return { success: false, ranQuadratMismatch: false, ranCoordinateDrift: false };
+        return {
+          success: false,
+          ranQuadratMismatch: false,
+          ranCoordinateDrift: false,
+          error: e.message
+        };
       }
     }
   }
 
   ailogger.error(`Combined cross-census location validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
-  return { success: false, ranQuadratMismatch: false, ranCoordinateDrift: false };
+  return {
+    success: false,
+    ranQuadratMismatch: false,
+    ranCoordinateDrift: false,
+    error: `Combined cross-census location validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`
+  };
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {

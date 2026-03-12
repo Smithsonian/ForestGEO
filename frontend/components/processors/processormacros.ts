@@ -74,11 +74,12 @@ export async function runQuery(connection: PoolConnection, query: string, params
       const [rows] = await Promise.race([connection.query(query, params), timer]);
       return rows;
     } else {
-      const [rows, _fields] = await Promise.race([connection.execute(query, params), timer]);
+      // mysql2's execute() uses prepared statements which don't support
+      // bulk INSERT ... VALUES ? with nested arrays. Use query() for those.
+      const hasBulkValues = params?.some(p => Array.isArray(p) && p.length > 0 && Array.isArray(p[0]));
+      const method = hasBulkValues ? connection.query.bind(connection) : connection.execute.bind(connection);
+      const [rows, _fields] = await Promise.race([method(query, params), timer]);
 
-      if (query.trim().startsWith('INSERT') || query.trim().startsWith('UPDATE') || query.trim().startsWith('DELETE')) {
-        return rows;
-      }
       return rows;
     }
   } catch (error: any) {
