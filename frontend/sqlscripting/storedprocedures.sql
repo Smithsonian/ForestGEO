@@ -1029,6 +1029,58 @@ BEGIN
       AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
       AND (p_PlotID IS NULL OR c.PlotID = p_PlotID);
 
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_keys;
+    CREATE TEMPORARY TABLE current_cross_census_keys
+    (
+        PreviousCensusID int         NOT NULL,
+        TreeTag          varchar(20) NOT NULL,
+        StemTag          varchar(10) NOT NULL,
+        PRIMARY KEY (PreviousCensusID, TreeTag, StemTag)
+    );
+
+    INSERT IGNORE INTO current_cross_census_keys (PreviousCensusID, TreeTag, StemTag)
+    SELECT scope.PreviousCensusID,
+           scope.TreeTag,
+           scope.StemTag
+    FROM current_cross_census_scope scope;
+
+    DROP TEMPORARY TABLE IF EXISTS previous_cross_census_lookup;
+    CREATE TEMPORARY TABLE previous_cross_census_lookup
+    (
+        PreviousCensusID   int            NOT NULL,
+        TreeTag            varchar(20)    NOT NULL,
+        StemTag            varchar(10)    NOT NULL,
+        PreviousQuadratName varchar(255)  NULL,
+        PreviousLocalX     decimal(12, 6) NULL,
+        PreviousLocalY     decimal(12, 6) NULL,
+        KEY idx_prev_lookup (PreviousCensusID, TreeTag, StemTag)
+    );
+
+    -- Materialize the previous-census lookup once per distinct tag/stem key from
+    -- the current scope.  This preserves the original "any matching previous row"
+    -- semantics while avoiding repeated tree/stem/quadrat joins for every insert path.
+    INSERT INTO previous_cross_census_lookup
+        (PreviousCensusID, TreeTag, StemTag, PreviousQuadratName, PreviousLocalX, PreviousLocalY)
+    SELECT DISTINCT scope_keys.PreviousCensusID,
+           scope_keys.TreeTag,
+           scope_keys.StemTag,
+           q_prev.QuadratName,
+           s_prev.LocalX,
+           s_prev.LocalY
+    FROM current_cross_census_keys scope_keys
+             JOIN trees t_prev
+                  ON t_prev.CensusID = scope_keys.PreviousCensusID
+                      AND t_prev.TreeTag = scope_keys.TreeTag
+                      AND t_prev.IsActive = 1
+             JOIN stems s_prev
+                  ON s_prev.TreeID = t_prev.TreeID
+                      AND s_prev.CensusID = scope_keys.PreviousCensusID
+                      AND s_prev.StemTag = scope_keys.StemTag
+                      AND s_prev.IsActive = 1
+             LEFT JOIN quadrats q_prev
+                  ON q_prev.QuadratID = s_prev.QuadratID
+                      AND q_prev.IsActive = 1;
+
     DROP TEMPORARY TABLE IF EXISTS cross_census_location_candidates;
     CREATE TEMPORARY TABLE cross_census_location_candidates
     (
@@ -1042,32 +1094,24 @@ BEGIN
     INSERT INTO cross_census_location_candidates (CoreMeasurementID, HasQuadratMismatch, HasCoordinateDrift)
     SELECT scope.CoreMeasurementID,
            MAX(CASE
-                   WHEN q_prev.QuadratName <> scope.CurrentQuadratName THEN 1
+                   WHEN prev_lookup.PreviousQuadratName <> scope.CurrentQuadratName THEN 1
                    ELSE 0
                END) AS HasQuadratMismatch,
            MAX(CASE
                    WHEN scope.CurrentLocalX IS NOT NULL
                        AND scope.CurrentLocalY IS NOT NULL
-                       AND s_prev.LocalX IS NOT NULL
-                       AND s_prev.LocalY IS NOT NULL
-                       AND ((scope.CurrentLocalX - s_prev.LocalX) * (scope.CurrentLocalX - s_prev.LocalX)) +
-                           ((scope.CurrentLocalY - s_prev.LocalY) * (scope.CurrentLocalY - s_prev.LocalY)) > 100
+                       AND prev_lookup.PreviousLocalX IS NOT NULL
+                       AND prev_lookup.PreviousLocalY IS NOT NULL
+                       AND ((scope.CurrentLocalX - prev_lookup.PreviousLocalX) * (scope.CurrentLocalX - prev_lookup.PreviousLocalX)) +
+                           ((scope.CurrentLocalY - prev_lookup.PreviousLocalY) * (scope.CurrentLocalY - prev_lookup.PreviousLocalY)) > 100
                        THEN 1
                    ELSE 0
                END) AS HasCoordinateDrift
     FROM current_cross_census_scope scope
-             JOIN trees t_prev
-                  ON t_prev.CensusID = scope.PreviousCensusID
-                      AND t_prev.TreeTag = scope.TreeTag
-                      AND t_prev.IsActive = 1
-             JOIN stems s_prev
-                  ON s_prev.TreeID = t_prev.TreeID
-                      AND s_prev.CensusID = scope.PreviousCensusID
-                      AND s_prev.StemTag = scope.StemTag
-                      AND s_prev.IsActive = 1
-             JOIN quadrats q_prev
-                  ON q_prev.QuadratID = s_prev.QuadratID
-                      AND q_prev.IsActive = 1
+             JOIN previous_cross_census_lookup prev_lookup
+                  ON prev_lookup.PreviousCensusID = scope.PreviousCensusID
+                      AND prev_lookup.TreeTag = scope.TreeTag
+                      AND prev_lookup.StemTag = scope.StemTag
     GROUP BY scope.CoreMeasurementID;
 
     IF vRunQuadratMismatch = 1 THEN
@@ -1085,8 +1129,9 @@ BEGIN
         WHERE candidate.HasCoordinateDrift = 1
         ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;
     END IF;
-
     DROP TEMPORARY TABLE IF EXISTS cross_census_location_candidates;
+    DROP TEMPORARY TABLE IF EXISTS previous_cross_census_lookup;
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_keys;
     DROP TEMPORARY TABLE IF EXISTS current_cross_census_scope;
 END $$
 

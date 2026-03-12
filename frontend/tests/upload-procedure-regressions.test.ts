@@ -66,4 +66,16 @@ describe('upload procedure regressions', () => {
       'core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements'
     );
   });
+
+  it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE current_cross_census_keys');
+    expect(canonicalSql).toContain('INSERT IGNORE INTO current_cross_census_keys (PreviousCensusID, TreeTag, StemTag)');
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE previous_cross_census_lookup');
+    expect(canonicalSql).toContain('SELECT DISTINCT scope_keys.PreviousCensusID,');
+    expect(canonicalSql).toContain('FROM current_cross_census_scope scope JOIN previous_cross_census_lookup prev_lookup');
+    expect(canonicalSql).toContain('GROUP BY scope.CoreMeasurementID;');
+    expect(canonicalSql).not.toContain('INSERT INTO measurement_error_log (MeasurementID, ErrorID) SELECT scope.CoreMeasurementID');
+  });
 });
