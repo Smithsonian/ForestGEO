@@ -10,7 +10,7 @@ const GRACE_PERIOD_MS = 3000;
 const FORCE_KILL_DELAY_MS = 5000;
 const IDLE_COMPLETION_GRACE_MS = 30000;
 const MIN_RUNTIME_FOR_IDLE_SUCCESS_MS = 4 * 60 * 1000;
-const HARD_TIMEOUT_MS = 20 * 60 * 1000;
+const HARD_TIMEOUT_MS = 25 * 60 * 1000;
 
 function stripAnsi(value) {
   return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
@@ -106,9 +106,6 @@ const childArgs = [
   '--max-old-space-size=4096',
   './node_modules/vitest/vitest.mjs',
   'run',
-  '--no-file-parallelism',
-  '--maxWorkers=1',
-  '--minWorkers=1',
   ...forwardedArgs
 ];
 
