@@ -53,20 +53,20 @@ async function refreshMeasurementsSummaryForScope(
                                                 UserDefinedFields,
                                                 Errors)
      SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
-            st.StemGUID                                          AS StemGUID,
+            COALESCE(st.StemGUID, cm.StemGUID)                   AS StemGUID,
             t.TreeID                                             AS TreeID,
             sp.SpeciesID                                         AS SpeciesID,
             q.QuadratID                                          AS QuadratID,
-            COALESCE(q.PlotID, 0)                                AS PlotID,
+            COALESCE(q.PlotID, c.PlotID, 0)                      AS PlotID,
             COALESCE(cm.CensusID, 0)                             AS CensusID,
             sp.SpeciesName                                       AS SpeciesName,
             sp.SubspeciesName                                    AS SubspeciesName,
-            sp.SpeciesCode                                       AS SpeciesCode,
-            t.TreeTag                                            AS TreeTag,
-            st.StemTag                                           AS StemTag,
-            st.LocalX                                            AS StemLocalX,
-            st.LocalY                                            AS StemLocalY,
-            q.QuadratName                                        AS QuadratName,
+            COALESCE(sp.SpeciesCode, cm.RawSpCode)               AS SpeciesCode,
+            COALESCE(t.TreeTag, cm.RawTreeTag)                   AS TreeTag,
+            COALESCE(st.StemTag, cm.RawStemTag)                  AS StemTag,
+            COALESCE(st.LocalX, cm.RawX)                         AS StemLocalX,
+            COALESCE(st.LocalY, cm.RawY)                         AS StemLocalY,
+            COALESCE(q.QuadratName, cm.RawQuadrat)               AS QuadratName,
             cm.MeasurementDate                                   AS MeasurementDate,
             cm.MeasuredDBH                                       AS MeasuredDBH,
             cm.MeasuredHOM                                       AS MeasuredHOM,
@@ -77,10 +77,10 @@ async function refreshMeasurementsSummaryForScope(
             validation_errors.Errors                             AS Errors
      FROM ??.coremeasurements cm
               JOIN ??.census c ON cm.CensusID = c.CensusID
-              JOIN ??.stems st ON cm.StemGUID = st.StemGUID AND st.CensusID = c.CensusID
-              JOIN ??.trees t ON t.CensusID = c.CensusID AND t.TreeID = st.TreeID
-              JOIN ??.species sp ON t.SpeciesID = sp.SpeciesID
-              JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
+              LEFT JOIN ??.stems st ON cm.StemGUID = st.StemGUID AND st.CensusID = c.CensusID
+              LEFT JOIN ??.trees t ON t.CensusID = c.CensusID AND t.TreeID = st.TreeID
+              LEFT JOIN ??.species sp ON t.SpeciesID = sp.SpeciesID
+              LEFT JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
               LEFT JOIN (
                   SELECT ca.CoreMeasurementID,
                          GROUP_CONCAT(DISTINCT a.Code SEPARATOR '; ') AS Attributes
@@ -101,7 +101,6 @@ async function refreshMeasurementsSummaryForScope(
                            JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
                            LEFT JOIN ??.sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
                   WHERE mel.IsResolved = FALSE
-                    AND me.ErrorSource = 'validation'
                   GROUP BY mel.MeasurementID
               ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID
      WHERE c.PlotID = ?

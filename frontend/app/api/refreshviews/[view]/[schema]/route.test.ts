@@ -140,6 +140,11 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
       [17, 42],
       'tx-3'
     );
+    expect(String(exec.mock.calls[1]?.[0])).toContain('LEFT JOIN `myschema`.stems st');
+    expect(String(exec.mock.calls[1]?.[0])).toContain('COALESCE(st.StemTag, cm.RawStemTag)');
+    expect(String(exec.mock.calls[1]?.[0])).toContain('COALESCE(q.QuadratName, cm.RawQuadrat)');
+    expect(String(exec.mock.calls[1]?.[0])).toContain('measurement_error_log');
+    expect(String(exec.mock.calls[1]?.[0])).not.toContain("me.ErrorSource = 'validation'");
     expect(exec).not.toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()');
     expect(commit).toHaveBeenCalledWith('tx-3');
     expect(rollback).not.toHaveBeenCalled();
