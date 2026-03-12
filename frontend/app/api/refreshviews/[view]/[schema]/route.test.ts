@@ -52,8 +52,8 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
     return ['myschema', 'testschema'].includes(schema);
   }),
   safeFormatQuery: vi.fn((schema: string, query: string) => {
-    // Replace ?? with schema name
-    return query.replace('??', `\`${schema}\``);
+    // Replace all ?? with schema name
+    return query.replace(/\?\?/g, `\`${schema}\``);
   })
 }));
 
@@ -91,7 +91,7 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     expect(begin).toHaveBeenCalledTimes(1);
     // safeFormatQuery wraps schema in backticks
-    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshViewFullTable()');
+    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshViewFullTable()', undefined, 'tx-1');
     expect(commit).toHaveBeenCalledWith('tx-1');
     expect(rollback).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
@@ -110,8 +110,38 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     expect(begin).toHaveBeenCalledTimes(1);
     // safeFormatQuery wraps schema in backticks
-    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()');
+    expect(exec).toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()', undefined, 'tx-2');
     expect(commit).toHaveBeenCalledWith('tx-2');
+    expect(rollback).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('measurementssummary with plot/census context refreshes only the active scope', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-3');
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValue(undefined);
+    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
+    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const request = new NextRequest('http://localhost', {
+      method: 'POST',
+      body: JSON.stringify({ plotID: 17, censusID: 42 })
+    });
+
+    const res = await POST(request, makeProps('measurementssummary', 'myschema'));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenNthCalledWith(1, 'DELETE FROM `myschema`.measurementssummary WHERE PlotID = ? AND CensusID = ?', [17, 42], 'tx-3');
+    expect(exec).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT IGNORE INTO `myschema`.measurementssummary'),
+      [17, 42],
+      'tx-3'
+    );
+    expect(exec).not.toHaveBeenCalledWith('CALL `myschema`.RefreshMeasurementsSummary()');
+    expect(commit).toHaveBeenCalledWith('tx-3');
     expect(rollback).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });

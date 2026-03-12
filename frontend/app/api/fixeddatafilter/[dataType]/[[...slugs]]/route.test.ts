@@ -277,6 +277,30 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('failedmeasurements: includes stored coremeasurement descriptions in the query payload', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-fm');
+    const commit = vi.spyOn(cm, 'commitTransaction');
+    const close = vi.spyOn(cm, 'closeConnection');
+
+    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'Description' }]);
+    exec.mockResolvedValueOnce([{ FailedMeasurementID: 1, Description: 'Detailed reason' }]);
+    exec.mockResolvedValueOnce([{ totalRows: 1 }]);
+
+    const req = makeRequest({ filterModel: baseFilterModel });
+    const res = await POST(req, makeProps('failedmeasurements', ['myschema', '0', '25', '7', '3']));
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    const body = await res.json();
+    expect(body.output).toEqual([{ FailedMeasurementID: 1, Description: 'Detailed reason' }]);
+    expect(String(body.finishedQuery)).toContain('cm.Description AS Description');
+
+    expect(begin).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledWith('tx-fm');
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('rolls back and returns 500 if a DB error occurs during query; closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');

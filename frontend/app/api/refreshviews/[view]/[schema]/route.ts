@@ -17,6 +17,100 @@ function isValidView(view: string): view is ValidView {
   return VALID_VIEWS.includes(view as ValidView);
 }
 
+async function refreshMeasurementsSummaryForScope(
+  connectionManager: typeof ConnectionManager.prototype,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  transactionID?: string
+): Promise<void> {
+  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
+
+  const insertQuery = safeFormatQuery(
+    schema,
+    `INSERT IGNORE INTO ??.measurementssummary (CoreMeasurementID,
+                                                StemGUID,
+                                                TreeID,
+                                                SpeciesID,
+                                                QuadratID,
+                                                PlotID,
+                                                CensusID,
+                                                SpeciesName,
+                                                SubspeciesName,
+                                                SpeciesCode,
+                                                TreeTag,
+                                                StemTag,
+                                                StemLocalX,
+                                                StemLocalY,
+                                                QuadratName,
+                                                MeasurementDate,
+                                                MeasuredDBH,
+                                                MeasuredHOM,
+                                                IsValidated,
+                                                Description,
+                                                Attributes,
+                                                UserDefinedFields,
+                                                Errors)
+     SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
+            st.StemGUID                                          AS StemGUID,
+            t.TreeID                                             AS TreeID,
+            sp.SpeciesID                                         AS SpeciesID,
+            q.QuadratID                                          AS QuadratID,
+            COALESCE(q.PlotID, 0)                                AS PlotID,
+            COALESCE(cm.CensusID, 0)                             AS CensusID,
+            sp.SpeciesName                                       AS SpeciesName,
+            sp.SubspeciesName                                    AS SubspeciesName,
+            sp.SpeciesCode                                       AS SpeciesCode,
+            t.TreeTag                                            AS TreeTag,
+            st.StemTag                                           AS StemTag,
+            st.LocalX                                            AS StemLocalX,
+            st.LocalY                                            AS StemLocalY,
+            q.QuadratName                                        AS QuadratName,
+            cm.MeasurementDate                                   AS MeasurementDate,
+            cm.MeasuredDBH                                       AS MeasuredDBH,
+            cm.MeasuredHOM                                       AS MeasuredHOM,
+            cm.IsValidated                                       AS IsValidated,
+            cm.Description                                       AS Description,
+            attr_summary.Attributes                              AS Attributes,
+            cm.UserDefinedFields                                 AS UserDefinedFields,
+            validation_errors.Errors                             AS Errors
+     FROM ??.coremeasurements cm
+              JOIN ??.census c ON cm.CensusID = c.CensusID
+              JOIN ??.stems st ON cm.StemGUID = st.StemGUID AND st.CensusID = c.CensusID
+              JOIN ??.trees t ON t.CensusID = c.CensusID AND t.TreeID = st.TreeID
+              JOIN ??.species sp ON t.SpeciesID = sp.SpeciesID
+              JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
+              LEFT JOIN (
+                  SELECT ca.CoreMeasurementID,
+                         GROUP_CONCAT(DISTINCT a.Code SEPARATOR '; ') AS Attributes
+                  FROM ??.cmattributes ca
+                           LEFT JOIN ??.attributes a ON a.Code = ca.Code
+                  GROUP BY ca.CoreMeasurementID
+              ) attr_summary ON attr_summary.CoreMeasurementID = cm.CoreMeasurementID
+              LEFT JOIN (
+                  SELECT mel.MeasurementID,
+                         GROUP_CONCAT(
+                                 COALESCE(
+                                         NULLIF(CONCAT_WS(' -> ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
+                                         me.ErrorMessage
+                                 )
+                                 ORDER BY me.ErrorCode SEPARATOR ';'
+                         ) AS Errors
+                  FROM ??.measurement_error_log mel
+                           JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+                           LEFT JOIN ??.sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                  WHERE mel.IsResolved = FALSE
+                    AND me.ErrorSource = 'validation'
+                  GROUP BY mel.MeasurementID
+              ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID
+     WHERE c.PlotID = ?
+       AND cm.CensusID = ?`
+  );
+
+  await connectionManager.executeQuery(insertQuery, [plotID, censusID], transactionID);
+}
+
 /**
  * Execute all enabled post-validation queries for a given plot and census
  * Updates each query's lastRunAt, lastRunResult, and lastRunStatus
@@ -129,8 +223,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
 
   try {
     const body = await request.json().catch(() => ({}));
-    _plotID = body.plotID;
-    _censusID = body.censusID;
+    const parsedPlotID = Number(body.plotID);
+    const parsedCensusID = Number(body.censusID);
+
+    _plotID = Number.isInteger(parsedPlotID) ? parsedPlotID : undefined;
+    _censusID = Number.isInteger(parsedCensusID) ? parsedCensusID : undefined;
     _runPostValidation = body.runPostValidation === true;
   } catch {
     // No body provided, that's fine
@@ -143,9 +240,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
     transactionID = await connectionManager.beginTransaction();
 
     // Execute the view refresh procedure - view is validated above against whitelist
-    const procedureName = view === 'viewfulltable' ? 'RefreshViewFullTable' : 'RefreshMeasurementsSummary';
-    const query = safeFormatQuery(schema, `CALL ??.${procedureName}()`);
-    await connectionManager.executeQuery(query);
+    if (view === 'measurementssummary' && _plotID != null && _censusID != null) {
+      await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
+    } else {
+      const procedureName = view === 'viewfulltable' ? 'RefreshViewFullTable' : 'RefreshMeasurementsSummary';
+      const query = safeFormatQuery(schema, `CALL ??.${procedureName}()`);
+      await connectionManager.executeQuery(query, undefined, transactionID);
+    }
 
     await connectionManager.commitTransaction(transactionID ?? '');
 

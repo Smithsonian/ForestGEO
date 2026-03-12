@@ -135,6 +135,7 @@ export async function POST(
             'Date',
             'Codes',
             'Comments',
+            'Description',
             'FailureReasons',
             'OriginalFailureReasons',
             'CurrentFailureReasons',
