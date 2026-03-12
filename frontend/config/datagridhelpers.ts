@@ -272,7 +272,6 @@ export interface MeasurementsCommonsProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   dynamicButtons: DynamicButton[];
-  failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
 }

@@ -94,6 +94,7 @@ import {
   createResetValidationStatesQuery,
   mergeMeasurementFilterModel
 } from './measurementscommonsutils';
+import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
@@ -152,8 +153,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
     locked = false,
-    dynamicButtons,
-    failedTrigger
+    dynamicButtons
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
@@ -195,13 +195,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     tss: buildMeasurementTssFilters(showOT, showMS, showNR)
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
-  const [errorCount, setErrorCount] = useState<number>(0);
+  const [invalidCount, setInvalidCount] = useState<number>(0);
+  const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
   const [validCount, setValidCount] = useState<number>(0);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [otCount, setOTCount] = useState<number>(0);
   const [msCount, setMSCount] = useState<number>(0);
   const [nrCount, setNRCount] = useState<number>(0);
-  const [failedCount, setFailedCount] = useState<number>(0);
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
   const [attributesMap, setAttributesMap] = useState<Map<string, AttributesRDS>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
@@ -257,9 +257,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (!currentSite || !currentPlot || !currentCensus) return;
 
     try {
-      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
-                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
-                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending,
+      const validCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'valid');
+      const invalidCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'errors');
+      const pendingCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'pending');
+      const query = `SELECT SUM(CASE WHEN ${validCondition} THEN 1 ELSE 0 END) AS CountValid,
+                            SUM(CASE WHEN ${invalidCondition} THEN 1 ELSE 0 END) AS CountInvalid,
+                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountValidationErrors,
+                            SUM(CASE WHEN ${pendingCondition} THEN 1 ELSE 0 END) AS CountPending,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
@@ -278,14 +282,15 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const countsData = data[0];
 
       setValidCount(Number(countsData.CountValid) || 0);
-      setErrorCount(Number(countsData.CountErrors) || 0);
+      setInvalidCount(Number(countsData.CountInvalid) || 0);
+      setValidationErrorCount(Number(countsData.CountValidationErrors) || 0);
       setPendingCount(Number(countsData.CountPending) || 0);
       setOTCount(Number(countsData.CountOldTrees) || 0);
       setMSCount(Number(countsData.CountMultiStems) || 0);
       setNRCount(Number(countsData.CountNewRecruits) || 0);
 
       const counts = [
-        { count: Number(countsData.CountErrors) || 0, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: Number(countsData.CountInvalid) || 0, message: `${countsData.CountInvalid} row(s) with unresolved errors detected.`, severity: 'warning' },
         { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
         { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
@@ -296,14 +301,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
         });
       }
-
-      const failedResponse = await fetch(
-        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0]?.censusID}`,
-        { method: 'GET' }
-      );
-      if (!failedResponse.ok) throw new Error('measurementscommon failure. failed measurements count request failed');
-      const failedData = await failedResponse.json();
-      setFailedCount(Number(failedData.recordCount) || 0);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error refreshing counts:', errorObj);
@@ -1479,18 +1476,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       }
                     }}
                     pendingCount={pendingCount}
-                    errorCount={errorCount}
+                    errorCount={validationErrorCount}
                   />
                 ),
-                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: errorCount },
+                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
                 validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
                 pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
                 otControls: { show: showOT, toggle: setShowOT, count: otCount },
                 msControls: { show: showMS, toggle: setShowMS, count: msCount },
                 nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
                 hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty,
-                failedControls: { trigger: failedTrigger, count: failedCount }
+                setHidingEmpty: setHidingEmpty
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             showToolbar

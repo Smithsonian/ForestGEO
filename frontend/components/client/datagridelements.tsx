@@ -54,7 +54,7 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { CallSplit, ErrorOutline, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
+import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -92,7 +92,6 @@ declare module '@mui/x-data-grid' {
     nrControls?: RowControl;
     hidingEmpty?: boolean;
     setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
-    failedControls?: { trigger: () => void; count: number };
   }
 }
 
@@ -125,11 +124,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     msControls = defaultControl,
     nrControls = defaultControl,
     hidingEmpty,
-    setHidingEmpty,
-    failedControls = {
-      trigger: () => {},
-      count: 0
-    }
+    setHidingEmpty
   } = props;
 
   // Hooks must be called before any early returns
@@ -328,37 +323,18 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             </Button>
             {gridType === 'measurements' && (
               <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
-                <Tooltip
-                  title={
-                    failedControls.count > 0 && errorControls.count > 0
-                      ? `Invalid: ${errorControls.count + failedControls.count} (${failedControls.count} failed rows pending review/reingestion, ${errorControls.count} validation errors)`
-                      : failedControls.count > 0
-                      ? `Invalid: ${failedControls.count} failed rows pending review/reingestion`
-                      : `Invalid: ${errorControls.count} (validation errors)`
-                  }
-                >
-                  <Badge badgeContent={errorControls.count + failedControls.count} size={'sm'}>
+                <Tooltip title={`Invalid: ${errorControls.count} (rows with unresolved errors)`}>
+                  <Badge badgeContent={errorControls.count} size={'sm'}>
                     <IconButton
-                      disabled={!errorControls.count && !failedControls.count}
+                      disabled={!errorControls.count}
                       variant="soft"
-                      color={errorControls.show || failedControls.count > 0 ? 'danger' : 'neutral'}
-                      onClick={() => {
-                        if (failedControls.count > 0) {
-                          failedControls.trigger();
-                        } else {
-                          errorControls.toggle(!errorControls.show);
-                        }
-                      }}
-                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count + failedControls.count})`}
+                      color={errorControls.show ? 'danger' : 'neutral'}
+                      onClick={() => errorControls.toggle(!errorControls.show)}
+                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
                       aria-pressed={errorControls.show}
                       data-testid="filter-errors"
-                      sx={{
-                        '& svg': {
-                          color: failedControls.count > 0 ? 'error.main' : errorControls.count > 0 ? 'warning.main' : 'inherit'
-                        }
-                      }}
                     >
-                      {failedControls.count > 0 ? <ErrorOutline /> : <Warning />}
+                      <Warning />
                     </IconButton>
                   </Badge>
                 </Tooltip>
