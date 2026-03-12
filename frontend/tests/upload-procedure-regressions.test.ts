@@ -30,4 +30,40 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain("DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';");
     expect(canonicalSql).toContain("SET vAlertBatchID = CONCAT('census-', vCensusID);");
   });
+
+  it('cleans up stale failed sub-batches before retrying the same batch id', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+
+    expect(canonicalSql).toContain("AND status IN ('processing', 'failed')");
+    expect(canonicalSql).toContain(
+      "WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status IN ('processing', 'failed');"
+    );
+  });
+
+  it('uses duplicate-tolerant stem inserts for within-batch stem collisions', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+
+    expect(canonicalSql).toContain(
+      'INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+    );
+    expect(canonicalSql).not.toContain(
+      'INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)'
+    );
+  });
+
+  it('degrades duplicate coremeasurement candidates to row-level failures', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
+    expect(canonicalSql).toContain(
+      "'Measurement insert skipped: source row resolved to multiple candidate measurements'"
+    );
+    expect(canonicalSql).toContain(
+      'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)'
+    );
+    expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
+    expect(canonicalSql).toContain(
+      'core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements'
+    );
+  });
 });

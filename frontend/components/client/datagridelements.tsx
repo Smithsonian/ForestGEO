@@ -331,9 +331,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip
                   title={
                     failedControls.count > 0 && errorControls.count > 0
-                      ? `Invalid: ${errorControls.count + failedControls.count} (${failedControls.count} unsubmitted, ${errorControls.count} validation errors)`
+                      ? `Invalid: ${errorControls.count + failedControls.count} (${failedControls.count} failed rows pending review/reingestion, ${errorControls.count} validation errors)`
                       : failedControls.count > 0
-                      ? `Invalid: ${failedControls.count} (unsubmitted - missing required data)`
+                      ? `Invalid: ${failedControls.count} failed rows pending review/reingestion`
                       : `Invalid: ${errorControls.count} (validation errors)`
                   }
                 >

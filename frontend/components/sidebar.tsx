@@ -261,7 +261,7 @@ export default function Sidebar(props: SidebarProps) {
         setCensusToDelete(null);
         setManualReset(true);
       } catch (error: any) {
-        ailogger.error('Failed to delete census:', error);
+        ailogger.error(`Failed to delete census: ${error?.message ?? error}`, error instanceof Error ? error : undefined);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);

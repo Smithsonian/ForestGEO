@@ -90,6 +90,8 @@ import {
   arePaginationModelsEqual,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
+  createResetValidationErrorsQuery,
+  createResetValidationStatesQuery,
   mergeMeasurementFilterModel
 } from './measurementscommonsutils';
 
@@ -165,6 +167,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
+  const [isResettingValidations, setIsResettingValidations] = useState(false);
   const [cmvSelected, setCMVSelected] = useState(-1);
   const [isClearingErrors, setIsClearingErrors] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
@@ -223,6 +226,31 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
+  const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+
+  const refreshMeasurementsSummaryView = useCallback(async () => {
+    if (!currentSite?.schemaName) {
+      throw new Error('Measurements Summary View Refresh failure');
+    }
+
+    const body =
+      currentPlot?.plotID != null && activeCensusID != null
+        ? JSON.stringify({
+            plotID: currentPlot.plotID,
+            censusID: activeCensusID
+          })
+        : undefined;
+
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body
+    });
+
+    if (!response.ok) {
+      throw new Error('Measurements Summary View Refresh failure');
+    }
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
@@ -269,23 +297,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         });
       }
 
-      const failedQuery = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) AS CountFailed
-                           FROM ${currentSite.schemaName}.coremeasurements cm
-                                  JOIN ${currentSite.schemaName}.measurement_error_log mel
-                                       ON mel.MeasurementID = cm.CoreMeasurementID AND mel.IsResolved = FALSE
-                                  JOIN ${currentSite.schemaName}.measurement_errors me
-                                       ON me.ErrorID = mel.ErrorID
-                           WHERE cm.CensusID = ${currentCensus.dateRanges?.[0]?.censusID}
-                             AND cm.StemGUID IS NULL
-                             AND me.ErrorSource = 'ingestion'`;
-      const failedResponse = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(failedQuery)
-      });
-      if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for unresolved ingestion-error count failed');
+      const failedResponse = await fetch(
+        `/api/admin/clear/failedmeasurements/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0]?.censusID}`,
+        { method: 'GET' }
+      );
+      if (!failedResponse.ok) throw new Error('measurementscommon failure. failed measurements count request failed');
       const failedData = await failedResponse.json();
-      setFailedCount(Number(failedData[0].CountFailed) || 0);
+      setFailedCount(Number(failedData.recordCount) || 0);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error refreshing counts:', errorObj);
@@ -829,16 +847,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
-        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-        if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await refreshMeasurementsSummaryView();
       } catch (e: unknown) {
         const errorObj = e instanceof Error ? e : new Error(String(e));
         ailogger.error('Error refreshing measurements summary view:', errorObj);
       } finally {
         setLoading(false);
       }
-      await new Promise(resolve => setTimeout(resolve, 1000)); // forced delay
       await fetchPaginatedData(paginationModel.page);
     }
   };
@@ -1310,67 +1325,58 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-      if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await refreshMeasurementsSummaryView();
     } catch (e: unknown) {
       const errorObj = e instanceof Error ? e : new Error(String(e));
       ailogger.error('Error refreshing measurements summary view:', errorObj);
     } finally {
       setLoading(false);
     }
-    await runFetchPaginated();
+    await Promise.all([runFetchPaginated(), refreshCounts()]);
   }
 
   async function handleResetValidations() {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+      throw new Error('Active site, plot, or census selection is missing.');
+    }
+
     try {
-      const clearCMVQuery = `DELETE mel
-                             FROM ${currentSite?.schemaName}.measurement_error_log AS mel
-                                    JOIN ${currentSite?.schemaName}.measurement_errors AS me
-                                         ON me.ErrorID = mel.ErrorID
-                                    JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-                                         ON mel.MeasurementID = cm.CoreMeasurementID
-                                    JOIN ${currentSite?.schemaName}.census AS c
-                                         ON c.CensusID = cm.CensusID
-                             WHERE c.CensusID IN (SELECT CensusID
-                                                  from ${currentSite?.schemaName}.census
-                                                  WHERE PlotID = ${currentPlot?.plotID}
-                                                    AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                               AND c.PlotID = ${currentPlot?.plotID}
-                               AND me.ErrorSource = 'validation'
-                               AND (cm.IsValidated = 0 OR cm.IsValidated IS NULL);`;
-      const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
-        JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-                     SET cm.IsValidated = NULL
-                     WHERE c.CensusID IN (SELECT CensusID
-                                          from ${currentSite?.schemaName}.census
-                                          WHERE PlotID = ${currentPlot?.plotID}
-                                            AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                       AND c.PlotID = ${currentPlot?.plotID}`;
+      setLoading(true, 'Resetting validation states...');
+
+      const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
+      const resetStateRequest = createResetValidationStatesQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
+
       const clearCMVResponse = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(clearCMVQuery)
+        body: JSON.stringify(resolveErrorsRequest)
       });
       if (!clearCMVResponse.ok) {
-        const errorData = await clearCMVResponse.json();
-        ailogger.error('Clear validation errors query failed:', errorData);
-        throw new Error(`Clear validation errors query failed: ${errorData.error || 'Unknown error'}`);
+        const errorData = await clearCMVResponse.json().catch(() => ({ error: 'Unknown error', details: '' }));
+        ailogger.error('Resolve validation errors query failed:', errorData);
+        throw new Error(errorData.details || errorData.error || 'Failed to resolve validation errors');
       }
       const response = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
+        body: JSON.stringify(resetStateRequest)
       });
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error', details: '' }));
         ailogger.error('Validation reset query failed:', errorData);
-        throw new Error(`Validation reset failed: ${errorData.error || 'Unknown error'}`);
+        throw new Error(errorData.details || errorData.error || 'Failed to reset validation states');
       }
+
+      setSnackbar({
+        children: 'Validation states reset. Rows are pending validation.',
+        severity: 'success'
+      });
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error in handleResetValidations:', errorObj);
       throw errorObj;
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -1466,9 +1472,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       if (!currentSite?.schemaName) return;
                       setLoading(true, 'Refreshing Measurements Summary View...');
                       try {
-                        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-                        if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await refreshMeasurementsSummaryView();
                       } finally {
                         setLoading(false);
                         setRefresh(true);
@@ -1547,20 +1551,41 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           />
         )}
         {isResetValidationModalOpen && (
-          <Modal open={isResetValidationModalOpen} onClose={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
+          <Modal
+            open={isResetValidationModalOpen}
+            onClose={async () => {
+              if (isResettingValidations) return;
+              await handleCloseModal(setIsResetValidationModalOpen, false);
+            }}
+          >
             <ModalDialog role={'alertdialog'}>
               <DialogTitle>Reset Validation States?</DialogTitle>
-              <DialogContent>Are you sure you want to reset all validation states? </DialogContent>
+              <DialogContent>Are you sure you want to clear current validation failures and set all rows in this census back to pending?</DialogContent>
               <DialogActions>
                 <Button
                   onClick={async () => {
-                    await handleResetValidations();
-                    await handleCloseModal(setIsResetValidationModalOpen, true);
+                    setIsResettingValidations(true);
+                    try {
+                      await handleResetValidations();
+                      await handleCloseModal(setIsResetValidationModalOpen, true);
+                    } catch (error: unknown) {
+                      const errorObj = error instanceof Error ? error : new Error(String(error));
+                      setSnackbar({
+                        children: `Error: ${errorObj.message}`,
+                        severity: 'error'
+                      });
+                    } finally {
+                      setIsResettingValidations(false);
+                    }
                   }}
+                  disabled={isResettingValidations}
+                  startDecorator={isResettingValidations ? <CircularProgress size="sm" /> : undefined}
                 >
-                  Yes
+                  {isResettingValidations ? 'Resetting...' : 'Yes'}
                 </Button>
-                <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>No</Button>
+                <Button disabled={isResettingValidations} onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
+                  No
+                </Button>
               </DialogActions>
             </ModalDialog>
           </Modal>

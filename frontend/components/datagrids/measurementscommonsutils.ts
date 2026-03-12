@@ -1,6 +1,12 @@
 import { GridFilterItem, GridFilterModel, GridPaginationModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 
+export interface FormattedQueryRequest {
+  query: string;
+  params: Array<string | number>;
+  format: true;
+}
+
 function areArraysEqual<T>(left: readonly T[] | undefined, right: readonly T[] | undefined): boolean {
   const leftValues = left ?? [];
   const rightValues = right ?? [];
@@ -94,4 +100,33 @@ export function areGridSortModelsEqual(left: GridSortModel, right: GridSortModel
 
 export function arePaginationModelsEqual(left: GridPaginationModel, right: GridPaginationModel): boolean {
   return left.page === right.page && left.pageSize === right.pageSize;
+}
+
+export function createResetValidationErrorsQuery(schema: string, plotID: number, censusID: number): FormattedQueryRequest {
+  return {
+    query: `UPDATE ??.measurement_error_log mel
+            JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+            JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
+            JOIN ??.census c ON c.CensusID = cm.CensusID
+            SET mel.IsResolved = TRUE,
+                mel.ResolvedAt = NOW()
+            WHERE c.CensusID = ?
+              AND c.PlotID = ?
+              AND me.ErrorSource = 'validation'
+              AND mel.IsResolved = FALSE`,
+    params: [schema, schema, schema, schema, censusID, plotID],
+    format: true
+  };
+}
+
+export function createResetValidationStatesQuery(schema: string, plotID: number, censusID: number): FormattedQueryRequest {
+  return {
+    query: `UPDATE ??.coremeasurements cm
+            JOIN ??.census c ON c.CensusID = cm.CensusID
+            SET cm.IsValidated = NULL
+            WHERE c.CensusID = ?
+              AND c.PlotID = ?`,
+    params: [schema, schema, censusID, plotID],
+    format: true
+  };
 }

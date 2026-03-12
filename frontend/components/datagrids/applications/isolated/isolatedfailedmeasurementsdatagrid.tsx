@@ -7,8 +7,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Alert, Box, Chip, IconButton, Snackbar, Stack, Typography } from '@mui/joy';
-import CloseIcon from '@mui/icons-material/Close';
+import { Box, Chip, Stack, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
@@ -23,6 +22,62 @@ interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
 }
 
+function normalizeFailureText(value?: string | null): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function hasStoredCurrentIngestionFailures(
+  row: Pick<FailedMeasurementsRDS, 'currentFailureReasons' | 'failureReasons'>
+): boolean {
+  const storedReasons = normalizeFailureText(row.currentFailureReasons) || normalizeFailureText(row.failureReasons);
+  return storedReasons !== '' && storedReasons !== 'Ready for reingestion';
+}
+
+export function isReadyForReingestion(
+  row: FailedMeasurementsRDS,
+  computeFailureReasons: (row: FailedMeasurementsRDS) => string
+): boolean {
+  if (hasStoredCurrentIngestionFailures(row)) {
+    return false;
+  }
+
+  return computeFailureReasons(row).length === 0;
+}
+
+export function formatDetailedFailureDescription(description?: string | null): string {
+  const rawDescription = normalizeFailureText(description);
+  if (!rawDescription) {
+    return '';
+  }
+
+  if (rawDescription.startsWith('Measurement insert skipped: source row resolved to multiple candidate measurements')) {
+    return 'Row matches two or more stems/trees.';
+  }
+
+  if (rawDescription.includes('already exists in a different quadrat')) {
+    return 'Tree/stem already exists in a different quadrat for this census.';
+  }
+
+  if (rawDescription.startsWith('Stem resolution failed: no active stem matched')) {
+    return 'Row could not be matched to a single stem in this census.';
+  }
+
+  if (rawDescription.startsWith('Invalid species code:')) {
+    const speciesMatch = rawDescription.match(/Invalid species code: "([^"]+)"/);
+    return speciesMatch ? `Species code "${speciesMatch[1]}" was not found.` : 'Species code was not found.';
+  }
+
+  if (rawDescription.startsWith('Measurement insert skipped: ')) {
+    return rawDescription.replace(/^Measurement insert skipped:\s*/, '');
+  }
+
+  if (rawDescription.startsWith('Stem resolution failed: ')) {
+    return rawDescription.replace(/^Stem resolution failed:\s*/, '');
+  }
+
+  return rawDescription;
+}
+
 export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: IsolatedFailedMeasurementsDataGridProps = {}) {
   const [refresh, setRefresh] = useState(false);
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
@@ -32,8 +87,6 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     spCode: [],
     codes: []
   });
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [rowsWithNoFailures, setRowsWithNoFailures] = useState(0);
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [validationResults, setValidationResults] = useState<any>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -142,31 +195,6 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       return reasons.join('|');
     },
     [selectableOpts, countInvalidCodes]
-  );
-
-  // Check loaded data for rows with no actual failures
-  const handleDataLoaded = useCallback(
-    (rows: GridRowModel[]) => {
-      if (!rows || rows.length === 0) return;
-
-      // Wait for selectable options to be loaded before checking
-      const hasOptions = Object.keys(selectableOpts)
-        .filter(i => !['tag', 'stemTag'].includes(i))
-        .every(key => selectableOpts[key].length > 0);
-      if (!hasOptions) return;
-
-      // Count rows that have no actual failures
-      const noFailureCount = rows.filter(row => {
-        const reasons = computeFailureReasons(row as FailedMeasurementsRDS);
-        return reasons.length === 0;
-      }).length;
-
-      if (noFailureCount > 0) {
-        setRowsWithNoFailures(noFailureCount);
-        setSnackbarOpen(true);
-      }
-    },
-    [selectableOpts, computeFailureReasons]
   );
 
   const onRowSave = useCallback(
@@ -285,15 +313,16 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   const columns: GridColDef[] = useMemo(() => {
     return [
       ...FailedMeasurementsGridColumns.map(column => {
-        const isReasonColumn = ['currentFailureReasons', 'originalFailureReasons', 'failureReasons', 'lastValidatedAt'].includes(column.field);
+        const isReasonColumn = ['currentFailureReasons', 'description', 'originalFailureReasons', 'failureReasons', 'lastValidatedAt'].includes(column.field);
         return {
           ...column,
           editable: !isReasonColumn,
           renderCell: (params: any) => {
             if (isReasonColumn) {
+              const displayValue = column.field === 'description' ? formatDetailedFailureDescription(params.value) : params.value;
               return (
                 <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
-                  {params.value === '' || params.value === null || params.value === undefined ? 'null' : String(params.value)}
+                  {displayValue === '' || displayValue === null || displayValue === undefined ? 'null' : String(displayValue)}
                 </Typography>
               );
             }
@@ -405,23 +434,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         defaultHideEmpty={false}
         apiRef={apiRef as RefObject<GridApiCommunity>}
         onDataUpdate={onRowSave}
-        onDataLoaded={handleDataLoaded}
       />
-      <Snackbar open={snackbarOpen} autoHideDuration={10000} onClose={() => setSnackbarOpen(false)} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-        <Alert
-          variant="soft"
-          color="success"
-          sx={{ width: '100%' }}
-          endDecorator={
-            <IconButton variant="soft" color="success" size="sm" onClick={() => setSnackbarOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          }
-        >
-          {rowsWithNoFailures} row{rowsWithNoFailures !== 1 ? 's have' : ' has'} no validation failures and can be reingested. Click &quot;Reingest All
-          Rows&quot; or save individual rows to process them.
-        </Alert>
-      </Snackbar>
       <ValidationCheckModal open={validationModalOpen} onClose={() => setValidationModalOpen(false)} results={validationResults} />
     </>
   ) : (

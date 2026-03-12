@@ -252,6 +252,14 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     filterable: false
   },
   {
+    field: 'description',
+    headerName: 'Detailed Reason',
+    flex: 3,
+    type: 'string',
+    editable: false,
+    filterable: false
+  },
+  {
     field: 'originalFailureReasons',
     headerName: 'Original Reasons',
     flex: 2,

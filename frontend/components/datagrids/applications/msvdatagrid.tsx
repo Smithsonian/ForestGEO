@@ -111,10 +111,19 @@ export default function MeasurementsSummaryViewDataGrid() {
   async function reloadMSV() {
     try {
       setLoading(true, 'Refreshing Measurements View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      const body =
+        currentPlot?.plotID != null && currentCensus?.dateRanges?.[0]?.censusID != null
+          ? JSON.stringify({
+              plotID: currentPlot.plotID,
+              censusID: currentCensus.dateRanges[0].censusID
+            })
+          : undefined;
+      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body
+      });
       if (!response.ok) throw new Error('Measurements View Refresh failure');
-      setLoading(true, 'Processing data...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       ailogger.error(e);
     } finally {
