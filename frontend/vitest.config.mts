@@ -34,6 +34,14 @@ export default defineConfig(({ mode }) => ({
         isolate: true
       }
     },
+    // Exclude tests that require a live database connection
+    exclude: [
+      'node_modules/**',
+      'tests/validation-framework/**',
+      'tests/deduplication-merge-fix.test.ts',
+      'tests/e2e/**',
+      'tests/integration/**'
+    ],
     // Strict timeout controls to prevent infinite loops
     testTimeout: 15000, // 15 seconds max per test
     hookTimeout: 10000, // 10 seconds max for hooks
