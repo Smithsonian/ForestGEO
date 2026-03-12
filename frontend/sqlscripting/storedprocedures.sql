@@ -1501,7 +1501,7 @@ BEGIN
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
                 current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
                 unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
-                core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+                core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
                 orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
                 species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
@@ -1684,23 +1684,25 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
-    -- If a prior run crashed mid-execution, uploadmetrics has status='processing'
-    -- and coremeasurements may have partial rows from that attempt. Clean up the
-    -- stale state so the retry can proceed cleanly instead of silently dropping
-    -- all rows via INSERT IGNORE on the ux_cm_uploadbatch_rowindex unique constraint.
+    -- If a prior run crashed or failed mid-execution, uploadmetrics is left in
+    -- status='processing' or status='failed' and coremeasurements may still
+    -- contain unresolved rows from that attempt. Clean up the stale state so a
+    -- retry can proceed cleanly instead of colliding on batch-scoped unique keys.
     IF EXISTS (
         SELECT 1 FROM uploadmetrics
         WHERE batchID = vBatchID
           AND censusID = vCurrentCensusID
-          AND status = 'processing'
+          AND status IN ('processing', 'failed')
         LIMIT 1
     ) THEN
-        -- Remove partial coremeasurements from the crashed run
+        -- Remove partial coremeasurements from the stale run
         DELETE FROM coremeasurements
         WHERE UploadBatchID = vBatchID AND UploadFileID = vFileID;
         -- Reset uploadmetrics so the fresh INSERT below succeeds
         DELETE FROM uploadmetrics
-        WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status = 'processing';
+        WHERE batchID = vBatchID
+          AND censusID = vCurrentCensusID
+          AND status IN ('processing', 'failed');
     END IF;
 
     -- Initialize metrics
@@ -1721,7 +1723,7 @@ BEGIN
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
         current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
         unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
-        core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+        core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
         orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
         species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
@@ -2368,7 +2370,7 @@ BEGIN
     -- Inline StemCrossID inheritance: set PrevStemCrossID at INSERT time for
     -- stems that have an unambiguous match in the previous census. Existing
     -- same-tree/same-stem rows are skipped explicitly and resolved below.
-    INSERT INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
+    INSERT IGNORE INTO stems (TreeID, QuadratID, CensusID, StemCrossID, StemTag, LocalX, LocalY, Moved, StemDescription, IsActive)
     SELECT sic.TreeID, sic.QuadratID, sic.CensusID, sic.StemCrossID,
            sic.StemTag, sic.LocalX, sic.LocalY, 0, NULL, 1
     FROM stem_insert_candidates sic
@@ -2525,7 +2527,33 @@ BEGIN
     CREATE INDEX idx_core_insert_candidates_id ON core_insert_candidates (id);
     CREATE INDEX idx_core_insert_candidates_stem ON core_insert_candidates (StemGUID);
 
-    INSERT INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+    CREATE TEMPORARY TABLE source_row_insert_conflicts AS
+    SELECT cic.id AS SourceRowIndex
+    FROM core_insert_candidates cic
+    GROUP BY cic.id
+    HAVING COUNT(*) > 1;
+
+    CREATE INDEX idx_source_row_insert_conflicts_id ON source_row_insert_conflicts (SourceRowIndex);
+
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT src.SourceRowIndex,
+           'MEASUREMENT_INSERT_SKIPPED',
+           'Measurement insert skipped: source row resolved to multiple candidate measurements'
+    FROM source_row_insert_conflicts src;
+
+    DROP TEMPORARY TABLE core_insert_candidates;
+
+    CREATE TEMPORARY TABLE core_insert_candidates AS
+    SELECT rbr.*
+    FROM resolved_batch_rows rbr
+    LEFT JOIN core_insert_failures cif
+        ON cif.SourceRowIndex = rbr.id
+    WHERE cif.SourceRowIndex IS NULL;
+
+    CREATE INDEX idx_core_insert_candidates_id ON core_insert_candidates (id);
+    CREATE INDEX idx_core_insert_candidates_stem ON core_insert_candidates (StemGUID);
+
+    INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   Description, UserDefinedFields, UploadFileID, UploadBatchID,
                                   RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
                                   RawCodes, RawComments, SourceRowIndex, IsActive)
@@ -2548,7 +2576,8 @@ BEGIN
            cic.LocalX, cic.LocalY, cic.Codes, cic.Comments,
            cic.id,
            1
-    FROM core_insert_candidates cic;
+    FROM core_insert_candidates cic
+    ORDER BY cic.id;
 
     SET vProcessedCount = ROW_COUNT();
 
@@ -2827,7 +2856,7 @@ BEGIN
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
             current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
             unresolved_stem_rows, current_stem_lookup, resolved_batch_rows,
-            core_insert_candidates, core_insert_failures, resolved_coremeasurements,
+            core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements,
             orphaned_rows, tempcodes, idf_first_occurrence, same_batch_species_conflicts,
             species_mismatch_records, quadrat_mismatch_failures, coordinate_drift_failures;
 
