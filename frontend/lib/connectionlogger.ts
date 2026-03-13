@@ -107,6 +107,11 @@ export function patchConnectionManager(cm: { executeQuery: (sql: string, params?
     const op = regexOutput?.[1]?.toUpperCase() as 'UPDATE' | 'DELETE' | undefined;
     const table = regexOutput?.[2];
     if (!op || !table || !tableConfigs[table]) return orig(sql, params, transactionId); // don't log - not a tracked operation/table
+
+    // Skip changelog tracking for queries with JOINs - the WHERE clause uses
+    // aliases that are only valid in the context of the JOIN, so extracting the
+    // WHERE clause for a standalone SELECT would produce invalid SQL.
+    if (/\bJOIN\b/i.test(cleaned)) return orig(sql, params, transactionId);
     const { pk, fk } = tableConfigs[table];
 
     let coreKey = pk;
