@@ -8,7 +8,7 @@ const mysql = require('mysql2/promise');
 const DB_CONFIG = {
   host: 'forestgeo-mysqldataserver.mysql.database.azure.com',
   user: 'azureroot',
-  password: 'P@ssw0rd',
+  password: process.env.AZURE_SQL_PASSWORD,
   database: 'forestgeo_testing',
   port: 3306,
   ssl: { rejectUnauthorized: false },

@@ -6,7 +6,7 @@
 // Load env vars
 process.env.AZURE_SQL_SERVER = 'forestgeo-mysqldataserver.mysql.database.azure.com';
 process.env.AZURE_SQL_USER = 'azureroot';
-process.env.AZURE_SQL_PASSWORD = 'P@ssw0rd';
+// AZURE_SQL_PASSWORD must be set in environment
 process.env.AZURE_SQL_SCHEMA = 'forestgeo_testing_mason';
 
 import ConnectionManager from '../config/connectionmanager';

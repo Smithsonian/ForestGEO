@@ -11,7 +11,7 @@ async function main() {
   const pool = mysql.createPool({
     host: 'forestgeo-mysqldataserver.mysql.database.azure.com',
     user: 'azureroot',
-    password: 'P@ssw0rd',
+    password: process.env.AZURE_SQL_PASSWORD,
     ssl: { rejectUnauthorized: false },
     database: SCHEMA,
     waitForConnections: true,
