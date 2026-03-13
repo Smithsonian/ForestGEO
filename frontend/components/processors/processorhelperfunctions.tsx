@@ -271,12 +271,7 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 // };
 
 function isRetryableValidationLockError(error: any) {
-  return (
-    error?.code === 'ER_LOCK_DEADLOCK' ||
-    error?.errno === 1213 ||
-    error?.code === 'ER_LOCK_WAIT_TIMEOUT' ||
-    error?.errno === 1205
-  );
+  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213 || error?.code === 'ER_LOCK_WAIT_TIMEOUT' || error?.errno === 1205;
 }
 
 type ValidationExecutionParams = {
@@ -347,12 +342,7 @@ async function prepareValidationRun(
   ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
 }
 
-function formatValidationQuery(
-  schema: string,
-  cursorQuery: string,
-  validationProcedureID: number,
-  params: ValidationExecutionParams
-): string {
+function formatValidationQuery(schema: string, cursorQuery: string, validationProcedureID: number, params: ValidationExecutionParams): string {
   return cursorQuery
     .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
     .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
@@ -364,7 +354,10 @@ function formatValidationQuery(
     .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
     .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
     .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
-    .replace(/insert\s+into\s+cmverrors\s*\(\s*CoreMeasurementID\s*,\s*ValidationErrorID\s*\)/gi, `INSERT INTO ${schema}.measurement_error_log (MeasurementID, ErrorID)`)
+    .replace(
+      /insert\s+into\s+cmverrors\s*\(\s*CoreMeasurementID\s*,\s*ValidationErrorID\s*\)/gi,
+      `INSERT INTO ${schema}.measurement_error_log (MeasurementID, ErrorID)`
+    )
     .replace(/(?<!\w\.)cmverrors\b/gi, `${schema}.measurement_error_log`)
     .replace(/\be\.CoreMeasurementID\b/gi, 'e.MeasurementID')
     .replace(/\be\.ValidationErrorID\b/gi, 'e.ErrorID')
@@ -375,7 +368,9 @@ function formatValidationQuery(
     .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
     .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
     .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
-    .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
+    .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
+    .replace(/(?<!\w\.)measurement_error_log\b/g, `${schema}.measurement_error_log`)
+    .replace(/(?<!\w\.)measurement_errors\b/g, `${schema}.measurement_errors`);
 }
 
 // Generalized runValidation function
@@ -450,10 +445,7 @@ export async function runValidation(
   return false;
 }
 
-export async function runCombinedDBHValidations(
-  schema: string,
-  params: ValidationExecutionParams = {}
-): Promise<CombinedDBHValidationResult> {
+export async function runCombinedDBHValidations(schema: string, params: ValidationExecutionParams = {}): Promise<CombinedDBHValidationResult> {
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
   let delay = 100;
@@ -483,25 +475,11 @@ export async function runCombinedDBHValidations(
       const ranShrinkage = mysqlBoolToBoolean(shrinkageValidation?.IsEnabled);
 
       if (ranGrowth) {
-        await prepareValidationRun(
-          connectionManager,
-          schema,
-          1,
-          growthValidation?.ProcedureName ?? 'ValidateDBHGrowthExceedsMax',
-          transactionID,
-          params
-        );
+        await prepareValidationRun(connectionManager, schema, 1, growthValidation?.ProcedureName ?? 'ValidateDBHGrowthExceedsMax', transactionID, params);
       }
 
       if (ranShrinkage) {
-        await prepareValidationRun(
-          connectionManager,
-          schema,
-          2,
-          shrinkageValidation?.ProcedureName ?? 'ValidateDBHShrinkageExceedsMax',
-          transactionID,
-          params
-        );
+        await prepareValidationRun(connectionManager, schema, 2, shrinkageValidation?.ProcedureName ?? 'ValidateDBHShrinkageExceedsMax', transactionID, params);
       }
 
       if (ranGrowth || ranShrinkage) {
@@ -619,11 +597,7 @@ export async function runCombinedCrossCensusLocationValidations(
         // cannot run for 54+ minutes and orphan a connection.  10 minutes
         // is needed for large cross-census comparisons (e.g. 212K × 192K rows).
         const CROSS_CENSUS_TIMEOUT_MS = 10 * 60 * 1000;
-        await connectionManager.executeQuery(
-          `SET SESSION MAX_EXECUTION_TIME = ${CROSS_CENSUS_TIMEOUT_MS}`,
-          [],
-          transactionID
-        );
+        await connectionManager.executeQuery(`SET SESSION MAX_EXECUTION_TIME = ${CROSS_CENSUS_TIMEOUT_MS}`, [], transactionID);
 
         try {
           await connectionManager.executeQuery(
@@ -635,11 +609,7 @@ export async function runCombinedCrossCensusLocationValidations(
           // Always reset MAX_EXECUTION_TIME so it doesn't leak to other queries
           // that reuse this pooled connection after rollback.
           try {
-            await connectionManager.executeQuery(
-              'SET SESSION MAX_EXECUTION_TIME = 0',
-              [],
-              transactionID
-            );
+            await connectionManager.executeQuery('SET SESSION MAX_EXECUTION_TIME = 0', [], transactionID);
           } catch {
             // Connection may already be dead after a timeout — swallow safely.
           }
