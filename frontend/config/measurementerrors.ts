@@ -38,6 +38,7 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   DUPLICATE_ENTRY: 'Duplicate measurement row detected',
   NEGATIVE_DBH: 'DBH must be non-negative',
   NEGATIVE_HOM: 'HOM must be non-negative',
+  MISSING_FIELD_COORDINATES: 'Missing required coordinate fields (lx, ly)',
   INVALID_COORDINATE: 'Coordinate value is negative',
   FIELD_TOO_LONG: 'One or more fields exceed column length limits',
   MISSING_MEASUREMENT_DATA: 'Missing measurement data',
@@ -67,6 +68,7 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
   if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
   if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
+  if (text.includes('missing required fields: lx') || text.includes('missing required fields: ly')) codes.push('MISSING_FIELD_COORDINATES');
   if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');

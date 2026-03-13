@@ -2528,7 +2528,7 @@ BEGIN
         KEY idx_core_insert_failures_error (ErrorCode)
     );
 
-    INSERT INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
+    INSERT IGNORE INTO core_insert_failures (SourceRowIndex, ErrorCode, FailureReason)
     SELECT rbr.id,
            'MEASUREMENT_INSERT_SKIPPED',
            LEFT(
