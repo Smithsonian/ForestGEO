@@ -180,8 +180,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const showPendingRows = true;
-  const setShowPendingRows = () => {};
+  const [showPendingRows, setShowPendingRows] = useState<boolean>(true);
   // tree-stem-state
   const [showOT, setShowOT] = useState<boolean>(true);
   const [showMS, setShowMS] = useState<boolean>(true);

@@ -6,6 +6,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
+import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -233,23 +234,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
               JOIN ${schema}.quadrats q on q.QuadratID = st.QuadratID and q.IsActive is true
               JOIN ${schema}.plots p ON p.PlotID = q.PlotID
               JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
-              WHERE p.PlotID = ? AND cm.CensusID = ? ${(() => {
-                const visibleConditions = filterModel.visible
-                  .map((v: string) => {
-                    switch (v) {
-                      case 'valid':
-                        return `cm.IsValidated = TRUE`;
-                      case 'errors':
-                        return `cm.IsValidated = FALSE`;
-                      case 'pending':
-                        return `cm.IsValidated IS NULL`;
-                      default:
-                        return null;
-                    }
-                  })
-                  .filter(Boolean);
-                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
-              })()} 
+              WHERE p.PlotID = ? AND cm.CensusID = ? ${buildMeasurementVisibleClauseSql(schema, 'cm', filterModel.visible)} 
               ${(() => {
                 // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
                 const validTss = filterModel.tss.filter((tss: any) => ['multi stem', 'old tree', 'new recruit'].includes(tss));

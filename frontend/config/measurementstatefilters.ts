@@ -21,3 +21,13 @@ export function buildMeasurementVisibleConditionSql(schema: string, alias: strin
       return `(${alias}.IsValidated IS NULL AND NOT ${hasUnresolvedErrors})`;
   }
 }
+
+export function buildMeasurementVisibleClauseSql(schema: string, alias: string, visibleFilters: VisibleFilter[] | undefined): string {
+  if (!visibleFilters) {
+    return '';
+  }
+
+  const visibleConditions = visibleFilters.map(visibleFilter => buildMeasurementVisibleConditionSql(schema, alias, visibleFilter));
+
+  return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : ' AND 1 = 0';
+}

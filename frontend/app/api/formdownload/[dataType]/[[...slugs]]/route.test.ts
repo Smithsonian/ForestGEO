@@ -291,6 +291,29 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('measurements: returns no rows when visible filters are all disabled', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi
+      .spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'MeasuredDBH' }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const res = await GET(
+      makeRequest(),
+      makeProps(
+        'measurements',
+        ['myschema', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })]
+      )
+    );
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.json()).toEqual([]);
+
+    const sql = exec.mock.calls[1][0] as string;
+    expect(sql).toMatch(/AND 1 = 0/);
+  });
+
   it('returns 500 on errors during columns discovery and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('columns fail'));

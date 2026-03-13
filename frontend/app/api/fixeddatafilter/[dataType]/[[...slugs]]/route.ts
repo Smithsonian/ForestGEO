@@ -9,7 +9,7 @@ import type { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { buildFailedMeasurementsSelectQuery } from '@/config/measurementerrors';
-import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
+import { buildMeasurementVisibleClauseSql } from '@/config/measurementstatefilters';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -247,14 +247,11 @@ export async function POST(
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS vft.*
             FROM ${schema}.${params.dataType} vft
-                     JOIN ${schema}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
+              JOIN ${schema}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
             WHERE vft.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-              ${(() => {
-                const visibleConditions = filterModel.visible.map(v => buildMeasurementVisibleConditionSql(schema, 'vft', v)).filter(Boolean);
-                return visibleConditions.length > 0 ? ` AND (${visibleConditions.join(' OR ')})` : '';
-              })()}
+              ${buildMeasurementVisibleClauseSql(schema, 'vft', filterModel.visible)}
               ${(() => {
                 // Bug #4 fix: Validate TSS values against allowed set to prevent SQL injection
                 const validTss = filterModel.tss.filter(tss => ['multi stem', 'old tree', 'new recruit'].includes(tss));

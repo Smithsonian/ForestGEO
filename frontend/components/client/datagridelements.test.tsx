@@ -13,9 +13,17 @@ vi.mock('@mui/x-data-grid', () => ({
   FilterPanelTrigger: ({ render }: any) => <>{render}</>,
   QuickFilter: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   QuickFilterControl: ({ slotProps, ...props }: any) => <input aria-label={slotProps?.input?.['aria-label']} {...props} />,
-  QuickFilterClear: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
+  QuickFilterClear: ({ children, ...props }: any) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
   Toolbar: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-  ToolbarButton: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
+  ToolbarButton: ({ children, ...props }: any) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
   useGridApiContext: () => ({
     current: {
       state: {
@@ -67,5 +75,39 @@ describe('EditToolbar', () => {
 
     expect(toggleErrors).toHaveBeenCalledWith(false);
     expect(screen.getByTestId('filter-errors')).toHaveAttribute('aria-label', 'Hide invalid measurements (3)');
+  });
+
+  it('uses the pending button as a pending-row filter toggle', async () => {
+    const user = userEvent.setup();
+    const togglePending = vi.fn();
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: true, toggle: vi.fn(), count: 3 }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: togglePending, count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    await user.click(screen.getByTestId('filter-pending'));
+
+    expect(togglePending).toHaveBeenCalledWith(false);
+    expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-label', 'Hide pending measurements (2)');
+    expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-pressed', 'true');
   });
 });

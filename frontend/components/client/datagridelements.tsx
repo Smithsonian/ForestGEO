@@ -353,16 +353,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </IconButton>
                   </Badge>
                 </Tooltip>
-                <Tooltip
-                  title={`Pending: (${pendingControls.count}) - Always Shown\nPending rows must remain visible to prevent edited measurements from disappearing during validation`}
-                >
+                <Tooltip title={`Pending: (${pendingControls.count})`}>
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
                     <IconButton
-                      variant="solid"
-                      color={'primary'}
-                      sx={{ cursor: 'default', pointerEvents: 'none' }}
-                      aria-label={`Pending measurements (${pendingControls.count}) - always visible to preserve edited measurements during validation`}
-                      aria-pressed={true}
+                      variant="soft"
+                      disabled={!pendingControls.count}
+                      color={pendingControls.show ? 'primary' : 'neutral'}
+                      onClick={() => pendingControls.toggle(!pendingControls.show)}
+                      aria-label={`${pendingControls.show ? 'Hide' : 'Show'} pending measurements (${pendingControls.count})`}
+                      aria-pressed={pendingControls.show}
                       data-testid="filter-pending"
                     >
                       <ScheduleIcon />

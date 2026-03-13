@@ -234,6 +234,34 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(mapDataSpy).toHaveBeenCalled();
   });
 
+  it('measurementssummaryview: returns no rows when visible filters are all disabled', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-empty-visible');
+    vi.spyOn(cm, 'commitTransaction');
+    vi.spyOn(cm, 'closeConnection');
+
+    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'MeasurementDate' }]);
+    exec.mockResolvedValueOnce([]);
+    exec.mockResolvedValueOnce([{ totalRows: 0 }]);
+
+    const req = makeRequest({
+      filterModel: {
+        items: [],
+        quickFilterValues: [],
+        visible: [],
+        tss: ['multi stem']
+      }
+    });
+
+    const res = await POST(req, makeProps('measurementssummaryview', ['myschema', '0', '25', '101', '7']));
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    const [, paginatedSQL] = exec.mock.calls;
+    const sqlStr = String(paginatedSQL);
+    expect(sqlStr).toMatch(/AND 1 = 0/);
+  });
+
   it('coremeasurements: when multiple census IDs, returns deprecated filtered subset; commits and closes', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');

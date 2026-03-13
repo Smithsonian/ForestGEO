@@ -87,33 +87,16 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
     });
 
     it('builds stable visible and tree-state filters from toggle state', () => {
+      expect(buildMeasurementVisibleFilters(true, true, true)).toEqual(['errors', 'valid', 'pending']);
       expect(buildMeasurementVisibleFilters(true, false, true)).toEqual(['errors', 'pending']);
+      expect(buildMeasurementVisibleFilters(true, false, false)).toEqual(['errors']);
+      expect(buildMeasurementVisibleFilters(false, false, false)).toEqual([]);
       expect(buildMeasurementTssFilters(true, false, true)).toEqual(['old tree', 'new recruit']);
     });
 
     it('treats identical sort models as equal', () => {
       expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'asc' }])).toBe(true);
       expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'desc' }])).toBe(false);
-    });
-  });
-
-  describe('Bug Fix: Pending filter cannot be disabled', () => {
-    it('should keep showPendingRows permanently enabled', () => {
-      // showPendingRows is now a constant true value
-      // This prevents rows with IsValidated=NULL from disappearing
-      expect(true).toBe(true); // Verified in measurementscommons.tsx:166-167
-    });
-
-    it('should render pending filter button as disabled', () => {
-      // The button is disabled in the UI to prevent user from toggling it off
-      // See datagridelements.tsx:321 - disabled={true}
-      expect(true).toBe(true);
-    });
-
-    it('should show helpful tooltip explaining why pending cannot be disabled', () => {
-      // Tooltip: "Pending rows must remain visible to prevent edited measurements from disappearing during validation"
-      // See datagridelements.tsx:317-318
-      expect(true).toBe(true);
     });
   });
 
