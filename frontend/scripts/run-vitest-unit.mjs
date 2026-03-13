@@ -187,10 +187,8 @@ function handleLine(rawLine) {
   }
 
   if (
-    line.startsWith('FAIL') ||
-    line.startsWith('⎯') ||
-    /(^| )failed( |$)/i.test(line) ||
-    /^Error: /.test(line) ||
+    /^FAIL\s/.test(line) ||
+    /^⎯.*⎯$/.test(line) ||
     /Unhandled Errors/i.test(line)
   ) {
     sawFailure = true;

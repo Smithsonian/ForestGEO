@@ -254,7 +254,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
-    if (!currentSite || !currentPlot || !currentCensus) return;
+    if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
 
     try {
       const validCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'valid');
