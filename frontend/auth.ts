@@ -34,8 +34,14 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
             method: 'GET'
           });
           if (!response.ok) {
-            console.error('auth response not okay');
-            throw new Error('API call FAILURE!');
+            const responseText = await response.text().catch(() => '');
+            console.error('auth response not okay', {
+              url: coreURL,
+              status: response.status,
+              statusText: response.statusText,
+              body: responseText.slice(0, 500)
+            });
+            throw new Error(`API call FAILURE! status=${response.status}`);
           }
 
           const data = await response.json();
@@ -44,7 +50,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
           session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
         } catch (error) {
-          console.error('Error fetching user data:', error);
+          console.error('Error fetching user data:', {
+            url: coreURL,
+            email: token.email,
+            error
+          });
           throw error;
         }
       }
