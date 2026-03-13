@@ -65,7 +65,7 @@ jobs:
       - name: Run unit tests
         run: |
           cd frontend/
-          npm run test:unit
+          npm run test:unit:ci
 
       - name: Build application
         run: |

@@ -37,6 +37,8 @@ export default defineConfig(({ mode }) => ({
     // Exclude tests that require a live database connection
     exclude: [
       'node_modules/**',
+      '**/*.integration.test.ts',
+      '**/*.integration.test.tsx',
       'tests/validation-framework/**',
       'tests/deduplication-merge-fix.test.ts',
       'tests/e2e/**',

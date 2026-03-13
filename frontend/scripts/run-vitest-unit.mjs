@@ -6,6 +6,7 @@ const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const EXCLUDED_DIRECTORIES = new Set(['node_modules', '.next', 'build', 'coverage', '.git', 'docs', 'cypress']);
 const EXCLUDED_PREFIXES = ['tests/validation-framework', 'tests/e2e', 'tests/integration'];
 const EXCLUDED_FILES = new Set(['tests/deduplication-merge-fix.test.ts']);
+const EXCLUDED_FILE_PATTERNS = [/\.integration\.test\.[cm]?[jt]sx?$/];
 const GRACE_PERIOD_MS = 3000;
 const FORCE_KILL_DELAY_MS = 5000;
 const IDLE_COMPLETION_GRACE_MS = 30000;
@@ -48,7 +49,7 @@ async function collectTestFiles(rootDir, currentDir = rootDir, relativeDir = '')
     }
 
     const relativePath = normalizeRelativePath(path.relative(rootDir, path.join(currentDir, entry.name)));
-    if (EXCLUDED_FILES.has(relativePath)) {
+    if (EXCLUDED_FILES.has(relativePath) || EXCLUDED_FILE_PATTERNS.some(pattern => pattern.test(relativePath))) {
       continue;
     }
 

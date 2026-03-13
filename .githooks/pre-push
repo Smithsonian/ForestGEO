@@ -20,8 +20,8 @@ do
     # Change to frontend directory and run tests
     cd frontend || exit 1
 
-    # Run the actual unit-test script used by CI
-    if ! npm run test:unit; then
+    # Run the same CI-safe unit suite that gates protected-branch deployments
+    if ! npm run test:unit:ci; then
       echo ""
       echo "❌ Tests failed! Push aborted."
       echo "Please fix the failing tests before pushing to $remote_branch"
