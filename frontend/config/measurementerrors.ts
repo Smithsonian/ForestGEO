@@ -238,14 +238,7 @@ async function resolveIngestionErrorIDCache(
   }
 
   for (const [errorCode, error] of uniqueErrors.entries()) {
-    const errorID = await ensureMeasurementErrorDefinition(
-      connectionManager,
-      schema,
-      INGESTION_ERROR_SOURCE,
-      errorCode,
-      error.errorMessage,
-      transactionID
-    );
+    const errorID = await ensureMeasurementErrorDefinition(connectionManager, schema, INGESTION_ERROR_SOURCE, errorCode, error.errorMessage, transactionID);
     errorIDCache.set(`${INGESTION_ERROR_SOURCE}:${errorCode}`, errorID);
   }
 
@@ -650,8 +643,7 @@ export async function revalidateEditedFailedRow(
          AND t.IsActive = 1
          AND s.IsActive = 1
        ORDER BY t.CensusID DESC
-       LIMIT 1`,
-      [schema, schema, schema]
+       LIMIT 1`
     );
     const priorStemRows: any[] = await connectionManager.executeQuery(
       priorStemSQL,

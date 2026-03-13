@@ -239,7 +239,7 @@ export class PoolMonitor {
       // holds a transaction that must not be interrupted by pool shutdown.
       let hasActiveTransactions = false;
       try {
-        const { ConnectionManager } = await import('./connectionmanager');
+        const ConnectionManager = (await import('./connectionmanager')).default;
         hasActiveTransactions = ConnectionManager.getInstance().hasActiveTransactions();
       } catch {
         // ConnectionManager not available — proceed with processlist check only.
