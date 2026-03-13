@@ -368,9 +368,7 @@ function formatValidationQuery(schema: string, cursorQuery: string, validationPr
     .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
     .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
     .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
-    .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
-    .replace(/(?<!\w\.)measurement_error_log\b/g, `${schema}.measurement_error_log`)
-    .replace(/(?<!\w\.)measurement_errors\b/g, `${schema}.measurement_errors`);
+    .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 }
 
 // Generalized runValidation function
