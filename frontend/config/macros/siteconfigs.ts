@@ -12,6 +12,7 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import HomeIcon from '@mui/icons-material/Home';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -92,6 +93,12 @@ export const siteConfigNav: SiteConfigProps[] = [
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
     icon: DataObjectIcon,
     expanded: [
+      {
+        label: 'Census Overview',
+        href: '/censusoverview',
+        tip: 'Return to census selection',
+        icon: HomeIcon
+      },
       {
         label: 'View Data',
         href: '/summary',

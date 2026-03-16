@@ -977,13 +977,57 @@ export default function Sidebar(props: SidebarProps) {
                     };
 
                     if (item.expanded.length === 0) {
-                      const isLinkDisabled = getDisabledState(item.href);
-                      const isDataIncomplete = shouldApplyTooltip(item);
+                      const isDashboard = item.href === '/dashboard';
+                      const isLinkDisabled = isDashboard ? false : getDisabledState(item.href);
+                      const isDataIncomplete = isDashboard ? false : shouldApplyTooltip(item);
+
+                      const handleDashboardClick = async () => {
+                        await handleCensusSelection(undefined);
+                        router.push('/dashboard');
+                        setTimeout(() => {
+                          const mainContent = document.getElementById('main-content');
+                          if (mainContent) {
+                            mainContent.focus();
+                            mainContent.scrollIntoView();
+                          }
+                        }, 100);
+                      };
+
+                      const handleNavClick = () => {
+                        if (!isLinkDisabled) {
+                          router.push(item.href);
+                          setTimeout(() => {
+                            const mainContent = document.getElementById('main-content');
+                            if (mainContent) {
+                              mainContent.focus();
+                              mainContent.scrollIntoView();
+                            }
+                          }, 100);
+                        }
+                      };
+
+                      // Dashboard button is always visible, other non-expanding items require site+plot
+                      const transitionIn = isDashboard ? true : (currentSite !== undefined && currentPlot !== undefined);
 
                       return (
-                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
+                        <TransitionComponent key={item.href} in={transitionIn} direction="down">
                           <ListItem data-testid={`navigate-list-item-nonexpanding-${item.label}`}>
-                            {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                            {isDashboard ? (
+                              <Box sx={{ display: 'flex', flex: 1 }} data-testid={'dashboard-nav-wrapper'}>
+                                <ListItemButton
+                                  selected={pathname === item.href && !currentCensus}
+                                  data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
+                                  sx={{ flex: 1, width: '100%' }}
+                                  color={pathname === item.href && !currentCensus ? 'primary' : undefined}
+                                  onClick={handleDashboardClick}
+                                >
+                                  <Icon />
+                                  <ListItemContent>
+                                    <Typography level={'title-sm'}>{item.label}</Typography>
+                                  </ListItemContent>
+                                </ListItemButton>
+                              </Box>
+                            ) : currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
@@ -992,19 +1036,7 @@ export default function Sidebar(props: SidebarProps) {
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
                                     color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={() => {
-                                      if (!isLinkDisabled) {
-                                        router.push(item.href);
-                                        // Move focus to main content after navigation
-                                        setTimeout(() => {
-                                          const mainContent = document.getElementById('main-content');
-                                          if (mainContent) {
-                                            mainContent.focus();
-                                            mainContent.scrollIntoView();
-                                          }
-                                        }, 100);
-                                      }
-                                    }}
+                                    onClick={handleNavClick}
                                   >
                                     <Badge
                                       color="danger"
@@ -1028,19 +1060,7 @@ export default function Sidebar(props: SidebarProps) {
                                   sx={{ flex: 1, width: '100%' }}
                                   disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
                                   color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={() => {
-                                    if (!isLinkDisabled) {
-                                      router.push(item.href);
-                                      // Move focus to main content after navigation
-                                      setTimeout(() => {
-                                        const mainContent = document.getElementById('main-content');
-                                        if (mainContent) {
-                                          mainContent.focus();
-                                          mainContent.scrollIntoView();
-                                        }
-                                      }, 100);
-                                    }
-                                  }}
+                                  onClick={handleNavClick}
                                 >
                                   <Icon />
                                   <ListItemContent>

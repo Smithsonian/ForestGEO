@@ -633,7 +633,7 @@ export default function DashboardPage() {
                 Available Censuses
               </Typography>
               <Typography level="body-md" color="neutral">
-                Use the sidebar to select a census from {currentPlot.plotName}
+                Select a census from {currentPlot.plotName} to view its data
               </Typography>
             </Box>
           </Stack>
@@ -644,6 +644,12 @@ export default function DashboardPage() {
             isLoading={false}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
+            onSelectCensus={(census) => {
+              if (censusDispatch) {
+                const orgCensus = censusListContext?.find(c => c?.plotCensusNumber === census.plotCensusNumber);
+                censusDispatch({ census: orgCensus });
+              }
+            }}
           />
         </Box>
       ) : !hasData && !isLoading ? (
