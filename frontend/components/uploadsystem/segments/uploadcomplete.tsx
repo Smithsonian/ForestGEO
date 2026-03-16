@@ -227,6 +227,8 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     if (hasRunRef.current) return;
     hasRunRef.current = true;
 
+    const abortController = new AbortController();
+
     const runAsyncTasks = async () => {
       try {
         if (uploadForm === FormType.measurements && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
@@ -237,17 +239,25 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
               format: true
             }),
-            method: 'POST'
+            method: 'POST',
+            signal: abortController.signal
           });
         }
+        if (abortController.signal.aborted) return;
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
-        setAllLoadsCompleted(true);
+        if (!abortController.signal.aborted) {
+          setAllLoadsCompleted(true);
+        }
       } catch (error: any) {
-        ailogger.error(error);
+        if (error?.name !== 'AbortError') {
+          ailogger.error(error);
+        }
       }
     };
     runAsyncTasks().catch(ailogger.error);
+
+    return () => abortController.abort();
   }, [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
 
   // Calculate overall progress as average of the three data loads

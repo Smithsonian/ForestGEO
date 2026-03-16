@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAppInsightsUserSync } from '@/config/applicationinsightsusersync';
+import ailogger from '@/ailogger';
 
 interface LoadingOperation {
   id: string;
@@ -80,9 +81,15 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
       });
 
       // Give long-running processing flows the same budget as uploads.
-      const timeoutDuration = category === 'upload' || category === 'processing' ? 5 * 60 * 1000 : 30 * 1000;
+      const TIMEOUT_BY_CATEGORY_MS: Record<string, number> = {
+        upload: 5 * 60 * 1000,
+        processing: 5 * 60 * 1000,
+        api: 60 * 1000
+      };
+      const DEFAULT_TIMEOUT_MS = 30 * 1000;
+      const timeoutDuration = TIMEOUT_BY_CATEGORY_MS[category ?? ''] ?? DEFAULT_TIMEOUT_MS;
       const timeoutId = setTimeout(() => {
-        console.warn(`Operation ${operationId} timed out after ${timeoutDuration}ms`);
+        ailogger.warn(`Operation ${operationId} timed out after ${timeoutDuration}ms`);
         endOperation(operationId);
       }, timeoutDuration);
 
@@ -217,7 +224,7 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
           const age = now - op.startTime;
           // Remove operations older than maxAge or with invalid timestamps
           if (age > maxAge || age < 0 || !op.startTime) {
-            console.warn(`Cleaning up stale operation: ${op.id} (${op.message}), age: ${age}ms`);
+            ailogger.warn(`Cleaning up stale operation: ${op.id} (${op.message}), age: ${age}ms`);
             // Also clear any associated timeout
             const timeoutId = operationTimeoutRefs.current.get(op.id);
             if (timeoutId) {

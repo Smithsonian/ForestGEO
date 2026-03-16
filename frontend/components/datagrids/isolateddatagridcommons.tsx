@@ -180,8 +180,11 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               ? JSON.stringify({ filterModel })
               : undefined
         });
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(errorBody.message || `Server returned ${response.status}`);
+        }
         const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Error fetching data');
         setRows(data.output);
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
