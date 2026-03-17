@@ -24,9 +24,7 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain(
       'INSERT INTO uploadintegrityalerts (uploadId, fileID, batchID, plotID, censusID, type, message, severity, sourceRecords, processedRecords, failedRecords, missingRecords)'
     );
-    expect(canonicalSql).not.toContain(
-      'INSERT INTO uploadintegrityalerts (plotID, censusID, type, message, severity, failedRecords)'
-    );
+    expect(canonicalSql).not.toContain('INSERT INTO uploadintegrityalerts (plotID, censusID, type, message, severity, failedRecords)');
     expect(canonicalSql).toContain("DECLARE vAlertFileID VARCHAR(50) DEFAULT '__collapser__';");
     expect(canonicalSql).toContain("SET vAlertBatchID = CONCAT('census-', vCensusID);");
   });
@@ -35,9 +33,7 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
 
     expect(canonicalSql).toContain("AND status IN ('processing', 'failed')");
-    expect(canonicalSql).toContain(
-      "WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status IN ('processing', 'failed');"
-    );
+    expect(canonicalSql).toContain("WHERE batchID = vBatchID AND censusID = vCurrentCensusID AND status IN ('processing', 'failed');");
   });
 
   it('uses duplicate-tolerant stem inserts for within-batch stem collisions', () => {
@@ -55,16 +51,12 @@ describe('upload procedure regressions', () => {
     const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
 
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE source_row_insert_conflicts AS');
-    expect(canonicalSql).toContain(
-      "'Measurement insert skipped: source row resolved to multiple candidate measurements'"
-    );
+    expect(canonicalSql).toContain("'Measurement insert skipped: source row resolved to multiple candidate measurements'");
     expect(canonicalSql).toContain(
       'INSERT IGNORE INTO coremeasurements (CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields, UploadFileID, UploadBatchID, RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY, RawCodes, RawComments, SourceRowIndex, IsActive)'
     );
     expect(canonicalSql).toContain('FROM core_insert_candidates cic ORDER BY cic.id;');
-    expect(canonicalSql).toContain(
-      'core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements'
-    );
+    expect(canonicalSql).toContain('core_insert_candidates, source_row_insert_conflicts, core_insert_failures, resolved_coremeasurements');
   });
 
   it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildUploadSessionRestartRequiredError,
-  getApiErrorMessage,
-  parseUploadSessionConflict
-} from './uploadsessionconflicts';
+import { buildUploadSessionRestartRequiredError, getApiErrorMessage, parseUploadSessionConflict } from './uploadsessionconflicts';
 
 describe('upload session conflict helpers', () => {
   it('detects restart-required conflicts for cleaned_up sessions', () => {

@@ -89,10 +89,7 @@ export class OrgCensusToCensusResultMapper {
   }
 }
 
-export function reconcileCurrentCensusSelection(
-  currentCensus: OrgCensus,
-  censusList: OrgCensusRDS[]
-): OrgCensusRDS | undefined {
+export function reconcileCurrentCensusSelection(currentCensus: OrgCensus, censusList: OrgCensusRDS[]): OrgCensusRDS | undefined {
   if (!currentCensus) return undefined;
 
   const persistedCensusID = currentCensus.dateRanges?.[0]?.censusID;

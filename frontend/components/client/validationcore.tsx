@@ -379,13 +379,12 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       const shouldUseCombinedCrossCensusLocationPath = Boolean(
         validationMessages[QUADRAT_MISMATCH_PROCEDURE] && validationMessages[COORDINATE_DRIFT_PROCEDURE]
       );
-      const standaloneValidationNames = validationProcedureNames.filter(procedureName =>
-        !(
-          (shouldUseCombinedDBHPath &&
-            (procedureName === DBH_GROWTH_PROCEDURE || procedureName === DBH_SHRINKAGE_PROCEDURE)) ||
-          (shouldUseCombinedCrossCensusLocationPath &&
-            (procedureName === QUADRAT_MISMATCH_PROCEDURE || procedureName === COORDINATE_DRIFT_PROCEDURE))
-        )
+      const standaloneValidationNames = validationProcedureNames.filter(
+        procedureName =>
+          !(
+            (shouldUseCombinedDBHPath && (procedureName === DBH_GROWTH_PROCEDURE || procedureName === DBH_SHRINKAGE_PROCEDURE)) ||
+            (shouldUseCombinedCrossCensusLocationPath && (procedureName === QUADRAT_MISMATCH_PROCEDURE || procedureName === COORDINATE_DRIFT_PROCEDURE))
+          )
       );
 
       // Build ordered list of validation tasks. Run sequentially to avoid

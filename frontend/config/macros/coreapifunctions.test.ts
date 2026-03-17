@@ -536,8 +536,8 @@ describe('CoreAPIFunctions', () => {
           'transaction-123'
         );
 
-        const deleteHistoryCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-          typeof call[0] === 'string' && call[0].includes('DELETE mel') && call[0].includes('measurement_error_log')
+        const deleteHistoryCall = mockConnectionManager.executeQuery.mock.calls.find(
+          (call: any[]) => typeof call[0] === 'string' && call[0].includes('DELETE mel') && call[0].includes('measurement_error_log')
         );
         expect(deleteHistoryCall).toBeUndefined();
       });

@@ -155,10 +155,7 @@ async function moveFailedToTemporary(
   const batchID = generateShortBatchID();
 
   // Only clear prior staged reingestion rows; never clear all temp rows for plot/census.
-  const clearStaleReingestionSQL = safeFormatQuery(
-    schema,
-    'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND PlotID = ? AND CensusID = ?'
-  );
+  const clearStaleReingestionSQL = safeFormatQuery(schema, 'DELETE FROM ??.temporarymeasurements WHERE FileID = ? AND PlotID = ? AND CensusID = ?');
   await connectionManager.executeQuery(clearStaleReingestionSQL, [fileID, plotID, censusID], transactionID);
 
   const values = sourceRows.map(row => [
@@ -194,9 +191,7 @@ async function moveFailedToTemporary(
   const rowMappings: ReingestionRowMapping[] = sourceRows.map((row, idx) => {
     const temporaryRowID = firstInsertId + idx;
     if (temporaryRowID > MAX_SIGNED_INT) {
-      throw new Error(
-        `Reingestion staging id overflow: ${temporaryRowID}. temporarymeasurements.id exceeded safe range for coremeasurements.SourceRowIndex`
-      );
+      throw new Error(`Reingestion staging id overflow: ${temporaryRowID}. temporarymeasurements.id exceeded safe range for coremeasurements.SourceRowIndex`);
     }
 
     return {
@@ -222,11 +217,7 @@ function parseBulkIngestionStatus(procedureResult: any): BulkIngestionStatus {
   };
 }
 
-async function createReingestionMap(
-  connectionManager: any,
-  rowMappings: ReingestionRowMapping[],
-  transactionID: string
-): Promise<void> {
+async function createReingestionMap(connectionManager: any, rowMappings: ReingestionRowMapping[], transactionID: string): Promise<void> {
   await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_map', [], transactionID);
   await connectionManager.executeQuery(
     `CREATE TEMPORARY TABLE reingestion_map (
@@ -247,13 +238,7 @@ async function createReingestionMap(
   }
 }
 
-async function createReingestionSnapshotTables(
-  connectionManager: any,
-  schema: string,
-  fileID: string,
-  batchID: string,
-  transactionID: string
-): Promise<void> {
+async function createReingestionSnapshotTables(connectionManager: any, schema: string, fileID: string, batchID: string, transactionID: string): Promise<void> {
   await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_results', [], transactionID);
   await connectionManager.executeQuery('DROP TEMPORARY TABLE IF EXISTS reingestion_attributes', [], transactionID);
 
@@ -559,9 +544,7 @@ export async function GET(
         }
 
         // Step 1: Stage failed rows to temporarymeasurements
-        const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(
-          connectionManager, schema, plotID, censusID, transactionID
-        );
+        const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(connectionManager, schema, plotID, censusID, transactionID);
 
         if (totalRows === 0) {
           return { totalRows: 0, successfulReingestions: 0, remainingFailures: 0 };
@@ -574,7 +557,12 @@ export async function GET(
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
         const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(
-          connectionManager, schema, fileID, batchID, rowMappings, transactionID
+          connectionManager,
+          schema,
+          fileID,
+          batchID,
+          rowMappings,
+          transactionID
         );
 
         if (ingestionStatus.batchFailed) {

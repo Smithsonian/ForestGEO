@@ -49,12 +49,7 @@ const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
 const HTTP_INTERNAL_ERROR = 500;
 
-async function cleanupValidationErrors(
-  connection: Connection,
-  validationID: number,
-  censusID?: number,
-  plotID?: number
-) {
+async function cleanupValidationErrors(connection: Connection, validationID: number, censusID?: number, plotID?: number) {
   const cleanupQuery = `
     DELETE mel
     FROM measurement_error_log mel
@@ -78,13 +73,9 @@ async function runCombinedDBHValidationsDirect(
   connection: Connection,
   params: { censusID?: number; plotID?: number } = {}
 ): Promise<{ success: boolean; ranGrowth: boolean; ranShrinkage: boolean }> {
-  const [validationRows] = await connection.query<RowDataPacket[]>(
-    'SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (1, 2)'
-  );
+  const [validationRows] = await connection.query<RowDataPacket[]>('SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (1, 2)');
 
-  const enabledByValidation = new Map<number, boolean>(
-    validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)])
-  );
+  const enabledByValidation = new Map<number, boolean>(validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)]));
 
   const ranGrowth = enabledByValidation.get(1) ?? false;
   const ranShrinkage = enabledByValidation.get(2) ?? false;
@@ -115,9 +106,7 @@ async function runCombinedCrossCensusLocationValidationsDirect(
     'SELECT ValidationID, IsEnabled FROM sitespecificvalidations WHERE ValidationID IN (17, 18)'
   );
 
-  const enabledByValidation = new Map<number, boolean>(
-    validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)])
-  );
+  const enabledByValidation = new Map<number, boolean>(validationRows.map(row => [Number(row.ValidationID), toBool(row.IsEnabled)]));
 
   const ranQuadratMismatch = enabledByValidation.get(17) ?? false;
   const ranCoordinateDrift = enabledByValidation.get(18) ?? false;
@@ -199,9 +188,7 @@ describe('Validation API Integration Tests', () => {
     });
 
     it('should include both enabled and disabled validations', async () => {
-      const [validations] = await connection.query<RowDataPacket[]>(
-        'SELECT ValidationID, IsEnabled FROM sitespecificvalidations'
-      );
+      const [validations] = await connection.query<RowDataPacket[]>('SELECT ValidationID, IsEnabled FROM sitespecificvalidations');
 
       const enabledCount = validations.filter(v => toBool(v.IsEnabled)).length;
       const disabledCount = validations.filter(v => !toBool(v.IsEnabled)).length;
@@ -244,16 +231,13 @@ describe('Validation API Integration Tests', () => {
       await runBulkIngestion(connection, fileID, batchID);
 
       // Get the validation SQL definition
-      const [validationDef] = await connection.query<RowDataPacket[]>(
-        'SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 6'
-      );
+      const [validationDef] = await connection.query<RowDataPacket[]>('SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 6');
 
       expect(validationDef.length).toBe(1);
       expect(validationDef[0].Definition).toContain('MeasurementDate');
 
       // Run the validation (simulating what API does)
-      const validationSQL = validationDef[0].Definition
-        .replace(/@validationProcedureID/g, '6')
+      const validationSQL = validationDef[0].Definition.replace(/@validationProcedureID/g, '6')
         .replace(/@p_CensusID/g, 'NULL')
         .replace(/@p_PlotID/g, 'NULL');
 
@@ -605,9 +589,7 @@ describe('Validation API Integration Tests', () => {
       );
 
       // READ: Verify it was created
-      const [created] = await connection.query<RowDataPacket[]>(
-        'SELECT * FROM sitespecificvalidations WHERE ValidationID = 99'
-      );
+      const [created] = await connection.query<RowDataPacket[]>('SELECT * FROM sitespecificvalidations WHERE ValidationID = 99');
       expect(created.length).toBe(1);
       expect(created[0].ProcedureName).toBe('TestValidation');
       expect(toBool(created[0].IsEnabled)).toBe(false);
@@ -619,46 +601,30 @@ describe('Validation API Integration Tests', () => {
          WHERE ValidationID = 99`
       );
 
-      const [updated] = await connection.query<RowDataPacket[]>(
-        'SELECT * FROM sitespecificvalidations WHERE ValidationID = 99'
-      );
+      const [updated] = await connection.query<RowDataPacket[]>('SELECT * FROM sitespecificvalidations WHERE ValidationID = 99');
       expect(updated[0].Description).toBe('Updated Description');
       expect(toBool(updated[0].IsEnabled)).toBe(true);
 
       // DELETE: Remove the validation
-      await connection.query(
-        'DELETE FROM sitespecificvalidations WHERE ValidationID = 99'
-      );
+      await connection.query('DELETE FROM sitespecificvalidations WHERE ValidationID = 99');
 
-      const [deleted] = await connection.query<RowDataPacket[]>(
-        'SELECT * FROM sitespecificvalidations WHERE ValidationID = 99'
-      );
+      const [deleted] = await connection.query<RowDataPacket[]>('SELECT * FROM sitespecificvalidations WHERE ValidationID = 99');
       expect(deleted.length).toBe(0);
     });
 
     it('should handle validation rule toggles correctly', async () => {
       // Get current state of ValidationID 1
-      const [before] = await connection.query<RowDataPacket[]>(
-        'SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = 1'
-      );
+      const [before] = await connection.query<RowDataPacket[]>('SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = 1');
       const originalEnabled = toBool(before[0].IsEnabled);
 
       // Toggle the validation
-      await connection.query(
-        'UPDATE sitespecificvalidations SET IsEnabled = ? WHERE ValidationID = 1',
-        [originalEnabled ? 0 : 1]
-      );
+      await connection.query('UPDATE sitespecificvalidations SET IsEnabled = ? WHERE ValidationID = 1', [originalEnabled ? 0 : 1]);
 
-      const [after] = await connection.query<RowDataPacket[]>(
-        'SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = 1'
-      );
+      const [after] = await connection.query<RowDataPacket[]>('SELECT IsEnabled FROM sitespecificvalidations WHERE ValidationID = 1');
       expect(toBool(after[0].IsEnabled)).toBe(!originalEnabled);
 
       // Restore original state
-      await connection.query(
-        'UPDATE sitespecificvalidations SET IsEnabled = ? WHERE ValidationID = 1',
-        [originalEnabled ? 1 : 0]
-      );
+      await connection.query('UPDATE sitespecificvalidations SET IsEnabled = ? WHERE ValidationID = 1', [originalEnabled ? 1 : 0]);
     });
   });
 
@@ -690,13 +656,10 @@ describe('Validation API Integration Tests', () => {
       await runBulkIngestion(connection, fileID, batchID);
 
       // Run ValidationID 15 (abnormally high DBH)
-      const [validationDef] = await connection.query<RowDataPacket[]>(
-        'SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 15'
-      );
+      const [validationDef] = await connection.query<RowDataPacket[]>('SELECT Definition FROM sitespecificvalidations WHERE ValidationID = 15');
 
       if (validationDef.length > 0 && validationDef[0].Definition) {
-        const validationSQL = validationDef[0].Definition
-          .replace(/@validationProcedureID/g, '15')
+        const validationSQL = validationDef[0].Definition.replace(/@validationProcedureID/g, '15')
           .replace(/@p_CensusID/g, 'NULL')
           .replace(/@p_PlotID/g, 'NULL');
 

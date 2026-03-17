@@ -121,10 +121,7 @@ describe('Hard Failure Validation Tests', () => {
       const result = await runBulkIngestion(connection, fileID, batchID);
 
       // Check uploadintegrityalerts for validation failure
-      const [alerts] = await connection.query<RowDataPacket[]>(
-        'SELECT type, message, severity FROM uploadintegrityalerts WHERE fileID = ?',
-        [fileID]
-      );
+      const [alerts] = await connection.query<RowDataPacket[]>('SELECT type, message, severity FROM uploadintegrityalerts WHERE fileID = ?', [fileID]);
 
       // Check for failed measurements (coremeasurements with StemGUID IS NULL + ingestion errors)
       const failedDetails = await getFailedMeasurements(connection, { fileID });
@@ -196,9 +193,7 @@ describe('Hard Failure Validation Tests', () => {
 
       // Check that NO quadrat mismatch failure was recorded
       const failedDetails = await getFailedMeasurements(connection, { fileID });
-      const quadratMismatchFailures = failedDetails.filter(
-        f => f.FailureReasons?.includes('Quadrat mismatch')
-      );
+      const quadratMismatchFailures = failedDetails.filter(f => f.FailureReasons?.includes('Quadrat mismatch'));
 
       // Should NOT have any quadrat mismatch failures
       expect(quadratMismatchFailures.length).toBe(0);
@@ -264,10 +259,7 @@ describe('Hard Failure Validation Tests', () => {
       const failed = await getFailedMeasurements(connection, { fileID });
 
       // Check upload alerts
-      const [alerts] = await connection.query<RowDataPacket[]>(
-        'SELECT type, message FROM uploadintegrityalerts WHERE fileID = ?',
-        [fileID]
-      );
+      const [alerts] = await connection.query<RowDataPacket[]>('SELECT type, message FROM uploadintegrityalerts WHERE fileID = ?', [fileID]);
 
       // The stored procedure puts cross-census validation failures in coremeasurements
       // with StemGUID IS NULL and logs errors in measurement_error_log
@@ -323,7 +315,7 @@ describe('Hard Failure Validation Tests', () => {
             speciesCode,
             quadratName,
             x: 10.0, // 5m difference
-            y: 8.0,  // 3m difference - total drift ~5.83m (within 10m)
+            y: 8.0, // 3m difference - total drift ~5.83m (within 10m)
             dbh: 105.0,
             hom: 1.3,
             date: '2025-06-15',
@@ -337,9 +329,7 @@ describe('Hard Failure Validation Tests', () => {
 
       // Check that NO coordinate drift failure was recorded
       const failedDetails = await getFailedMeasurements(connection, { fileID });
-      const coordinateDriftFailures = failedDetails.filter(
-        f => f.FailureReasons?.toLowerCase().includes('coordinate')
-      );
+      const coordinateDriftFailures = failedDetails.filter(f => f.FailureReasons?.toLowerCase().includes('coordinate'));
 
       // Should NOT have any coordinate drift failures
       expect(coordinateDriftFailures.length).toBe(0);
@@ -403,9 +393,7 @@ describe('Hard Failure Validation Tests', () => {
 
       // Check for coordinate drift failure
       const failedDetails = await getFailedMeasurements(connection, { fileID });
-      const coordinateFailures = failedDetails.filter(
-        f => f.FailureReasons?.toLowerCase().includes('coordinate')
-      );
+      const coordinateFailures = failedDetails.filter(f => f.FailureReasons?.toLowerCase().includes('coordinate'));
 
       // Exactly 10m should NOT trigger - validation is for EXCEEDS (>10m)
       expect(coordinateFailures.length).toBe(0);
@@ -466,9 +454,7 @@ describe('Hard Failure Validation Tests', () => {
 
       // Check for coordinate drift failure
       const failedDetails = await getFailedMeasurements(connection, { fileID });
-      const coordinateFailures = failedDetails.filter(
-        f => f.FailureReasons?.toLowerCase().includes('coordinate')
-      );
+      const coordinateFailures = failedDetails.filter(f => f.FailureReasons?.toLowerCase().includes('coordinate'));
 
       // 10.01m SHOULD trigger - just over threshold
       expect(coordinateFailures.length).toBeGreaterThan(0);
@@ -563,34 +549,41 @@ describe('Inline Validation Data Tests', () => {
       }
 
       // Insert tree with species1 in census 1 (directly into coremeasurements)
-      await insertDirectMeasurements(connection, testData, census1.censusID, [{
-        treeTag: 'SPMISMATCH01',
-        stemTag: 'S001',
-        speciesCode: species1Code,
-        quadratName,
-        x: 8.0,
-        y: 8.0,
-        dbh: 100.0,
-        hom: 1.3,
-        date: '2024-06-15',
-        codes: 'A'
-      }]);
-
-      // Insert same tree with species2 in census 2 (via bulk ingestion)
-      const { fileID, batchID } = await insertTestMeasurements(connection, testData, [
+      await insertDirectMeasurements(connection, testData, census1.censusID, [
         {
-          treeTag: 'SPMISMATCH01', // Same tree
+          treeTag: 'SPMISMATCH01',
           stemTag: 'S001',
-          speciesCode: species2Code, // Different species!
+          speciesCode: species1Code,
           quadratName,
           x: 8.0,
           y: 8.0,
-          dbh: 120.0,
+          dbh: 100.0,
           hom: 1.3,
-          date: '2025-06-15',
+          date: '2024-06-15',
           codes: 'A'
         }
-      ], { censusID: census2.censusID });
+      ]);
+
+      // Insert same tree with species2 in census 2 (via bulk ingestion)
+      const { fileID, batchID } = await insertTestMeasurements(
+        connection,
+        testData,
+        [
+          {
+            treeTag: 'SPMISMATCH01', // Same tree
+            stemTag: 'S001',
+            speciesCode: species2Code, // Different species!
+            quadratName,
+            x: 8.0,
+            y: 8.0,
+            dbh: 120.0,
+            hom: 1.3,
+            date: '2025-06-15',
+            codes: 'A'
+          }
+        ],
+        { censusID: census2.censusID }
+      );
 
       await runBulkIngestion(connection, fileID, batchID);
 
@@ -1087,10 +1080,7 @@ describe('Tree State Categorization Tests', () => {
       expect(stems1.length).toBeGreaterThan(0);
       const census1StemGUID = stems1[0].StemGUID;
 
-      await connection.query(
-        'UPDATE stems SET StemCrossID = ? WHERE StemGUID = ?',
-        [census1StemGUID, census1StemGUID]
-      );
+      await connection.query('UPDATE stems SET StemCrossID = ? WHERE StemGUID = ?', [census1StemGUID, census1StemGUID]);
 
       // Census 2: Same tree+stem via bulk ingestion
       const { fileID, batchID } = await insertTestMeasurements(
@@ -1162,10 +1152,7 @@ describe('Tree State Categorization Tests', () => {
       expect(previousStemRows.length).toBeGreaterThan(0);
       const previousStemGUID = previousStemRows[0].StemGUID;
 
-      await connection.query(
-        'UPDATE stems SET StemCrossID = ? WHERE StemGUID = ?',
-        [previousStemGUID, previousStemGUID]
-      );
+      await connection.query('UPDATE stems SET StemCrossID = ? WHERE StemGUID = ?', [previousStemGUID, previousStemGUID]);
 
       await insertDirectMeasurements(connection, testData, census2.censusID, [
         {

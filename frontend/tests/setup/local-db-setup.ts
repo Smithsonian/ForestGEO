@@ -137,10 +137,7 @@ function delay(ms: number): Promise<void> {
  * @returns A MySQL connection
  * @throws Error if all retry attempts fail
  */
-async function connectWithRetry(
-  config: TestDatabaseConfig,
-  retryConfig = CONNECTION_RETRY_CONFIG
-): Promise<mysql.Connection> {
+async function connectWithRetry(config: TestDatabaseConfig, retryConfig = CONNECTION_RETRY_CONFIG): Promise<mysql.Connection> {
   let lastError: Error | null = null;
   let currentDelay: number = retryConfig.initialDelayMs;
 
@@ -177,16 +174,10 @@ async function connectWithRetry(
         error.message?.includes('Connection lost');
 
       if (!isRetryable || attempt === retryConfig.maxRetries) {
-        throw new Error(
-          `Failed to connect to MySQL after ${attempt} attempt(s): ${error.message}. ` +
-            `Ensure MySQL is running: docker compose up -d mysql`
-        );
+        throw new Error(`Failed to connect to MySQL after ${attempt} attempt(s): ${error.message}. ` + `Ensure MySQL is running: docker compose up -d mysql`);
       }
 
-      log.warn(
-        `Connection attempt ${attempt}/${retryConfig.maxRetries} failed: ${error.code || error.message}. ` +
-          `Retrying in ${currentDelay}ms...`
-      );
+      log.warn(`Connection attempt ${attempt}/${retryConfig.maxRetries} failed: ${error.code || error.message}. ` + `Retrying in ${currentDelay}ms...`);
 
       await delay(currentDelay);
       currentDelay = Math.min(currentDelay * retryConfig.backoffMultiplier, retryConfig.maxDelayMs);
@@ -259,9 +250,7 @@ export async function loadSchema(connection: mysql.Connection): Promise<void> {
       }
     } catch (error: any) {
       // Ignore expected errors: DROP on non-existent tables, CREATE on existing tables
-      const isExpectedError =
-        error.message.includes("doesn't exist") ||
-        error.message.includes('already exists');
+      const isExpectedError = error.message.includes("doesn't exist") || error.message.includes('already exists');
 
       if (!isExpectedError) {
         // Collect critical errors - these indicate broken schema
@@ -329,8 +318,8 @@ export async function loadValidationDefinitions(connection: mysql.Connection): P
       // 2. "VALUES(IsEnabled);" - end of ON DUPLICATE KEY UPDATE clause
       // Simple "); check doesn't work because SQL definitions contain "...WHERE x = @p_PlotID);"
       const isEndOfStatement =
-        /,\s*(true|false)\);$/.test(trimmed) ||  // End of VALUES clause: , true); or , false);
-        /VALUES\s*\(\s*IsEnabled\s*\)\s*;$/.test(trimmed);  // End of ON DUPLICATE KEY UPDATE
+        /,\s*(true|false)\);$/.test(trimmed) || // End of VALUES clause: , true); or , false);
+        /VALUES\s*\(\s*IsEnabled\s*\)\s*;$/.test(trimmed); // End of ON DUPLICATE KEY UPDATE
 
       if (isEndOfStatement) {
         try {
@@ -412,9 +401,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
 
   try {
     // Remove DELIMITER statements (they're MySQL client commands, not SQL)
-    let content = fileContent
-      .replace(/DELIMITER\s+\$\$/gi, '')
-      .replace(/DELIMITER\s+;/gi, '');
+    let content = fileContent.replace(/DELIMITER\s+\$\$/gi, '').replace(/DELIMITER\s+;/gi, '');
 
     // Split on $$ to get individual statements
     const statements = content.split('$$');
@@ -428,10 +415,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
       if (!trimmed || trimmed.length < 10) continue;
 
       // Remove the definer clause (azureroot won't exist locally)
-      let cleaned = trimmed.replace(
-        /definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi,
-        ''
-      );
+      let cleaned = trimmed.replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '');
 
       // Check if it's a DROP statement (these should succeed)
       const isDrop = cleaned.toLowerCase().startsWith('drop');
@@ -445,9 +429,7 @@ export async function loadStoredProcedures(connection: mysql.Connection): Promis
         }
       } catch (err: any) {
         // Ignore expected errors: DROP on non-existent, CREATE on existing
-        const isExpectedError =
-          err.message.includes('already exists') ||
-          err.message.includes('does not exist');
+        const isExpectedError = err.message.includes('already exists') || err.message.includes('does not exist');
 
         if (!isExpectedError) {
           const preview = cleaned.substring(0, 60).replace(/\n/g, ' ');
@@ -624,10 +606,7 @@ export async function seedSampleData(connection: mysql.Connection): Promise<Test
       [plotID]
     );
 
-    const [censusRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1',
-      [plotID]
-    );
+    const [censusRows] = await connection.query<mysql.RowDataPacket[]>('SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 1', [plotID]);
     const censusID = censusRows[0].CensusID;
     testData.census = [
       {
@@ -682,9 +661,7 @@ export async function seedMeasurementErrors(connection: mysql.Connection): Promi
  * verification or retry flows that now treat the direct upload tracking
  * columns as canonical.
  */
-export async function backfillLegacyUploadTrackingColumns(
-  connection: mysql.Connection
-): Promise<{
+export async function backfillLegacyUploadTrackingColumns(connection: mysql.Connection): Promise<{
   backfilledRows: number;
   remainingRowsWithMetadataGaps: number;
   conflictingRows: number;
@@ -824,13 +801,13 @@ export async function teardownTestDatabase(
  */
 const MEASUREMENT_TABLES_DELETE_ORDER = [
   'measurement_error_log', // Leaf: depends on coremeasurements + measurement_errors
-  'cmattributes',          // Leaf: depends on coremeasurements
-  'coremeasurements',      // Parent of measurement_error_log, cmattributes; child of stems
-  'stems',                 // Parent of coremeasurements; child of trees, quadrats
-  'trees',                 // Parent of stems; child of species, census
+  'cmattributes', // Leaf: depends on coremeasurements
+  'coremeasurements', // Parent of measurement_error_log, cmattributes; child of stems
+  'stems', // Parent of coremeasurements; child of trees, quadrats
+  'trees', // Parent of stems; child of species, census
   'temporarymeasurements', // Standalone (no FKs)
-  'uploadmetrics',         // Standalone: idempotency tracking (must clear to allow re-ingestion)
-  'uploadintegrityalerts'  // Standalone: alert log
+  'uploadmetrics', // Standalone: idempotency tracking (must clear to allow re-ingestion)
+  'uploadintegrityalerts' // Standalone: alert log
 ] as const;
 
 /**
@@ -887,10 +864,7 @@ export async function cleanupTestMeasurements(
 
       if (censusIDsToKeep.length > 0) {
         // Delete any census records not in our preserve list
-        await connection.query(
-          `DELETE FROM census WHERE PlotID = ? AND CensusID NOT IN (${censusIDsToKeep.join(',')})`,
-          [plotID]
-        );
+        await connection.query(`DELETE FROM census WHERE PlotID = ? AND CensusID NOT IN (${censusIDsToKeep.join(',')})`, [plotID]);
       }
     }
   }
@@ -1086,10 +1060,10 @@ export async function createAdditionalCensus(
     [plotID, options.plotCensusNumber, options.startDate, options.endDate]
   );
 
-  const [rows] = await connection.query<mysql.RowDataPacket[]>(
-    'SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?',
-    [plotID, options.plotCensusNumber]
-  );
+  const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = ?', [
+    plotID,
+    options.plotCensusNumber
+  ]);
 
   const censusInfo: CensusInfo = {
     censusID: rows[0].CensusID,
@@ -1142,10 +1116,10 @@ export async function insertDirectMeasurements(
 
   for (const meas of measurements) {
     // Get or create quadrat
-    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-      [meas.quadratName, plotID]
-    );
+    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+      meas.quadratName,
+      plotID
+    ]);
 
     if (quadratRows.length === 0) {
       throw new Error(`Quadrat not found: ${meas.quadratName}`);
@@ -1153,10 +1127,7 @@ export async function insertDirectMeasurements(
     const quadratID = quadratRows[0].QuadratID;
 
     // Get species
-    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-      [meas.speciesCode]
-    );
+    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [meas.speciesCode]);
 
     if (speciesRows.length === 0) {
       throw new Error(`Species not found: ${meas.speciesCode}`);
@@ -1166,31 +1137,28 @@ export async function insertDirectMeasurements(
     // Get or create tree for this census
     // Trees are unique per (TreeTag, SpeciesID, CensusID) - each census has its own tree record
     let treeID: number;
-    const [treeRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT TreeID FROM trees WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?',
-      [meas.treeTag, speciesID, censusID]
-    );
+    const [treeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT TreeID FROM trees WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?', [
+      meas.treeTag,
+      speciesID,
+      censusID
+    ]);
 
     if (treeRows.length > 0) {
       treeID = treeRows[0].TreeID;
     } else {
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        [meas.treeTag, speciesID, censusID]
-      );
-      const [newTreeRows] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT LAST_INSERT_ID() as TreeID'
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', [meas.treeTag, speciesID, censusID]);
+      const [newTreeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       treeID = newTreeRows[0].TreeID;
     }
 
     // Get or create stem for this census (StemGUID is auto-increment INT, not UUID)
     // Stems are unique per (TreeID, StemTag, CensusID) - each census has its own stem record
     let stemGUID: number;
-    const [stemRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT StemGUID FROM stems WHERE StemTag = ? AND TreeID = ? AND CensusID = ?',
-      [meas.stemTag, treeID, censusID]
-    );
+    const [stemRows] = await connection.query<mysql.RowDataPacket[]>('SELECT StemGUID FROM stems WHERE StemTag = ? AND TreeID = ? AND CensusID = ?', [
+      meas.stemTag,
+      treeID,
+      censusID
+    ]);
 
     if (stemRows.length > 0) {
       stemGUID = stemRows[0].StemGUID;
@@ -1200,9 +1168,7 @@ export async function insertDirectMeasurements(
          VALUES (?, ?, ?, ?, ?, ?, 1)`,
         [treeID, quadratID, censusID, meas.stemTag, meas.x, meas.y]
       );
-      const [newStemRows] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT LAST_INSERT_ID() as StemGUID'
-      );
+      const [newStemRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
       stemGUID = newStemRows[0].StemGUID;
     }
 
@@ -1214,20 +1180,18 @@ export async function insertDirectMeasurements(
       [stemGUID, censusID, meas.dbh, meas.hom, meas.date]
     );
 
-    const [cmRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT LAST_INSERT_ID() as CoreMeasurementID'
-    );
+    const [cmRows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as CoreMeasurementID');
     const coreMeasurementID = cmRows[0].CoreMeasurementID;
     coreMeasurementIDs.push(coreMeasurementID);
 
     // Insert attributes if provided
     if (meas.codes) {
-      const codes = meas.codes.split(';').map(c => c.trim()).filter(c => c);
+      const codes = meas.codes
+        .split(';')
+        .map(c => c.trim())
+        .filter(c => c);
       for (const code of codes) {
-        await connection.query(
-          'INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)',
-          [coreMeasurementID, code]
-        );
+        await connection.query('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)', [coreMeasurementID, code]);
       }
     }
   }
@@ -1351,11 +1315,7 @@ export async function getFailedMeasurements(
  * The tree_state is stored in UserDefinedFields JSON as $.treestemstate.
  * Only returns rows where StemGUID IS NOT NULL (successful ingestions).
  */
-export async function getTreeState(
-  connection: mysql.Connection,
-  batchID: string,
-  treeTag: string
-): Promise<string | null> {
+export async function getTreeState(connection: mysql.Connection, batchID: string, treeTag: string): Promise<string | null> {
   const [rows] = await connection.query<mysql.RowDataPacket[]>(
     `SELECT JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.treestemstate')) AS treeState
      FROM coremeasurements
@@ -1372,10 +1332,7 @@ export async function getTreeState(
  * Helper to get treestemstate values for all successful measurements in a batch.
  * Returns a map of TreeTag -> treestemstate.
  */
-export async function getTreeStatesForBatch(
-  connection: mysql.Connection,
-  batchID: string
-): Promise<Map<string, string>> {
+export async function getTreeStatesForBatch(connection: mysql.Connection, batchID: string): Promise<Map<string, string>> {
   const [rows] = await connection.query<mysql.RowDataPacket[]>(
     `SELECT RawTreeTag AS treeTag,
             JSON_UNQUOTE(JSON_EXTRACT(UserDefinedFields, '$.treestemstate')) AS treeState
@@ -1439,11 +1396,7 @@ export interface SpeciesWithLimits {
  * Seeds species with DBH min/max limits for validation testing.
  * DBH limits are stored in the specieslimits table, not in species directly.
  */
-export async function seedSpeciesWithLimits(
-  connection: mysql.Connection,
-  species: SpeciesWithLimits[],
-  testData: TestData
-): Promise<void> {
+export async function seedSpeciesWithLimits(connection: mysql.Connection, species: SpeciesWithLimits[], testData: TestData): Promise<void> {
   const plotID = testData.plots[0]?.plotID;
   const censusID = testData.census[0]?.censusID;
 
@@ -1457,10 +1410,7 @@ export async function seedSpeciesWithLimits(
     );
 
     // Get the SpeciesID
-    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-      [sp.speciesCode]
-    );
+    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [sp.speciesCode]);
 
     if (speciesRows.length > 0 && (sp.minDBH !== null || sp.maxDBH !== null)) {
       const speciesID = speciesRows[0].SpeciesID;
@@ -1522,10 +1472,7 @@ function seededRandom(seed: number): () => number {
  * @param testData - Test data containing species and quadrats
  * @param options - Generation options including optional seed for reproducibility
  */
-export function generateTestMeasurements(
-  testData: TestData,
-  options: MeasurementFactoryOptions = {}
-): DirectMeasurement[] {
+export function generateTestMeasurements(testData: TestData, options: MeasurementFactoryOptions = {}): DirectMeasurement[] {
   const {
     count = 10,
     treeTagPrefix = 'T',
@@ -1653,10 +1600,7 @@ export async function runValidationForTest(
  * Runs all enabled validations for a census.
  * Returns array of validation IDs that were run.
  */
-export async function runAllValidationsForTest(
-  connection: mysql.Connection,
-  params: { censusID?: number; plotID?: number } = {}
-): Promise<number[]> {
+export async function runAllValidationsForTest(connection: mysql.Connection, params: { censusID?: number; plotID?: number } = {}): Promise<number[]> {
   const [validations] = await connection.query<mysql.RowDataPacket[]>(
     'SELECT ValidationID FROM sitespecificvalidations WHERE IsEnabled = 1 ORDER BY ValidationID'
   );
@@ -1725,20 +1669,17 @@ export async function insertCrossCensusMeasurements(
 
   for (const meas of measurements) {
     // Get quadrat
-    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-      [meas.quadratName, plotID]
-    );
+    const [quadratRows] = await connection.query<mysql.RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+      meas.quadratName,
+      plotID
+    ]);
     if (quadratRows.length === 0) {
       throw new Error(`Quadrat not found: ${meas.quadratName}`);
     }
     const quadratID = quadratRows[0].QuadratID;
 
     // Get species
-    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-      [meas.speciesCode]
-    );
+    const [speciesRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [meas.speciesCode]);
     if (speciesRows.length === 0) {
       throw new Error(`Species not found: ${meas.speciesCode}`);
     }
@@ -1749,10 +1690,7 @@ export async function insertCrossCensusMeasurements(
     // so each census needs its own tree and stem records.
 
     // Census 1 tree + stem
-    await connection.query(
-      'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-      [meas.treeTag, speciesID, census1ID]
-    );
+    await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', [meas.treeTag, speciesID, census1ID]);
     const [tree1Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
     const tree1ID = tree1Rows[0].TreeID;
 
@@ -1769,16 +1707,12 @@ export async function insertCrossCensusMeasurements(
     const x2 = meas.x2 ?? meas.x;
     const y2 = meas.y2 ?? meas.y;
     const quadratID2 = meas.quadratName2
-      ? (await connection.query<mysql.RowDataPacket[]>(
-          'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-          [meas.quadratName2, plotID]
-        ))[0][0]?.QuadratID ?? quadratID
+      ? ((
+          await connection.query<mysql.RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [meas.quadratName2, plotID])
+        )[0][0]?.QuadratID ?? quadratID)
       : quadratID;
 
-    await connection.query(
-      'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-      [meas.treeTag, speciesID, census2ID]
-    );
+    await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', [meas.treeTag, speciesID, census2ID]);
     const [tree2Rows] = await connection.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
     const tree2ID = tree2Rows[0].TreeID;
 

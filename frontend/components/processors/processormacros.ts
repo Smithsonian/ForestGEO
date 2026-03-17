@@ -61,7 +61,10 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const QUERY_TIMEOUT_MS = 360000; // 360 seconds
+  // Must exceed the longest MySQL MAX_EXECUTION_TIME (cross-census validations
+  // use 10 min).  Set to 11 min so the MySQL-level timeout fires first with a
+  // proper error instead of this generic JS-level rejection.
+  const QUERY_TIMEOUT_MS = 660000; // 660 seconds (11 minutes)
   let timeoutHandle: NodeJS.Timeout | undefined;
   const timer = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => reject(new Error('Query execution timed out')), QUERY_TIMEOUT_MS);

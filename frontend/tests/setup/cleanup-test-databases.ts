@@ -81,9 +81,7 @@ Examples:
 }
 
 async function getTestDatabases(connection: mysql.Connection): Promise<DatabaseInfo[]> {
-  const [rows] = await connection.query<mysql.RowDataPacket[]>(
-    `SHOW DATABASES LIKE '${TEST_DB_PREFIX}%'`
-  );
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(`SHOW DATABASES LIKE '${TEST_DB_PREFIX}%'`);
 
   const databases: DatabaseInfo[] = [];
 
@@ -149,9 +147,7 @@ async function main(): Promise<void> {
     }
 
     // Filter by age if specified
-    const databasesToDelete = options.maxAgeHours !== null
-      ? databases.filter(db => db.ageHours === null || db.ageHours >= options.maxAgeHours!)
-      : databases;
+    const databasesToDelete = options.maxAgeHours !== null ? databases.filter(db => db.ageHours === null || db.ageHours >= options.maxAgeHours!) : databases;
 
     if (databasesToDelete.length === 0) {
       console.log(`✅ No test databases older than ${options.maxAgeHours} hours found.`);
@@ -161,9 +157,7 @@ async function main(): Promise<void> {
     console.log(`\nFound ${databasesToDelete.length} test database(s):\n`);
 
     for (const db of databasesToDelete) {
-      const ageStr = db.ageHours !== null
-        ? `${db.ageHours.toFixed(1)} hours old`
-        : 'age unknown';
+      const ageStr = db.ageHours !== null ? `${db.ageHours.toFixed(1)} hours old` : 'age unknown';
       console.log(`  - ${db.name} (${ageStr})`);
     }
 

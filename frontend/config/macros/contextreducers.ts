@@ -15,8 +15,7 @@ export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, act
     else if (actionType === 'plot') await submitCookie('plotID', (selection as unknown as Plot | undefined)?.plotID?.toString() ?? '');
     else if (actionType === 'census')
       await submitCookie('censusID', (selection as unknown as OrgCensus | undefined)?.dateRanges?.[0]?.censusID?.toString() ?? '');
-    else if (actionType === 'quadrat')
-      await submitCookie('quadratID', (selection as unknown as QuadratRDS | undefined)?.quadratID?.toString() ?? '');
+    else if (actionType === 'quadrat') await submitCookie('quadratID', (selection as unknown as QuadratRDS | undefined)?.quadratID?.toString() ?? '');
     else if (actionType === 'censusList') await submitCookie('censusList', JSON.stringify((selection as unknown as OrgCensus[] | undefined) ?? []));
 
     dispatch({ type: actionType, payload });

@@ -151,9 +151,7 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
 
     it('formats different-quadrat stem conflicts into a readable sentence', () => {
       expect(
-        formatDetailedFailureDescription(
-          'Stem resolution failed: TreeTag "011134" / StemTag "011134" already exists in a different quadrat for census 19'
-        )
+        formatDetailedFailureDescription('Stem resolution failed: TreeTag "011134" / StemTag "011134" already exists in a different quadrat for census 19')
       ).toBe('Tree/stem already exists in a different quadrat for this census.');
     });
   });
@@ -200,7 +198,6 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
         ok: true,
         json: async () => ({ message: 'Update successful', updatedIDs: { failedmeasurements: 123 } })
       });
-
 
       // Mock loadSelectableOptions
       const { loadSelectableOptions } = await import('@/components/client/clientmacros');

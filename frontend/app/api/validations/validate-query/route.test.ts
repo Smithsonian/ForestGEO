@@ -45,9 +45,7 @@ describe('POST /api/validations/validate-query', () => {
     const executeQuery = vi.spyOn(connectionManager, 'executeQuery');
     vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
 
-    executeQuery
-      .mockResolvedValueOnce([{ ROUTINE_NAME: 'RunSharedCrossCensusLocationValidations' }])
-      .mockResolvedValueOnce([]);
+    executeQuery.mockResolvedValueOnce([{ ROUTINE_NAME: 'RunSharedCrossCensusLocationValidations' }]).mockResolvedValueOnce([]);
 
     const response = await POST(
       makeRequest('forestgeo_testing', 'CALL forestgeo_testing.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)')
@@ -60,20 +58,17 @@ describe('POST /api/validations/validate-query', () => {
       warnings: []
     });
 
-    expect(executeQuery).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('FROM INFORMATION_SCHEMA.ROUTINES'),
-      ['forestgeo_testing', 'RunSharedCrossCensusLocationValidations']
-    );
+    expect(executeQuery).toHaveBeenNthCalledWith(1, expect.stringContaining('FROM INFORMATION_SCHEMA.ROUTINES'), [
+      'forestgeo_testing',
+      'RunSharedCrossCensusLocationValidations'
+    ]);
   });
 
   it('rejects schema-prefixed calls that target a different schema', async () => {
     const connectionManager = (ConnectionManager as any).getInstance();
     vi.spyOn(connectionManager, 'closeConnection').mockResolvedValue(undefined);
 
-    const response = await POST(
-      makeRequest('forestgeo_testing', 'CALL other_schema.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)')
-    );
+    const response = await POST(makeRequest('forestgeo_testing', 'CALL other_schema.RunSharedCrossCensusLocationValidations(@p_CensusID, @p_PlotID, 1, 0)'));
 
     expect(response.status).toBe(HTTPResponses.OK);
     await expect(response.json()).resolves.toEqual({

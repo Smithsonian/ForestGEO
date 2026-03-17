@@ -19,7 +19,9 @@ async function main() {
 
   // Clean up from previous runs
   try {
-    await cm.executeQuery(`DELETE FROM ${SCHEMA}.measurement_error_log WHERE MeasurementID IN (SELECT CoreMeasurementID FROM ${SCHEMA}.coremeasurements WHERE UploadFileID = 'trace_test')`);
+    await cm.executeQuery(
+      `DELETE FROM ${SCHEMA}.measurement_error_log WHERE MeasurementID IN (SELECT CoreMeasurementID FROM ${SCHEMA}.coremeasurements WHERE UploadFileID = 'trace_test')`
+    );
     await cm.executeQuery(`DELETE FROM ${SCHEMA}.coremeasurements WHERE UploadFileID = 'trace_test'`);
     await cm.executeQuery(`DELETE FROM ${SCHEMA}.stems WHERE CensusID = 14`);
     await cm.executeQuery(`DELETE FROM ${SCHEMA}.trees WHERE CensusID = 14`);

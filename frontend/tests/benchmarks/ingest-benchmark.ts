@@ -68,7 +68,10 @@ async function loadSchema(conn: mysql.Connection): Promise<void> {
   const schemaPath = path.join(process.cwd(), 'sqlscripting', 'tablestructures.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-  for (const stmt of schema.split(';').map(s => s.trim()).filter(s => s.length > 0 && !s.startsWith('--'))) {
+  for (const stmt of schema
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s.length > 0 && !s.startsWith('--'))) {
     try {
       await conn.query(stmt);
     } catch (err: any) {
@@ -82,11 +85,15 @@ async function loadSchema(conn: mysql.Connection): Promise<void> {
 
 async function loadStoredProcedures(conn: mysql.Connection): Promise<void> {
   const procPath = path.join(process.cwd(), 'sqlscripting', 'storedprocedures.sql');
-  const content = fs.readFileSync(procPath, 'utf-8')
+  const content = fs
+    .readFileSync(procPath, 'utf-8')
     .replace(/DELIMITER\s+\$\$/gi, '')
     .replace(/DELIMITER\s+;/gi, '');
 
-  for (const stmt of content.split('$$').map(s => s.trim()).filter(s => s.length >= 10)) {
+  for (const stmt of content
+    .split('$$')
+    .map(s => s.trim())
+    .filter(s => s.length >= 10)) {
     const cleaned = stmt.replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '');
     try {
       await conn.query(cleaned);
@@ -203,12 +210,7 @@ function generateMeasurements(rowCount: number, quadratNames: string[], censusNu
   return rows;
 }
 
-function generateScenarioMeasurements(
-  rowCount: number,
-  quadratNames: string[],
-  censusNum: number,
-  scenario: BenchmarkScenario
-): MeasurementRow[] {
+function generateScenarioMeasurements(rowCount: number, quadratNames: string[], censusNum: number, scenario: BenchmarkScenario): MeasurementRow[] {
   const rows = generateMeasurements(rowCount, quadratNames, censusNum);
 
   if (scenario !== 'dirty' || censusNum !== 2) {
@@ -235,9 +237,7 @@ function generateScenarioMeasurements(
 
   for (let i = dirtyChunk * 3; i < dirtyChunk * 4 && i < rows.length; i++) {
     const nextQuadrat = quadratNames[(i + 1) % quadratNames.length];
-    rows[i].quadratName = nextQuadrat === rows[i].quadratName
-      ? quadratNames[(i + 2) % quadratNames.length]
-      : nextQuadrat;
+    rows[i].quadratName = nextQuadrat === rows[i].quadratName ? quadratNames[(i + 2) % quadratNames.length] : nextQuadrat;
   }
 
   for (let i = dirtyChunk * 4; i < dirtyChunk * 5 && i < rows.length; i++) {
@@ -258,10 +258,12 @@ async function seedFirstCensus(conn: mysql.Connection, meta: SeedMeta, rows: Mea
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: any[] = [];
-    const placeholders = chunk.map(m => {
-      values.push(m.treeTag, meta.speciesByCode[m.speciesCode], meta.census1ID);
-      return '(?, ?, ?, 1)';
-    }).join(',');
+    const placeholders = chunk
+      .map(m => {
+        values.push(m.treeTag, meta.speciesByCode[m.speciesCode], meta.census1ID);
+        return '(?, ?, ?, 1)';
+      })
+      .join(',');
     await conn.query(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES ${placeholders}`, values);
   }
 
@@ -274,10 +276,12 @@ async function seedFirstCensus(conn: mysql.Connection, meta: SeedMeta, rows: Mea
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: any[] = [];
-    const placeholders = chunk.map(m => {
-      values.push(treeByTag[m.treeTag], meta.quadratByName[m.quadratName], meta.census1ID, m.stemTag, m.x, m.y);
-      return '(?, ?, ?, ?, ?, ?, 1)';
-    }).join(',');
+    const placeholders = chunk
+      .map(m => {
+        values.push(treeByTag[m.treeTag], meta.quadratByName[m.quadratName], meta.census1ID, m.stemTag, m.x, m.y);
+        return '(?, ?, ?, ?, ?, ?, 1)';
+      })
+      .join(',');
     await conn.query(`INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive) VALUES ${placeholders}`, values);
   }
 
@@ -293,10 +297,12 @@ async function seedFirstCensus(conn: mysql.Connection, meta: SeedMeta, rows: Mea
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: any[] = [];
-    const placeholders = chunk.map(m => {
-      values.push(stemByTag[m.treeTag], meta.census1ID, m.dbh, m.hom, m.date);
-      return '(?, ?, ?, ?, ?, 1, 1)';
-    }).join(',');
+    const placeholders = chunk
+      .map(m => {
+        values.push(stemByTag[m.treeTag], meta.census1ID, m.dbh, m.hom, m.date);
+        return '(?, ?, ?, ?, ?, 1, 1)';
+      })
+      .join(',');
     await conn.query(
       `INSERT INTO coremeasurements (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
        VALUES ${placeholders}`,
@@ -308,22 +314,32 @@ async function seedFirstCensus(conn: mysql.Connection, meta: SeedMeta, rows: Mea
 /**
  * Stage second-census rows into temporarymeasurements.
  */
-async function stageSecondCensus(
-  conn: mysql.Connection,
-  meta: SeedMeta,
-  rows: MeasurementRow[],
-  fileID: string,
-  batchID: string
-): Promise<void> {
+async function stageSecondCensus(conn: mysql.Connection, meta: SeedMeta, rows: MeasurementRow[], fileID: string, batchID: string): Promise<void> {
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: any[] = [];
-    const placeholders = chunk.map(m => {
-      values.push(fileID, batchID, meta.plotID, meta.census2ID,
-        m.treeTag, m.stemTag, m.speciesCode, m.quadratName,
-        m.x, m.y, m.dbh, m.hom, m.date, m.codes, null);
-      return '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    }).join(',');
+    const placeholders = chunk
+      .map(m => {
+        values.push(
+          fileID,
+          batchID,
+          meta.plotID,
+          meta.census2ID,
+          m.treeTag,
+          m.stemTag,
+          m.speciesCode,
+          m.quadratName,
+          m.x,
+          m.y,
+          m.dbh,
+          m.hom,
+          m.date,
+          m.codes,
+          null
+        );
+        return '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      })
+      .join(',');
     await conn.query(
       `INSERT INTO temporarymeasurements
        (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName,
@@ -460,10 +476,9 @@ async function runBenchmark(rowCount: number, scenario: BenchmarkScenario = 'cle
     console.log(`  bulkingestioncollapser: ${formatDuration(collapserMs)}`);
 
     // Verify
-    const [[countRow]] = await conn.query<mysql.RowDataPacket[]>(
-      'SELECT COUNT(*) AS cnt FROM coremeasurements WHERE CensusID = ? AND StemGUID IS NOT NULL',
-      [meta.census2ID]
-    );
+    const [[countRow]] = await conn.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM coremeasurements WHERE CensusID = ? AND StemGUID IS NOT NULL', [
+      meta.census2ID
+    ]);
     const insertedRows = countRow.cnt;
     console.log(`  result: ${insertedRows}/${rowCount} rows ingested`);
 
@@ -474,7 +489,9 @@ async function runBenchmark(rowCount: number, scenario: BenchmarkScenario = 'cle
   } finally {
     try {
       await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     await conn.end();
   }
 }
@@ -509,12 +526,12 @@ async function main() {
   for (const r of results) {
     console.log(
       `${r.scenario.padEnd(9)}| ` +
-      `${String(r.rowCount).padEnd(9)}| ` +
-      `${formatDuration(r.stageMs).padEnd(11)}| ` +
-      `${formatDuration(r.ingestMs).padEnd(11)}| ` +
-      `${formatDuration(r.collapserMs).padEnd(11)}| ` +
-      `${formatDuration(r.totalMs).padEnd(11)}| ` +
-      `${r.insertedRows}/${r.rowCount}`
+        `${String(r.rowCount).padEnd(9)}| ` +
+        `${formatDuration(r.stageMs).padEnd(11)}| ` +
+        `${formatDuration(r.ingestMs).padEnd(11)}| ` +
+        `${formatDuration(r.collapserMs).padEnd(11)}| ` +
+        `${formatDuration(r.totalMs).padEnd(11)}| ` +
+        `${r.insertedRows}/${r.rowCount}`
     );
   }
 

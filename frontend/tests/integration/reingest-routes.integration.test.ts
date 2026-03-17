@@ -98,10 +98,7 @@ vi.mock('@/config/utils', async importOriginal => {
   };
 });
 
-import {
-  GET as bulkReingestGet,
-  POST as bulkReingestPost
-} from '@/app/api/reingest/[schema]/[plotID]/[censusID]/route';
+import { GET as bulkReingestGet, POST as bulkReingestPost } from '@/app/api/reingest/[schema]/[plotID]/[censusID]/route';
 import { GET as singleReingestGet } from '@/app/api/reingestsinglefailure/[schema]/[targetRowID]/route';
 
 interface FailedRowSnapshot {
@@ -310,10 +307,7 @@ describe('Reingest route integration tests', () => {
     const originalIDs = failedRows.map(row => row.FailedMeasurementID);
     const before = await getCoreMeasurementSnapshots(originalIDs);
 
-    await connection.query(
-      'UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?, ?)',
-      [validSpeciesCode, originalIDs[0], originalIDs[1]]
-    );
+    await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID IN (?, ?)', [validSpeciesCode, originalIDs[0], originalIDs[1]]);
 
     const response = await bulkReingestGet(makeBulkRequest('GET'), makeBulkParams());
     const body = await response.json();
@@ -373,10 +367,7 @@ describe('Reingest route integration tests', () => {
     const targetRowID = failedRows[0].FailedMeasurementID;
     const [before] = await getCoreMeasurementSnapshots([targetRowID]);
 
-    await connection.query(
-      'UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID = ?',
-      [validSpeciesCode, targetRowID]
-    );
+    await connection.query('UPDATE coremeasurements SET RawSpCode = ? WHERE CoreMeasurementID = ?', [validSpeciesCode, targetRowID]);
 
     const response = await singleReingestGet(makeSingleRequest(targetRowID), makeSingleParams(targetRowID));
     const body = await response.json();

@@ -80,12 +80,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const quadratListLoad = useLoadState();
 
   // Aggregate load state
-  const { allLoaded: coreDataLoaded, anyError: hasLoadError } = combineLoadStates([
-    siteListLoad,
-    plotListLoad,
-    censusListLoad,
-    quadratListLoad
-  ]);
+  const { allLoaded: coreDataLoaded, anyError: hasLoadError } = combineLoadStates([siteListLoad, plotListLoad, censusListLoad, quadratListLoad]);
 
   const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
@@ -136,9 +131,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentSite?.schemaName || !currentPlot?.plotID) return;
     censusListLoad.setLoading();
     try {
-      const response = await fetch(
-        `/api/fetchall/census/${currentPlot.plotID}/0?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`
-      );
+      const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}/0?schema=${currentSite.schemaName}&plotID=${currentPlot.plotID}`);
       if (!response.ok) throw new Error(`Failed to fetch census: ${response.status}`);
       const censusRDSLoad = await response.json();
       const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
@@ -183,9 +176,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentSite?.schemaName || !currentPlot?.plotID || currentCensus?.plotCensusNumber == null) return;
     quadratListLoad.setLoading();
     try {
-      const response = await fetch(
-        `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`
-      );
+      const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
       if (!response.ok) throw new Error(`Failed to fetch quadrats: ${response.status}`);
       const quadratsData = await response.json();
       if (quadratListDispatch) quadratListDispatch({ quadratList: quadratsData });
@@ -287,7 +278,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           censusListLoad.reset();
           quadratListLoad.reset();
         })
-        .catch((error) => {
+        .catch(error => {
           ailogger.error('Manual reset failed:', error);
         })
         .finally(() => {
@@ -404,7 +395,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           zIndex: 1000
         }}
       >
-        <Sidebar setCensusListLoaded={censusListLoad.reset} siteListLoaded={siteListLoad.isLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
+        <Sidebar
+          setCensusListLoaded={censusListLoad.reset}
+          siteListLoaded={siteListLoad.isLoaded}
+          coreDataLoaded={coreDataLoaded}
+          setManualReset={setManualReset}
+        />
       </Box>
       <Header />
       <Box

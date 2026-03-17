@@ -56,9 +56,9 @@ export function parseUploadSessionConflict(payload: unknown): UploadSessionConfl
   let sessionState =
     typeof details?.sessionState === 'string'
       ? details.sessionState.toLowerCase()
-      : combinedMessage.match(/\bis in state\s+([a-z_]+)/i)?.[1]?.toLowerCase() ?? null;
+      : (combinedMessage.match(/\bis in state\s+([a-z_]+)/i)?.[1]?.toLowerCase() ?? null);
 
-  let reason =
+  const reason =
     typeof details?.reason === 'string'
       ? details.reason
       : normalizedMessage.includes('expired before')
@@ -79,8 +79,7 @@ export function parseUploadSessionConflict(payload: unknown): UploadSessionConfl
     sessionState = sessionState.toLowerCase();
   }
 
-  const restartRequired =
-    reason === 'stale_session' || reason === 'not_found' || (sessionState !== null && TERMINAL_UPLOAD_SESSION_STATES.has(sessionState));
+  const restartRequired = reason === 'stale_session' || reason === 'not_found' || (sessionState !== null && TERMINAL_UPLOAD_SESSION_STATES.has(sessionState));
 
   return {
     message,
@@ -122,16 +121,10 @@ export function buildUploadSessionRestartRequiredError(context: string, payload?
   }
 
   if (conflict?.reason === 'stale_session') {
-    return new UploadSessionRestartRequiredError(
-      `Upload session expired before ${context}. Restart the upload to create a fresh session.`,
-      conflict
-    );
+    return new UploadSessionRestartRequiredError(`Upload session expired before ${context}. Restart the upload to create a fresh session.`, conflict);
   }
 
-  return new UploadSessionRestartRequiredError(
-    `Upload session expired before ${context}. Restart the upload to create a fresh session.`,
-    conflict
-  );
+  return new UploadSessionRestartRequiredError(`Upload session expired before ${context}. Restart the upload to create a fresh session.`, conflict);
 }
 
 export async function readResponsePayload(response: Response): Promise<unknown> {

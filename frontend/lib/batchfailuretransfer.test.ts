@@ -68,14 +68,7 @@ describe('moveTemporaryBatchToFailedMeasurements', () => {
     } as any;
     ensureMeasurementErrorDefinition.mockResolvedValue(22);
 
-    const movedRows = await moveTemporaryBatchToFailedMeasurements(
-      connectionManager,
-      'forestgeo_testing',
-      'file.csv',
-      'batch-3',
-      'failed',
-      'outer-tx'
-    );
+    const movedRows = await moveTemporaryBatchToFailedMeasurements(connectionManager, 'forestgeo_testing', 'file.csv', 'batch-3', 'failed', 'outer-tx');
 
     expect(movedRows).toBe(1);
     expect(connectionManager.beginTransaction).not.toHaveBeenCalled();

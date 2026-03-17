@@ -22,6 +22,29 @@ const VALID_TABLE_TYPES = {
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
 
+function buildFailedMeasurementsScopeWhereClause(schema: string) {
+  return `c.PlotID = ?
+           AND c.PlotCensusNumber = (
+             SELECT selected_census.PlotCensusNumber
+             FROM ${schema}.census selected_census
+             WHERE selected_census.CensusID = ?
+               AND selected_census.PlotID = ?
+             LIMIT 1
+           )
+           AND cm.StemGUID IS NULL
+           AND EXISTS (
+             SELECT 1
+             FROM ${schema}.measurement_error_log mel
+             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = cm.CoreMeasurementID
+               AND me.ErrorSource = ?
+           )`;
+}
+
+function buildFailedMeasurementsScopeParams(plotID: number | string, censusID: number | string) {
+  return [plotID, censusID, plotID, INGESTION_ERROR_SOURCE];
+}
+
 export async function DELETE(
   request: NextRequest,
   props: {
@@ -111,32 +134,14 @@ export async function DELETE(
       countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
          FROM ${schema}.coremeasurements cm
          JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE c.PlotID = ?
-           AND cm.CensusID = ?
-           AND cm.StemGUID IS NULL
-           AND EXISTS (
-             SELECT 1
-             FROM ${schema}.measurement_error_log mel
-             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
-             WHERE mel.MeasurementID = cm.CoreMeasurementID
-               AND me.ErrorSource = ?
-           )`;
-      countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
 
       deleteSQL = `DELETE cm
          FROM ${schema}.coremeasurements cm
          JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE c.PlotID = ?
-           AND cm.CensusID = ?
-           AND cm.StemGUID IS NULL
-           AND EXISTS (
-             SELECT 1
-             FROM ${schema}.measurement_error_log mel
-             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
-             WHERE mel.MeasurementID = cm.CoreMeasurementID
-               AND me.ErrorSource = ?
-           )`;
-      deleteParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      deleteParams = buildFailedMeasurementsScopeParams(plotID, censusID);
     } else {
       const tableName = VALID_TABLE_TYPES[tableType as TableType];
       countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
@@ -247,17 +252,8 @@ export async function GET(
       countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
          FROM ${schema}.coremeasurements cm
          JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-         WHERE c.PlotID = ?
-           AND cm.CensusID = ?
-           AND cm.StemGUID IS NULL
-           AND EXISTS (
-             SELECT 1
-             FROM ${schema}.measurement_error_log mel
-             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
-             WHERE mel.MeasurementID = cm.CoreMeasurementID
-               AND me.ErrorSource = ?
-           )`;
-      countParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
     } else {
       const tableName = VALID_TABLE_TYPES[tableType as TableType];
       countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);

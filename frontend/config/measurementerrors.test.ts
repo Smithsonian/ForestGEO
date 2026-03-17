@@ -50,9 +50,7 @@ describe('measurementerrors helpers', () => {
 
     expect(insertedIDs).toEqual([77]);
 
-    const bulkMeasurementInsertCalls = executeQuery.mock.calls.filter(
-      ([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements')
-    );
+    const bulkMeasurementInsertCalls = executeQuery.mock.calls.filter(([sql]: [string]) => sql.includes('INSERT INTO `forestgeo_testing`.coremeasurements'));
     expect(bulkMeasurementInsertCalls).toHaveLength(1);
 
     const lookupCalls = executeQuery.mock.calls.filter(([sql]: [string]) => sql.includes('SELECT CoreMeasurementID, SourceRowIndex'));

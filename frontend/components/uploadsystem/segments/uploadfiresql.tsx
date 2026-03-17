@@ -1372,40 +1372,42 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       ailogger.info(`Starting runUploads for attempt ${uploadAttemptKey}`);
       uploadStartedRef.current = true;
       uploadRunningRef.current = true;
-      runUploads().then(() => {
-        uploadRunningRef.current = false;
-      }).catch(error => {
-        uploadRunningRef.current = false;
-        if (error instanceof Error && error.name === 'AbortError') {
-          ailogger.info(`runUploads aborted for attempt ${uploadAttemptKey}`);
-          return;
-        }
+      runUploads()
+        .then(() => {
+          uploadRunningRef.current = false;
+        })
+        .catch(error => {
+          uploadRunningRef.current = false;
+          if (error instanceof Error && error.name === 'AbortError') {
+            ailogger.info(`runUploads aborted for attempt ${uploadAttemptKey}`);
+            return;
+          }
 
-        // Filter out Application Insights monitoring errors
-        if (isApplicationInsightsError(error)) {
-          ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
-          ailogger.info('Upload process continuing despite monitoring system limitation');
-          // Don't set error state or change review state for monitoring errors
-          return;
-        }
+          // Filter out Application Insights monitoring errors
+          if (isApplicationInsightsError(error)) {
+            ailogger.warn('Application Insights monitoring error detected (not a data processing error):', error);
+            ailogger.info('Upload process continuing despite monitoring system limitation');
+            // Don't set error state or change review state for monitoring errors
+            return;
+          }
 
-        ailogger.error('runUploads failed:', error);
-        if (!isUploadSessionRestartRequiredError(error)) {
-          // Cancel the session and clean up staged temp data on error.
-          cancelSession(true).catch(cancelErr => {
-            ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
-          });
-        }
+          ailogger.error('runUploads failed:', error);
+          if (!isUploadSessionRestartRequiredError(error)) {
+            // Cancel the session and clean up staged temp data on error.
+            cancelSession(true).catch(cancelErr => {
+              ailogger.warn(`Failed to cancel upload session: ${cancelErr.message}`);
+            });
+          }
 
-        // CRITICAL: Only update state if component is still mounted
-        // Updating state after unmount can cause React error #310
-        if (isMountedRef.current) {
-          setUploadError(error);
-          setReviewState(ReviewStates.ERRORS);
-        } else {
-          ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
-        }
-      });
+          // CRITICAL: Only update state if component is still mounted
+          // Updating state after unmount can cause React error #310
+          if (isMountedRef.current) {
+            setUploadError(error);
+            setReviewState(ReviewStates.ERRORS);
+          } else {
+            ailogger.warn('Component unmounted during error handling - skipping state updates to prevent React error #310');
+          }
+        });
     }
     return () => {
       abortRecoveryVerification();

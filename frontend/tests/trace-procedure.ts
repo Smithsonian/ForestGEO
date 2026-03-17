@@ -39,9 +39,7 @@ async function main() {
     }
 
     // Check what happened
-    const [countRows] = await conn.execute(
-      `SELECT COUNT(*) as cnt FROM ${SCHEMA}.coremeasurements WHERE UploadFileID = 'trace_test'`
-    ) as any;
+    const [countRows] = (await conn.execute(`SELECT COUNT(*) as cnt FROM ${SCHEMA}.coremeasurements WHERE UploadFileID = 'trace_test'`)) as any;
     console.log('Core measurements after test 1:', countRows[0]?.cnt);
 
     // === Test 2: Within a transaction (simulating old withTransaction) ===
@@ -74,7 +72,9 @@ async function main() {
     } catch (err: any) {
       console.error('Test 2 FAILED:', err.message);
       console.error('Code:', err.code, 'Errno:', err.errno);
-      try { await conn.rollback(); } catch {}
+      try {
+        await conn.rollback();
+      } catch {}
     }
 
     // === Test 3: Using execute() instead of query() for CALL ===
@@ -100,7 +100,6 @@ async function main() {
       console.error('Test 3 FAILED:', err.message);
       console.error('Code:', err.code, 'Errno:', err.errno);
     }
-
   } finally {
     conn.release();
     await pool.end();

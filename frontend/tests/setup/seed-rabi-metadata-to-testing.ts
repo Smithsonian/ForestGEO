@@ -98,9 +98,7 @@ async function main() {
   console.log(`  Quadrats: ${existingQuadrats[0].cnt}`);
 
   // Check for measurement data that would block clearing
-  const [measurementCount] = await conn.query<mysql.RowDataPacket[]>(
-    'SELECT COUNT(*) as cnt FROM coremeasurements'
-  );
+  const [measurementCount] = await conn.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as cnt FROM coremeasurements');
   const [treeCount] = await conn.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as cnt FROM trees');
   const [stemCount] = await conn.query<mysql.RowDataPacket[]>('SELECT COUNT(*) as cnt FROM stems');
 
@@ -111,8 +109,17 @@ async function main() {
     console.log(`  Clearing measurement tables before seeding metadata...`);
 
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-    for (const table of ['measurement_error_log', 'cmattributes', 'coremeasurements', 'stems', 'trees',
-                          'temporarymeasurements', 'failedmeasurements', 'uploadmetrics', 'uploadintegrityalerts']) {
+    for (const table of [
+      'measurement_error_log',
+      'cmattributes',
+      'coremeasurements',
+      'stems',
+      'trees',
+      'temporarymeasurements',
+      'failedmeasurements',
+      'uploadmetrics',
+      'uploadintegrityalerts'
+    ]) {
       try {
         const [result] = await conn.query<mysql.ResultSetHeader>(`DELETE FROM ${table}`);
         if (result.affectedRows > 0) {

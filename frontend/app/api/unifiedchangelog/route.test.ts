@@ -144,13 +144,7 @@ function mockMeasurementUploadQueries(
     changelogError?: Error;
   } = {}
 ) {
-  const {
-    preInsertCount = 1,
-    postInsertCount = preInsertCount + 1,
-    existingEntry = [],
-    changelogResult = {},
-    changelogError
-  } = options;
+  const { preInsertCount = 1, postInsertCount = preInsertCount + 1, existingEntry = [], changelogResult = {}, changelogError } = options;
 
   exec
     .mockResolvedValueOnce([{ PlotID: 1 }])

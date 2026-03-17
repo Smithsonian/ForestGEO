@@ -122,9 +122,7 @@ describe('reingest API routes', () => {
       const selectCall = mockConnectionManager.executeQuery.mock.calls[0];
       expect(String(selectCall[0])).toContain('EXISTS (');
       expect(String(selectCall[0])).not.toContain('mel.IsResolved = FALSE');
-      expect(
-        mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('SELECT COALESCE(MAX(id), 0) as maxId'))
-      ).toBe(false);
+      expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('SELECT COALESCE(MAX(id), 0) as maxId'))).toBe(false);
     });
 
     it('returns 200 with rowsMoved=0 when no unresolved rows exist', async () => {
@@ -272,8 +270,8 @@ describe('reingest API routes', () => {
       const res = await POST(req, makeParams());
       expect(res.status).toBe(200);
 
-      const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-        String(call[0]).includes('INSERT INTO') && String(call[0]).includes('temporarymeasurements')
+      const insertCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => String(call[0]).includes('INSERT INTO') && String(call[0]).includes('temporarymeasurements')
       );
 
       expect(insertCall).toBeDefined();

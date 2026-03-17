@@ -17,11 +17,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import {
-  setupTestDatabase,
-  teardownTestDatabase,
-  type TestData
-} from '../setup/local-db-setup';
+import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
 function toBool(value: unknown): boolean {
@@ -120,9 +116,7 @@ describe('Infrastructure Validation', () => {
     });
 
     it('should have correct table structure for coremeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>(
-        "SHOW COLUMNS FROM coremeasurements"
-      );
+      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM coremeasurements');
       const columnNames = columns.map(c => c.Field);
 
       const requiredColumns = [
@@ -158,9 +152,7 @@ describe('Infrastructure Validation', () => {
     });
 
     it('should have correct table structure for temporarymeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>(
-        "SHOW COLUMNS FROM temporarymeasurements"
-      );
+      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM temporarymeasurements');
       const columnNames = columns.map(c => c.Field);
 
       const requiredColumns = ['FileID', 'BatchID', 'PlotID', 'CensusID', 'TreeTag', 'StemTag', 'DBH'];
@@ -188,9 +180,7 @@ describe('Infrastructure Validation', () => {
 
     it('should have bulkingestionprocess callable', async () => {
       // Just verify we can call it without error (with dummy data that won't match anything)
-      const [result] = await connection.query<RowDataPacket[]>(
-        "CALL bulkingestionprocess('nonexistent_file', 'nonexistent_batch')"
-      );
+      const [result] = await connection.query<RowDataPacket[]>("CALL bulkingestionprocess('nonexistent_file', 'nonexistent_batch')");
 
       // The procedure should return something (even if empty)
       expect(result).toBeDefined();
@@ -229,9 +219,7 @@ describe('Infrastructure Validation', () => {
         if (!found) {
           missingValidations.push(`ValidationID ${expected.id} (${expected.name})`);
         } else if (found.ProcedureName !== expected.name) {
-          wrongNames.push(
-            `ValidationID ${expected.id}: expected "${expected.name}", got "${found.ProcedureName}"`
-          );
+          wrongNames.push(`ValidationID ${expected.id}: expected "${expected.name}", got "${found.ProcedureName}"`);
         }
       }
 
@@ -311,16 +299,12 @@ describe('Infrastructure Validation', () => {
     });
 
     it('should have species in database matching testData', async () => {
-      const [dbSpecies] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM species'
-      );
+      const [dbSpecies] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM species');
       expect(dbSpecies[0].count).toBeGreaterThanOrEqual(testData.species.length);
     });
 
     it('should have attributes in database matching testData', async () => {
-      const [dbAttrs] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM attributes'
-      );
+      const [dbAttrs] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM attributes');
       expect(dbAttrs[0].count).toBeGreaterThanOrEqual(testData.attributes.length);
     });
   });

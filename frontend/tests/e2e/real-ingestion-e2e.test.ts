@@ -395,16 +395,10 @@ describe('Real E2E Ingestion Tests', () => {
       const failedID = failedRows[0].CoreMeasurementID;
 
       // Fix the coordinates on the raw columns
-      await connection.query(
-        'UPDATE coremeasurements SET RawX = ?, RawY = ? WHERE CoreMeasurementID = ? AND StemGUID IS NULL',
-        [15.5, 25.5, failedID]
-      );
+      await connection.query('UPDATE coremeasurements SET RawX = ?, RawY = ? WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [15.5, 25.5, failedID]);
 
       // Verify update was reflected
-      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>(
-        'SELECT RawX, RawY FROM coremeasurements WHERE CoreMeasurementID = ?',
-        [failedID]
-      );
+      const [updatedRows] = await connection.query<mysql.RowDataPacket[]>('SELECT RawX, RawY FROM coremeasurements WHERE CoreMeasurementID = ?', [failedID]);
       expect(parseFloat(updatedRows[0].RawX)).toBe(15.5);
       expect(parseFloat(updatedRows[0].RawY)).toBe(25.5);
 

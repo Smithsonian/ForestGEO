@@ -91,7 +91,10 @@ async function loadSchema(conn: mysql.Connection): Promise<void> {
   const schemaPath = path.join(FRONTEND_ROOT, 'sqlscripting', 'tablestructures.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-  for (const stmt of schema.split(';').map(s => s.trim()).filter(s => s.length > 0 && !s.startsWith('--'))) {
+  for (const stmt of schema
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s.length > 0 && !s.startsWith('--'))) {
     try {
       await conn.query(stmt);
     } catch (err: any) {
@@ -104,11 +107,12 @@ async function loadSchema(conn: mysql.Connection): Promise<void> {
 }
 
 async function loadStoredProcedures(conn: mysql.Connection, content: string): Promise<void> {
-  const cleanedContent = content
-    .replace(/DELIMITER\s+\$\$/gi, '')
-    .replace(/DELIMITER\s+;/gi, '');
+  const cleanedContent = content.replace(/DELIMITER\s+\$\$/gi, '').replace(/DELIMITER\s+;/gi, '');
 
-  for (const stmt of cleanedContent.split('$$').map(s => s.trim()).filter(s => s.length >= 10)) {
+  for (const stmt of cleanedContent
+    .split('$$')
+    .map(s => s.trim())
+    .filter(s => s.length >= 10)) {
     const cleaned = stmt.replace(/definer\s*=\s*`?[^`\s]+`?@`?[^`\s]+`?\s*/gi, '');
     try {
       await conn.query(cleaned);
@@ -217,20 +221,16 @@ function generateMeasurements(rowCount: number, quadratNames: string[], censusNu
   return rows;
 }
 
-async function seedCensus(
-  conn: mysql.Connection,
-  meta: SeedMeta,
-  rows: MeasurementRow[],
-  censusID: number,
-  isValidated: 0 | 1 | null
-): Promise<void> {
+async function seedCensus(conn: mysql.Connection, meta: SeedMeta, rows: MeasurementRow[], censusID: number, isValidated: 0 | 1 | null): Promise<void> {
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: Array<string | number> = [];
-    const placeholders = chunk.map(row => {
-      values.push(row.treeTag, meta.speciesByCode[row.speciesCode], censusID);
-      return '(?, ?, ?, 1)';
-    }).join(',');
+    const placeholders = chunk
+      .map(row => {
+        values.push(row.treeTag, meta.speciesByCode[row.speciesCode], censusID);
+        return '(?, ?, ?, 1)';
+      })
+      .join(',');
     await conn.query(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES ${placeholders}`, values);
   }
 
@@ -240,14 +240,13 @@ async function seedCensus(
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: Array<string | number> = [];
-    const placeholders = chunk.map(row => {
-      values.push(treeByTag[row.treeTag], meta.quadratByName[row.quadratName], censusID, row.stemTag, row.x, row.y);
-      return '(?, ?, ?, ?, ?, ?, 1)';
-    }).join(',');
-    await conn.query(
-      `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive) VALUES ${placeholders}`,
-      values
-    );
+    const placeholders = chunk
+      .map(row => {
+        values.push(treeByTag[row.treeTag], meta.quadratByName[row.quadratName], censusID, row.stemTag, row.x, row.y);
+        return '(?, ?, ?, ?, ?, ?, 1)';
+      })
+      .join(',');
+    await conn.query(`INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive) VALUES ${placeholders}`, values);
   }
 
   const [stemRows] = await conn.query<mysql.RowDataPacket[]>(
@@ -262,12 +261,12 @@ async function seedCensus(
   for (let start = 0; start < rows.length; start += BULK_INSERT_CHUNK) {
     const chunk = rows.slice(start, start + BULK_INSERT_CHUNK);
     const values: Array<string | number> = [];
-    const placeholders = chunk.map(row => {
-      values.push(stemByTreeTag[row.treeTag], censusID, row.dbh, row.hom, row.date);
-      return isValidated === null
-        ? '(?, ?, ?, ?, ?, NULL, 1)'
-        : '(?, ?, ?, ?, ?, ?, 1)';
-    }).join(',');
+    const placeholders = chunk
+      .map(row => {
+        values.push(stemByTreeTag[row.treeTag], censusID, row.dbh, row.hom, row.date);
+        return isValidated === null ? '(?, ?, ?, ?, ?, NULL, 1)' : '(?, ?, ?, ?, ?, ?, 1)';
+      })
+      .join(',');
 
     if (isValidated === null) {
       await conn.query(
@@ -374,10 +373,9 @@ async function runValidation(conn: mysql.Connection, validationID: 1 | 2, census
     [validationID, censusID, plotID]
   );
 
-  const [[defRow]] = await conn.query<mysql.RowDataPacket[]>(
-    'SELECT Definition FROM sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1',
-    [validationID]
-  );
+  const [[defRow]] = await conn.query<mysql.RowDataPacket[]>('SELECT Definition FROM sitespecificvalidations WHERE ValidationID = ? AND IsEnabled = 1', [
+    validationID
+  ]);
 
   const formattedQuery = String(defRow.Definition)
     .replace(/@p_CensusID/g, String(censusID))
@@ -603,10 +601,7 @@ async function runScenario(
       console.log('  running validation 2...');
       const validation2 = await runValidation(conn, 2, meta.census2ID, meta.plotID);
       console.log(`    measured ${formatDuration(validation2.elapsedMs)} (${validation2.errorCount} errors)`);
-      validations = [
-        validation1,
-        validation2
-      ];
+      validations = [validation1, validation2];
     }
 
     let sharedDbh: SharedDbhResult | undefined;
@@ -614,8 +609,7 @@ async function runScenario(
       console.log('  running shared DBH candidate prototype...');
       sharedDbh = await runSharedDbhPrototype(conn, meta.census2ID, meta.plotID);
       console.log(
-        `    measured ${formatDuration(sharedDbh.elapsedMs)} ` +
-        `(growth=${sharedDbh.growthErrorCount}, shrinkage=${sharedDbh.shrinkageErrorCount})`
+        `    measured ${formatDuration(sharedDbh.elapsedMs)} ` + `(growth=${sharedDbh.growthErrorCount}, shrinkage=${sharedDbh.shrinkageErrorCount})`
       );
     }
 
@@ -679,11 +673,11 @@ async function main() {
     for (const result of results) {
       console.log(
         `${result.variant.padEnd(7)}| ` +
-        `${String(result.rowCount).padEnd(9)}| ` +
-        `${formatDuration(result.refreshSummary.measuredMs).padEnd(11)}| ` +
-        `${formatDuration(result.refreshFull.measuredMs).padEnd(11)}| ` +
-        `${String(result.refreshSummary.rowCount).padEnd(13)}| ` +
-        `${result.refreshFull.rowCount}`
+          `${String(result.rowCount).padEnd(9)}| ` +
+          `${formatDuration(result.refreshSummary.measuredMs).padEnd(11)}| ` +
+          `${formatDuration(result.refreshFull.measuredMs).padEnd(11)}| ` +
+          `${String(result.refreshSummary.rowCount).padEnd(13)}| ` +
+          `${result.refreshFull.rowCount}`
       );
     }
   }
@@ -697,12 +691,12 @@ async function main() {
       const v2 = result.validations?.find(v => v.validationID === 2);
       console.log(
         `${String(result.rowCount).padEnd(8)}| ` +
-        `${formatDuration(v1?.elapsedMs ?? 0).padEnd(13)}| ` +
-        `${String(v1?.errorCount ?? 0).padEnd(9)}| ` +
-        `${formatDuration(v2?.elapsedMs ?? 0).padEnd(13)}| ` +
-        `${String(v2?.errorCount ?? 0).padEnd(9)}| ` +
-        `${formatDuration((v1?.elapsedMs ?? 0) + (v2?.elapsedMs ?? 0)).padEnd(9)}| ` +
-        `${result.sharedDbh ? formatDuration(result.sharedDbh.elapsedMs) : '-'}`
+          `${formatDuration(v1?.elapsedMs ?? 0).padEnd(13)}| ` +
+          `${String(v1?.errorCount ?? 0).padEnd(9)}| ` +
+          `${formatDuration(v2?.elapsedMs ?? 0).padEnd(13)}| ` +
+          `${String(v2?.errorCount ?? 0).padEnd(9)}| ` +
+          `${formatDuration((v1?.elapsedMs ?? 0) + (v2?.elapsedMs ?? 0)).padEnd(9)}| ` +
+          `${result.sharedDbh ? formatDuration(result.sharedDbh.elapsedMs) : '-'}`
       );
     }
   }

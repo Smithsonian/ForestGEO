@@ -246,9 +246,7 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
 
   // Check for duplicate prevention pattern.
   if (!queryLower.includes('left join measurement_error_log e') || !queryLower.includes('e.measurementid is null')) {
-    validationResult.warnings.push(
-      'Query should include LEFT JOIN measurement_error_log with e.MeasurementID IS NULL to prevent duplicate error records'
-    );
+    validationResult.warnings.push('Query should include LEFT JOIN measurement_error_log with e.MeasurementID IS NULL to prevent duplicate error records');
   }
 
   // Check for proper census join pattern
@@ -304,9 +302,7 @@ async function validateStoredProcedureCall(
 
   if (procedureReference.schemaName && procedureReference.schemaName.toLowerCase() !== schema.toLowerCase()) {
     validationResult.isValid = false;
-    validationResult.errors.push(
-      `Stored procedure call targets schema '${procedureReference.schemaName}', but the selected schema is '${schema}'`
-    );
+    validationResult.errors.push(`Stored procedure call targets schema '${procedureReference.schemaName}', but the selected schema is '${schema}'`);
     return;
   }
 

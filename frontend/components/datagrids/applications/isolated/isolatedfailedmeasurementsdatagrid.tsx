@@ -26,17 +26,12 @@ function normalizeFailureText(value?: string | null): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function hasStoredCurrentIngestionFailures(
-  row: Pick<FailedMeasurementsRDS, 'currentFailureReasons' | 'failureReasons'>
-): boolean {
+export function hasStoredCurrentIngestionFailures(row: Pick<FailedMeasurementsRDS, 'currentFailureReasons' | 'failureReasons'>): boolean {
   const storedReasons = normalizeFailureText(row.currentFailureReasons) || normalizeFailureText(row.failureReasons);
   return storedReasons !== '' && storedReasons !== 'Ready for reingestion';
 }
 
-export function isReadyForReingestion(
-  row: FailedMeasurementsRDS,
-  computeFailureReasons: (row: FailedMeasurementsRDS) => string
-): boolean {
+export function isReadyForReingestion(row: FailedMeasurementsRDS, computeFailureReasons: (row: FailedMeasurementsRDS) => string): boolean {
   if (hasStoredCurrentIngestionFailures(row)) {
     return false;
   }

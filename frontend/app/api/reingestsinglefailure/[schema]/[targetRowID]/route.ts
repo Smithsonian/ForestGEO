@@ -194,10 +194,9 @@ export async function GET(
 
     if (!shiftResult?.affectedRows) {
       await connectionManager.rollbackTransaction(transactionID);
-      return new NextResponse(
-        JSON.stringify({ error: `No failed measurement row found for CoreMeasurementID ${targetMeasurementID}` }),
-        { status: HTTPResponses.NOT_FOUND }
-      );
+      return new NextResponse(JSON.stringify({ error: `No failed measurement row found for CoreMeasurementID ${targetMeasurementID}` }), {
+        status: HTTPResponses.NOT_FOUND
+      });
     }
     if (!Number.isInteger(temporaryRowID) || temporaryRowID <= 0) {
       throw new Error('Single-row reingestion staging insert did not return a usable insertId');
@@ -205,11 +204,7 @@ export async function GET(
 
     await connectionManager.executeQuery(bulkProcessSQL, [SINGLE_ROW_FILE_ID, batchID], transactionID);
 
-    const snapshotRows: any[] = await connectionManager.executeQuery(
-      snapshotResultSQL,
-      [SINGLE_ROW_FILE_ID, batchID, temporaryRowID],
-      transactionID
-    );
+    const snapshotRows: any[] = await connectionManager.executeQuery(snapshotResultSQL, [SINGLE_ROW_FILE_ID, batchID, temporaryRowID], transactionID);
     const snapshot = snapshotRows[0];
     if (!snapshot) {
       throw new Error(`Single-row reingestion produced no reconciliable result for SourceRowIndex ${temporaryRowID}`);

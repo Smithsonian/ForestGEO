@@ -76,12 +76,7 @@ function escapeValue(value: any, colType: string): string {
   return `'${str}'`;
 }
 
-async function exportTable(
-  conn: mysql.Connection,
-  schema: string,
-  table: string,
-  whereClause?: string
-): Promise<string> {
+async function exportTable(conn: mysql.Connection, schema: string, table: string, whereClause?: string): Promise<string> {
   const columns = await getColumns(conn, schema, table);
   const colNames = columns.map(c => c.name);
 
@@ -99,9 +94,7 @@ async function exportTable(
       const colInfo = columns.find(c => c.name === col)!;
       return escapeValue(row[col], colInfo.type);
     });
-    lines.push(
-      `INSERT INTO \`${table}\` (${colNames.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`
-    );
+    lines.push(`INSERT INTO \`${table}\` (${colNames.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`);
   }
 
   return lines.join('\n') + '\n\n';
@@ -157,7 +150,7 @@ async function main() {
     { table: 'personnel', where: undefined },
     { table: 'censusactivepersonnel', where: undefined },
     // 6. Species limits
-    { table: 'specieslimits', where: undefined },
+    { table: 'specieslimits', where: undefined }
   ];
 
   for (const { table, where } of tablesToExport) {

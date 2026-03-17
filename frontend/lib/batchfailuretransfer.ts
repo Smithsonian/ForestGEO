@@ -15,10 +15,7 @@ export async function moveTemporarySubBatchesToFailedMeasurements(
   failureReason: string,
   transactionID?: string
 ): Promise<number> {
-  const findSubBatchesSQL = safeFormatQuery(
-    schema,
-    'SELECT DISTINCT BatchID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID LIKE ?'
-  );
+  const findSubBatchesSQL = safeFormatQuery(schema, 'SELECT DISTINCT BatchID FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID LIKE ?');
   // Reuse the caller's transaction when provided so multi-batch cleanup can stay atomic.
   const subBatchRows: any[] = await connectionManager.executeQuery(findSubBatchesSQL, [fileID, `${subBatchPrefix}%`], transactionID);
 

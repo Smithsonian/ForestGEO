@@ -13,9 +13,7 @@ describe('validationcore helpers', () => {
       hasBlockingValidationFailures([
         {
           status: 'fulfilled',
-          value: [
-            { procedureName: 'ValidateQuadratMismatchAcrossCensuses', success: false, error: 'NetworkError when attempting to fetch resource.' }
-          ]
+          value: [{ procedureName: 'ValidateQuadratMismatchAcrossCensuses', success: false, error: 'NetworkError when attempting to fetch resource.' }]
         }
       ])
     ).toBe(true);

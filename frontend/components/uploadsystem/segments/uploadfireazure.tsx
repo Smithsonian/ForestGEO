@@ -112,13 +112,11 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         .catch(ailogger.error)
         .then(() => {
           hasUploaded.current = true;
-          ailogger.info(`[UploadFireAzure] Upload complete, isMountedRef: ${isMountedRef.current}`);
-          if (isMountedRef.current) {
-            ailogger.info('[UploadFireAzure] Transitioning to COMPLETE state');
-            setReviewState(ReviewStates.COMPLETE);
-          } else {
-            ailogger.warn('[UploadFireAzure] Component unmounted, cannot transition to COMPLETE');
-          }
+          ailogger.info('[UploadFireAzure] Upload complete, transitioning to COMPLETE state');
+          // Always call setReviewState — React 18+ safely ignores setState on
+          // unmounted components, and guarding with isMountedRef caused a
+          // StrictMode race where the transition was permanently skipped.
+          setReviewState(ReviewStates.COMPLETE);
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +124,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   // Fallback: If upload completed during a previous mount (StrictMode), ensure we transition to COMPLETE
   useEffect(() => {
-    if (hasUploaded.current && !loading && isMountedRef.current) {
+    if (hasUploaded.current && !loading) {
       ailogger.info('[UploadFireAzure] Fallback check: upload already completed, ensuring transition to COMPLETE');
       setReviewState(ReviewStates.COMPLETE);
     }

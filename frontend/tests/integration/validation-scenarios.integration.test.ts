@@ -109,9 +109,9 @@ describe('Validation Scenarios Integration Tests', () => {
 
       const [inserted] = await connection.query<RowDataPacket[]>(
         'SELECT COUNT(*) as count FROM coremeasurements cm ' +
-        'INNER JOIN stems s ON s.StemGUID = cm.StemGUID ' +
-        'INNER JOIN trees t ON t.TreeID = s.TreeID ' +
-        'WHERE t.TreeTag IS NULL'
+          'INNER JOIN stems s ON s.StemGUID = cm.StemGUID ' +
+          'INNER JOIN trees t ON t.TreeID = s.TreeID ' +
+          'WHERE t.TreeTag IS NULL'
       );
 
       // ASSERTION: NULL TreeTag records should be rejected or not inserted
@@ -171,10 +171,10 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(Boolean(result.batch_failed)).toBe(true);
       expect(result.message).toContain('references missing census');
 
-      const [stagedRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?',
-        [fileID, batchID]
-      );
+      const [stagedRows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS rowCount FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?', [
+        fileID,
+        batchID
+      ]);
       expect(stagedRows[0].rowCount).toBe(1);
 
       const [alerts] = await connection.query<RowDataPacket[]>(
@@ -183,7 +183,7 @@ describe('Validation Scenarios Integration Tests', () => {
          WHERE fileID = ? AND batchID = ?`,
         [fileID, batchID]
       );
-      expect(alerts.some((alert) => alert.type === 'MISSING_CENSUS_SCOPE' && alert.severity === 'critical')).toBe(true);
+      expect(alerts.some(alert => alert.type === 'MISSING_CENSUS_SCOPE' && alert.severity === 'critical')).toBe(true);
     });
 
     it('should record TREE_RESOLUTION_FAILED when only an inactive current-census tree exists', async () => {
@@ -195,16 +195,10 @@ describe('Validation Scenarios Integration Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      const [speciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [speciesCode]
-      );
+      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [speciesCode]);
       const speciesID = speciesRows[0].SpeciesID;
 
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)',
-        ['INACTTREE001', speciesID, censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)', ['INACTTREE001', speciesID, censusID]);
 
       const { fileID, batchID } = await insertTestMeasurements(
         connection,
@@ -233,7 +227,7 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(failed).toHaveLength(1);
 
       const errorRows = await getIngestionErrorsForFile(fileID);
-      expect(errorRows.map((row) => row.ErrorCode)).toContain('TREE_RESOLUTION_FAILED');
+      expect(errorRows.map(row => row.ErrorCode)).toContain('TREE_RESOLUTION_FAILED');
       expect(errorRows[0].Description).toContain('inactive');
     });
 
@@ -246,22 +240,16 @@ describe('Validation Scenarios Integration Tests', () => {
         throw new Error('Test setup failed: missing species or quadrat data');
       }
 
-      const [speciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [speciesCode]
-      );
-      const [quadratRows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE PlotID = ? AND QuadratName = ?',
-        [testData.plots[0].plotID, quadratName]
-      );
+      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [speciesCode]);
+      const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE PlotID = ? AND QuadratName = ?', [
+        testData.plots[0].plotID,
+        quadratName
+      ]);
 
       const speciesID = speciesRows[0].SpeciesID;
       const quadratID = quadratRows[0].QuadratID;
 
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['INACTSTEM001', speciesID, censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['INACTSTEM001', speciesID, censusID]);
 
       const [treeRows] = await connection.query<RowDataPacket[]>(
         `SELECT TreeID
@@ -305,7 +293,7 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(failed).toHaveLength(1);
 
       const errorRows = await getIngestionErrorsForFile(fileID);
-      expect(errorRows.map((row) => row.ErrorCode)).toContain('STEM_RESOLUTION_FAILED');
+      expect(errorRows.map(row => row.ErrorCode)).toContain('STEM_RESOLUTION_FAILED');
       expect(errorRows[0].Description).toContain('inactive');
     });
 
@@ -357,7 +345,7 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(result.batch_failed, result.message).toBe(false);
 
       const errorRows = await getIngestionErrorsForFile(fileID);
-      expect(errorRows.map((row) => row.ErrorCode)).toContain('MEASUREMENT_INSERT_SKIPPED');
+      expect(errorRows.map(row => row.ErrorCode)).toContain('MEASUREMENT_INSERT_SKIPPED');
       expect(errorRows[0].Description).toContain('matching measurement already exists');
 
       const [coreRows] = await connection.query<RowDataPacket[]>(
@@ -415,10 +403,9 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(result.batch_failed, `Unexpected batch failure: ${result.message}`).toBe(false);
 
       // Verify data was processed - either inserted or flagged (not silently dropped)
-      const [measurements] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM coremeasurements WHERE CensusID = ?',
-        [testData.census[0].censusID]
-      );
+      const [measurements] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM coremeasurements WHERE CensusID = ?', [
+        testData.census[0].censusID
+      ]);
 
       const failed = await getFailedMeasurements(connection, { fileID });
 
@@ -463,5 +450,4 @@ describe('Validation Scenarios Integration Tests', () => {
       expect(errors[0].ValidationErrorID).toBe(14);
     });
   });
-
 });

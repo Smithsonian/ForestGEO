@@ -68,12 +68,7 @@ describe('POST /api/uploadsession', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
-    expect(mocks.updateSessionState).toHaveBeenCalledWith(
-      'forestgeo_testing',
-      'session-1',
-      'abandoned',
-      'User closed browser during upload'
-    );
+    expect(mocks.updateSessionState).toHaveBeenCalledWith('forestgeo_testing', 'session-1', 'abandoned', 'User closed browser during upload');
     expect(mocks.ensureUploadSessionsTable).not.toHaveBeenCalled();
     expect(mocks.createUploadSession).not.toHaveBeenCalled();
   });
