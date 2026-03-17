@@ -161,18 +161,19 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
 
     const executedSql = cm.executeQuery.mock.calls.map(([sql]: [string]) => String(sql));
     expect(
-      executedSql.some((sql: string) =>
-        sql.includes('DELETE tm') &&
-        sql.includes('INNER JOIN forestgeo_testing.uploadmetrics um') &&
-        sql.includes("um.status IN ('failed', 'processing')") &&
-        sql.includes('NOT (tm.FileID = ? AND tm.BatchID = ?)')
+      executedSql.some(
+        (sql: string) =>
+          sql.includes('DELETE tm') &&
+          sql.includes('INNER JOIN forestgeo_testing.uploadmetrics um') &&
+          sql.includes("um.status IN ('failed', 'processing')") &&
+          sql.includes('NOT (tm.FileID = ? AND tm.BatchID = ?)')
       )
     ).toBe(true);
     expect(
-      executedSql.some((sql: string) => sql.includes('DELETE FROM forestgeo_testing.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND NOT (FileID = ?)'))
-    ).toBe(
-      false
-    );
+      executedSql.some((sql: string) =>
+        sql.includes('DELETE FROM forestgeo_testing.temporarymeasurements WHERE PlotID = ? AND CensusID = ? AND NOT (FileID = ?)')
+      )
+    ).toBe(false);
   });
 
   it('removes stale unresolved rows from prior same-file batches before processing', async () => {

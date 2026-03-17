@@ -263,10 +263,7 @@ async function splitIntoSubBatches(
   for (let i = 0; i < subBatchCount; i++) {
     const subBatchID = `${originalBatchID}__sub${String(i + 1).padStart(3, '0')}`;
     // LIMIT cannot be parameterized in mysql2 prepared statements, so inline the constant
-    const updateSQL = safeFormatQuery(
-      schema,
-      `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${INGESTION_BATCH_SIZE}`
-    );
+    const updateSQL = safeFormatQuery(schema, `UPDATE ??.temporarymeasurements SET BatchID = ? WHERE FileID = ? AND BatchID = ? LIMIT ${INGESTION_BATCH_SIZE}`);
     const updateResult = await connectionManager.executeQuery(updateSQL, [subBatchID, fileID, originalBatchID], transactionID);
     const affectedRows = toCount(updateResult?.affectedRows);
 
@@ -479,14 +476,7 @@ export async function GET(
 
         // If the same census is re-uploaded under a new filename, remove any old
         // unresolved ingestion rows that exactly match the currently staged rows.
-        await cleanupMatchedUnresolvedIngestionFailuresForBatch(
-          connectionManager,
-          schema,
-          fileID,
-          batchID,
-          currentCensusID,
-          transactionID
-        );
+        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, transactionID);
 
         // Split into sub-batches if needed (UPDATE within same transaction)
         const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, transactionID);
@@ -500,10 +490,7 @@ export async function GET(
 
     if (setupResult.plotID === null || setupResult.subBatchIDs.length === 0) {
       ailogger.warn(`No temporary rows found for ${fileID}-${batchID}`);
-      return new NextResponse(
-        JSON.stringify({ attemptsNeeded: 0, batchFailedButHandled: false, message: 'No data found' }),
-        { status: HTTPResponses.OK }
-      );
+      return new NextResponse(JSON.stringify({ attemptsNeeded: 0, batchFailedButHandled: false, message: 'No data found' }), { status: HTTPResponses.OK });
     }
 
     plotID = setupResult.plotID;
@@ -514,10 +501,7 @@ export async function GET(
       return new NextResponse(JSON.stringify({ error: setupError.message, fileID, batchID }), { status: setupError.status });
     }
     ailogger.error(`Setup phase failed for ${fileID}-${batchID}: ${setupError.message}`, setupError);
-    return new NextResponse(
-      JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }),
-      { status: HTTPResponses.SERVICE_UNAVAILABLE }
-    );
+    return new NextResponse(JSON.stringify({ error: `Setup failed: ${setupError.message}`, fileID, batchID }), { status: HTTPResponses.SERVICE_UNAVAILABLE });
   }
 
   // --- Phase 2: Process each sub-batch sequentially ---
@@ -541,14 +525,20 @@ export async function GET(
       // Client disconnect or truly unrecoverable error — move remaining sub-batches to failed
       ailogger.error(`Unrecoverable error on sub-batch ${subBatchID}: ${subError.message}`, subError);
 
-      for (let j = i; j < subBatchIDs.length; j++) {
-        try {
+      // Move all remaining sub-batches in a single transaction so cleanup
+      // is atomic — either every remaining sub-batch is moved to failures
+      // or none are (no orphaned rows left in temporarymeasurements).
+      let cleanupTransactionID: string | undefined;
+      try {
+        cleanupTransactionID = await connectionManager.beginTransaction();
+        for (let j = i; j < subBatchIDs.length; j++) {
           const movedRows = await moveTemporaryBatchToFailedMeasurements(
             connectionManager,
             schema,
             fileID,
             subBatchIDs[j],
-            `Sub-batch abandoned after unrecoverable error: ${subError.message}`
+            `Sub-batch abandoned after unrecoverable error: ${subError.message}`,
+            cleanupTransactionID
           );
           results.push({
             subBatchID: subBatchIDs[j],
@@ -558,8 +548,16 @@ export async function GET(
             batchFailedButHandled: true,
             message: `Moved ${movedRows} rows to unresolved coremeasurements`
           });
-        } catch (moveError: any) {
-          ailogger.error(`Failed to move remaining sub-batch ${subBatchIDs[j]} to failed: ${moveError.message}`);
+        }
+        await connectionManager.commitTransaction(cleanupTransactionID);
+      } catch (moveError: any) {
+        ailogger.error(`Failed to move remaining sub-batches to failed: ${moveError.message}`);
+        if (cleanupTransactionID) {
+          try {
+            await connectionManager.rollbackTransaction(cleanupTransactionID);
+          } catch (rollbackError: any) {
+            ailogger.error(`Rollback of sub-batch cleanup also failed: ${rollbackError.message}`);
+          }
         }
       }
       break;
