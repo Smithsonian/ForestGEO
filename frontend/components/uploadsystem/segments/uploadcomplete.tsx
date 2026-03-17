@@ -11,9 +11,11 @@ import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteConte
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
+import { withTimeout } from '@/components/uploadsystemhelpers/withtimeout';
 import ailogger from '@/ailogger';
 
 type LoadStatus = 'pending' | 'success' | 'warning' | 'error' | 'skipped';
+const CLEANUP_TIMEOUT_MS = 5000;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, uploadForm } = props;
@@ -43,6 +45,53 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   // Zustand store setters to keep store in sync with context
   const setCensusListStore = useAppStore(state => state.setCensusList);
   const setCensusStore = useAppStore(state => state.setCensus);
+
+  const cleanupTemporaryMeasurements = useCallback(
+    async (signal: AbortSignal) => {
+      if (uploadForm !== FormType.measurements || !currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, census: 'Cleaning up temporary staging data...' }));
+
+      const cleanupAbortController = new AbortController();
+      const abortCleanup = () => cleanupAbortController.abort();
+
+      signal.addEventListener('abort', abortCleanup, { once: true });
+
+      try {
+        const cleanupRequest = fetch(`/api/query`, {
+          body: JSON.stringify({
+            query: `delete from ${currentSite.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+            params: [currentPlot.plotID, currentCensus.dateRanges[0].censusID],
+            format: true
+          }),
+          method: 'POST',
+          signal: cleanupAbortController.signal
+        });
+
+        const cleanupResponse = await withTimeout(cleanupRequest, CLEANUP_TIMEOUT_MS, () => cleanupAbortController.abort());
+
+        if (!cleanupResponse.ok) {
+          const errorBody = await cleanupResponse.json().catch(() => ({}));
+          ailogger.warn('Temporary measurements cleanup returned a non-OK response:', errorBody);
+        }
+      } catch (error: unknown) {
+        const isAbortError = error instanceof Error && error.name === 'AbortError';
+        if (!signal.aborted) {
+          ailogger.warn(
+            isAbortError
+              ? `[UploadComplete] Temporary measurements cleanup timed out after ${CLEANUP_TIMEOUT_MS}ms; continuing with application refresh.`
+              : '[UploadComplete] Temporary measurements cleanup failed; continuing with application refresh.',
+            error instanceof Error ? error : new Error(String(error))
+          );
+        }
+      } finally {
+        signal.removeEventListener('abort', abortCleanup);
+      }
+    },
+    [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, uploadForm]
+  );
 
   const loadCensusData = useCallback(async () => {
     // Only refresh census data for measurements uploads
@@ -231,18 +280,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
     const runAsyncTasks = async () => {
       try {
-        if (uploadForm === FormType.measurements && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-          // Clean up temporary measurements table
-          await fetch(`/api/query`, {
-            body: JSON.stringify({
-              query: `delete from ${currentSite.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-              params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
-              format: true
-            }),
-            method: 'POST',
-            signal: abortController.signal
-          });
-        }
+        await cleanupTemporaryMeasurements(abortController.signal);
         if (abortController.signal.aborted) return;
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
@@ -258,7 +296,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     runAsyncTasks().catch(ailogger.error);
 
     return () => abortController.abort();
-  }, [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
+  }, [cleanupTemporaryMeasurements, currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
 
   // Calculate overall progress as average of the three data loads
   const overallProgress = (progress.census + progress.plots + progress.quadrats) / 3;
