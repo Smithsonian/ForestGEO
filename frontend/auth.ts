@@ -31,7 +31,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     async session({ session, token }) {
       // E2E testing bypass: return test session without calling external auth API.
       // The test user's role comes from the credentials provider via the JWT token.
-      if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+      if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production') {
         session.user.userStatus = (token.userStatus as string as import('@/config/macros').UserAuthRoles) || 'global';
         // Sites are fetched from the real DB via the normal /api/fetchall/sites endpoint,
         // so we leave them empty here — the hub layout will fetch them.

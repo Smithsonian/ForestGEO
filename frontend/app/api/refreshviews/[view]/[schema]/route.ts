@@ -276,7 +276,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
       ailogger.error('Error:', e instanceof Error ? e : undefined);
       throw new Error('Call failed: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
-      await connectionManager.closeConnection();
+      try {
+        await connectionManager.closeConnection();
+      } catch (closeErr) {
+        ailogger.warn('Failed to close connection during retry cleanup:', closeErr instanceof Error ? closeErr : undefined);
+      }
     }
   }
 

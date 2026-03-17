@@ -48,6 +48,11 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "30_seed_ingestion_integrity_error_codes.sql"
     "31_add_upload_session_scope_lock.sql"
     "32_add_cross_census_validation_indexes.sql"
+    "33_refresh_measurements_summary_procedure.sql"
+    "34_fix_validation5_subquery_census_filter.sql"
+    "35_add_temporarymeasurements_session_id.sql"
+    "36_add_error_log_indexes.sql"
+    "37_seed_duplicate_conflict_error_codes.sql"
 )
 
 REQUIRED_BASE_TABLES=(
