@@ -146,8 +146,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const internalApiRef = useGridApiRef();
   const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
+  const PAGE_CACHE_TTL_MS = 30_000;
+  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+
   const fetchPaginatedData = useCallback(
     async (pageToFetch: number) => {
+      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
+      const cached = pageCacheRef.current.get(cacheKey);
+      const now = Date.now();
+
+      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
+        setRows(cached.rows);
+        setRowCount(cached.totalCount);
+        if (onDataLoaded) onDataLoaded(cached.rows);
+        return;
+      }
+
       setLoading(true);
       let paginatedQuery =
         (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
@@ -188,14 +202,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setRows(data.output);
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
+        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
 
         // Notify parent component that data has been loaded
         if (onDataLoaded) {
           onDataLoaded(data.output);
         }
-
-        // Note: handleAddNewRow will be triggered via processRowUpdate
-        // Removed direct call to avoid circular dependency
       } catch (error: unknown) {
         ailogger.error('Error fetching data:', error instanceof Error ? error : new Error(String(error)));
         setSnackbar({ children: 'Error fetching data', severity: 'error' });
@@ -219,6 +231,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const handleRefresh = useCallback(async () => {
+    pageCacheRef.current.clear();
     await fetchPaginatedData(paginationModel.page);
   }, [paginationModel.page, fetchPaginatedData]);
 
@@ -1137,6 +1150,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             }}
             loading={refresh || loading}
             paginationMode="server"
+            filterMode="server"
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
             rowCount={rowCount}

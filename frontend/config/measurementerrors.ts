@@ -710,8 +710,27 @@ export function buildFailedMeasurementsBaseQuery(schema: string): string {
 export function buildFailedMeasurementsSelectQuery(schema: string): string {
   return `
     SELECT
-      fm.*,
-      COALESCE(fm.CurrentFailureReasons, 'Ready for reingestion') AS FailureReasons
+      fm.FailedMeasurementID,
+      fm.PlotID,
+      fm.CensusID,
+      fm.Tag,
+      fm.StemTag,
+      fm.SpCode,
+      fm.Quadrat,
+      fm.X,
+      fm.Y,
+      fm.DBH,
+      fm.HOM,
+      fm.Date,
+      fm.Codes,
+      fm.Comments,
+      fm.Description,
+      fm.OriginalFailureReasons,
+      fm.CurrentFailureReasons,
+      fm.LastValidatedAt,
+      COALESCE(fm.CurrentFailureReasons, 'Ready for reingestion') AS FailureReasons,
+      fm.FileID,
+      fm.BatchID
     FROM (
       SELECT
         cm.CoreMeasurementID AS FailedMeasurementID,
@@ -729,28 +748,20 @@ export function buildFailedMeasurementsSelectQuery(schema: string): string {
         cm.RawCodes AS Codes,
         cm.RawComments AS Comments,
         cm.Description AS Description,
-        (SELECT GROUP_CONCAT(DISTINCT me_all.ErrorMessage ORDER BY me_all.ErrorCode SEPARATOR '; ')
-         FROM ${schema}.measurement_error_log mel_all
-         JOIN ${schema}.measurement_errors me_all ON me_all.ErrorID = mel_all.ErrorID
-         WHERE mel_all.MeasurementID = cm.CoreMeasurementID
-           AND me_all.ErrorSource = 'ingestion'
-        ) AS OriginalFailureReasons,
-        (SELECT GROUP_CONCAT(DISTINCT me_cur.ErrorMessage ORDER BY me_cur.ErrorCode SEPARATOR '; ')
-         FROM ${schema}.measurement_error_log mel_cur
-         JOIN ${schema}.measurement_errors me_cur ON me_cur.ErrorID = mel_cur.ErrorID
-         WHERE mel_cur.MeasurementID = cm.CoreMeasurementID
-           AND me_cur.ErrorSource = 'ingestion'
-           AND mel_cur.IsResolved = FALSE
-        ) AS CurrentFailureReasons,
-        (SELECT MAX(COALESCE(mel_any.ResolvedAt, mel_any.CreatedAt))
-         FROM ${schema}.measurement_error_log mel_any
-         JOIN ${schema}.measurement_errors me_any ON me_any.ErrorID = mel_any.ErrorID
-         WHERE mel_any.MeasurementID = cm.CoreMeasurementID
-           AND me_any.ErrorSource = 'ingestion'
-        ) AS LastValidatedAt,
+        GROUP_CONCAT(DISTINCT me.ErrorMessage ORDER BY me.ErrorCode SEPARATOR '; ') AS OriginalFailureReasons,
+        GROUP_CONCAT(DISTINCT CASE WHEN mel.IsResolved = FALSE THEN me.ErrorMessage END ORDER BY me.ErrorCode SEPARATOR '; ') AS CurrentFailureReasons,
+        MAX(COALESCE(mel.ResolvedAt, mel.CreatedAt)) AS LastValidatedAt,
         cm.UploadFileID AS FileID,
         cm.UploadBatchID AS BatchID
-      ${buildFailedMeasurementsBaseQuery(schema)}
+      FROM ${schema}.coremeasurements cm
+      JOIN ${schema}.census c ON c.CensusID = cm.CensusID
+      JOIN ${schema}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+      JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID AND me.ErrorSource = 'ingestion'
+      WHERE cm.StemGUID IS NULL
+      GROUP BY cm.CoreMeasurementID, c.PlotID, cm.CensusID, cm.RawTreeTag, cm.RawStemTag,
+        cm.RawSpCode, cm.RawQuadrat, cm.RawX, cm.RawY, cm.MeasuredDBH, cm.MeasuredHOM,
+        cm.MeasurementDate, cm.RawCodes, cm.RawComments, cm.Description,
+        cm.UploadFileID, cm.UploadBatchID
     ) fm
   `;
 }

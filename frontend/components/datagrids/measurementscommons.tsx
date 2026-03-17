@@ -227,6 +227,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const apiRef = useGridApiRef();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
 
+  const PAGE_CACHE_TTL_MS = 30_000;
+  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+
   const refreshMeasurementsSummaryView = useCallback(async () => {
     if (!currentSite?.schemaName) {
       throw new Error('Measurements Summary View Refresh failure');
@@ -330,71 +333,81 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const fetchPaginatedData = useCallback(
-    (pageToFetch: number) =>
-      debounce(async () => {
-        if (!currentSite || !currentPlot || !currentCensus) {
-          ailogger.warn('Missing necessary context for fetchPaginatedData');
-          return;
+  const fetchPaginatedDataCore = useCallback(
+    async (pageToFetch: number) => {
+      if (!currentSite || !currentPlot || !currentCensus) {
+        ailogger.warn('Missing necessary context for fetchPaginatedData');
+        return;
+      }
+
+      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
+      const cached = pageCacheRef.current.get(cacheKey);
+      const now = Date.now();
+
+      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
+        setRows(cached.rows);
+        setRowCount(cached.totalCount);
+        if (isNewRowAdded && pageToFetch === newLastPage) {
+          addNewRowToGrid();
         }
+        return;
+      }
 
-        setLoading(true);
-        let paginatedQuery = '';
+      setLoading(true);
+      const paginatedQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        pageToFetch,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
 
-        paginatedQuery = createQFFetchQuery(
-          currentSite?.schemaName ?? '',
-          gridType,
-          pageToFetch,
-          paginationModel.pageSize,
-          currentPlot?.plotID,
-          currentCensus?.plotCensusNumber
-        );
+      try {
+        // Filter to only include valid, complete filter items (Bug #1 fix)
+        const validItems =
+          filterModel.items?.filter(item => {
+            // Field and operator are always required
+            if (!item.field || item.field === '' || !item.operator || item.operator === '') {
+              return false;
+            }
+            // isEmpty/isNotEmpty operators don't require a value
+            if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
+              return true;
+            }
+            // All other operators require a value
+            return item.value !== undefined && item.value !== null && item.value !== '';
+          }) ?? [];
 
-        try {
-          // Filter to only include valid, complete filter items (Bug #1 fix)
-          const validItems =
-            filterModel.items?.filter(item => {
-              // Field and operator are always required
-              if (!item.field || item.field === '' || !item.operator || item.operator === '') {
-                return false;
-              }
-              // isEmpty/isNotEmpty operators don't require a value
-              if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
-                return true;
-              }
-              // All other operators require a value
-              return item.value !== undefined && item.value !== null && item.value !== '';
-            }) ?? [];
+        const sanitizedFilterModel = {
+          ...filterModel,
+          items: validItems
+        };
 
-          const sanitizedFilterModel = {
-            ...filterModel,
-            items: validItems
-          };
+        const response = await fetch(paginatedQuery, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filterModel: sanitizedFilterModel })
+        });
 
-          const response = await fetch(paginatedQuery, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filterModel: sanitizedFilterModel })
-          });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Error fetching data');
 
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.message || 'Error fetching data');
+        setRows(data.output);
+        setRowCount(data.totalCount);
+        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
 
-          setRows(data.output);
-          setRowCount(data.totalCount);
-          // setUsingQuery(data.finishedQuery);
-
-          if (isNewRowAdded && pageToFetch === newLastPage) {
-            addNewRowToGrid();
-          }
-        } catch (error: unknown) {
-          const errorObj = error instanceof Error ? error : new Error(String(error));
-          ailogger.error('Error fetching data:', errorObj);
-          setSnackbar({ children: 'Error fetching data', severity: 'error' });
-        } finally {
-          setLoading(false);
+        if (isNewRowAdded && pageToFetch === newLastPage) {
+          addNewRowToGrid();
         }
-      }, 250)(),
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Error fetching data:', errorObj);
+        setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       filterModel,
@@ -409,6 +422,16 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       addNewRowToGrid
     ]
   );
+
+  const debouncedFetchPaginatedData = useMemo(
+    () =>
+      debounce((pageToFetch: number) => {
+        fetchPaginatedDataCore(pageToFetch);
+      }, 250),
+    [fetchPaginatedDataCore]
+  );
+
+  const fetchPaginatedData = fetchPaginatedDataCore;
 
   const fetchValidationErrors = useCallback(async () => {
     try {
@@ -462,8 +485,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
-    await fetchPaginatedData(paginationModel.page);
-    await fetchValidationErrors();
+    await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
   }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
 
   useEffect(() => {
@@ -480,6 +502,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   useEffect(() => {
     if (!refresh || isRefreshing.current) return;
     isRefreshing.current = true;
+    pageCacheRef.current.clear();
 
     Promise.all([runFetchPaginated(), refreshCounts()])
       .catch(ailogger.error)
@@ -688,8 +711,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       if (oldRow.isNew) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
-        await fetchPaginatedData(paginationModel.page);
-        await fetchValidationErrors();
+        await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
       }
 
       return newRow;
@@ -870,12 +892,22 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     [locked, openConfirmationDialog]
   );
 
+  // Fetch on pagination, sort, or context changes (no debounce)
   useEffect(() => {
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(ailogger.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPlot, currentCensus, paginationModel.page, sortModel, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel]);
+
+  // Debounce fetches triggered by filter model changes (rapid typing in search)
+  useEffect(() => {
+    pageCacheRef.current.clear();
+    if (currentPlot && currentCensus && paginationModel.page >= 0) {
+      debouncedFetchPaginatedData(paginationModel.page);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterModel]);
 
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
@@ -1411,6 +1443,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             processRowUpdate={processRowUpdate}
             loading={refresh}
             paginationMode="server"
+            filterMode="server"
             onPaginationModelChange={newPaginationModel => {
               if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
                 return;

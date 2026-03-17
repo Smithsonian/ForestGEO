@@ -15,14 +15,10 @@ export async function GET(request: NextRequest) {
   const censusPCNParam = request.nextUrl.searchParams.get('censusPCNParam');
   if (!schema) throw new Error('No schema variable provided!');
 
-  let transactionID: string | undefined = undefined;
-
   try {
-    transactionID = await conn.beginTransaction();
-    // Query to fetch existing validation errors
     const validationErrorsQuery = `
-      SELECT 
-          cm.CoreMeasurementID AS CoreMeasurementID, 
+      SELECT
+          cm.CoreMeasurementID AS CoreMeasurementID,
           GROUP_CONCAT(COALESCE(ve.ValidationID, me.ErrorID) ORDER BY COALESCE(ve.ValidationID, me.ErrorID)) AS ValidationErrorIDs,
           GROUP_CONCAT(
             COALESCE(NULLIF(ve.Description, ''), me.ErrorMessage)
@@ -34,18 +30,18 @@ export async function GET(request: NextRequest) {
             ORDER BY COALESCE(ve.ValidationID, me.ErrorID)
             SEPARATOR '||'
           ) AS Criteria
-      FROM 
+      FROM
           ${schema}.measurement_error_log AS cve
       JOIN
           ${schema}.measurement_errors me ON me.ErrorID = cve.ErrorID AND me.ErrorSource = 'validation' AND cve.IsResolved = FALSE
-      JOIN 
+      JOIN
           ${schema}.coremeasurements cm ON cve.MeasurementID = cm.CoreMeasurementID
-      LEFT JOIN 
+      LEFT JOIN
           ${schema}.sitespecificvalidations AS ve ON me.ErrorCode = CAST(ve.ValidationID AS CHAR)
       JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
       JOIN ${schema}.plots p ON c.PlotID = p.PlotID
       WHERE p.PlotID = ? AND c.PlotCensusNumber = ?
-      GROUP BY 
+      GROUP BY
           cm.CoreMeasurementID;
     `;
     const validationErrorsRows = await conn.executeQuery(validationErrorsQuery, [plotIDParam, censusPCNParam]);
@@ -56,7 +52,6 @@ export async function GET(request: NextRequest) {
       descriptions: row.Descriptions.split('||'),
       criteria: row.Criteria.split('||')
     }));
-    await conn.commitTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors
@@ -70,7 +65,6 @@ export async function GET(request: NextRequest) {
     );
   } catch (error: any) {
     ailogger.error('Error in validation error display:', error.message, { endpoint: request.nextUrl.pathname });
-    await conn.rollbackTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: HTTPResponses.INTERNAL_SERVER_ERROR
     });
