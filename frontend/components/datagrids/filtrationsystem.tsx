@@ -1,6 +1,6 @@
 'use client';
 
-import { GetApplyQuickFilterFn, GridColDef, GridFilterOperator } from '@mui/x-data-grid';
+import { GetApplyQuickFilterFn, getGridNumericOperators, GridColDef, GridFilterOperator } from '@mui/x-data-grid';
 
 // starting with quick filter
 export const getApplyQuickFilterFnSameYear: GetApplyQuickFilterFn<any, unknown> = value => {
@@ -65,30 +65,7 @@ export function applyFilterToColumns(columns: GridColDef[]) {
   });
 }
 
-// customizing full filtration system
-// multiple values operator:
-
-const createNumericOperator = (label: string, operator: (value: number, filterValue: number) => boolean): GridFilterOperator => ({
-  label,
-  value: label,
-  getApplyFilterFn: filterItem => {
-    if (
-      !filterItem.value ||
-      !['measuredDBH', 'measuredHOM', 'startX', 'startY', 'area', 'dimensionX', 'dimensionY', 'stemLocalX', 'stemLocalY'].includes(filterItem.field || '')
-    )
-      return null;
-    return (value, row) => {
-      const fieldValue = Number(row[filterItem.field!]); // Get field value from the row
-      return value != null && !isNaN(fieldValue) && operator(fieldValue, Number(filterItem.value));
-    };
-  },
-  InputComponentProps: {}
-});
-
-export const customNumericOperators: GridFilterOperator[] = [
-  createNumericOperator('>=', (value, filterValue) => value >= filterValue),
-  createNumericOperator('>', (value, filterValue) => value > filterValue),
-  createNumericOperator('=', (value, filterValue) => value === filterValue),
-  createNumericOperator('<', (value, filterValue) => value < filterValue),
-  createNumericOperator('<=', (value, filterValue) => value <= filterValue)
-];
+// Use MUI's built-in numeric operators which include proper InputComponent rendering.
+// Server-side filtering (filterMode="server") handles the actual SQL — these operators
+// only control the UI (operator labels + input fields).
+export const customNumericOperators: GridFilterOperator[] = getGridNumericOperators();

@@ -108,6 +108,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     handleExport,
     handleExportAll,
     handleExportCSV,
+    showToolbarActions = true,
     handleQuickFilterChange,
     filterModel,
     dynamicButtons = [],
@@ -416,109 +417,113 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </Stack>
             )}
           </Box>
-          <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-          {/* Right section - action buttons */}
-          <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            {/* Manual Entry Form - icon only with tooltip */}
-            {dynamicButtons
-              .filter((button: any) => button.label === 'Manual Entry Form')
-              .map((button: any, index: number) => (
-                <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
-                  <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
-                    {button.icon}
-                  </IconButton>
-                </Tooltip>
-              ))}
-            {/* Upload - keep as button with text */}
-            {dynamicButtons
-              .filter((button: any) => button.label === 'Upload')
-              .map((button: any, index: number) => (
-                <Tooltip key={index} title={button.tooltip} placement="top" arrow>
-                  <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
-                    {button.label}
-                  </Button>
-                </Tooltip>
-              ))}
-            {/* Export as CSV button */}
-            {hasAnyExport && (
-              <Tooltip title="Export as CSV" placement="top" arrow>
-                <IconButton
-                  onClick={async () => {
-                    if (handleExport) {
-                      setOpenExportModal(true);
-                    } else if (handleExportCSV) {
-                      await handleExportCSV();
-                    } else {
-                      await handleExportAll!();
-                    }
-                  }}
-                  variant="soft"
-                  color="primary"
-                  aria-label="Export as CSV"
-                >
-                  <CloudDownloadIcon />
-                </IconButton>
-              </Tooltip>
-            )}
-            {/* Show/Hide empty columns button */}
-            {setHidingEmpty && (
-              <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
-                <IconButton
-                  onClick={() => setHidingEmpty(!hidingEmpty)}
-                  variant="soft"
-                  color="primary"
-                  aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
-                >
-                  {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
-                </IconButton>
-              </Tooltip>
-            )}
-            {/* Kebab menu for additional actions */}
-            <Dropdown>
-              <Tooltip title="More actions" placement="top" arrow>
-                <MenuButton
-                  slots={{ root: Button }}
-                  slotProps={{
-                    root: {
-                      variant: 'soft',
-                      color: 'primary',
-                      size: 'sm',
-                      'aria-label': 'More actions',
-                      startDecorator: <MoreVert />
-                    }
-                  }}
-                >
-                  More
-                </MenuButton>
-              </Tooltip>
-              <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
-                {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+          {showToolbarActions && (
+            <>
+              <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+              {/* Right section - action buttons */}
+              <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                {/* Manual Entry Form - icon only with tooltip */}
                 {dynamicButtons
-                  .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
-                  .map(
-                    (button: any, index: number) =>
-                      button.tooltip && (
-                        <MenuItem key={index} onClick={button.onClick}>
-                          <ListItemDecorator>{button.icon}</ListItemDecorator>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                            <Typography level="body-sm">{button.label}</Typography>
-                            <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
-                              {button.tooltip}
-                            </Typography>
-                          </Box>
-                          {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
-                        </MenuItem>
-                      )
-                  )}
-                {validationMenu && (
-                  <Box>
-                    <Divider />
-                    {validationMenu}
-                  </Box>
+                  .filter((button: any) => button.label === 'Manual Entry Form')
+                  .map((button: any, index: number) => (
+                    <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
+                      <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
+                        {button.icon}
+                      </IconButton>
+                    </Tooltip>
+                  ))}
+                {/* Upload - keep as button with text */}
+                {dynamicButtons
+                  .filter((button: any) => button.label === 'Upload')
+                  .map((button: any, index: number) => (
+                    <Tooltip key={index} title={button.tooltip} placement="top" arrow>
+                      <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
+                        {button.label}
+                      </Button>
+                    </Tooltip>
+                  ))}
+                {/* Export as CSV button */}
+                {hasAnyExport && (
+                  <Tooltip title="Export as CSV" placement="top" arrow>
+                    <IconButton
+                      onClick={async () => {
+                        if (handleExport) {
+                          setOpenExportModal(true);
+                        } else if (handleExportCSV) {
+                          await handleExportCSV();
+                        } else {
+                          await handleExportAll!();
+                        }
+                      }}
+                      variant="soft"
+                      color="primary"
+                      aria-label="Export as CSV"
+                    >
+                      <CloudDownloadIcon />
+                    </IconButton>
+                  </Tooltip>
                 )}
-              </Menu>
-            </Dropdown>
-          </Stack>
+                {/* Show/Hide empty columns button */}
+                {setHidingEmpty && (
+                  <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
+                    <IconButton
+                      onClick={() => setHidingEmpty(!hidingEmpty)}
+                      variant="soft"
+                      color="primary"
+                      aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
+                    >
+                      {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {/* Kebab menu for additional actions */}
+                <Dropdown>
+                  <Tooltip title="More actions" placement="top" arrow>
+                    <MenuButton
+                      slots={{ root: Button }}
+                      slotProps={{
+                        root: {
+                          variant: 'soft',
+                          color: 'primary',
+                          size: 'sm',
+                          'aria-label': 'More actions',
+                          startDecorator: <MoreVert />
+                        }
+                      }}
+                    >
+                      More
+                    </MenuButton>
+                  </Tooltip>
+                  <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
+                    {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+                    {dynamicButtons
+                      .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
+                      .map(
+                        (button: any, index: number) =>
+                          button.tooltip && (
+                            <MenuItem key={index} onClick={button.onClick}>
+                              <ListItemDecorator>{button.icon}</ListItemDecorator>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                <Typography level="body-sm">{button.label}</Typography>
+                                <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
+                                  {button.tooltip}
+                                </Typography>
+                              </Box>
+                              {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
+                            </MenuItem>
+                          )
+                      )}
+                    {validationMenu && (
+                      <Box>
+                        <Divider />
+                        {validationMenu}
+                      </Box>
+                    )}
+                  </Menu>
+                </Dropdown>
+              </Stack>
+            </>
+          )}
         </Box>
         {handleExport && (
           <Modal

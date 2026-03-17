@@ -156,6 +156,7 @@ export interface EditToolbarCustomProps {
   handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
   handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
+  showToolbarActions?: boolean;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
@@ -254,6 +255,8 @@ export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridCo
 export interface MeasurementsCommonsProps {
   gridType: string;
   gridColumns: GridColDef[];
+  initialVisibleFilters?: VisibleFilter[];
+  showToolbarActions?: boolean;
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;
   rowCount: number;

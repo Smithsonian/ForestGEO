@@ -18,6 +18,7 @@ import FailedMeasurementsModal from '@/components/client/modals/failedmeasuremen
 import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
 import { useRouter } from 'next/navigation';
+import { VisibleFilter } from '@/config/datagridhelpers';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -49,11 +50,15 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
 interface MeasurementsSummaryViewDataGridProps {
   autoOpenFailedMeasurements?: boolean;
   failedMeasurementsCloseRedirectHref?: string;
+  initialVisibleFilters?: VisibleFilter[];
+  showToolbarActions?: boolean;
 }
 
 export default function MeasurementsSummaryViewDataGrid({
   autoOpenFailedMeasurements = false,
-  failedMeasurementsCloseRedirectHref
+  failedMeasurementsCloseRedirectHref,
+  initialVisibleFilters,
+  showToolbarActions = true
 }: MeasurementsSummaryViewDataGridProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -177,16 +182,14 @@ export default function MeasurementsSummaryViewDataGrid({
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
-          if (uploadCompleted) {
+          const wasCompleted = uploadCompleted;
+          setIsUploadModalOpen(false);
+          setIsReingesting(false);
+          setUploadCompleted(false);
+          if (wasCompleted) {
             reloadMSV().then(() => {
-              setIsUploadModalOpen(false);
-              setIsReingesting(false);
-              setUploadCompleted(false);
               setOpenAlert(true);
             });
-          } else {
-            setIsUploadModalOpen(false);
-            setIsReingesting(false);
           }
         }}
         formType={FormType.measurements}
@@ -213,10 +216,13 @@ export default function MeasurementsSummaryViewDataGrid({
         open={openFSM}
         setReingested={setDataReingested}
         handleCloseModal={handleCloseFailedMeasurementsModal}
+        autoCloseWhenEmpty={!autoOpenFailedMeasurements}
       />
       <MeasurementsCommons
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}
+        initialVisibleFilters={initialVisibleFilters}
+        showToolbarActions={showToolbarActions}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

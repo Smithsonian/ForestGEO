@@ -1,9 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MeasurementsSummaryViewDataGrid from './msvdatagrid';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
-import { useRouter } from 'next/navigation';
 
 vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -16,7 +14,9 @@ vi.mock('@/config/sqlrdsdefinitions/views', async importOriginal => {
 });
 
 vi.mock('next/navigation', () => ({
-  useRouter: vi.fn()
+  useRouter: () => ({
+    replace: vi.fn()
+  })
 }));
 
 vi.mock('@/app/contexts/compat-hooks', () => ({
@@ -44,14 +44,7 @@ vi.mock('@/components/datagrids/measurementscommons', () => ({
 }));
 
 vi.mock('@/components/client/modals/failedmeasurementsmodal', () => ({
-  default: ({ open, handleCloseModal }: { open: boolean; handleCloseModal: () => Promise<void> }) =>
-    open ? (
-      <div data-testid="failed-measurements-modal">
-        <button type="button" onClick={() => void handleCloseModal()}>
-          Close Failed Measurements
-        </button>
-      </div>
-    ) : null
+  default: () => null
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -59,38 +52,27 @@ vi.mock('@/ailogger', () => ({
 }));
 
 describe('MeasurementsSummaryViewDataGrid', () => {
-  const mockReplace = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useRouter).mockReturnValue({
-      replace: mockReplace
-    } as any);
   });
 
-  it('keeps failed-measurements review separate from the summary toolbar props by default', () => {
+  it('renders the summary grid without a pre-applied visible filter by default', () => {
     render(<MeasurementsSummaryViewDataGrid />);
 
     const mockedMeasurementsCommons = vi.mocked(MeasurementsCommons);
     const renderedProps = mockedMeasurementsCommons.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 
     expect(screen.getByTestId('measurements-commons')).toBeInTheDocument();
-    expect(screen.queryByTestId('failed-measurements-modal')).not.toBeInTheDocument();
     expect(renderedProps).toBeDefined();
-    expect(renderedProps).not.toHaveProperty('failedTrigger');
+    expect(renderedProps?.initialVisibleFilters).toBeUndefined();
   });
 
-  it('auto-opens the failed-measurements review for the errors entry and returns to summary on close', async () => {
-    const user = userEvent.setup();
+  it('passes through an initial errors-only visible filter when requested', () => {
+    render(<MeasurementsSummaryViewDataGrid initialVisibleFilters={['errors']} />);
 
-    render(<MeasurementsSummaryViewDataGrid autoOpenFailedMeasurements failedMeasurementsCloseRedirectHref="/measurementshub/summary" />);
+    const mockedMeasurementsCommons = vi.mocked(MeasurementsCommons);
+    const renderedProps = mockedMeasurementsCommons.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 
-    expect(screen.getByTestId('failed-measurements-modal')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Close Failed Measurements' }));
-
-    await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith('/measurementshub/summary');
-    });
+    expect(renderedProps?.initialVisibleFilters).toEqual(['errors']);
   });
 });

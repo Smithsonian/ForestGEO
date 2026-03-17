@@ -6,7 +6,7 @@ export default function ErrorsPage() {
   return (
     <>
       <RenderGridFormExplanations datagridType={DatagridType.measurementssummaryview} />
-      <MeasurementsSummaryViewDataGrid autoOpenFailedMeasurements failedMeasurementsCloseRedirectHref="/measurementshub/summary" />
+      <MeasurementsSummaryViewDataGrid initialVisibleFilters={['errors']} showToolbarActions={false} />
     </>
   );
 }

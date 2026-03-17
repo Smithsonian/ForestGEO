@@ -25,10 +25,11 @@ interface FailedMeasurementsModalProps {
   open: boolean;
   setReingested: Dispatch<SetStateAction<boolean>>;
   handleCloseModal: () => Promise<void>;
+  autoCloseWhenEmpty?: boolean;
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, setReingested, handleCloseModal } = props;
+  const { open, setReingested, handleCloseModal, autoCloseWhenEmpty = true } = props;
   const [isReingesting, setIsReingesting] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
   const [isClearingTemp, setIsClearingTemp] = useState(false);
@@ -190,13 +191,13 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   // Note: Only auto-close when failedCount has been explicitly loaded (not null)
   // and equals 0, to prevent premature closing during initial load
   useEffect(() => {
-    if (open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
+    if (autoCloseWhenEmpty && open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
       ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
       setReingested(true);
       // Use void to explicitly ignore the promise - the async close is fire-and-forget
       void handleCloseModal();
     }
-  }, [open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
+  }, [autoCloseWhenEmpty, open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
 
   return (
     <Modal open={open} onClose={() => {}}>

@@ -110,4 +110,34 @@ describe('EditToolbar', () => {
     expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-label', 'Hide pending measurements (2)');
     expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('can hide the action buttons section for read-only pages', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        showToolbarActions={false}
+        dynamicButtons={[
+          {
+            label: 'Upload',
+            tooltip: 'Submit data by uploading a CSV file',
+            onClick: vi.fn()
+          }
+        ]}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export as CSV' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument();
+  });
 });

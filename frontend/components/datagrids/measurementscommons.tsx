@@ -136,6 +136,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     addNewRowToGrid,
     gridType,
     gridColumns,
+    initialVisibleFilters,
+    showToolbarActions = true,
     rows = [],
     setRows,
     rowCount,
@@ -155,6 +157,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     locked = false,
     dynamicButtons
   } = props;
+
+  const initialErrorRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('errors') : true;
+  const initialValidRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('valid') : true;
+  const initialPendingRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('pending') : true;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
@@ -178,9 +184,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   } | null>(null);
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
-  const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
-  const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const [showPendingRows, setShowPendingRows] = useState<boolean>(true);
+  const [showErrorRows, setShowErrorRows] = useState<boolean>(initialErrorRowsVisible);
+  const [showValidRows, setShowValidRows] = useState<boolean>(initialValidRowsVisible);
+  const [showPendingRows, setShowPendingRows] = useState<boolean>(initialPendingRowsVisible);
   // tree-stem-state
   const [showOT, setShowOT] = useState<boolean>(true);
   const [showMS, setShowMS] = useState<boolean>(true);
@@ -1487,6 +1493,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: async () => setRefresh(true),
                 handleExport: fetchRowsForExport,
+                showToolbarActions: showToolbarActions,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 gridColumns: gridColumns,

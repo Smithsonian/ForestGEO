@@ -221,5 +221,27 @@ describe('FailedMeasurementsModal', () => {
         expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/admin/clear/temporarymeasurements/testschema/1/1'), { method: 'GET' });
       });
     });
+
+    it('does not auto-close on an empty initial load when autoCloseWhenEmpty is disabled', async () => {
+      (global.fetch as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 0 })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 0 })
+        });
+
+      render(<FailedMeasurementsModal {...defaultProps} autoCloseWhenEmpty={false} />);
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mockHandleCloseModal).not.toHaveBeenCalled();
+      expect(mockSetReingested).not.toHaveBeenCalledWith(true);
+      expect(screen.getByText('Failed Measurements')).toBeInTheDocument();
+    });
   });
 });
