@@ -609,6 +609,7 @@ create table if not exists temporarymeasurements
         primary key,
     FileID          varchar(36)                         null,
     BatchID         varchar(36)                         not null,
+    SessionID       varchar(64)                         null,
     PlotID          int                                 null,
     CensusID        int                                 null,
     TreeTag         varchar(20)                         null,
@@ -645,6 +646,9 @@ create index temporarymeasurements_QuadratName_index
 
 create index temporarymeasurements_TreeTag_SpeciesCode_index
     on temporarymeasurements (TreeTag, SpeciesCode);
+
+create index idx_tmpm_session
+    on temporarymeasurements (SessionID);
 
 create table if not exists trees
 (

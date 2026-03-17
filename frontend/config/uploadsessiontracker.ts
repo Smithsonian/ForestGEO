@@ -419,9 +419,7 @@ export async function createUploadSession(
           };
         }
 
-        throw new UploadSessionOwnershipError(
-          `Another upload is in progress for Plot ${plotId}, Census ${censusId}. Session: ${activeSession.sessionId}`
-        );
+        throw new UploadSessionOwnershipError(`Another upload is in progress for Plot ${plotId}, Census ${censusId}. Session: ${activeSession.sessionId}`);
       }
     }
 
@@ -662,62 +660,97 @@ export async function cleanupOrphanedData(schema: string, session: UploadSession
   try {
     transactionID = await connectionManager.beginTransaction();
 
-    // Move orphaned temporarymeasurements for the whole scope once no other active scope owner exists.
+    // Move orphaned temporarymeasurements that belong to THIS session.
+    // Scoping by SessionID (rather than PlotID/CensusID) avoids a TOCTOU race
+    // where a newer session's rows could be swept up between the overlap check
+    // and the move. Rows with NULL SessionID (pre-migration) fall back to the
+    // broader PlotID/CensusID scope, but only when no other active session owns
+    // that scope.
     if (session.fileId) {
-      const overlappingActiveSessionsSQL = `
-        SELECT session_id
-        FROM ${schema}.upload_sessions
-        WHERE plot_id = ?
-          AND census_id = ?
-          AND session_id <> ?
-          AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
-          AND last_heartbeat >= DATE_SUB(NOW(), INTERVAL ? SECOND)
-        ORDER BY updated_at DESC
-        LIMIT 1
+      const selectSessionBatchSQL = `
+        SELECT DISTINCT FileID, BatchID
+        FROM ${schema}.temporarymeasurements
+        WHERE SessionID = ?
+        ORDER BY FileID, BatchID
       `;
-      const heartbeatTimeoutSeconds = Math.floor(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
-      const overlappingSessions = await connectionManager.executeQuery(
-        overlappingActiveSessionsSQL,
-        [session.plotId, session.censusId, session.sessionId, heartbeatTimeoutSeconds],
-        transactionID ?? undefined
-      );
+      const sessionBatchRows = await connectionManager.executeQuery(selectSessionBatchSQL, [session.sessionId], transactionID ?? undefined);
+      const sessionBatches = Array.isArray(sessionBatchRows)
+        ? sessionBatchRows
+            .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
+            .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
+        : [];
 
-      if (Array.isArray(overlappingSessions) && overlappingSessions.length > 0) {
-        const newerSessionId = (overlappingSessions[0] as { session_id?: string }).session_id ?? 'unknown';
-        cleanupNote = `Cleanup skipped: active session ${newerSessionId} still owns plot ${session.plotId}, census ${session.censusId}`;
-        ailogger.warn(
-          `[UploadSessionTracker] Skipping temporarymeasurement cleanup for session ${session.sessionId} because active session ${newerSessionId} still owns plot ${session.plotId}, census ${session.censusId}`
+      for (const { fileId, batchId } of sessionBatches) {
+        const movedRows = await moveTemporaryBatchToFailedMeasurements(
+          connectionManager,
+          schema,
+          fileId,
+          batchId,
+          `Upload session ${session.sessionId} cleaned up after abandonment`,
+          transactionID ?? undefined
         );
-      } else {
-        const selectBatchSQL = `
-          SELECT DISTINCT FileID, BatchID
-          FROM ${schema}.temporarymeasurements
-          WHERE PlotID = ?
-            AND CensusID = ?
-          ORDER BY FileID, BatchID
-        `;
-        const batchRows = await connectionManager.executeQuery(selectBatchSQL, [session.plotId, session.censusId], transactionID ?? undefined);
-        const batches = Array.isArray(batchRows)
-          ? batchRows
-              .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
-              .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
-          : [];
-
-        for (const { fileId, batchId } of batches) {
-          const movedRows = await moveTemporaryBatchToFailedMeasurements(
-            connectionManager,
-            schema,
-            fileId,
-            batchId,
-            'Upload session cleaned up after abandonment',
-            transactionID ?? undefined
-          );
-          temporaryDeleted += movedRows;
-          failedDeleted += movedRows;
-        }
-
-        cleanupNote = failedDeleted > 0 ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures` : `Cleanup: deleted ${temporaryDeleted} temp rows`;
+        temporaryDeleted += movedRows;
+        failedDeleted += movedRows;
       }
+
+      // Fallback: clean up pre-migration rows (SessionID IS NULL) that belong
+      // to this scope, but only if no other active session currently owns it.
+      const nullSessionBatchSQL = `
+        SELECT DISTINCT FileID, BatchID
+        FROM ${schema}.temporarymeasurements
+        WHERE SessionID IS NULL
+          AND PlotID = ?
+          AND CensusID = ?
+        ORDER BY FileID, BatchID
+      `;
+      const nullSessionRows = await connectionManager.executeQuery(nullSessionBatchSQL, [session.plotId, session.censusId], transactionID ?? undefined);
+      const nullSessionBatches = Array.isArray(nullSessionRows)
+        ? nullSessionRows
+            .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
+            .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
+        : [];
+
+      if (nullSessionBatches.length > 0) {
+        const overlappingActiveSessionsSQL = `
+          SELECT session_id
+          FROM ${schema}.upload_sessions
+          WHERE plot_id = ?
+            AND census_id = ?
+            AND session_id <> ?
+            AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
+            AND last_heartbeat >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `;
+        const heartbeatTimeoutSeconds = Math.floor(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
+        const overlappingSessions = await connectionManager.executeQuery(
+          overlappingActiveSessionsSQL,
+          [session.plotId, session.censusId, session.sessionId, heartbeatTimeoutSeconds],
+          transactionID ?? undefined
+        );
+
+        if (Array.isArray(overlappingSessions) && overlappingSessions.length > 0) {
+          const newerSessionId = (overlappingSessions[0] as { session_id?: string }).session_id ?? 'unknown';
+          ailogger.warn(
+            `[UploadSessionTracker] Skipping NULL-SessionID cleanup for session ${session.sessionId} because active session ${newerSessionId} still owns plot ${session.plotId}, census ${session.censusId}`
+          );
+        } else {
+          for (const { fileId, batchId } of nullSessionBatches) {
+            const movedRows = await moveTemporaryBatchToFailedMeasurements(
+              connectionManager,
+              schema,
+              fileId,
+              batchId,
+              `Upload session ${session.sessionId} cleaned up after abandonment (pre-migration rows)`,
+              transactionID ?? undefined
+            );
+            temporaryDeleted += movedRows;
+            failedDeleted += movedRows;
+          }
+        }
+      }
+
+      cleanupNote = failedDeleted > 0 ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures` : `Cleanup: deleted ${temporaryDeleted} temp rows`;
     }
 
     // Mark session as cleaned up
@@ -849,9 +882,7 @@ export async function requireUploadSessionOwnership(options: RequireUploadSessio
   }
 
   if (plotId !== undefined && session.plotId !== plotId) {
-    throw new UploadSessionOwnershipError(
-      `Upload session ${sessionId} does not own plot ${plotId} for ${contextLabel} (session plot: ${session.plotId})`
-    );
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} does not own plot ${plotId} for ${contextLabel} (session plot: ${session.plotId})`);
   }
 
   if (session.censusId !== censusId) {
@@ -866,9 +897,7 @@ export async function requireUploadSessionOwnership(options: RequireUploadSessio
   }
 
   if (!allowedStates.includes(session.state)) {
-    throw new UploadSessionOwnershipError(
-      `Upload session ${sessionId} is in state ${session.state}, not one of: ${allowedStates.join(', ')}`
-    );
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} is in state ${session.state}, not one of: ${allowedStates.join(', ')}`);
   }
 
   return session;

@@ -231,9 +231,7 @@ describe('sqlpacketload measurement scope validation', () => {
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
-    requireUploadSessionOwnershipMock.mockRejectedValueOnce(
-      new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409)
-    );
+    requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409));
 
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: 22 }])
@@ -354,8 +352,8 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-test');
 
-    const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find(
-      (call: any[]) => String(call[0]).includes('DELETE mel FROM forestgeo_testing.measurement_error_log')
+    const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE mel FROM forestgeo_testing.measurement_error_log')
     );
     expect(deleteValidationErrorsCall).toBeDefined();
 
@@ -468,9 +466,10 @@ describe('sqlpacketload measurement scope validation', () => {
       dataIntegrityWarning: true
     });
 
-    const alertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT INTO forestgeo_testing.uploadintegrityalerts') &&
-      String(call[0]).includes('FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS')
+    const alertCall = mockConnectionManager.executeQuery.mock.calls.find(
+      (call: any[]) =>
+        String(call[0]).includes('INSERT INTO forestgeo_testing.uploadintegrityalerts') &&
+        String(call[0]).includes('FAILED_INSERT_TO_UNRESOLVED_COREMEASUREMENTS')
     );
 
     expect(alertCall).toBeDefined();

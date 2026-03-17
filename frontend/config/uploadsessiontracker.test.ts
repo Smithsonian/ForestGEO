@@ -88,9 +88,7 @@ describe('cleanupOrphanedData', () => {
   });
 
   it('rolls back the outer transaction when a batch move fails', async () => {
-    mocks.executeQuery
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-1' }]);
+    mocks.executeQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([{ FileID: 'file.csv', BatchID: 'batch-1' }]);
     mocks.moveTemporaryBatchToFailedMeasurements.mockRejectedValue(new Error('cleanup failed'));
 
     await expect(

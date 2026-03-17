@@ -47,11 +47,7 @@ function hashChunkContent(fileRowSet: FileRowSet): string {
 }
 
 function buildUploadId(schema: string, plotID: number, censusID: number, fileID: string, batchID: string, purpose: string = 'upload'): string {
-  return crypto
-    .createHash('sha256')
-    .update([schema, plotID, censusID, fileID, batchID, purpose].join('#'))
-    .digest('hex')
-    .slice(0, 40);
+  return crypto.createHash('sha256').update([schema, plotID, censusID, fileID, batchID, purpose].join('#')).digest('hex').slice(0, 40);
 }
 
 function isMissingTableError(error: unknown, tableName?: string): boolean {
@@ -262,7 +258,14 @@ function buildDroppedMeasurementFailureReason(row: FileRow, existingBatch: strin
   return `Row dropped by INSERT IGNORE - possible constraint violation (Tag=${row.tag}, Quadrat=${row.quadrat}, Date=${normalizeMeasurementDate(row.date)})`;
 }
 
-function buildTemporaryMeasurementInsertParams(row: FileRow, fileName: string, batchID: string, plotID: number, censusID: number): (string | number | null)[] {
+function buildTemporaryMeasurementInsertParams(
+  row: FileRow,
+  fileName: string,
+  batchID: string,
+  sessionId: string | null,
+  plotID: number,
+  censusID: number
+): (string | number | null)[] {
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
   const formattedDate = normalizeMeasurementDate(date);
   const parsedLx = lx !== undefined && lx !== null && lx !== '' && !isNaN(Number(lx)) ? Number(lx) : null;
@@ -271,6 +274,7 @@ function buildTemporaryMeasurementInsertParams(row: FileRow, fileName: string, b
   return [
     fileName,
     batchID,
+    sessionId,
     plotID,
     censusID,
     tag ?? null,
@@ -293,21 +297,22 @@ async function insertTemporaryMeasurementsInBatches(
   rows: FileRow[],
   fileName: string,
   batchID: string,
+  sessionId: string | null,
   plotID: number,
   censusID: number,
   transactionID: string
 ): Promise<void> {
   const insertSQLPrefix = format(
     `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, SessionID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
       VALUES `,
     [schema]
   );
 
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
-    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, plotID, censusID));
+    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, plotID, censusID));
     await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
   }
 }
@@ -659,7 +664,7 @@ export async function POST(request: NextRequest) {
           await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
         }
 
-        await insertTemporaryMeasurementsInBatches(connectionManager, schema, chunkRows, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
+        await insertTemporaryMeasurementsInBatches(connectionManager, schema, chunkRows, fileName, batchID, sessionId, resolvedPlotID, resolvedCensusID, transactionID);
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
         const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
@@ -786,7 +791,18 @@ export async function POST(request: NextRequest) {
                   });
                   await connectionManager.executeQuery(
                     alertSQL,
-                    [alertUploadId, fileName, batchID, resolvedPlotID, resolvedCensusID, alertMessage, expectedRowCount, actualInsertedCount, droppedRows.length, 0],
+                    [
+                      alertUploadId,
+                      fileName,
+                      batchID,
+                      resolvedPlotID,
+                      resolvedCensusID,
+                      alertMessage,
+                      expectedRowCount,
+                      actualInsertedCount,
+                      droppedRows.length,
+                      0
+                    ],
                     transactionID
                   );
                   ailogger.error(`Logged failed insert to uploadintegrityalerts for ${fileName}-${batchID}`);
