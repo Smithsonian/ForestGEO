@@ -22,11 +22,26 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         if (!token.email) token.email = user.email;
+        // Persist userStatus from the E2E credentials provider into the JWT
+        if (user.userStatus) token.userStatus = user.userStatus;
       }
       return token;
     },
 
     async session({ session, token }) {
+      // E2E testing bypass: return test session without calling external auth API.
+      // The test user's role comes from the credentials provider via the JWT token.
+      if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+        session.user.userStatus = (token.userStatus as string as import('@/config/macros').UserAuthRoles) || 'global';
+        // Sites are fetched from the real DB via the normal /api/fetchall/sites endpoint,
+        // so we leave them empty here — the hub layout will fetch them.
+        session.user.sites = session.user.sites ?? [];
+        session.user.allsites = session.user.allsites ?? [];
+        session.user.name = session.user.name || 'E2E Test User';
+        session.user.email = session.user.email || (token.email as string);
+        return session;
+      }
+
       if (!session.user.userStatus || !session.user.sites || session.user.sites.length === 0 || !session.user.allsites || session.user.allsites.length === 0) {
         const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
         try {

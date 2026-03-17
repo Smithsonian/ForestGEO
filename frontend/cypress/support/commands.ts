@@ -165,6 +165,44 @@ Cypress.Commands.add('setupCommonMocks', () => {
   cy.log('✅ Common mocks set up');
 });
 
+/**
+ * Programmatic login via the E2E credentials provider.
+ * Sends a real sign-in request to NextAuth, which sets a valid session cookie.
+ * Requires the app to be running with NEXT_PUBLIC_E2E_TESTING=true.
+ *
+ * This replaces cy.intercept()-based session mocking for tests that need
+ * to hit real API endpoints.
+ */
+Cypress.Commands.add(
+  'loginViaCredentials',
+  (email = 'e2e-admin@forestgeo.si.edu', userStatus = 'global') => {
+    cy.log(`Logging in via credentials provider as ${userStatus}`);
+
+    // 1. Fetch the CSRF token that NextAuth requires
+    cy.request('/api/auth/csrf').then(csrfResponse => {
+      const csrfToken = csrfResponse.body.csrfToken;
+
+      // 2. POST to the credentials provider callback to obtain a session cookie
+      cy.request({
+        method: 'POST',
+        url: '/api/auth/callback/e2e-credentials',
+        form: true,
+        body: {
+          email,
+          userStatus,
+          csrfToken
+        },
+        followRedirect: false
+      }).then(loginResponse => {
+        // NextAuth responds with a redirect (302) on success.
+        // The session cookie is now set in the browser.
+        expect(loginResponse.status).to.be.oneOf([200, 302]);
+        cy.log(`Logged in as ${email} (${userStatus})`);
+      });
+    });
+  }
+);
+
 declare global {
   namespace Cypress {
     interface Chainable {
@@ -172,6 +210,11 @@ declare global {
       loginAsDBManager(): Chainable<void>;
       loginAsFieldCrew(): Chainable<void>;
       setupCommonMocks(): Chainable<void>;
+      /**
+       * Programmatic login via NextAuth E2E credentials provider.
+       * Sets a real session cookie — no intercept mocking needed.
+       */
+      loginViaCredentials(email?: string, userStatus?: string): Chainable<void>;
     }
   }
 }
