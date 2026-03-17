@@ -25,6 +25,21 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   const slugPlotID = parsePositiveInt(plotIDParam);
   const slugPCN = parsePositiveInt(pcnParam);
 
+  // Sites live in the catalog schema and don't require a site-specific schema
+  if (dataType === 'sites') {
+    const connectionManager = ConnectionManager.getInstance();
+    try {
+      const results = await connectionManager.executeQuery('SELECT * FROM catalog.sites');
+      return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('sites').mapData(results)), { status: HTTPResponses.OK });
+    } catch (error: unknown) {
+      const errorObj = toError(error);
+      ailogger.error('Failed to fetch sites from catalog:', errorObj);
+      return new NextResponse(JSON.stringify({ error: getErrorMessage(error) }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    } finally {
+      await connectionManager.closeConnection();
+    }
+  }
+
   // Validate contextual values first
   const validation = await validateContextualValues(request, {
     requireSchema: true,

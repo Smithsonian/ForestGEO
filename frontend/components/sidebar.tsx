@@ -616,27 +616,23 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
   const renderSiteOptions = () => {
+    const isGlobalUser = session?.user?.userStatus === 'global';
+    const sortByName = (a: SitesRDS, b: SitesRDS) => {
+      const nameA = a.siteName?.toLowerCase() ?? '';
+      const nameB = b.siteName?.toLowerCase() ?? '';
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return 0;
+    };
     const allowedSites = Array.isArray(siteListContext)
       ? siteListContext
-          .filter(site => session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort((a, b) => {
-            const nameA = a.siteName?.toLowerCase() ?? '';
-            const nameB = b.siteName?.toLowerCase() ?? '';
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
-          })
+          .filter(site => isGlobalUser || session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
+          .sort(sortByName)
       : [];
     const otherSites = Array.isArray(siteListContext)
       ? siteListContext
-          .filter(site => !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort((a, b) => {
-            const nameA = a.siteName?.toLowerCase() ?? '';
-            const nameB = b.siteName?.toLowerCase() ?? '';
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
-          })
+          .filter(site => !isGlobalUser && !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
+          .sort(sortByName)
       : [];
 
     return (

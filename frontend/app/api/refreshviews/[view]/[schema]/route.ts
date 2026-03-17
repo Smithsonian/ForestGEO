@@ -232,45 +232,54 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
     // No body provided, that's fine
   }
 
-  const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | undefined = undefined;
+  const MAX_LOCK_RETRIES = 3;
+  const LOCK_RETRY_DELAY_MS = 2000;
 
-  try {
-    transactionID = await connectionManager.beginTransaction();
+  for (let attempt = 1; attempt <= MAX_LOCK_RETRIES; attempt++) {
+    const connectionManager = ConnectionManager.getInstance();
+    let transactionID: string | undefined = undefined;
 
-    // Execute the view refresh procedure - view is validated above against whitelist
-    if (view === 'measurementssummary' && _plotID != null && _censusID != null) {
-      await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
-    } else {
-      const procedureName = view === 'viewfulltable' ? 'RefreshViewFullTable' : 'RefreshMeasurementsSummary';
-      const query = safeFormatQuery(schema, `CALL ??.${procedureName}()`);
-      await connectionManager.executeQuery(query, undefined, transactionID);
+    try {
+      transactionID = await connectionManager.beginTransaction();
+
+      // Execute the view refresh procedure - view is validated above against whitelist
+      if (view === 'measurementssummary' && _plotID != null && _censusID != null) {
+        await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
+      } else {
+        const procedureName = view === 'viewfulltable' ? 'RefreshViewFullTable' : 'RefreshMeasurementsSummary';
+        const query = safeFormatQuery(schema, `CALL ??.${procedureName}()`);
+        await connectionManager.executeQuery(query, undefined, transactionID);
+      }
+
+      await connectionManager.commitTransaction(transactionID ?? '');
+
+      // TODO: Post-validation query execution temporarily disabled for refactoring
+      const postValidationStats = null;
+
+      return new NextResponse(
+        JSON.stringify({
+          success: true,
+          postValidation: postValidationStats
+        }),
+        { status: HTTPResponses.OK }
+      );
+    } catch (e) {
+      await connectionManager.rollbackTransaction(transactionID ?? '');
+
+      const isLockTimeout = e instanceof Error && e.message.includes('Lock wait timeout exceeded');
+      if (isLockTimeout && attempt < MAX_LOCK_RETRIES) {
+        ailogger.warn(`Lock timeout on ${view} refresh (attempt ${attempt}/${MAX_LOCK_RETRIES}), retrying in ${LOCK_RETRY_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_DELAY_MS));
+        continue;
+      }
+
+      ailogger.error('Error:', e instanceof Error ? e : undefined);
+      throw new Error('Call failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      await connectionManager.closeConnection();
     }
-
-    await connectionManager.commitTransaction(transactionID ?? '');
-
-    // TODO: Post-validation query execution temporarily disabled for refactoring
-    // For measurementssummary refresh, automatically run post-validation queries if context is provided
-    const postValidationStats = null;
-    // if (view === 'measurementssummary' && runPostValidation && plotID && censusID) {
-    //   postValidationStats = await executePostValidationQueries(connectionManager, schema, plotID, censusID);
-    //   ailogger.info(
-    //     `Post-validation queries executed: ${postValidationStats.executed} total, ${postValidationStats.success} success, ${postValidationStats.failed} failed`
-    //   );
-    // }
-
-    return new NextResponse(
-      JSON.stringify({
-        success: true,
-        postValidation: postValidationStats
-      }),
-      { status: HTTPResponses.OK }
-    );
-  } catch (e) {
-    await connectionManager.rollbackTransaction(transactionID ?? '');
-    ailogger.error('Error:', e instanceof Error ? e : undefined);
-    throw new Error('Call failed: ' + (e instanceof Error ? e.message : String(e)));
-  } finally {
-    await connectionManager.closeConnection();
   }
+
+  // Should not be reached, but TypeScript needs a return
+  throw new Error('Unexpected: retry loop exhausted without returning or throwing');
 }

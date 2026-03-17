@@ -134,12 +134,7 @@ describe('POST /api/refreshviews/[view]/[schema]', () => {
     expect(res.status).toBe(HTTPResponses.OK);
     expect(begin).toHaveBeenCalledTimes(1);
     expect(exec).toHaveBeenNthCalledWith(1, 'DELETE FROM `myschema`.measurementssummary WHERE PlotID = ? AND CensusID = ?', [17, 42], 'tx-3');
-    expect(exec).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('INSERT IGNORE INTO `myschema`.measurementssummary'),
-      [17, 42],
-      'tx-3'
-    );
+    expect(exec).toHaveBeenNthCalledWith(2, expect.stringContaining('INSERT IGNORE INTO `myschema`.measurementssummary'), [17, 42], 'tx-3');
     expect(String(exec.mock.calls[1]?.[0])).toContain('LEFT JOIN `myschema`.stems st');
     expect(String(exec.mock.calls[1]?.[0])).toContain('COALESCE(st.StemTag, cm.RawStemTag)');
     expect(String(exec.mock.calls[1]?.[0])).toContain('COALESCE(q.QuadratName, cm.RawQuadrat)');

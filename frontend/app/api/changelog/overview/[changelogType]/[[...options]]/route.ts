@@ -21,11 +21,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
   }
 
   // Validate contextual values with fallback to URL params
+  // Note: plotID comes from path params (options[0]), not from context cookies/query params,
+  // so we only require schema here. Plot validation is handled by the params.options check above.
   const validation = await validateContextualValues(request, {
     requireSchema: true,
-    requirePlot: true,
     allowFallback: true,
-    fallbackMessage: 'Changelog requires active site and plot selections.'
+    fallbackMessage: 'Changelog requires active site selection.'
   });
 
   let plotID: number, pcn: number, schema: string;
