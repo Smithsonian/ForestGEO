@@ -1,6 +1,7 @@
 import type { NextAuthConfig } from 'next-auth';
 import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
 import Credentials from 'next-auth/providers/credentials';
+import type { UserAuthRoles } from '@/config/macros';
 
 const isE2ETesting = process.env.NEXT_PUBLIC_E2E_TESTING === 'true';
 
@@ -25,7 +26,7 @@ const e2eCredentialsProvider = Credentials({
       id: 'e2e-test-user',
       email,
       name: 'E2E Test User',
-      userStatus: (credentials?.userStatus as string) || 'global',
+      userStatus: ((credentials?.userStatus as string) || 'global') as UserAuthRoles,
       sites: [],
       allsites: []
     };
