@@ -22,6 +22,20 @@ const VALID_TABLE_TYPES = {
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
 
+function getAdminAuthErrorResponse(session: Awaited<ReturnType<typeof auth>>, method: 'GET' | 'DELETE'): NextResponse | null {
+  if (!session?.user) {
+    ailogger.warn(`Unauthorized admin clear ${method} attempt - no session`);
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  }
+
+  if (!['global', 'db admin'].includes(session.user.userStatus)) {
+    ailogger.warn(`Forbidden admin clear ${method} attempt by role: ${session.user.userStatus}`);
+    return new NextResponse(JSON.stringify({ error: 'Forbidden - admin access required' }), { status: 403 });
+  }
+
+  return null;
+}
+
 function buildFailedMeasurementsScopeWhereClause(schema: string) {
   return `c.PlotID = ?
            AND c.PlotCensusNumber = (
@@ -51,11 +65,10 @@ export async function DELETE(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  // Authentication check - admin operations require authenticated user
   const session = await auth();
-  if (!session?.user) {
-    ailogger.warn('Unauthorized admin clear DELETE attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  const authError = getAdminAuthErrorResponse(session, 'DELETE');
+  if (authError) {
+    return authError;
   }
 
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
@@ -209,11 +222,10 @@ export async function GET(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  // Authentication check - admin operations require authenticated user
   const session = await auth();
-  if (!session?.user) {
-    ailogger.warn('Unauthorized admin clear GET attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  const authError = getAdminAuthErrorResponse(session, 'GET');
+  if (authError) {
+    return authError;
   }
 
   const { tableType, schema, plotID, censusID } = await props.params;
