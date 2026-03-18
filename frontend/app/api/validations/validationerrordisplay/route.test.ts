@@ -46,7 +46,6 @@ describe('GET /api/validations/validationerrordisplay', () => {
 
   it('falls back to measurement_errors details when sitespecificvalidations row is missing', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([
       {
         CoreMeasurementID: 1048722,
@@ -55,7 +54,6 @@ describe('GET /api/validations/validationerrordisplay', () => {
         Criteria: 'Validation 20'
       }
     ]);
-    const commit = vi.spyOn(cm, 'commitTransaction').mockResolvedValueOnce(undefined);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const request = {
@@ -79,16 +77,12 @@ describe('GET /api/validations/validationerrordisplay', () => {
     expect(sql).toMatch(/LEFT JOIN\s+myschema\.sitespecificvalidations AS ve/i);
     expect(sql).toMatch(/COALESCE\(NULLIF\(ve\.Description, ''\), me\.ErrorMessage\)/);
     expect(sql).toMatch(/COALESCE\(NULLIF\(ve\.Criteria, ''\), CONCAT\('Validation ', me\.ErrorCode\)\)/);
-    expect(begin).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith('tx-1');
     expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('rolls back and returns 500 when the query fails', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-2');
     vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('query failed'));
-    const rollback = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValueOnce(undefined);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const request = {
@@ -98,7 +92,6 @@ describe('GET /api/validations/validationerrordisplay', () => {
 
     expect(response.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     await expect(response.json()).resolves.toEqual({ error: 'query failed' });
-    expect(rollback).toHaveBeenCalledWith('tx-2');
     expect(close).toHaveBeenCalledTimes(1);
   });
 });

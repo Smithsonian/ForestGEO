@@ -798,6 +798,9 @@ create index idx_cm_uploadfile_census_stem
 create index idx_cm_uploadfile_batch_census_stem
     on coremeasurements (UploadFileID, UploadBatchID, CensusID, StemGUID);
 
+create index idx_cm_unresolved_lookup
+    on coremeasurements (StemGUID, CensusID, UploadBatchID);
+
 create unique index ux_cm_uploadbatch_rowindex
     on coremeasurements (UploadBatchID, SourceRowIndex);
 
@@ -835,6 +838,8 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'STEM_TREE_RESOLUTION_FAILED', 'Stem resolution failed because no active tree matched'),
        ('ingestion', 'STEM_RESOLUTION_FAILED', 'Stem resolution failed after stem materialization'),
        ('ingestion', 'MEASUREMENT_INSERT_SKIPPED', 'Measurement insert skipped during core materialization'),
+       ('ingestion', 'DUPLICATE_TAG_CONFLICT', 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch'),
+       ('ingestion', 'DUPLICATE_TAG_CONFLICT_EXISTING', 'Conflicting TreeTag/StemTag matches existing census measurement'),
        ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
        ('validation', '14', 'Invalid attribute code'),
        ('validation', '20', 'Species mismatch from previous census'),
@@ -861,6 +866,12 @@ create index idx_measurement_error_log_errorid
 
 create index idx_measurement_error_log_resolved
     on measurement_error_log (IsResolved, CreatedAt);
+
+create index idx_mel_measurement_error_resolved
+    on measurement_error_log (MeasurementID, ErrorID, IsResolved);
+
+create index idx_me_error_source
+    on measurement_errors (ErrorID, ErrorSource);
 
 create table if not exists specimens
 (
@@ -1167,7 +1178,8 @@ create table if not exists uploadmetrics
     startTime                  datetime                                             not null,
     endTime                    datetime                                             null,
     createdAt                  datetime                                             default CURRENT_TIMESTAMP null,
-    constraint uploadId unique (uploadId)
+    constraint uq_uploadmetrics_uploadid
+        unique (uploadId)
 );
 
 create index idx_uploadmetrics_fileid
