@@ -615,7 +615,15 @@ export default function ErrorsExplorer() {
                 key={preset.id}
                 variant={filters.presetId === preset.id ? 'solid' : 'soft'}
                 color={filters.presetId === preset.id ? 'primary' : 'neutral'}
+                role="button"
+                tabIndex={0}
                 onClick={() => handlePresetClick(preset.id)}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handlePresetClick(preset.id);
+                  }
+                }}
                 sx={{ cursor: 'pointer' }}
               >
                 {preset.label}
@@ -625,8 +633,9 @@ export default function ErrorsExplorer() {
 
           <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.5}>
             <FormControl sx={{ minWidth: 180 }}>
-              <FormLabel>Source</FormLabel>
+              <FormLabel htmlFor="errors-explorer-source">Source</FormLabel>
               <Select
+                id="errors-explorer-source"
                 value={filters.source}
                 onChange={(_event, value) =>
                   updateFilters(prev => ({
@@ -643,8 +652,9 @@ export default function ErrorsExplorer() {
             </FormControl>
 
             <FormControl sx={{ minWidth: 280, flex: 1 }}>
-              <FormLabel>Exact Error Message</FormLabel>
+              <FormLabel htmlFor="errors-explorer-exact-message">Exact Error Message</FormLabel>
               <Autocomplete
+                id="errors-explorer-exact-message"
                 multiple
                 loading={loadingFacets}
                 options={facets.messages.map(option => `${option.value} (${option.count})`)}
@@ -664,8 +674,9 @@ export default function ErrorsExplorer() {
             </FormControl>
 
             <FormControl sx={{ minWidth: 220, flex: 0.8 }}>
-              <FormLabel>Affected Field</FormLabel>
+              <FormLabel htmlFor="errors-explorer-affected-field">Affected Field</FormLabel>
               <Autocomplete
+                id="errors-explorer-affected-field"
                 multiple
                 loading={loadingFacets}
                 options={facets.fields.map(option => `${option.value} (${option.count})`)}
@@ -685,8 +696,10 @@ export default function ErrorsExplorer() {
             </FormControl>
 
             <FormControl sx={{ minWidth: 220, flex: 1 }}>
-              <FormLabel>Quick Search</FormLabel>
+              <FormLabel htmlFor="errors-explorer-quick-search">Quick Search</FormLabel>
               <Input
+                id="errors-explorer-quick-search"
+                aria-label="Quick Search"
                 value={filters.quickSearch}
                 onChange={event =>
                   updateFilters(prev => ({
@@ -702,8 +715,10 @@ export default function ErrorsExplorer() {
 
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
             <FormControl orientation="horizontal" sx={{ gap: 1 }}>
-              <FormLabel>Contradictions only</FormLabel>
+              <FormLabel htmlFor="errors-explorer-contradictions-only">Contradictions only</FormLabel>
               <Switch
+                id="errors-explorer-contradictions-only"
+                aria-label="Contradictions only"
                 checked={filters.contradictionOnly}
                 onChange={event =>
                   updateFilters(prev => ({
@@ -719,6 +734,8 @@ export default function ErrorsExplorer() {
               <Chip
                 variant={filters.contradictionTypes.includes('duplicate_tag_stem') ? 'solid' : 'soft'}
                 color="warning"
+                role="button"
+                tabIndex={0}
                 onClick={() =>
                   updateFilters(prev => ({
                     ...prev,
@@ -728,6 +745,18 @@ export default function ErrorsExplorer() {
                     presetId: undefined
                   }))
                 }
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    updateFilters(prev => ({
+                      ...prev,
+                      contradictionTypes: prev.contradictionTypes.includes('duplicate_tag_stem')
+                        ? prev.contradictionTypes.filter(type => type !== 'duplicate_tag_stem')
+                        : [...prev.contradictionTypes, 'duplicate_tag_stem'],
+                      presetId: undefined
+                    }));
+                  }
+                }}
                 sx={{ cursor: 'pointer' }}
               >
                 Duplicate tag/stem ({facets.contradictionCounts.duplicateTagStem})
@@ -735,6 +764,8 @@ export default function ErrorsExplorer() {
               <Chip
                 variant={filters.contradictionTypes.includes('same_batch_conflict') ? 'solid' : 'soft'}
                 color="warning"
+                role="button"
+                tabIndex={0}
                 onClick={() =>
                   updateFilters(prev => ({
                     ...prev,
@@ -744,6 +775,18 @@ export default function ErrorsExplorer() {
                     presetId: undefined
                   }))
                 }
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    updateFilters(prev => ({
+                      ...prev,
+                      contradictionTypes: prev.contradictionTypes.includes('same_batch_conflict')
+                        ? prev.contradictionTypes.filter(type => type !== 'same_batch_conflict')
+                        : [...prev.contradictionTypes, 'same_batch_conflict'],
+                      presetId: undefined
+                    }));
+                  }
+                }}
                 sx={{ cursor: 'pointer' }}
               >
                 Same-batch conflicts ({facets.contradictionCounts.sameBatchConflict})

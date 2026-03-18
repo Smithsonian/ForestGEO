@@ -173,11 +173,24 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
       : null;
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
       component="article"
       variant="solid"
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
       aria-label={`Census ${census.plotCensusNumber}. Status: ${statusConfig[status].label}. ${formatDateRange(census.dateRanges)}.${census.description ? ` Description: ${census.description}.` : ''}${onSelect ? ' Click to select.' : ''}`}
       onClick={onSelect ? () => onSelect(census) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(census);
+              }
+            }
+          : undefined
+      }
       sx={{
         background: gradient,
         color: 'white',
@@ -498,7 +511,15 @@ const gridStyles = {
   margin: 0
 };
 
-export default function CensusesOverview({ censuses, plotName, siteName, isLoading = false, onCensusDelete, onAddCensus, onSelectCensus }: CensusesOverviewProps) {
+export default function CensusesOverview({
+  censuses,
+  plotName,
+  siteName,
+  isLoading = false,
+  onCensusDelete,
+  onAddCensus,
+  onSelectCensus
+}: CensusesOverviewProps) {
   if (isLoading) {
     return (
       <Box component="section" aria-label="Loading censuses" aria-busy="true" sx={gridStyles}>

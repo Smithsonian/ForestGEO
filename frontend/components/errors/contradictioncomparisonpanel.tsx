@@ -205,7 +205,15 @@ export default function ContradictionComparisonPanel({
               size="sm"
               variant={row.coreMeasurementID === comparisonRow.coreMeasurementID ? 'solid' : 'soft'}
               color={row.coreMeasurementID === comparisonRow.coreMeasurementID ? 'warning' : 'neutral'}
+              role="button"
+              tabIndex={0}
               onClick={() => setComparisonMeasurementID(row.coreMeasurementID)}
+              onKeyDown={(e: React.KeyboardEvent) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setComparisonMeasurementID(row.coreMeasurementID);
+                }
+              }}
               sx={{ cursor: 'pointer' }}
             >
               {buildIdentityLabel(row)}
@@ -232,7 +240,7 @@ export default function ContradictionComparisonPanel({
           {visibleFields.map(field => {
             const different = valuesDiffer(selectedComparisonRow[field.key], comparisonRow[field.key]);
             return (
-              <tr key={field.key} style={different ? { backgroundColor: 'rgba(217, 119, 6, 0.08)' } : undefined}>
+              <tr key={field.key} aria-label={`${field.label} comparison`} style={different ? { backgroundColor: 'rgba(217, 119, 6, 0.08)' } : undefined}>
                 <td>
                   <Typography level="body-sm" fontWeight="lg">
                     {field.label}

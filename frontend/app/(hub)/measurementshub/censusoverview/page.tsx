@@ -53,7 +53,12 @@ export default function CensusOverviewPage() {
   const [countStems, setCountStems] = useState(0);
   const [activeUsers, setActiveUsers] = useState(0);
   const [stemTypes, setStemTypes] = useState<StemTypesType>({ CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: 0 });
-  const [progressTacho, setProgressTacho] = useState<ProgressTachoType>({ TotalQuadrats: 0, PopulatedQuadrats: 0, PopulatedPercent: 0, UnpopulatedQuadrats: [] });
+  const [progressTacho, setProgressTacho] = useState<ProgressTachoType>({
+    TotalQuadrats: 0,
+    PopulatedQuadrats: 0,
+    PopulatedPercent: 0,
+    UnpopulatedQuadrats: []
+  });
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -70,10 +75,9 @@ export default function CensusOverviewPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(
-        `/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`,
-        { signal: metricsAbortControllerRef.current.signal }
-      );
+      const response = await fetch(`/api/dashboardmetrics/all/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, {
+        signal: metricsAbortControllerRef.current.signal
+      });
 
       if (!isMountedRef.current) return;
       if (!response.ok) throw new Error(`Failed to load metrics: ${response.status}`);
@@ -125,10 +129,7 @@ export default function CensusOverviewPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2}>
-        <Avatar
-          alt="Census overview icon"
-          sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg', width: 48, height: 48 }}
-        >
+        <Avatar alt="Census overview icon" sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg', width: 48, height: 48 }}>
           <CalendarMonthIcon />
         </Avatar>
         <Box>
@@ -197,6 +198,8 @@ export default function CensusOverviewPage() {
               <Card
                 key={link.href}
                 variant="outlined"
+                role="button"
+                tabIndex={0}
                 sx={{
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
@@ -207,9 +210,15 @@ export default function CensusOverviewPage() {
                   }
                 }}
                 onClick={() => router.push(link.href)}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    router.push(link.href);
+                  }
+                }}
               >
                 <CardContent sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                  <Avatar size="sm" sx={{ bgcolor: 'primary.softBg', color: 'primary.500' }}>
+                  <Avatar alt="" size="sm" sx={{ bgcolor: 'primary.softBg', color: 'primary.500' }}>
                     <LinkIcon sx={{ fontSize: 18 }} />
                   </Avatar>
                   <Box sx={{ flex: 1 }}>

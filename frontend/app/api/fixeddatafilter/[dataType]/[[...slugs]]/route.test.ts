@@ -55,10 +55,7 @@ vi.mock('@/config/connectionmanager', async () => {
     actual;
 
   // Either use the real test instance or stub a safe default
-  const instance = (candidate &&
-    typeof candidate.executeQuery === 'function' &&
-    typeof candidate.closeConnection === 'function' &&
-    candidate) || {
+  const instance = (candidate && typeof candidate.executeQuery === 'function' && typeof candidate.closeConnection === 'function' && candidate) || {
     executeQuery: vi.fn(async () => []),
     closeConnection: vi.fn(async () => {})
   };
