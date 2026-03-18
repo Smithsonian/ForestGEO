@@ -27,7 +27,7 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
+import { Plot, Site, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
@@ -625,14 +625,10 @@ export default function Sidebar(props: SidebarProps) {
       return 0;
     };
     const allowedSites = Array.isArray(siteListContext)
-      ? siteListContext
-          .filter(site => isGlobalUser || session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort(sortByName)
+      ? siteListContext.filter(site => isGlobalUser || session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort(sortByName)
       : [];
     const otherSites = Array.isArray(siteListContext)
-      ? siteListContext
-          .filter(site => !isGlobalUser && !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort(sortByName)
+      ? siteListContext.filter(site => !isGlobalUser && !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort(sortByName)
       : [];
 
     return (
@@ -1003,7 +999,7 @@ export default function Sidebar(props: SidebarProps) {
                       };
 
                       // Dashboard button is always visible, other non-expanding items require site+plot
-                      const transitionIn = isDashboard ? true : (currentSite !== undefined && currentPlot !== undefined);
+                      const transitionIn = isDashboard ? true : currentSite !== undefined && currentPlot !== undefined;
 
                       return (
                         <TransitionComponent key={item.href} in={transitionIn} direction="down">
@@ -1146,10 +1142,14 @@ export default function Sidebar(props: SidebarProps) {
                                               >
                                                 <Badge
                                                   color={isMeasurementsViewLink ? 'warning' : 'danger'}
-                                                  variant={isMeasurementsViewLink ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'}
-                                                  badgeContent={isMeasurementsViewLink ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined}
+                                                  variant={
+                                                    isMeasurementsViewLink ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'
+                                                  }
+                                                  badgeContent={
+                                                    isMeasurementsViewLink ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
+                                                  }
                                                   invisible={isMeasurementsViewLink ? isAllValiditiesTrue : !isDataIncomplete}
-                                                    aria-label={
+                                                  aria-label={
                                                     isMeasurementsViewLink
                                                       ? !isAllValiditiesTrue
                                                         ? 'Warning: Measurements views contain incomplete data sections'

@@ -71,6 +71,7 @@ declare module '@mui/x-data-grid' {
     handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
     handleExportAll?: () => Promise<void>;
     handleExportCSV?: () => Promise<void>;
+    showToolbarActions?: boolean;
     hidingEmptyColumns?: boolean;
     handleToggleHideEmptyColumns?: (checked: boolean) => void;
     handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
