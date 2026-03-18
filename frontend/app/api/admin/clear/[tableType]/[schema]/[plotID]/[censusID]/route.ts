@@ -6,6 +6,7 @@ import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
+import { Session } from 'next-auth';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -22,7 +23,7 @@ const VALID_TABLE_TYPES = {
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
 
-function getAdminAuthErrorResponse(session: Awaited<ReturnType<typeof auth>>, method: 'GET' | 'DELETE'): NextResponse | null {
+function getAdminAuthErrorResponse(session: Session | null, method: 'GET' | 'DELETE'): NextResponse | null {
   if (!session?.user) {
     ailogger.warn(`Unauthorized admin clear ${method} attempt - no session`);
     return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
