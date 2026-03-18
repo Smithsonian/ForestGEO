@@ -70,4 +70,19 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain('GROUP BY scope.CoreMeasurementID;');
     expect(canonicalSql).not.toContain('INSERT INTO measurement_error_log (MeasurementID, ErrorID) SELECT scope.CoreMeasurementID');
   });
+
+  it('uses PlotCensusNumber for previous-census selection and user-facing messages', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+
+    expect(canonicalSql).toContain('DECLARE vCurrentPlotCensusNumber INT DEFAULT NULL;');
+    expect(canonicalSql).toContain('DECLARE vPreviousPlotCensusNumber INT DEFAULT NULL;');
+    expect(canonicalSql).toContain('SELECT tm.CensusID, tm.PlotID, c.PlotCensusNumber');
+    expect(canonicalSql).toContain('INTO vCurrentCensusID, vCurrentPlotID, vCurrentPlotCensusNumber');
+    expect(canonicalSql).toContain('INTO vPreviousCensusID, vPreviousPlotCensusNumber');
+    expect(canonicalSql).toContain('AND c_prev.PlotCensusNumber = vCurrentPlotCensusNumber - 1');
+    expect(canonicalSql).toContain("' active trees in Census ', vPreviousPlotCensusNumber");
+    expect(canonicalSql).toContain("' active stems in Census ', vPreviousPlotCensusNumber");
+    expect(canonicalSql).not.toContain("' active trees in census ', vPreviousCensusID");
+    expect(canonicalSql).not.toContain("' active stems in census ', vPreviousCensusID");
+  });
 });

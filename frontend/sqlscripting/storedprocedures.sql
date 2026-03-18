@@ -1430,7 +1430,9 @@ main_proc:
 BEGIN
     DECLARE vCurrentCensusID int;
     DECLARE vCurrentPlotID int;
+    DECLARE vCurrentPlotCensusNumber INT DEFAULT NULL;
     DECLARE vPreviousCensusID int DEFAULT NULL;
+    DECLARE vPreviousPlotCensusNumber INT DEFAULT NULL;
     DECLARE vBatchFailed BOOLEAN DEFAULT FALSE;
     DECLARE vErrorMessage TEXT DEFAULT '';
     DECLARE vErrorCode VARCHAR(10) DEFAULT '';
@@ -1558,11 +1560,14 @@ BEGIN
     SET collation_connection = 'utf8mb4_0900_ai_ci';
 
     -- Get batch scope
-    SELECT CensusID, PlotID
-    INTO vCurrentCensusID, vCurrentPlotID
-    FROM temporarymeasurements
-    WHERE FileID = vFileID AND BatchID = vBatchID
-    GROUP BY CensusID, PlotID
+    SELECT tm.CensusID, tm.PlotID, c.PlotCensusNumber
+    INTO vCurrentCensusID, vCurrentPlotID, vCurrentPlotCensusNumber
+    FROM temporarymeasurements tm
+    LEFT JOIN census c
+        ON c.CensusID = tm.CensusID
+        AND c.PlotID = tm.PlotID
+    WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID
+    GROUP BY tm.CensusID, tm.PlotID, c.PlotCensusNumber
     LIMIT 1;
 
     SELECT COUNT(*)
@@ -1700,11 +1705,11 @@ BEGIN
         LEAVE main_proc;
     END IF;
 
-    SELECT c_prev.CensusID
-    INTO vPreviousCensusID
+    SELECT c_prev.CensusID, c_prev.PlotCensusNumber
+    INTO vPreviousCensusID, vPreviousPlotCensusNumber
     FROM census c_prev
     WHERE c_prev.PlotID = vCurrentPlotID
-      AND c_prev.CensusID < vCurrentCensusID
+      AND c_prev.PlotCensusNumber = vCurrentPlotCensusNumber - 1
       AND c_prev.IsActive = 1
     ORDER BY c_prev.CensusID DESC
     LIMIT 1;
@@ -2063,13 +2068,13 @@ BEGIN
                    CASE
                        WHEN COALESCE(ptl.MatchCount, 0) > 1
                            THEN CONCAT('Ambiguous previous census tree match: TreeTag "', f.TreeTag,
-                                       '" matched ', ptl.MatchCount, ' active trees in census ', vPreviousCensusID)
+                                       '" matched ', ptl.MatchCount, ' active trees in Census ', vPreviousPlotCensusNumber)
                    END,
                    CASE
                        WHEN COALESCE(psl.MatchCount, 0) > 1
                            THEN CONCAT('Ambiguous previous census stem match: TreeTag "', f.TreeTag,
                                        '" StemTag "', f.StemTag, '" matched ', psl.MatchCount,
-                                       ' active stems in census ', vPreviousCensusID)
+                                       ' active stems in Census ', vPreviousPlotCensusNumber)
                    END
                ), 255) AS FailureReason
         FROM filtered f
@@ -2260,14 +2265,14 @@ BEGIN
            LEFT(
                CASE
                    WHEN c.CensusID IS NULL
-                       THEN CONCAT('Tree insert blocked: census ', cf.CensusID,
+                       THEN CONCAT('Tree insert blocked: Census ', vCurrentPlotCensusNumber,
                                    ' no longer exists for TreeTag "', cf.TreeTag, '"')
                    WHEN s.SpeciesID IS NULL
                        THEN CONCAT('Tree insert blocked: species ', cf.SpeciesID,
                                    ' for TreeTag "', cf.TreeTag, '" is missing or inactive')
                    WHEN t_any.TreeID IS NOT NULL AND t_active.TreeID IS NULL
                        THEN CONCAT('Tree resolution failed: matching tree exists but is inactive for TreeTag "',
-                                   cf.TreeTag, '" in census ', cf.CensusID)
+                                   cf.TreeTag, '" in Census ', vCurrentPlotCensusNumber)
                END,
                255
            ) AS FailureReason
@@ -2383,7 +2388,7 @@ BEGIN
     SELECT cf.id,
            'STEM_TREE_RESOLUTION_FAILED',
            LEFT(CONCAT('Stem resolution failed: no active tree matched TreeTag "', cf.TreeTag,
-                       '" / SpeciesID ', cf.SpeciesID, ' in census ', cf.CensusID), 255)
+                       '" / SpeciesID ', cf.SpeciesID, ' in Census ', vCurrentPlotCensusNumber), 255)
     FROM classified_filtered cf
     LEFT JOIN current_tree_lookup ctl
         ON ctl.TreeTag = cf.TreeTag
@@ -2445,12 +2450,12 @@ BEGIN
                CASE
                    WHEN s_blocking.StemGUID IS NOT NULL AND s_blocking.IsActive = 0
                        THEN CONCAT('Stem resolution failed: matching TreeID ', srr.TreeID,
-                                   ' / StemTag "', srr.StemTag, '" exists but is inactive in census ', srr.CensusID)
+                                   ' / StemTag "', srr.StemTag, '" exists but is inactive in Census ', vCurrentPlotCensusNumber)
                    WHEN s_blocking.StemGUID IS NOT NULL AND s_blocking.IsActive = 1
                         AND s_blocking.QuadratID <> srr.QuadratID
                        THEN CONCAT('Stem resolution failed: TreeTag "', srr.TreeTag,
                                    '" / StemTag "', srr.StemTag,
-                                   '" already exists in a different quadrat for census ', srr.CensusID)
+                                   '" already exists in a different quadrat for Census ', vCurrentPlotCensusNumber)
                    ELSE CONCAT('Stem resolution failed: no active stem matched TreeTag "',
                                srr.TreeTag, '" / StemTag "', srr.StemTag,
                                '" after stem materialization')

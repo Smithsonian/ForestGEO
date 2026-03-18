@@ -1,0 +1,948 @@
+'use client';
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Autocomplete,
+  Button,
+  Card,
+  Chip,
+  CircularProgress,
+  Divider,
+  FormControl,
+  FormLabel,
+  Input,
+  Option,
+  Select,
+  Sheet,
+  Stack,
+  Switch,
+  Typography
+} from '@mui/joy';
+import {
+  GridActionsCellItem,
+  GridColDef,
+  GridEventListener,
+  GridPaginationModel,
+  GridRowEditStopReasons,
+  GridRowModes,
+  GridRowModesModel,
+  GridRowModel
+} from '@mui/x-data-grid';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Close';
+import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
+import {
+  ContradictionType,
+  CONTRADICTION_LABELS,
+  DEFAULT_ERROR_EXPLORER_FILTERS,
+  ErrorExplorerDetailsResponse,
+  ErrorExplorerFacetsResponse,
+  ErrorExplorerFilters,
+  ErrorExplorerQueryResponse,
+  ErrorExplorerRow,
+  ERROR_EXPLORER_PRESETS
+} from '@/config/errorsexplorer';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { StyledDataGrid } from '@/config/styleddatagrid';
+import ContradictionComparisonPanel from './contradictioncomparisonpanel';
+
+const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
+  messages: [],
+  fields: [],
+  sourceCounts: {
+    validation: 0,
+    ingestion: 0
+  },
+  contradictionCounts: {
+    duplicateTagStem: 0,
+    sameBatchConflict: 0
+  }
+};
+
+const DEFAULT_RESULTS: ErrorExplorerQueryResponse = {
+  rows: [],
+  totalRows: 0,
+  summary: {
+    total: 0,
+    validation: 0,
+    ingestion: 0,
+    contradictions: 0,
+    duplicateTagStem: 0,
+    sameBatchConflict: 0
+  }
+};
+
+function stripRowForUpdate(row: ErrorExplorerRow) {
+  return {
+    id: row.id,
+    coreMeasurementID: row.coreMeasurementID,
+    plotID: row.plotID,
+    censusID: row.censusID,
+    quadratID: row.quadratID,
+    treeID: row.treeID,
+    stemGUID: row.stemGUID,
+    speciesID: row.speciesID,
+    quadratName: row.quadratName,
+    speciesName: row.speciesName,
+    subspeciesName: row.subspeciesName,
+    speciesCode: row.speciesCode,
+    treeTag: row.treeTag,
+    stemTag: row.stemTag,
+    stemLocalX: row.stemLocalX,
+    stemLocalY: row.stemLocalY,
+    measurementDate: row.measurementDate,
+    measuredDBH: row.measuredDBH,
+    measuredHOM: row.measuredHOM,
+    isValidated: row.isValidated,
+    description: row.description,
+    attributes: row.attributes,
+    userDefinedFields: row.userDefinedFields
+  };
+}
+
+function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
+  if (!schema || !plotID || !censusID) return null;
+  return `errors-explorer-filters:${schema}:${plotID}:${censusID}`;
+}
+
+function renderPreviewCell(value: string | null | undefined, lines = 2) {
+  const displayValue = value && value.trim().length > 0 ? value : '—';
+
+  return (
+    <Typography
+      level="body-sm"
+      title={displayValue}
+      sx={{
+        width: '100%',
+        overflow: 'hidden',
+        display: '-webkit-box',
+        WebkitBoxOrient: 'vertical',
+        WebkitLineClamp: lines,
+        whiteSpace: 'normal',
+        textAlign: 'left',
+        lineHeight: 1.35
+      }}
+    >
+      {displayValue}
+    </Typography>
+  );
+}
+
+function getDisplayedContradictionTypes(row: Pick<ErrorExplorerRow, 'contradictionTypes' | 'contradictionType'>): ContradictionType[] {
+  if (row.contradictionTypes.length > 0) {
+    return row.contradictionTypes;
+  }
+  return row.contradictionType ? [row.contradictionType] : [];
+}
+
+function mergeEditedRow(existingRow: ErrorExplorerRow, updatedRow: ErrorExplorerRow): ErrorExplorerRow {
+  return {
+    ...existingRow,
+    ...stripRowForUpdate(updatedRow)
+  };
+}
+
+export default function ErrorsExplorer() {
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const storageKey = useMemo(
+    () => getFilterStorageKey(currentSite?.schemaName, currentPlot?.plotID, activeCensusID),
+    [currentSite?.schemaName, currentPlot?.plotID, activeCensusID]
+  );
+
+  const [filters, setFilters] = useState<ErrorExplorerFilters>(DEFAULT_ERROR_EXPLORER_FILTERS);
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
+  const [results, setResults] = useState<ErrorExplorerQueryResponse>(DEFAULT_RESULTS);
+  const [facets, setFacets] = useState<ErrorExplorerFacetsResponse>(DEFAULT_FACETS);
+  const [details, setDetails] = useState<ErrorExplorerDetailsResponse | null>(null);
+  const [selectedMeasurementID, setSelectedMeasurementID] = useState<number | null>(null);
+  const [loadingRows, setLoadingRows] = useState(false);
+  const [loadingFacets, setLoadingFacets] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      setFilters({
+        ...DEFAULT_ERROR_EXPLORER_FILTERS,
+        ...parsed,
+        exactMessages: parsed?.exactMessages ?? [],
+        affectedFields: parsed?.affectedFields ?? [],
+        contradictionTypes: parsed?.contradictionTypes ?? []
+      });
+    } catch {
+      // Ignore invalid saved state and use defaults.
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    window.localStorage.setItem(storageKey, JSON.stringify(filters));
+  }, [filters, storageKey]);
+
+  const fetchRows = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+    setLoadingRows(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch('/api/errors/explorer/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schema: currentSite.schemaName,
+          plotID: currentPlot.plotID,
+          censusID: activeCensusID,
+          page: paginationModel.page,
+          pageSize: paginationModel.pageSize,
+          filters
+        })
+      });
+      const data = (await response.json()) as ErrorExplorerQueryResponse | { error: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data ? data.error : 'Failed to load errors');
+      }
+      setResults(data);
+      if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
+        setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
+      }
+    } catch (error) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setErrorMessage(errorObj.message);
+    } finally {
+      setLoadingRows(false);
+    }
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters, paginationModel.page, paginationModel.pageSize, selectedMeasurementID]);
+
+  const fetchFacets = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+    setLoadingFacets(true);
+    try {
+      const response = await fetch('/api/errors/explorer/facets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schema: currentSite.schemaName,
+          plotID: currentPlot.plotID,
+          censusID: activeCensusID,
+          filters
+        })
+      });
+      const data = (await response.json()) as ErrorExplorerFacetsResponse | { error: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data ? data.error : 'Failed to load filters');
+      }
+      setFacets(data);
+    } catch (error) {
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setErrorMessage(errorObj.message);
+    } finally {
+      setLoadingFacets(false);
+    }
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters]);
+
+  const fetchDetails = useCallback(
+    async (measurementID: number) => {
+      if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+      setLoadingDetails(true);
+      try {
+        const searchParams = new URLSearchParams({
+          schema: currentSite.schemaName,
+          plotID: String(currentPlot.plotID),
+          censusID: String(activeCensusID)
+        });
+        if (filters.contradictionTypes.length === 1) {
+          searchParams.set('activeContradictionType', filters.contradictionTypes[0]);
+        }
+        const response = await fetch(`/api/errors/explorer/details/${measurementID}?${searchParams.toString()}`);
+        const data = (await response.json()) as ErrorExplorerDetailsResponse | { error: string };
+        if (!response.ok || 'error' in data) {
+          throw new Error('error' in data ? data.error : 'Failed to load row details');
+        }
+        setDetails(data);
+      } catch (error) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        setErrorMessage(errorObj.message);
+      } finally {
+        setLoadingDetails(false);
+      }
+    },
+    [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters.contradictionTypes]
+  );
+
+  const refreshMeasurementsSummaryScope = useCallback(async () => {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+      throw new Error('Explorer scope is not available');
+    }
+
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plotID: currentPlot.plotID,
+        censusID: activeCensusID
+      })
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body?.error || body?.message || 'Failed to refresh errors explorer data');
+    }
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
+
+  const syncEditedRowLocally = useCallback((updatedRow: ErrorExplorerRow) => {
+    setResults(current => ({
+      ...current,
+      rows: current.rows.map(row => (row.coreMeasurementID === updatedRow.coreMeasurementID ? mergeEditedRow(row, updatedRow) : row))
+    }));
+    setDetails(current => {
+      if (!current?.row || current.row.coreMeasurementID !== updatedRow.coreMeasurementID) {
+        return current;
+      }
+
+      return {
+        ...current,
+        row: mergeEditedRow(current.row, updatedRow)
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    fetchRows().catch(() => undefined);
+  }, [fetchRows]);
+
+  useEffect(() => {
+    fetchFacets().catch(() => undefined);
+  }, [fetchFacets]);
+
+  useEffect(() => {
+    if (!selectedMeasurementID) {
+      setDetails(null);
+      return;
+    }
+    fetchDetails(selectedMeasurementID).catch(() => undefined);
+  }, [fetchDetails, selectedMeasurementID]);
+
+  const updateFilters = useCallback((updater: (prev: ErrorExplorerFilters) => ErrorExplorerFilters) => {
+    setFilters(prev => updater(prev));
+    setPaginationModel(prev => ({ ...prev, page: 0 }));
+  }, []);
+
+  const handlePresetClick = useCallback((presetID: string) => {
+    const preset = ERROR_EXPLORER_PRESETS.find(item => item.id === presetID);
+    if (!preset) return;
+    setFilters({
+      ...preset.filters,
+      presetId: preset.id
+    });
+    setPaginationModel(prev => ({ ...prev, page: 0 }));
+  }, []);
+
+  const processRowUpdate = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      if (!currentSite?.schemaName) {
+        throw new Error('Site context not available');
+      }
+
+      const response = await fetch(`/api/fixeddata/measurementssummary/${currentSite.schemaName}/coreMeasurementID`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oldRow: stripRowForUpdate(oldRow as ErrorExplorerRow),
+          newRow: stripRowForUpdate(newRow as ErrorExplorerRow)
+        })
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.message || body?.error || 'Failed to update row');
+      }
+
+      const updatedRow = newRow as ErrorExplorerRow;
+      syncEditedRowLocally(updatedRow);
+
+      try {
+        await refreshMeasurementsSummaryScope();
+      } catch (error) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        setErrorMessage(`Row updated, but the explorer could not refresh: ${errorObj.message}`);
+        return updatedRow;
+      }
+
+      await Promise.all([fetchRows(), fetchFacets(), selectedMeasurementID ? fetchDetails(selectedMeasurementID) : Promise.resolve()]);
+      return updatedRow;
+    },
+    [currentSite?.schemaName, fetchDetails, fetchFacets, fetchRows, refreshMeasurementsSummaryScope, selectedMeasurementID, syncEditedRowLocally]
+  );
+
+  const handleProcessRowUpdateError = useCallback((error: Error) => {
+    setErrorMessage(error.message);
+  }, []);
+
+  const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
+    if (params.reason === GridRowEditStopReasons.rowFocusOut) {
+      event.defaultMuiPrevented = true;
+    }
+  };
+
+  const columns = useMemo<GridColDef[]>(
+    () => [
+      {
+        field: 'actions',
+        type: 'actions',
+        headerName: 'Actions',
+        width: 74,
+        getActions: ({ id }) => {
+          const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
+          if (isInEditMode) {
+            return [
+              <GridActionsCellItem
+                key="save"
+                icon={<SaveIcon />}
+                label="Save"
+                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View } }))}
+              />,
+              <GridActionsCellItem
+                key="cancel"
+                icon={<CancelIcon />}
+                label="Cancel"
+                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))}
+              />
+            ];
+          }
+          return [
+            <GridActionsCellItem
+              key="edit"
+              icon={<EditIcon />}
+              label="Edit"
+              onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.Edit } }))}
+            />
+          ];
+        }
+      },
+      {
+        field: 'hasContradiction',
+        headerName: 'Conflict',
+        minWidth: 150,
+        width: 150,
+        sortable: false,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => {
+          const contradictionTypes = getDisplayedContradictionTypes(params.row as ErrorExplorerRow);
+
+          if (contradictionTypes.length === 0) {
+            return (
+              <Chip size="sm" variant="soft">
+                None
+              </Chip>
+            );
+          }
+
+          return (
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', py: 0.5 }}>
+              {contradictionTypes.map(type => (
+                <Chip key={type} size="sm" color="warning" startDecorator={<CallSplitIcon />}>
+                  {CONTRADICTION_LABELS[type]}
+                </Chip>
+              ))}
+            </Stack>
+          );
+        }
+      },
+      {
+        field: 'primaryErrorMessage',
+        headerName: 'Primary Error',
+        minWidth: 260,
+        flex: 1.5,
+        editable: false,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => renderPreviewCell(params.value as string | undefined, 2)
+      },
+      {
+        field: 'errorCount',
+        headerName: 'Errors',
+        width: 80,
+        editable: false,
+        type: 'number',
+        align: 'center',
+        headerAlign: 'center'
+      },
+      {
+        field: 'treeTag',
+        headerName: 'Tree Tag',
+        minWidth: 110,
+        flex: 0.7,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left'
+      },
+      {
+        field: 'stemTag',
+        headerName: 'Stem Tag',
+        minWidth: 110,
+        flex: 0.7,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left'
+      },
+      {
+        field: 'speciesCode',
+        headerName: 'Species',
+        minWidth: 110,
+        flex: 0.7,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left'
+      },
+      {
+        field: 'quadratName',
+        headerName: 'Quadrat',
+        minWidth: 110,
+        flex: 0.7,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left'
+      },
+      {
+        field: 'measurementDate',
+        headerName: 'Date',
+        minWidth: 120,
+        flex: 0.8,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left'
+      },
+      {
+        field: 'stemLocalX',
+        headerName: 'X',
+        width: 90,
+        type: 'number',
+        editable: true,
+        align: 'right',
+        headerAlign: 'right'
+      },
+      {
+        field: 'stemLocalY',
+        headerName: 'Y',
+        width: 90,
+        type: 'number',
+        editable: true,
+        align: 'right',
+        headerAlign: 'right'
+      },
+      {
+        field: 'measuredDBH',
+        headerName: 'DBH',
+        width: 95,
+        type: 'number',
+        editable: true,
+        align: 'right',
+        headerAlign: 'right'
+      },
+      {
+        field: 'measuredHOM',
+        headerName: 'HOM',
+        width: 95,
+        type: 'number',
+        editable: true,
+        align: 'right',
+        headerAlign: 'right'
+      },
+      {
+        field: 'description',
+        headerName: 'Description',
+        minWidth: 220,
+        flex: 1.1,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => renderPreviewCell(params.value as string | undefined, 2)
+      }
+    ],
+    [rowModesModel]
+  );
+
+  return (
+    <Stack spacing={2} sx={{ width: '100%' }}>
+      <Stack spacing={1}>
+        <Typography level="h2">Errors Explorer</Typography>
+        <Typography level="body-sm">
+          Review unresolved validation and ingestion errors, filter by exact message, and inspect contradiction-linked rows within the active census.
+        </Typography>
+      </Stack>
+
+      {errorMessage && (
+        <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />}>
+          {errorMessage}
+        </Alert>
+      )}
+
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+        <Card variant="soft" sx={{ minWidth: 140 }}>
+          <Typography level="body-xs">Matching rows</Typography>
+          <Typography level="h3">{results.summary.total}</Typography>
+        </Card>
+        <Card variant="soft" color="primary" sx={{ minWidth: 140 }}>
+          <Typography level="body-xs">Validation</Typography>
+          <Typography level="h3">{results.summary.validation}</Typography>
+        </Card>
+        <Card variant="soft" color="warning" sx={{ minWidth: 140 }}>
+          <Typography level="body-xs">Ingestion</Typography>
+          <Typography level="h3">{results.summary.ingestion}</Typography>
+        </Card>
+        <Card variant="soft" color="danger" sx={{ minWidth: 160 }}>
+          <Typography level="body-xs">Contradictions</Typography>
+          <Typography level="h3">{results.summary.contradictions}</Typography>
+        </Card>
+      </Stack>
+
+      <Sheet variant="outlined" sx={{ p: 2, borderRadius: 'md' }}>
+        <Stack spacing={2}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ flexWrap: 'wrap' }}>
+            {ERROR_EXPLORER_PRESETS.map(preset => (
+              <Chip
+                key={preset.id}
+                variant={filters.presetId === preset.id ? 'solid' : 'soft'}
+                color={filters.presetId === preset.id ? 'primary' : 'neutral'}
+                onClick={() => handlePresetClick(preset.id)}
+                sx={{ cursor: 'pointer' }}
+              >
+                {preset.label}
+              </Chip>
+            ))}
+          </Stack>
+
+          <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.5}>
+            <FormControl sx={{ minWidth: 180 }}>
+              <FormLabel>Source</FormLabel>
+              <Select
+                value={filters.source}
+                onChange={(_event, value) =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    source: value ?? 'all',
+                    presetId: undefined
+                  }))
+                }
+              >
+                <Option value="all">Both sources</Option>
+                <Option value="validation">Validation only</Option>
+                <Option value="ingestion">Ingestion only</Option>
+              </Select>
+            </FormControl>
+
+            <FormControl sx={{ minWidth: 280, flex: 1 }}>
+              <FormLabel>Exact Error Message</FormLabel>
+              <Autocomplete
+                multiple
+                loading={loadingFacets}
+                options={facets.messages.map(option => `${option.value} (${option.count})`)}
+                value={filters.exactMessages.map(message => {
+                  const option = facets.messages.find(item => item.value === message);
+                  return option ? `${option.value} (${option.count})` : message;
+                })}
+                onChange={(_event, value) =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    exactMessages: value.map(item => item.replace(/\s\(\d+\)$/, '')),
+                    presetId: undefined
+                  }))
+                }
+                placeholder="Filter rows by exact displayed message"
+              />
+            </FormControl>
+
+            <FormControl sx={{ minWidth: 220, flex: 0.8 }}>
+              <FormLabel>Affected Field</FormLabel>
+              <Autocomplete
+                multiple
+                loading={loadingFacets}
+                options={facets.fields.map(option => `${option.value} (${option.count})`)}
+                value={filters.affectedFields.map(field => {
+                  const option = facets.fields.find(item => item.value === field);
+                  return option ? `${option.value} (${option.count})` : field;
+                })}
+                onChange={(_event, value) =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    affectedFields: value.map(item => item.replace(/\s\(\d+\)$/, '')),
+                    presetId: undefined
+                  }))
+                }
+                placeholder="Optional"
+              />
+            </FormControl>
+
+            <FormControl sx={{ minWidth: 220, flex: 1 }}>
+              <FormLabel>Quick Search</FormLabel>
+              <Input
+                value={filters.quickSearch}
+                onChange={event =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    quickSearch: event.target.value,
+                    presetId: undefined
+                  }))
+                }
+                placeholder="Search tags, species, quadrat, messages"
+              />
+            </FormControl>
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <FormControl orientation="horizontal" sx={{ gap: 1 }}>
+              <FormLabel>Contradictions only</FormLabel>
+              <Switch
+                checked={filters.contradictionOnly}
+                onChange={event =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    contradictionOnly: event.target.checked,
+                    presetId: undefined
+                  }))
+                }
+              />
+            </FormControl>
+
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              <Chip
+                variant={filters.contradictionTypes.includes('duplicate_tag_stem') ? 'solid' : 'soft'}
+                color="warning"
+                onClick={() =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    contradictionTypes: prev.contradictionTypes.includes('duplicate_tag_stem')
+                      ? prev.contradictionTypes.filter(type => type !== 'duplicate_tag_stem')
+                      : [...prev.contradictionTypes, 'duplicate_tag_stem'],
+                    presetId: undefined
+                  }))
+                }
+                sx={{ cursor: 'pointer' }}
+              >
+                Duplicate tag/stem ({facets.contradictionCounts.duplicateTagStem})
+              </Chip>
+              <Chip
+                variant={filters.contradictionTypes.includes('same_batch_conflict') ? 'solid' : 'soft'}
+                color="warning"
+                onClick={() =>
+                  updateFilters(prev => ({
+                    ...prev,
+                    contradictionTypes: prev.contradictionTypes.includes('same_batch_conflict')
+                      ? prev.contradictionTypes.filter(type => type !== 'same_batch_conflict')
+                      : [...prev.contradictionTypes, 'same_batch_conflict'],
+                    presetId: undefined
+                  }))
+                }
+                sx={{ cursor: 'pointer' }}
+              >
+                Same-batch conflicts ({facets.contradictionCounts.sameBatchConflict})
+              </Chip>
+            </Stack>
+          </Stack>
+        </Stack>
+      </Sheet>
+
+      <Sheet
+        sx={{
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 430px' },
+          alignItems: 'start'
+        }}
+      >
+        <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
+          <StyledDataGrid
+            autoHeight={false}
+            rows={results.rows as any[]}
+            columns={columns}
+            loading={loadingRows}
+            rowCount={results.totalRows}
+            paginationMode="server"
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[25, 50, 100]}
+            editMode="row"
+            rowModesModel={rowModesModel}
+            onRowModesModelChange={setRowModesModel}
+            processRowUpdate={processRowUpdate}
+            onProcessRowUpdateError={handleProcessRowUpdateError}
+            onRowEditStop={handleRowEditStop}
+            onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
+            rowHeight={68}
+            sx={{
+              minHeight: 640,
+              '& .MuiDataGrid-cell': {
+                alignItems: 'center',
+                py: 0.75,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden'
+              },
+              '& .MuiDataGrid-columnHeaderTitle': {
+                fontWeight: 700
+              },
+              '& .MuiDataGrid-row.Mui-selected': {
+                outline: '1px solid',
+                outlineColor: 'var(--joy-palette-primary-outlinedBorder)',
+                backgroundColor: 'rgba(59, 130, 246, 0.08)'
+              }
+            }}
+          />
+        </Sheet>
+
+        <Sheet
+          variant="soft"
+          sx={{
+            width: '100%',
+            minHeight: 320,
+            borderRadius: 'md',
+            p: 2,
+            position: { lg: 'sticky' },
+            top: { lg: 16 },
+            maxHeight: { lg: 'calc(100vh - 120px)' },
+            overflow: 'auto'
+          }}
+        >
+          <Stack spacing={1.5}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography level="title-lg">Row Details</Typography>
+              {selectedMeasurementID && (
+                <Button size="sm" variant="plain" onClick={() => setSelectedMeasurementID(null)}>
+                  Close
+                </Button>
+              )}
+            </Stack>
+
+            {!selectedMeasurementID && <Typography level="body-sm">Select a row to inspect its errors and contradiction links.</Typography>}
+
+            {selectedMeasurementID && loadingDetails && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size="sm" />
+                <Typography level="body-sm">Loading row details…</Typography>
+              </Stack>
+            )}
+
+            {selectedMeasurementID && !loadingDetails && !details?.row && (
+              <Typography level="body-sm">This row is no longer in the current filtered result set.</Typography>
+            )}
+
+            {selectedMeasurementID && !loadingDetails && details?.row && (
+              <>
+                <Card size="sm" variant="soft" color={details.row.hasContradiction ? 'warning' : 'neutral'}>
+                  <Stack spacing={1}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                        <Typography level="title-md">{details.row.primaryErrorMessage}</Typography>
+                        <Typography level="body-sm">
+                          Row {details.row.coreMeasurementID}
+                          {details.row.treeTag ? ` | Tree ${details.row.treeTag}` : ''}
+                          {details.row.stemTag ? ` | Stem ${details.row.stemTag}` : ''}
+                        </Typography>
+                      </Stack>
+                      <Chip size="sm" color={details.row.hasContradiction ? 'warning' : 'primary'} variant="solid">
+                        {details.row.errorCount} error{details.row.errorCount === 1 ? '' : 's'}
+                      </Chip>
+                    </Stack>
+
+                    <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+                      {details.row.speciesCode && (
+                        <Chip size="sm" variant="soft">
+                          {details.row.speciesCode}
+                        </Chip>
+                      )}
+                      {details.row.quadratName && (
+                        <Chip size="sm" variant="soft">
+                          {details.row.quadratName}
+                        </Chip>
+                      )}
+                      {details.row.measurementDate && (
+                        <Chip size="sm" variant="soft">
+                          {details.row.measurementDate}
+                        </Chip>
+                      )}
+                      {getDisplayedContradictionTypes(details.row).map(type => (
+                        <Chip key={type} size="sm" color="warning" startDecorator={<CallSplitIcon />}>
+                          {CONTRADICTION_LABELS[type]}
+                        </Chip>
+                      ))}
+                    </Stack>
+
+                    <Typography level="body-sm">{details.row.description || 'No row description.'}</Typography>
+                  </Stack>
+                </Card>
+
+                <Stack spacing={0.75}>
+                  <Typography level="title-sm">Why this row is surfaced</Typography>
+                  <Typography level="body-sm">
+                    {details.row.errorMessages.length} matching displayed message{details.row.errorMessages.length === 1 ? '' : 's'} across{' '}
+                    {details.row.errorSources.join(' + ')} sources.
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+                    {details.allErrors.map((error, index) => (
+                      <Chip key={`${error.code}-${index}`} size="sm" color={error.source === 'validation' ? 'primary' : 'warning'}>
+                        {error.source}:{error.code}
+                      </Chip>
+                    ))}
+                  </Stack>
+                </Stack>
+
+                {details.row.hasContradiction && details.relatedRows.length > 0 && (
+                  <>
+                    <Divider />
+                    <ContradictionComparisonPanel
+                      selectedRow={details.row}
+                      relatedRows={details.relatedRows}
+                      onInspectRow={measurementID => setSelectedMeasurementID(measurementID)}
+                    />
+                  </>
+                )}
+
+                {details.row.hasContradiction && details.relatedRows.length === 0 && (
+                  <Typography level="body-sm">This row is marked as contradictory, but no linked rows are currently available to compare.</Typography>
+                )}
+
+                <Divider />
+
+                <Stack spacing={1}>
+                  <Typography level="title-sm">All Errors</Typography>
+                  {details.allErrors.map((error, index) => (
+                    <Card key={`${error.code}-${index}`} size="sm" variant="outlined">
+                      <Stack spacing={0.5}>
+                        <Typography level="body-sm" fontWeight="lg">
+                          {error.message}
+                        </Typography>
+                        <Typography level="body-xs">
+                          {error.source} / {error.code}
+                        </Typography>
+                        {error.fields.length > 0 && (
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+                            {error.fields.map(field => (
+                              <Chip key={`${error.code}-${field}`} size="sm" variant="soft">
+                                {field}
+                              </Chip>
+                            ))}
+                          </Stack>
+                        )}
+                        {error.procedureName && <Typography level="body-xs">Procedure: {error.procedureName}</Typography>}
+                      </Stack>
+                    </Card>
+                  ))}
+                </Stack>
+              </>
+            )}
+          </Stack>
+        </Sheet>
+      </Sheet>
+    </Stack>
+  );
+}
