@@ -24,6 +24,14 @@ vi.mock('@mui/x-data-grid', () => ({
       {children}
     </button>
   ),
+  GridColDef: {},
+  GridFilterModel: {},
+  GridSlotProps: {},
+  GridFilterOperator: {},
+  GridPreProcessEditCellProps: {},
+  GridRenderEditCellParams: {},
+  GetApplyQuickFilterFn: {},
+  getGridNumericOperators: () => [],
   useGridApiContext: () => ({
     current: {
       state: {

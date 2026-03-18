@@ -16,6 +16,11 @@ vi.mock('@mui/x-data-grid', () => ({
   GridEventListener: {},
   GridRowEditStopReasons: {},
   GridSlots: {},
+  GridFilterOperator: {},
+  GridPreProcessEditCellProps: {},
+  GridRenderEditCellParams: {},
+  GetApplyQuickFilterFn: {},
+  getGridNumericOperators: () => [],
   useGridApiRef: () => ({
     current: {
       setEditCellValue: vi.fn(),

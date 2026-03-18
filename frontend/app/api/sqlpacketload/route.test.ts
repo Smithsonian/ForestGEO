@@ -96,15 +96,27 @@ vi.mock('mysql2/promise', () => ({
   })
 }));
 
+/** Must match TEMP_MEASUREMENT_INSERT_BATCH_SIZE in route.ts */
+const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
+
+/** Number of columns in the temporarymeasurements INSERT (FileID through Comments) */
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 16;
+
+const TEST_SESSION_ID = 'session-1';
+const TEST_PLOT_ID = 22;
+const TEST_CENSUS_ID = 32;
+const TEST_BATCH_ID = 'batch-1';
+const TEST_FILE_NAME = 'SERC_census1_2025.csv';
+
 function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}) {
   const body = {
     schema: 'forestgeo_testing',
     formType: 'measurements',
-    fileName: 'SERC_census1_2025.csv',
-    plot: { plotID: 22 },
-    census: { dateRanges: [{ censusID: 32 }] },
+    fileName: TEST_FILE_NAME,
+    plot: { plotID: TEST_PLOT_ID },
+    census: { dateRanges: [{ censusID: TEST_CENSUS_ID }] },
     user: 'Test User',
-    batchID: 'batch-1',
+    batchID: TEST_BATCH_ID,
     fileRowSet: {
       'row-1': {
         tag: '100001',
@@ -127,7 +139,7 @@ function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-upload-session-id': 'session-1'
+      'x-upload-session-id': TEST_SESSION_ID
     },
     body: JSON.stringify(body)
   }) as any;
@@ -153,13 +165,13 @@ describe('sqlpacketload measurement scope validation', () => {
 
   it('prefers request body over mismatched cookies', async () => {
     getCookieMock.mockImplementation(async (name: string) => {
-      if (name === 'plotID') return '22';
+      if (name === 'plotID') return String(TEST_PLOT_ID);
       if (name === 'censusID') return '99';
       return undefined;
     });
 
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
@@ -178,7 +190,7 @@ describe('sqlpacketload measurement scope validation', () => {
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
-    expect(insertCall[1].slice(0, 4)).toEqual(['SERC_census1_2025.csv', 'batch-1', 22, 32]);
+    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
   it('rejects when census does not belong to the provided plot', async () => {
@@ -194,8 +206,8 @@ describe('sqlpacketload measurement scope validation', () => {
 
   it('rejects when an existing batch already has a different census scope', async () => {
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 1, distinctCensusCount: 1, plotID: 22, censusID: 99 }]);
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 1, distinctCensusCount: 1, plotID: TEST_PLOT_ID, censusID: 99 }]);
 
     const res = (await POST(makeMeasurementRequest()))!;
 
@@ -207,7 +219,7 @@ describe('sqlpacketload measurement scope validation', () => {
 
   it('accepts valid scope and inserts temporary rows using the resolved plot/census IDs', async () => {
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
@@ -227,14 +239,14 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
-    expect(insertCall[1].slice(0, 4)).toEqual(['SERC_census1_2025.csv', 'batch-1', 22, 32]);
+    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
     requireUploadSessionOwnershipMock.mockRejectedValueOnce(new MockUploadSessionOwnershipError('Upload session expired before measurement chunk upload', 409));
 
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }]);
 
     const res = (await POST(makeMeasurementRequest()))!;
@@ -242,8 +254,8 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toMatchObject({
       error: 'Upload session expired before measurement chunk upload',
-      fileName: 'SERC_census1_2025.csv',
-      batchID: 'batch-1'
+      fileName: TEST_FILE_NAME,
+      batchID: TEST_BATCH_ID
     });
   });
 
@@ -268,7 +280,7 @@ describe('sqlpacketload measurement scope validation', () => {
     );
 
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
@@ -289,13 +301,13 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
     expect(insertCalls).toHaveLength(2);
-    expect(insertCalls[0][1]).toHaveLength(1000 * 15);
-    expect(insertCalls[1][1]).toHaveLength(15);
+    expect(insertCalls[0][1]).toHaveLength(TEMP_MEASUREMENT_INSERT_BATCH_SIZE * TEMP_MEASUREMENT_COLUMNS_PER_ROW);
+    expect(insertCalls[1][1]).toHaveLength(TEMP_MEASUREMENT_COLUMNS_PER_ROW);
   });
 
   it('cleans up stale temporarymeasurements rows from older batches before starting a new batch', async () => {
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
@@ -313,13 +325,13 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('DELETE FROM forestgeo_testing.temporarymeasurements')
     );
     expect(cleanupCall).toBeDefined();
-    expect(cleanupCall[1]).toEqual(['SERC_census1_2025.csv', 22, 32, 'batch-1']);
+    expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
   });
 
   it('cleans up previous upload data and allows re-upload of the same file', async () => {
     mockConnectionManager.executeQuery
       // census scope check
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       // batch scope check
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       // pre-insert count
@@ -380,7 +392,7 @@ describe('sqlpacketload measurement scope validation', () => {
     });
 
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
@@ -441,7 +453,7 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockRejectedValueOnce(new Error('second persistence failure'));
 
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
@@ -477,7 +489,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(String(alertCall[0])).toContain('sourceRecords, processedRecords, failedRecords, missingRecords');
     expect(alertCall[1]).toHaveLength(10);
     expect(alertCall[1][0]).toMatch(/^[a-f0-9]{40}$/);
-    expect(alertCall[1].slice(1, 5)).toEqual(['SERC_census1_2025.csv', 'batch-1', 22, 32]);
+    expect(alertCall[1].slice(1, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
     expect(alertCall[1][6]).toBe(2);
     expect(alertCall[1][7]).toBe(1);
     expect(alertCall[1][8]).toBe(1);

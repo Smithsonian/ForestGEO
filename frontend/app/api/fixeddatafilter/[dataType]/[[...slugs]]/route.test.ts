@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 // Import after mocks
 import { POST } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // -------------------- helpers --------------------
+import ConnectionManager from '@/config/connectionmanager';
 
 // -------------------- hoisted spies (safe for vi.mock factories) --------------------
 const { mapDataSpy, singlePostSpy, filterStubSpy, searchStubSpy } = vi.hoisted(() => ({
@@ -36,7 +36,7 @@ vi.mock('@/config/macros/coreapifunctions', () => ({
 // Mock schema validation to accept test schemas
 vi.mock('@/config/utils/sqlsecurity', () => ({
   isValidSchema: vi.fn((schema: string) => {
-    return ['myschema', 'testschema'].includes(schema);
+    return ['myschema', 'testschema', 'schema_a', 'schema_b', 'schema_c', 'schema_d'].includes(schema);
   })
 }));
 
@@ -46,7 +46,7 @@ vi.mock('@/ailogger', () => ({
 }));
 
 vi.mock('@/config/connectionmanager', async () => {
-  // Try to reuse your test setup’s singleton if present
+  // Try to reuse your test setup's singleton if present
   const actual = await vi.importActual<any>('@/config/connectionmanager').catch(() => ({}) as any);
   const candidate =
     (typeof actual?.getInstance === 'function' && actual.getInstance?.()) ||
@@ -56,15 +56,9 @@ vi.mock('@/config/connectionmanager', async () => {
 
   // Either use the real test instance or stub a safe default
   const instance = (candidate &&
-    typeof candidate.beginTransaction === 'function' &&
-    typeof candidate.commitTransaction === 'function' &&
-    typeof candidate.rollbackTransaction === 'function' &&
     typeof candidate.executeQuery === 'function' &&
     typeof candidate.closeConnection === 'function' &&
     candidate) || {
-    beginTransaction: vi.fn(async () => 'tx'),
-    commitTransaction: vi.fn(async () => {}),
-    rollbackTransaction: vi.fn(async () => {}),
     executeQuery: vi.fn(async () => []),
     closeConnection: vi.fn(async () => {})
   };
@@ -149,23 +143,22 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(body3.error).toMatch(/core slugs/i);
   });
 
-  it('sitespecificvalidations: builds WHERE with search+filter, paginates, maps rows, commits, closes', async () => {
+  it('sitespecificvalidations: builds WHERE with search+filter, paginates, maps rows, and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-1');
-    const commit = vi.spyOn(cm, 'commitTransaction');
-    const rollback = vi.spyOn(cm, 'rollbackTransaction');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    // 1) column introspection
+    // 1) column introspection via INFORMATION_SCHEMA
     exec.mockResolvedValueOnce([{ COLUMN_NAME: 'ColA' }, { COLUMN_NAME: 'ColB' }]);
-    // 2) paginated results
+    // 2) paginated results (consumed by Promise.all)
     exec.mockResolvedValueOnce([{ id: 1 }, { id: 2 }]);
-    // 3) FOUND_ROWS
+    // 3) count query (consumed by Promise.all)
     exec.mockResolvedValueOnce([{ totalRows: 2 }]);
 
     const req = makeRequest({ filterModel: baseFilterModel });
-    const res = await POST(req, makeProps('sitespecificvalidations', ['myschema', '1', '50', '7', '3']));
+    const PAGE = 1;
+    const PAGE_SIZE = 50;
+    const res = await POST(req, makeProps('sitespecificvalidations', ['myschema', String(PAGE), String(PAGE_SIZE), '7', '3']));
     expect(res.status).toBe(HTTPResponses.OK);
 
     const body = await res.json();
@@ -175,13 +168,11 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     // finishedQuery shows our prepared query + params
     expect(String(body.finishedQuery)).toMatch(/FORMATTED_SQL:/);
     expect(String(body.finishedQuery)).toMatch(/FROM myschema\.sitespecificvalidations/);
-    // LIMIT params appended at the end: page*pageSize, pageSize => 1*50=50, 50
-    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[50,50\]$/);
+    // LIMIT params: page*pageSize=50, pageSize=50
+    const expectedOffset = PAGE * PAGE_SIZE;
+    expect(String(body.finishedQuery)).toMatch(new RegExp(`::PARAMS:\\[${expectedOffset},${PAGE_SIZE}\\]$`));
 
-    // flow
-    expect(begin).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith('tx-1');
-    expect(rollback).not.toHaveBeenCalled();
+    // The route does not use transactions -- it executes queries directly and closes the connection
     expect(close).toHaveBeenCalledTimes(1);
 
     // filter/search builders used
@@ -190,18 +181,17 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(mapDataSpy).toHaveBeenCalled();
   });
 
-  it('measurementssummaryview: respects visible + tss filters; commits and closes', async () => {
+  it('measurementssummaryview: respects visible + tss filters and closes connection', async () => {
+    // Use a unique schema to avoid column cache collisions with other tests
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-ms');
-    const commit = vi.spyOn(cm, 'commitTransaction');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    // 1) columns
+    // 1) column introspection via INFORMATION_SCHEMA
     exec.mockResolvedValueOnce([{ COLUMN_NAME: 'MeasurementDate' }]);
-    // 2) paginated results
+    // 2) paginated results (consumed by Promise.all)
     exec.mockResolvedValueOnce([{ CoreMeasurementID: 10 }]);
-    // 3) FOUND_ROWS
+    // 3) count query (consumed by Promise.all)
     exec.mockResolvedValueOnce([{ totalRows: 1 }]);
 
     const filterModel = {
@@ -212,66 +202,69 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     };
 
     const req = makeRequest({ filterModel });
-    const res = await POST(req, makeProps('measurementssummaryview', ['myschema', '0', '25', '101', '7']));
+    const res = await POST(req, makeProps('measurementssummaryview', ['schema_a', '0', '25', '101', '7']));
     expect(res.status).toBe(HTTPResponses.OK);
 
     const body = await res.json();
     expect(body.output).toEqual([{ CoreMeasurementID: 10 }]);
     expect(body.totalCount).toBe(1);
 
-    const [, paginatedSQL] = exec.mock.calls; // second call is the paginated query
+    // The paginated query is the second executeQuery call (first of the Promise.all pair)
+    const [, paginatedSQL] = exec.mock.calls;
     const sqlStr = String(paginatedSQL);
-    // sanity that our extra conditions were embedded
+    // Verify visible filter conditions were embedded via buildMeasurementVisibleClauseSql
     expect(sqlStr).toMatch(/measurement_error_log mel/);
     expect(sqlStr).toMatch(/IsValidated = TRUE AND NOT EXISTS/);
     expect(sqlStr).toMatch(/IsValidated IS NULL AND NOT EXISTS/);
+    // Verify TSS filter conditions
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\)/);
     expect(sqlStr).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('old tree'\), '\$\.treestemstate'\)/);
 
-    expect(begin).toHaveBeenCalled();
-    expect(commit).toHaveBeenCalledWith('tx-ms');
+    // The route does not use transactions
     expect(close).toHaveBeenCalledTimes(1);
     expect(mapDataSpy).toHaveBeenCalled();
   });
 
   it('measurementssummaryview: returns no rows when visible filters are all disabled', async () => {
+    // Use a different schema from the previous measurementssummaryview test to avoid column cache hits
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-empty-visible');
-    vi.spyOn(cm, 'commitTransaction');
     vi.spyOn(cm, 'closeConnection');
 
+    // 1) column introspection via INFORMATION_SCHEMA (cache miss due to unique schema)
     exec.mockResolvedValueOnce([{ COLUMN_NAME: 'MeasurementDate' }]);
+    // 2) paginated results (consumed by Promise.all)
     exec.mockResolvedValueOnce([]);
+    // 3) count query (consumed by Promise.all)
     exec.mockResolvedValueOnce([{ totalRows: 0 }]);
 
     const req = makeRequest({
       filterModel: {
-        items: [],
-        quickFilterValues: [],
+        items: [{ field: 'any', operator: 'contains', value: 'x' }],
+        quickFilterValues: ['abc'],
         visible: [],
         tss: ['multi stem']
       }
     });
 
-    const res = await POST(req, makeProps('measurementssummaryview', ['myschema', '0', '25', '101', '7']));
+    const res = await POST(req, makeProps('measurementssummaryview', ['schema_b', '0', '25', '101', '7']));
     expect(res.status).toBe(HTTPResponses.OK);
 
+    // The paginated query is the second executeQuery call
     const [, paginatedSQL] = exec.mock.calls;
     const sqlStr = String(paginatedSQL);
+    // Empty visible array triggers the "always false" clause from buildMeasurementVisibleClauseSql
     expect(sqlStr).toMatch(/AND 1 = 0/);
   });
 
-  it('coremeasurements: when multiple census IDs, returns deprecated filtered subset; commits and closes', async () => {
+  it('coremeasurements: when multiple census IDs, returns deprecated filtered subset and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-cm');
-    const commit = vi.spyOn(cm, 'commitTransaction');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    // 1) columns for building search/filter
+    // 1) column introspection via INFORMATION_SCHEMA
     exec.mockResolvedValueOnce([{ COLUMN_NAME: 'MeasurementDate' }]);
-    // 2) censusQuery -> multiple census IDs
+    // 2) censusQuery -> multiple census IDs (triggers deprecated-row logic)
     exec.mockResolvedValueOnce([{ CensusID: 100 }, { CensusID: 90 }, { CensusID: 80 }]);
     // 3) paginated results (mix of current & past census rows, with overlapping keys)
     exec.mockResolvedValueOnce([
@@ -281,11 +274,11 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
       { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 }, // same key -> deprecated
       { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 } // different key -> filtered out
     ]);
-    // 4) FOUND_ROWS
+    // 4) count query
     exec.mockResolvedValueOnce([{ totalRows: 3 }]);
 
     const req = makeRequest({ filterModel: baseFilterModel });
-    const res = await POST(req, makeProps('coremeasurements', ['myschema', '0', '25', '7', '3']));
+    const res = await POST(req, makeProps('coremeasurements', ['schema_c', '0', '25', '7', '3']));
     expect(res.status).toBe(HTTPResponses.OK);
 
     const body = await res.json();
@@ -294,26 +287,26 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
       { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 },
       { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 }
     ]);
-    // Only deprecated rows that match an output key combo
+    // Only deprecated rows whose key combo appears in the full output set
+    // pastCensusIDs = [90, 80], so both past-census rows are candidates;
+    // both have key combos present in output, so both appear in deprecated
     expect(body.deprecated).toEqual([
       { PlotID: 7, QuadratID: 1, TreeID: 11, StemGUID: 111, CensusID: 90 },
       { PlotID: 7, QuadratID: 2, TreeID: 12, StemGUID: 112, CensusID: 80 }
     ]);
     expect(body.totalCount).toBe(3);
 
-    expect(begin).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith('tx-cm');
+    // The route does not use transactions
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('failedmeasurements: includes stored coremeasurement descriptions in the query payload', async () => {
+  it('failedmeasurements: uses hardcoded columns and builds subquery with buildFailedMeasurementsSelectQuery', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-fm');
-    const commit = vi.spyOn(cm, 'commitTransaction');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'Description' }]);
+    // failedmeasurements skips column introspection (hardcoded column list in route).
+    // Only two executeQuery calls happen via Promise.all: paginated results + count.
     exec.mockResolvedValueOnce([{ FailedMeasurementID: 1, Description: 'Detailed reason' }]);
     exec.mockResolvedValueOnce([{ totalRows: 1 }]);
 
@@ -323,34 +316,32 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     const body = await res.json();
     expect(body.output).toEqual([{ FailedMeasurementID: 1, Description: 'Detailed reason' }]);
+    // The query should include the subquery from buildFailedMeasurementsSelectQuery
+    // which aliases cm.Description AS Description
     expect(String(body.finishedQuery)).toContain('cm.Description AS Description');
 
-    expect(begin).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledWith('tx-fm');
+    // The route does not use transactions
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('rolls back and returns 500 if a DB error occurs during query; closes connection', async () => {
+  it('returns 500 if a DB error occurs during query execution; closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
-    const begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-err');
-    const rollback = vi.spyOn(cm, 'rollbackTransaction');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    // 1) columns ok
+    // 1) column introspection succeeds
     exec.mockResolvedValueOnce([{ COLUMN_NAME: 'ColX' }]);
-    // 2) paginated results boom
+    // 2) Promise.all queries -- first one throws
     exec.mockRejectedValueOnce(new Error('kapow'));
 
     const req = makeRequest({ filterModel: baseFilterModel });
-    const res = await POST(req, makeProps('species', ['myschema', '0', '25', '1', '2']));
+    const res = await POST(req, makeProps('species', ['schema_d', '0', '25', '1', '2']));
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();
     expect(body.error).toMatch(/kapow/i);
 
-    expect(begin).toHaveBeenCalledTimes(1);
-    expect(rollback).toHaveBeenCalledWith('tx-err');
+    // The route does not use transactions -- errors are caught and connection is closed in finally
     expect(close).toHaveBeenCalledTimes(1);
   });
 });

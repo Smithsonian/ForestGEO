@@ -80,7 +80,7 @@ describe('cleanupOrphanedData', () => {
       'forestgeo_testing',
       'file.csv',
       'batch-1',
-      'Upload session cleaned up after abandonment',
+      'Upload session session-1 cleaned up after abandonment (pre-migration rows)',
       'tx-cleanup'
     );
     expect(mocks.commitTransaction).toHaveBeenCalledWith('tx-cleanup');
