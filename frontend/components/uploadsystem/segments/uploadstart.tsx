@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import FinalizeSelectionsButton from '../../client/modals/finalizeselectionsbutton';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
-  const { uploadForm, setReviewState } = props;
+  const { uploadForm, uploadMode, setReviewState } = props;
   const [finish, setFinish] = useState<boolean>(false);
 
   // When finish is triggered, advance to upload files state
@@ -92,6 +92,11 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               <Typography level="title-md" sx={{ fontWeight: 700, color: 'success.solidBg' }}>
                 Form: {uploadForm}
               </Typography>
+              {uploadMode && (
+                <Typography level="body-sm" sx={{ mt: 0.5, fontWeight: 600, color: 'success.solidBg' }}>
+                  Mode: {uploadMode === 'clean_reupload' ? 'Clean Re-Upload' : 'Revisions Upload'}
+                </Typography>
+              )}
             </Box>
           </>
         )}

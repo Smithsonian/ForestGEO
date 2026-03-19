@@ -1,14 +1,12 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { HTTPResponses, InsertUpdateProcessingProps, SpecialBulkProcessingProps } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
-import { Plot, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import moment from 'moment/moment';
-import { buildBulkUpsertQuery, generateShortBatchID } from '@/config/utils';
-import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { processBulkSpecies } from '@/components/processors/processbulkspecies';
+import { generateShortBatchID, handleUpsert } from '@/config/utils';
 import { getCookie } from '@/app/actions/cookiemanager';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
@@ -17,6 +15,9 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
+import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
+import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 
 /**
  * Generate idempotency key for a batch of data
@@ -83,6 +84,336 @@ function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: stri
     }),
     { status }
   );
+}
+
+interface FixedDataProcessingResult {
+  insertedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  return normalized === '' ? null : normalized;
+}
+
+function normalizeRequiredString(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+async function upsertAttributeRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  rows: FileRow[],
+  uploadMode: UploadMode,
+  transactionID: string
+): Promise<FixedDataProcessingResult> {
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  for (const row of rows) {
+    const code = normalizeRequiredString(row.code || row.codes);
+    if (!code) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const existingSQL = format(`SELECT Code FROM ??.attributes WHERE Code = ? AND IsActive = 1 LIMIT 1`, [schema]);
+    const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
+    const description = normalizeOptionalString(row.description || row.comments);
+    const status = normalizeOptionalString(row.status);
+
+    if (existingRows.length > 0) {
+      const updateSQL = format(`UPDATE ??.attributes SET Description = ?, Status = ?, DeletedAt = NULL WHERE Code = ? AND IsActive = 1`, [schema]);
+      await connectionManager.executeQuery(updateSQL, [description, status, code], transactionID);
+      updatedCount += 1;
+      continue;
+    }
+
+    if (uploadMode === UploadMode.REVISIONS) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const insertSQL = format(`INSERT INTO ??.attributes (Code, Description, Status, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
+    await connectionManager.executeQuery(insertSQL, [code, description, status], transactionID);
+    insertedCount += 1;
+  }
+
+  return { insertedCount, updatedCount, skippedCount };
+}
+
+async function upsertQuadratRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  plotID: number | undefined,
+  rows: FileRow[],
+  uploadMode: UploadMode,
+  transactionID: string
+): Promise<FixedDataProcessingResult> {
+  if (!plotID) {
+    throw new Error('PlotID is required for quadrat uploads');
+  }
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  for (const row of rows) {
+    const quadratName = normalizeRequiredString(row.quadrat);
+    if (!quadratName) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND QuadratName = ? AND IsActive = 1 LIMIT 1`, [schema]);
+    const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
+    const payload = {
+      StartX: row.startx,
+      StartY: row.starty,
+      DimensionX: row.dimx,
+      DimensionY: row.dimy,
+      Area: row.area,
+      QuadratShape: normalizeOptionalString(row.quadratshape)
+    };
+
+    if (existingRows.length > 0) {
+      const updateSQL = format(
+        `UPDATE ??.quadrats
+         SET StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
+         WHERE PlotID = ? AND QuadratName = ? AND IsActive = 1`,
+        [schema]
+      );
+      await connectionManager.executeQuery(
+        updateSQL,
+        [payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape, plotID, quadratName],
+        transactionID
+      );
+      updatedCount += 1;
+      continue;
+    }
+
+    if (uploadMode === UploadMode.REVISIONS) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const insertSQL = format(
+      `INSERT INTO ??.quadrats
+       (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive, DeletedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
+      [schema]
+    );
+    await connectionManager.executeQuery(
+      insertSQL,
+      [plotID, quadratName, payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape],
+      transactionID
+    );
+    insertedCount += 1;
+  }
+
+  return { insertedCount, updatedCount, skippedCount };
+}
+
+async function upsertSpeciesRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  rows: FileRow[],
+  uploadMode: UploadMode,
+  transactionID: string
+): Promise<FixedDataProcessingResult> {
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  for (const row of rows) {
+    const speciesCode = normalizeRequiredString(row.spcode);
+    if (!speciesCode) {
+      skippedCount += 1;
+      continue;
+    }
+
+    let familyID: number | undefined;
+    if (normalizeOptionalString(row.family)) {
+      familyID = (await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: normalizeOptionalString(row.family)! }, 'FamilyID')).id;
+    }
+
+    let genusID: number | undefined;
+    if (normalizeOptionalString(row.genus)) {
+      const genusPayload: Partial<GenusResult> = {
+        Genus: normalizeOptionalString(row.genus)!
+      };
+      if (familyID) {
+        genusPayload.FamilyID = familyID;
+      }
+      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID')).id;
+    }
+
+    const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE SpeciesCode = ? AND IsActive = 1 LIMIT 1`, [schema]);
+    const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
+    const speciesPayload = {
+      GenusID: genusID ?? null,
+      SpeciesName: normalizeOptionalString(row.species),
+      SubspeciesName: normalizeOptionalString(row.subspecies),
+      IDLevel: normalizeOptionalString(row.idlevel),
+      SpeciesAuthority: normalizeOptionalString(row.authority),
+      SubspeciesAuthority: normalizeOptionalString(row.subauthority)
+    };
+
+    if (existingRows.length > 0) {
+      const updateSQL = format(
+        `UPDATE ??.species
+         SET GenusID = ?, SpeciesName = ?, SubspeciesName = ?, IDLevel = ?, SpeciesAuthority = ?, SubspeciesAuthority = ?, DeletedAt = NULL
+         WHERE SpeciesCode = ? AND IsActive = 1`,
+        [schema]
+      );
+      await connectionManager.executeQuery(
+        updateSQL,
+        [
+          speciesPayload.GenusID,
+          speciesPayload.SpeciesName,
+          speciesPayload.SubspeciesName,
+          speciesPayload.IDLevel,
+          speciesPayload.SpeciesAuthority,
+          speciesPayload.SubspeciesAuthority,
+          speciesCode
+        ],
+        transactionID
+      );
+      updatedCount += 1;
+      continue;
+    }
+
+    if (uploadMode === UploadMode.REVISIONS) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const insertSQL = format(
+      `INSERT INTO ??.species
+       (GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, IsActive, DeletedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL)`,
+      [schema]
+    );
+    await connectionManager.executeQuery(
+      insertSQL,
+      [
+        speciesPayload.GenusID,
+        speciesCode,
+        speciesPayload.SpeciesName,
+        speciesPayload.SubspeciesName,
+        speciesPayload.IDLevel,
+        speciesPayload.SpeciesAuthority,
+        speciesPayload.SubspeciesAuthority
+      ],
+      transactionID
+    );
+    insertedCount += 1;
+  }
+
+  return { insertedCount, updatedCount, skippedCount };
+}
+
+async function upsertPersonnelRows(
+  connectionManager: ConnectionManager,
+  schema: string,
+  censusID: number | undefined,
+  rows: FileRow[],
+  uploadMode: UploadMode,
+  transactionID: string
+): Promise<FixedDataProcessingResult> {
+  if (!censusID) {
+    throw new Error('CensusID is required for personnel uploads');
+  }
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  const cleanUploadPersonnelIDs = new Set<number>();
+
+  for (const row of rows) {
+    const firstName = normalizeRequiredString(row.firstname);
+    const lastName = normalizeRequiredString(row.lastname);
+    const roleName = normalizeRequiredString(row.role);
+    const roleDescription = normalizeOptionalString(row.roledescription);
+
+    if (!firstName || !lastName || !roleName) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const normalizedRole = roleName
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+      .trim();
+
+    const roleID = (await handleUpsert<RoleResult>(
+      connectionManager,
+      schema,
+      'roles',
+      {
+        RoleName: normalizedRole,
+        RoleDescription: roleDescription
+      },
+      'RoleID'
+    )).id;
+
+    const existingSQL =
+      uploadMode === UploadMode.REVISIONS
+        ? format(
+            `SELECT p.PersonnelID
+             FROM ??.personnel p
+             INNER JOIN ??.censusactivepersonnel cap
+               ON cap.PersonnelID = p.PersonnelID
+              AND cap.CensusID = ?
+             WHERE p.FirstName = ? AND p.LastName = ? AND p.IsActive = 1
+             LIMIT 1`,
+            [schema, schema]
+          )
+        : format(`SELECT PersonnelID FROM ??.personnel WHERE FirstName = ? AND LastName = ? AND IsActive = 1 LIMIT 1`, [schema]);
+
+    const existingRows =
+      uploadMode === UploadMode.REVISIONS
+        ? await connectionManager.executeQuery(existingSQL, [censusID, firstName, lastName], transactionID)
+        : await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
+
+    if (existingRows.length > 0) {
+      const personnelID = Number(existingRows[0].PersonnelID);
+      const updateSQL = format(`UPDATE ??.personnel SET RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
+      await connectionManager.executeQuery(updateSQL, [roleID, personnelID], transactionID);
+      updatedCount += 1;
+      if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+        cleanUploadPersonnelIDs.add(personnelID);
+        const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
+        await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+      }
+      continue;
+    }
+
+    if (uploadMode === UploadMode.REVISIONS) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
+    const insertResult = await connectionManager.executeQuery(insertSQL, [firstName, lastName, roleID], transactionID);
+    const personnelID = Number(insertResult.insertId);
+    const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
+    await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+    cleanUploadPersonnelIDs.add(personnelID);
+    insertedCount += 1;
+  }
+
+  if (uploadMode === UploadMode.CLEAN_REUPLOAD && cleanUploadPersonnelIDs.size > 0) {
+    const placeholders = Array.from(cleanUploadPersonnelIDs).map(() => '?').join(', ');
+    const cleanupSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ? AND PersonnelID NOT IN (${placeholders})`, [schema]);
+    await connectionManager.executeQuery(cleanupSQL, [censusID, ...Array.from(cleanUploadPersonnelIDs)], transactionID);
+  }
+
+  return { insertedCount, updatedCount, skippedCount };
 }
 
 async function validateMeasurementUploadScope(
@@ -574,6 +905,7 @@ export async function POST(request: NextRequest) {
     );
   }
   const formType: string = body.formType;
+  const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const user: string = body.user;
@@ -657,9 +989,11 @@ export async function POST(request: NextRequest) {
         // A retry of the same file should not inherit stale batches that were left
         // behind by an earlier interrupted upload for the same plot/census.
         if (preInsertCount === 0) {
-          // Clean up data from any previous uploads of this file for this census.
-          // This allows researchers to re-upload freely — new data fully replaces old.
-          await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
+          if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+            // Clean up data from any previous uploads of this file for this census.
+            // This allows researchers to re-upload freely — new data fully replaces old.
+            await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
+          }
 
           await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
         }
@@ -832,6 +1166,7 @@ export async function POST(request: NextRequest) {
             const uploadMetadata = JSON.stringify({
               fileName,
               formType,
+              uploadMode,
               rowCount: actualInsertedCount,
               droppedCount: droppedRowCount,
               batchCount: 1
@@ -851,6 +1186,7 @@ export async function POST(request: NextRequest) {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
+            metadata.uploadMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
             metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
             metadata.batchCount = (metadata.batchCount || 1) + 1;
@@ -878,6 +1214,7 @@ export async function POST(request: NextRequest) {
             dataIntegrityWarning: droppedRowCount > 0,
             transactionCompleted: true,
             batchID: batchID,
+            uploadMode,
             idempotencyKey
           }),
           { status: HTTPResponses.OK }
@@ -917,44 +1254,24 @@ export async function POST(request: NextRequest) {
   } else {
     transactionID = await connectionManager.beginTransaction();
     let rowId = '';
+    let fixedDataProcessingResult: FixedDataProcessingResult = { insertedCount: 0, updatedCount: 0, skippedCount: 0 };
     try {
+      const uploadRows = Object.values(fileRowSet);
       if (formType === 'quadrats') {
-        const bulkQuadrats = Object.values(fileRowSet).map(
-          row =>
-            ({
-              QuadratName: row.quadrat,
-              PlotID: plot?.plotID,
-              StartX: row.startx,
-              StartY: row.starty,
-              DimensionX: row.dimx,
-              DimensionY: row.dimy,
-              Area: row.area,
-              QuadratShape: row.quadratshape
-            }) as Partial<QuadratResult>
-        );
-        const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
-        await connectionManager.executeQuery(sql, params, transactionID);
+        fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
       } else if (formType === 'attributes') {
-        const bulkAttributes = Object.values(fileRowSet).map(
-          row =>
-            ({
-              // Handle both original and transformed header names (client transforms code->codes, description->comments)
-              Code: row.code || row.codes,
-              Description: row.description || row.comments,
-              // Convert empty string to null - ENUM columns don't accept empty strings
-              Status: row.status && row.status.trim() !== '' ? row.status : null
-            }) as Partial<AttributesResult>
-        );
-        const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
-        await connectionManager.executeQuery(sql, params, transactionID);
+        fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
       } else if (formType === 'species') {
-        const bulkProps: SpecialBulkProcessingProps = {
-          schema,
+        fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+      } else if (formType === 'personnel') {
+        fixedDataProcessingResult = await upsertPersonnelRows(
           connectionManager,
-          rowDataSet: fileRowSet,
-          census: census
-        };
-        await processBulkSpecies(bulkProps);
+          schema,
+          census?.dateRanges?.[0]?.censusID,
+          uploadRows,
+          uploadMode,
+          transactionID
+        );
       } else {
         for (rowId in fileRowSet) {
           const row = fileRowSet[rowId];
@@ -969,6 +1286,7 @@ export async function POST(request: NextRequest) {
           };
           try {
             await insertOrUpdate(props);
+            fixedDataProcessingResult.updatedCount += 1;
           } catch (e: any) {
             ailogger.error(`Error processing row for file ${fileName}:`, e.message);
             failingRows.add(row); // saving this for future processing
@@ -997,7 +1315,11 @@ export async function POST(request: NextRequest) {
           const uploadMetadata = JSON.stringify({
             fileName,
             formType,
+            uploadMode,
             rowCount: batchRowCount,
+            insertedCount: fixedDataProcessingResult.insertedCount,
+            updatedCount: fixedDataProcessingResult.updatedCount,
+            skippedCount: fixedDataProcessingResult.skippedCount,
             batchCount: 1
           });
           const insertChangelogSQL = format(
@@ -1011,7 +1333,11 @@ export async function POST(request: NextRequest) {
           // Subsequent batch - update the existing entry with accumulated count
           // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
           const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
+          metadata.uploadMode = uploadMode;
           metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
+          metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
+          metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
+          metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
           metadata.batchCount = (metadata.batchCount || 1) + 1;
           const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
           await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
@@ -1047,8 +1373,15 @@ export async function POST(request: NextRequest) {
     }
     return new NextResponse(
       JSON.stringify({
-        responseMessage: `Bulk insert to SQL completed`,
+        responseMessage:
+          uploadMode === UploadMode.REVISIONS
+            ? `Revisions upload completed`
+            : `Clean re-upload completed`,
         failingRows: Array.from(failingRows),
+        insertedCount: fixedDataProcessingResult.insertedCount,
+        updatedCount: fixedDataProcessingResult.updatedCount,
+        skippedCount: fixedDataProcessingResult.skippedCount,
+        uploadMode,
         transactionCompleted: true
       }),
       { status: HTTPResponses.OK }

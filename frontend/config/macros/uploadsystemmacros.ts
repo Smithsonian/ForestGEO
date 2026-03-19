@@ -2,6 +2,7 @@ import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
+import { UploadMode } from '@/config/uploadmodes';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -19,9 +20,11 @@ export function formatFileSize(bytes: number): string {
 export interface UploadStartProps {
   // state vars
   uploadForm: FormType | undefined;
+  uploadMode: UploadMode | undefined;
   personnelRecording: string;
   // state setters
   setUploadForm: Dispatch<SetStateAction<FormType | undefined>>;
+  setUploadMode: Dispatch<SetStateAction<UploadMode | undefined>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
@@ -78,6 +81,7 @@ export interface UploadFireProps {
   schema: string;
   // state vars
   uploadForm: FormType | undefined;
+  uploadMode: UploadMode | undefined;
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;

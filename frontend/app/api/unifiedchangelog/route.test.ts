@@ -28,6 +28,15 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
   isValidSchema: vi.fn(() => true)
 }));
 
+vi.mock('@/config/utils', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    generateShortBatchID: () => 'test-batch-id',
+    handleUpsert: vi.fn().mockResolvedValue({ id: 1, operation: 'inserted' })
+  };
+});
+
 vi.mock('mysql2/promise', () => ({
   format: vi.fn((sql, params) => {
     // Mock implementation that properly replaces ?? and ? placeholders in order
@@ -465,7 +474,13 @@ describe('Unified Changelog Tracking System', () => {
 
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        .mockResolvedValueOnce({}) // INSERT/UPSERT to attributes
+        // upsertAttributeRows: row 1 (code='A')
+        .mockResolvedValueOnce([]) // SELECT existing for code 'A' (not found)
+        .mockResolvedValueOnce({}) // INSERT code 'A'
+        // upsertAttributeRows: row 2 (code='D')
+        .mockResolvedValueOnce([]) // SELECT existing for code 'D' (not found)
+        .mockResolvedValueOnce({}) // INSERT code 'D'
+        // changelog tracking
         .mockResolvedValueOnce([]) // SELECT existing changelog entry (none)
         .mockResolvedValueOnce({}); // INSERT changelog entry
 

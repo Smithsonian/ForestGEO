@@ -3,9 +3,10 @@ import { POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
-const { getCookieMock, authMock } = vi.hoisted(() => ({
+const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
-  authMock: vi.fn()
+  authMock: vi.fn(),
+  handleUpsertMock: vi.fn()
 }));
 
 const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = vi.hoisted(() => {
@@ -53,7 +54,8 @@ vi.mock('@/config/utils', async importOriginal => {
   const actual = (await importOriginal()) as object;
   return {
     ...actual,
-    generateShortBatchID: () => 'test-batch-id'
+    generateShortBatchID: () => 'test-batch-id',
+    handleUpsert: handleUpsertMock
   };
 });
 
@@ -68,10 +70,6 @@ vi.mock('@/config/uploadsessiontracker', () => ({
 
 vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: vi.fn().mockResolvedValue([])
-}));
-
-vi.mock('@/components/processors/processbulkspecies', () => ({
-  processBulkSpecies: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock('@/components/processors/processorhelperfunctions', () => ({
@@ -148,6 +146,35 @@ function makeMeasurementRequest(overrides: Partial<Record<string, unknown>> = {}
   return req;
 }
 
+function makeFixedDataRequest(
+  formType: 'attributes' | 'quadrats' | 'personnel' | 'species',
+  fileRowSet: Record<string, unknown>,
+  overrides: Partial<Record<string, unknown>> = {}
+) {
+  const body = {
+    schema: 'forestgeo_testing',
+    formType,
+    fileName: `${formType}.csv`,
+    plot: { plotID: TEST_PLOT_ID },
+    census: { dateRanges: [{ censusID: TEST_CENSUS_ID }] },
+    user: 'Test User',
+    fileRowSet,
+    ...overrides
+  };
+
+  const req = new Request('http://localhost/api/sqlpacketload', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-upload-session-id': TEST_SESSION_ID
+    },
+    body: JSON.stringify(body)
+  }) as any;
+  req.json = async () => body;
+  req.nextUrl = new URL('http://localhost/api/sqlpacketload');
+  return req;
+}
+
 describe('sqlpacketload measurement scope validation', () => {
   let mockConnectionManager: any;
 
@@ -155,6 +182,7 @@ describe('sqlpacketload measurement scope validation', () => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
     vi.mocked(insertIngestionFailureRows).mockResolvedValue([]);
+    handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
@@ -383,6 +411,36 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(deleteFailedCall).toBeDefined();
   });
 
+  it('skips previous-upload cleanup for measurement revisions uploads', async () => {
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(makeMeasurementRequest({ uploadMode: 'revisions' })))!;
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      uploadMode: 'revisions',
+      insertedCount: 1
+    });
+
+    const cleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements')
+    );
+    expect(cleanupCall).toBeUndefined();
+
+    const staleBatchCleanupCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE FROM forestgeo_testing.temporarymeasurements')
+    );
+    expect(staleBatchCleanupCall).toBeDefined();
+  });
+
   it('falls back past missing legacy cleanup tables during re-upload', async () => {
     const missingError = Object.assign(new Error("Table 'forestgeo_testing.measurement_error_log' doesn't exist"), {
       code: 'ER_NO_SUCH_TABLE'
@@ -494,5 +552,115 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(alertCall[1][7]).toBe(1);
     expect(alertCall[1][8]).toBe(1);
     expect(alertCall[1][9]).toBe(0);
+  });
+});
+
+describe('sqlpacketload fixed-data upload modes', () => {
+  let mockConnectionManager: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionManager = ConnectionManager.getInstance();
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
+    mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
+    mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+    handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
+  });
+
+  it('updates existing attributes and skips new codes in revisions mode', async () => {
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ Code: 'EXISTING' }])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 9 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'attributes',
+        {
+          'row-1': { code: 'EXISTING', description: 'Updated description', status: 'alive' },
+          'row-2': { code: 'NEWCODE', description: 'Should skip', status: 'dead' }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({
+      uploadMode: 'revisions',
+      insertedCount: 0,
+      updatedCount: 1,
+      skippedCount: 1,
+      transactionCompleted: true
+    });
+  });
+
+  it('syncs personnel rows in clean mode for the current census', async () => {
+    handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 501 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 3 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'personnel',
+        {
+          'row-1': { firstname: 'Ada', lastname: 'Lovelace', role: 'Lead Tech', roledescription: 'Lead technician' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({
+      uploadMode: 'clean_reupload',
+      insertedCount: 1,
+      updatedCount: 0,
+      skippedCount: 0,
+      transactionCompleted: true
+    });
+
+    expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('INSERT INTO forestgeo_testing.personnel'))).toBe(true);
+    expect(
+      mockConnectionManager.executeQuery.mock.calls.some((call: any[]) =>
+        String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.censusactivepersonnel')
+      )
+    ).toBe(true);
+  });
+
+  it('normalizes camelCase personnel roles before upserting', async () => {
+    handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 501 })
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 3 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'personnel',
+        {
+          'row-1': { firstname: 'Ada', lastname: 'Lovelace', role: 'LeadTech', roledescription: 'Lead technician' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    expect(handleUpsertMock).toHaveBeenCalledWith(
+      mockConnectionManager,
+      'forestgeo_testing',
+      'roles',
+      expect.objectContaining({ RoleName: 'lead tech' }),
+      'RoleID'
+    );
   });
 });

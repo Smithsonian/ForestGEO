@@ -75,6 +75,7 @@ function waitForAbortableDelay(ms: number, signal: AbortSignal, label: string): 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   acceptedFiles,
   uploadForm,
+  uploadMode,
   setIsDataUnsaved,
   schema,
   setUploadError,
@@ -510,6 +511,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               body: JSON.stringify({
                 schema,
                 formType: uploadForm,
+                uploadMode,
                 fileName,
                 plot: currentPlot,
                 census: currentCensus,
@@ -625,7 +627,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       // If we reach here, all retries failed but error wasn't thrown (shouldn't happen)
       throw new Error(`Upload failed for ${fileName} after ${maxRetries + 1} attempts`);
     },
-    [uploadForm, currentPlot, currentCensus, session, schema, fetchWithTimeout, getRequiredUploadSessionId, isMountedRef, buildClientResponseError]
+    [uploadForm, uploadMode, currentPlot, currentCensus, session, schema, fetchWithTimeout, getRequiredUploadSessionId, isMountedRef, buildClientResponseError]
   );
 
   const parseFileInChunks = useCallback(
