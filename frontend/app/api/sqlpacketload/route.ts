@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
-import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 
 /**
@@ -350,16 +350,18 @@ async function upsertPersonnelRows(
       .toLowerCase()
       .trim();
 
-    const roleID = (await handleUpsert<RoleResult>(
-      connectionManager,
-      schema,
-      'roles',
-      {
-        RoleName: normalizedRole,
-        RoleDescription: roleDescription
-      },
-      'RoleID'
-    )).id;
+    const roleID = (
+      await handleUpsert<RoleResult>(
+        connectionManager,
+        schema,
+        'roles',
+        {
+          RoleName: normalizedRole,
+          RoleDescription: roleDescription
+        },
+        'RoleID'
+      )
+    ).id;
 
     const existingSQL =
       uploadMode === UploadMode.REVISIONS
@@ -408,7 +410,9 @@ async function upsertPersonnelRows(
   }
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD && cleanUploadPersonnelIDs.size > 0) {
-    const placeholders = Array.from(cleanUploadPersonnelIDs).map(() => '?').join(', ');
+    const placeholders = Array.from(cleanUploadPersonnelIDs)
+      .map(() => '?')
+      .join(', ');
     const cleanupSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ? AND PersonnelID NOT IN (${placeholders})`, [schema]);
     await connectionManager.executeQuery(cleanupSQL, [censusID, ...Array.from(cleanUploadPersonnelIDs)], transactionID);
   }
@@ -998,7 +1002,17 @@ export async function POST(request: NextRequest) {
           await cleanupStaleMeasurementBatchesForFile(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
         }
 
-        await insertTemporaryMeasurementsInBatches(connectionManager, schema, chunkRows, fileName, batchID, sessionId, resolvedPlotID, resolvedCensusID, transactionID);
+        await insertTemporaryMeasurementsInBatches(
+          connectionManager,
+          schema,
+          chunkRows,
+          fileName,
+          batchID,
+          sessionId,
+          resolvedPlotID,
+          resolvedCensusID,
+          transactionID
+        );
 
         // CRITICAL FIX: Verify expected vs actual row count to detect silent data loss from INSERT IGNORE
         const postInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
@@ -1373,10 +1387,7 @@ export async function POST(request: NextRequest) {
     }
     return new NextResponse(
       JSON.stringify({
-        responseMessage:
-          uploadMode === UploadMode.REVISIONS
-            ? `Revisions upload completed`
-            : `Clean re-upload completed`,
+        responseMessage: uploadMode === UploadMode.REVISIONS ? `Revisions upload completed` : `Clean re-upload completed`,
         failingRows: Array.from(failingRows),
         insertedCount: fixedDataProcessingResult.insertedCount,
         updatedCount: fixedDataProcessingResult.updatedCount,

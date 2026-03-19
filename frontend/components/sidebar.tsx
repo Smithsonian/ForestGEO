@@ -77,7 +77,6 @@ function MenuRenderToggle(
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -1176,9 +1175,7 @@ export default function Sidebar(props: SidebarProps) {
                                               selected={pathname == item.href + link.href}
                                               color={pathname === item.href ? 'primary' : undefined}
                                               disabled={
-                                                currentPlot === undefined ||
-                                                (item.href !== '/fixeddatainput' && currentCensus === undefined) ||
-                                                isLinkDisabled
+                                                currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
                                               }
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
