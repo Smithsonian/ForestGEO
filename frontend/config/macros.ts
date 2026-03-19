@@ -100,7 +100,6 @@ export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', '
 
 export interface UnifiedValidityFlags {
   attributes: boolean;
-  personnel: boolean;
   species: boolean;
   quadrats: boolean;
 }

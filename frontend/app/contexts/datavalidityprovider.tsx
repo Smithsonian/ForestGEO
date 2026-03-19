@@ -8,12 +8,13 @@ import ailogger from '@/ailogger';
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
-  personnel: false,
   species: false,
   quadrats: false
 };
 
-const ALL_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'quadrats', 'personnel'];
+// Validity types that can be checked with just site + plot (no census required)
+const CENSUS_INDEPENDENT_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'quadrats'];
+const ALL_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = CENSUS_INDEPENDENT_VALIDITY_TYPES;
 
 const DataValidityContext = createContext<{
   validity: UnifiedValidityFlags;
@@ -52,14 +53,17 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   // without needing it as a dependency (prevents effect re-runs from callback recreation)
   const runValidationRef = useRef<(types: (keyof UnifiedValidityFlags)[], signal?: AbortSignal) => Promise<void>>(undefined);
   runValidationRef.current = async (types, signal) => {
-    if (!schemaName || !plotID || plotCensusNumber == null) return;
+    if (!schemaName || !plotID) return;
 
     try {
       const results = await Promise.all(
         types.map(async type => {
           if (signal?.aborted) return { type, isValid: false };
 
-          const url = `/api/cmprevalidation/${type}/${schemaName}/${plotID}/${plotCensusNumber}`;
+          const url =
+            plotCensusNumber != null
+              ? `/api/cmprevalidation/${type}/${schemaName}/${plotID}/${plotCensusNumber}`
+              : `/api/cmprevalidation/${type}/${schemaName}/${plotID}`;
           try {
             const response = await ApiWrapper.get(url, {
               loadingMessage: `Validating ${type}...`,
@@ -90,7 +94,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   // Primary effect: run validation when context primitives change or refresh is requested.
   // Uses only primitive deps + counter so it cannot be starved by unstable object references.
   useEffect(() => {
-    if (!schemaName || !plotID || plotCensusNumber == null) return;
+    if (!schemaName || !plotID) return;
 
     // Reset validity before re-checking
     setValidityState(initialValidityState);
@@ -109,7 +113,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   // Safety net: if all flags are still false 5s after contexts are available, retry once.
   // Catches edge cases where the initial check silently failed (HMR, network blip, etc.)
   useEffect(() => {
-    if (!schemaName || !plotID || plotCensusNumber == null) return;
+    if (!schemaName || !plotID) return;
 
     const safetyTimer = setTimeout(() => {
       setValidityState(current => {

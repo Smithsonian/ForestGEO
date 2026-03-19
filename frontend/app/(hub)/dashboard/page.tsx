@@ -668,8 +668,6 @@ export default function DashboardPage() {
                 router.push('/fixeddatainput/quadrats');
               } else if (!validity.attributes) {
                 router.push('/fixeddatainput/attributes');
-              } else if (!validity.personnel) {
-                router.push('/fixeddatainput/personnel');
               } else {
                 // All prerequisites met, go to measurement upload
                 router.push('/measurementshub/summary');

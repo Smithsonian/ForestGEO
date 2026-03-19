@@ -75,34 +75,38 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('returns 400 when incorrect slugs (length not 3 or "undefined" values)', async () => {
-    const res1 = await GET(noopRequest(), makeProps('attributes', ['schema', '1']));
+  it('returns 400 when required slugs are missing or undefined', async () => {
+    const res1 = await GET(noopRequest(), makeProps('attributes', ['schema']));
     expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
-    const res2 = await GET(noopRequest(), makeProps('attributes', ['schema', '1', 'undefined']));
+    const res2 = await GET(noopRequest(), makeProps('attributes', ['schema', 'undefined']));
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
-    const res3 = await GET(noopRequest(), makeProps('attributes', ['undefined', '1', '2']));
+    const res3 = await GET(noopRequest(), makeProps('postvalidation', ['schema', '1']));
     expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
+    const res4 = await GET(noopRequest(), makeProps('attributes', ['undefined', '1']));
+    expect(res4.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
-  it('attributes: 200 when table has rows; 428 when empty; closes connection', async () => {
+  it('attributes: 200 when table has rows without a census slug; 428 when empty; closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
     const close = vi.spyOn(cm, 'closeConnection');
 
-    // success path
     exec.mockResolvedValueOnce([{ _1: 1 }]);
-    let res = await GET(noopRequest(), makeProps('attributes', ['myschema', '42', '7']));
+    let res = await GET(noopRequest(), makeProps('attributes', ['myschema', '42']));
     expect(res.status).toBe(HTTPResponses.OK);
     expect(close).toHaveBeenCalledTimes(1);
     const [sql] = exec.mock.calls[0];
-    // Route uses backtick-escaped identifiers
     expect(String(sql)).toMatch(/SELECT 1 FROM `myschema`\.`attributes` dt/i);
 
-    // failure path (no rows)
     exec.mockResolvedValueOnce([]);
-    res = await GET(noopRequest(), makeProps('attributes', ['myschema', '42', '7']));
+    res = await GET(noopRequest(), makeProps('attributes', ['myschema', '42']));
     expect(res.status).toBe(HTTPResponses.PRECONDITION_VALIDATION_FAILURE);
     expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  it('attributes: rejects invalid schema slug values', async () => {
+    const res3 = await GET(noopRequest(), makeProps('attributes', ['undefined', '1']));
+    expect(res3.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
   it('species: mirrors attributes behavior', async () => {

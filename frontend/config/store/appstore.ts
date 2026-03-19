@@ -91,7 +91,6 @@ interface AppState {
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
-  personnel: false,
   species: false,
   quadrats: false
 };
