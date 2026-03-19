@@ -111,13 +111,13 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(j).toEqual({ delegated: true });
   });
 
-  it('returns 400 if slugs missing or fewer than 5', async () => {
+  it('returns 400 if slugs missing or fewer than 3', async () => {
     const res1 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', undefined as any));
     expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body1 = await res1.json();
     expect(body1.error).toMatch(/slugs not received/i);
 
-    const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0', '25', '101']));
+    const res2 = await POST(makeRequest({ filterModel: baseFilterModel }), makeProps('species', ['myschema', '0']));
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body2 = await res2.json();
     expect(body2.error).toMatch(/slugs not received/i);
@@ -319,6 +319,23 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
 
     // The route does not use transactions
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('personnel: finishedQuery binds census before plot for CensusActive', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'FirstName' }, { COLUMN_NAME: 'LastName' }]);
+    exec.mockResolvedValueOnce([{ PersonnelID: 1, CensusActive: 1 }]);
+    exec.mockResolvedValueOnce([{ totalRows: 1 }]);
+
+    const req = makeRequest({ filterModel: baseFilterModel });
+    const res = await POST(req, makeProps('personnel', ['myschema', '2', '50', '77', '9']));
+    expect(res.status).toBe(HTTPResponses.OK);
+
+    const body = await res.json();
+    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel p/i);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[9,77,100,50\]/);
   });
 
   it('returns 500 if a DB error occurs during query execution; closes connection', async () => {

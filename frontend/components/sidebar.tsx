@@ -96,7 +96,7 @@ function MenuRenderToggle(
           color="danger"
           variant={isParentDataIncomplete ? 'solid' : 'soft'}
           badgeContent={isParentDataIncomplete ? '!' : undefined}
-          invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
+          invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
           aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
         >
           <Icon />
@@ -721,7 +721,7 @@ export default function Sidebar(props: SidebarProps) {
         case '/subquadrats':
           return !validity['quadrats'];
         case '/quadratpersonnel':
-          return !(validity['quadrats'] && validity['personnel']);
+          return !validity['quadrats'];
         default:
           const dataKey = validityMapping[linkHref];
           return dataKey !== undefined && !validity[dataKey];
@@ -734,7 +734,7 @@ export default function Sidebar(props: SidebarProps) {
         case '/subquadrats':
           return !validity['quadrats'];
         case '/quadratpersonnel':
-          return !(validity['quadrats'] && validity['personnel']);
+          return !validity['quadrats'];
         default:
           return false;
       }
@@ -962,7 +962,7 @@ export default function Sidebar(props: SidebarProps) {
                         case '/subquadrats':
                           return !validity['quadrats'];
                         case '/quadratpersonnel':
-                          return !(validity['quadrats'] && validity['personnel']);
+                          return !validity['quadrats'];
                         default:
                           return false;
                       }
@@ -1077,7 +1077,7 @@ export default function Sidebar(props: SidebarProps) {
                               renderToggle={MenuRenderToggle(
                                 {
                                   plotSelectionRequired: currentPlot === undefined,
-                                  censusSelectionRequired: currentCensus === undefined,
+                                  censusSelectionRequired: item.href !== '/fixeddatainput' && currentCensus === undefined,
                                   pathname: pathname ?? '',
                                   isParentDataIncomplete: isParentDataIncomplete
                                 },
@@ -1097,7 +1097,9 @@ export default function Sidebar(props: SidebarProps) {
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
-                                        {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                                        {currentSite !== undefined &&
+                                        currentPlot !== undefined &&
+                                        (item.href === '/fixeddatainput' || currentCensus !== undefined) ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
@@ -1173,7 +1175,11 @@ export default function Sidebar(props: SidebarProps) {
                                               sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}
                                               color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
+                                              disabled={
+                                                currentPlot === undefined ||
+                                                (item.href !== '/fixeddatainput' && currentCensus === undefined) ||
+                                                isLinkDisabled
+                                              }
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);

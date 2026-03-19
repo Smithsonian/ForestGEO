@@ -37,6 +37,12 @@ function isValidDataType(dataType: string): dataType is ValidDataType {
   return VALID_DATA_TYPES.includes(dataType as ValidDataType);
 }
 
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value || value === 'undefined') return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+}
+
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
   _request: NextRequest,
@@ -46,9 +52,9 @@ export async function GET(
 ): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string } | { error: string }>> {
   const params = await props.params;
 
-  // Validate slugs parameter
-  if (!params.slugs || params.slugs.length < 5) {
-    return new NextResponse(JSON.stringify({ error: 'Invalid parameters: expected at least 5 slug values' }), {
+  // Validate slugs parameter — minimum 3 (schema, page, pageSize); plotID and plotCensusNumber are optional
+  if (!params.slugs || params.slugs.length < 3) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid parameters: expected at least 3 slug values (schema, page, pageSize)' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -74,9 +80,9 @@ export async function GET(
   }
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
-  const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
-  const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
-  const speciesID = speciesIDParam ? parseInt(speciesIDParam) : undefined;
+  const plotID = parseOptionalPositiveInt(plotIDParam);
+  const plotCensusNumber = parseOptionalPositiveInt(plotCensusNumberParam);
+  const speciesID = parseOptionalPositiveInt(speciesIDParam);
 
   const pkRaw = getGridID(params.dataType);
   const demappedGridID = pkRaw.charAt(0).toUpperCase() + pkRaw.substring(1);
@@ -129,16 +135,24 @@ export async function GET(
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'personnel':
-        paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS( 
-              SELECT 1 FROM ${schema}.censusactivepersonnel cap 
-                JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
-                WHERE cap.PersonnelID = p.PersonnelID 
-                  AND c.PlotCensusNumber = ? and c.PlotID = ? 
-              ) AS CensusActive 
-            FROM ${schema}.${params.dataType} p
-            ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
-        queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
+        if (plotCensusNumber !== undefined && plotID !== undefined) {
+          paginatedQuery = `
+              SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS(
+                SELECT 1 FROM ${schema}.censusactivepersonnel cap
+                  JOIN ${schema}.census c ON cap.CensusID = c.CensusID
+                  WHERE cap.PersonnelID = p.PersonnelID
+                    AND c.PlotCensusNumber = ? and c.PlotID = ?
+                ) AS CensusActive
+              FROM ${schema}.${params.dataType} p
+              ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
+          queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
+        } else {
+          paginatedQuery = `
+              SELECT SQL_CALC_FOUND_ROWS p.*
+              FROM ${schema}.${params.dataType} p
+              ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
+          queryParams.push(page * pageSize, pageSize);
+        }
         break;
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv

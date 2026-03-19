@@ -6,7 +6,7 @@ import { Box, Checkbox, Chip, IconButton, Modal, ModalDialog, Typography } from 
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { formatHeader, PersonnelGridColumns } from '@/components/client/datagridcolumns';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import CloseIcon from '@mui/icons-material/Close';
 import { AssignmentOutlined, ManageAccountsOutlined, UploadFileOutlined } from '@mui/icons-material';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
@@ -18,8 +18,8 @@ import ailogger from '@/ailogger';
 export default function IsolatedPersonnelDataGrid() {
   const dataGridRef = useRef<IsolatedDataGridCommonsHandle>(null);
   const currentSite = useSiteContext();
-  const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const hasActiveCensus = Boolean(currentCensus?.dateRanges?.[0]?.censusID);
   const initialPersonnelRDSRow: PersonnelRDS = {
     id: 0,
     personnelID: 0,
@@ -36,15 +36,14 @@ export default function IsolatedPersonnelDataGrid() {
 
   useEffect(() => {
     async function fetchRoles() {
-      const response = await fetch(`/api/fetchall/roles/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`);
+      const response = await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`);
       setRoles(await response.json());
     }
 
-    // Guard: only fetch if all required context values are defined
-    if (currentPlot?.plotID && currentCensus?.plotCensusNumber && currentSite?.schemaName) {
+    if (currentSite?.schemaName) {
       fetchRoles().catch(ailogger.error);
     }
-  }, [refresh, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentSite?.schemaName]);
+  }, [refresh, currentSite?.schemaName]);
 
   const roleIDColumn: GridColDef = {
     field: 'roleID',
@@ -116,6 +115,23 @@ export default function IsolatedPersonnelDataGrid() {
     }
   };
 
+  const gridColumns = hasActiveCensus ? [...PersonnelGridColumns, roleIDColumn, isPersonActive] : [...PersonnelGridColumns, roleIDColumn];
+
+  const dynamicButtons = [
+    ...(hasActiveCensus
+      ? [
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> }
+        ]
+      : []),
+    { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true), tooltip: 'Edit roles for personnel', icon: <ManageAccountsOutlined /> }
+  ];
+
   return (
     <>
       <UploadParentModal
@@ -157,7 +173,7 @@ export default function IsolatedPersonnelDataGrid() {
       <IsolatedDataGridCommons
         ref={dataGridRef}
         gridType="personnel"
-        gridColumns={[...PersonnelGridColumns, roleIDColumn, isPersonActive]}
+        gridColumns={gridColumns}
         refresh={refresh}
         setRefresh={setRefresh}
         selectionOptions={roles.map(role => ({
@@ -170,16 +186,7 @@ export default function IsolatedPersonnelDataGrid() {
           Name: ['firstName', 'lastName'],
           Role: ['roleID']
         }}
-        dynamicButtons={[
-          {
-            label: 'Manual Entry Form',
-            onClick: () => setIsManualEntryFormOpen(true),
-            tooltip: 'Submit data by filling out a form',
-            icon: <AssignmentOutlined />
-          },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
-          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true), tooltip: 'Edit roles for personnel', icon: <ManageAccountsOutlined /> }
-        ]}
+        dynamicButtons={dynamicButtons}
       />
     </>
   );

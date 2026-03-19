@@ -747,8 +747,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      localApiRef.current?.stopRowEditMode({ id, ignoreModifications: true });
-
       const oldRow = rows.find(row => String(row.id) === String(id));
 
       const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
@@ -1089,9 +1087,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     }
   };
 
+  // Grid types under "Stem & Plot Details" that don't require a census selection
+  const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
+  const requiresCensus = !censusIndependentGridTypes.includes(gridType);
+
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
-  // Only require site/plot/census context for site-specific data grids
-  if (!adminEmail && (!currentSite || !currentPlot || !currentCensus)) {
+  // Census-independent grids only need site + plot; others need all three
+  if (!adminEmail && (!currentSite || !currentPlot || (requiresCensus && !currentCensus))) {
     redirect('/dashboard');
   } else {
     return (

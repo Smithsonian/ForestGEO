@@ -51,6 +51,12 @@ function isValidDataType(dataType: string): dataType is AllowedDataType {
 // Whitelist of allowed TSS values for measurements filter (for future validation)
 const _ALLOWED_TSS_VALUES = ['multi stem', 'old tree', 'new recruit'] as const;
 
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value || value === 'undefined') return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+}
+
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
 export async function POST(
@@ -66,8 +72,8 @@ export async function POST(
     return SINGLEPOST(request, props);
   } else {
     const filterModel: ExtendedGridFilterModel = body.filterModel;
-    if (!params.slugs || params.slugs.length < 5) {
-      return new NextResponse(JSON.stringify({ error: 'slugs not received' }), {
+    if (!params.slugs || params.slugs.length < 3) {
+      return new NextResponse(JSON.stringify({ error: 'slugs not received: expected at least 3 (schema, page, pageSize)' }), {
         status: HTTPResponses.INVALID_REQUEST
       });
     }
@@ -101,8 +107,8 @@ export async function POST(
     }
     const page = parseInt(pageParam);
     const pageSize = parseInt(pageSizeParam);
-    const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
-    const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
+    const plotID = parseOptionalPositiveInt(plotIDParam);
+    const plotCensusNumber = parseOptionalPositiveInt(plotCensusNumberParam);
 
     // Validate numeric parameters
     if (isNaN(page) || page < 0 || isNaN(pageSize) || pageSize <= 0) {
@@ -227,18 +233,26 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
           {
             const whereClause = searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
-            paginatedQuery = `
-            SELECT p.*, EXISTS(
-              SELECT 1 FROM ${schema}.censusactivepersonnel cap
-                JOIN ${schema}.census c ON cap.CensusID = c.CensusID
-                WHERE cap.PersonnelID = p.PersonnelID
-                  AND c.PlotCensusNumber = ? and c.PlotID = ?
-              ) AS CensusActive
-            FROM ${schema}.${params.dataType} p
-            ${whereClause}`;
+            if (plotCensusNumber !== undefined && plotID !== undefined) {
+              paginatedQuery = `
+              SELECT p.*, EXISTS(
+                SELECT 1 FROM ${schema}.censusactivepersonnel cap
+                  JOIN ${schema}.census c ON cap.CensusID = c.CensusID
+                  WHERE cap.PersonnelID = p.PersonnelID
+                    AND c.PlotCensusNumber = ? and c.PlotID = ?
+                ) AS CensusActive
+              FROM ${schema}.${params.dataType} p
+              ${whereClause}`;
+              queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
+            } else {
+              paginatedQuery = `
+              SELECT p.*
+              FROM ${schema}.${params.dataType} p
+              ${whereClause}`;
+              queryParams.push(page * pageSize, pageSize);
+            }
             countQuery = `SELECT COUNT(*) as totalRows FROM ${schema}.${params.dataType} p ${whereClause}`;
           }
-          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'unifiedchangelog':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);

@@ -30,10 +30,8 @@ vi.mock('@/app/contexts/datavalidityprovider', () => ({
   useDataValidityContext: () => ({
     validity: {
       attributes: true,
-      personnel: true,
       species: true,
-      quadrats: true,
-      subquadrats: false
+      quadrats: true
     },
     isDataValid: true,
     shouldAddPlot: false,
