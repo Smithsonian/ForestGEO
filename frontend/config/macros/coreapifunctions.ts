@@ -233,8 +233,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           await connectionManager.executeQuery(resetValidationQuery);
         }
       } else {
-        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
-        const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
+        const mapper = MapperFactory.getMapper<any, any>(dataType);
+        const oldRowData = mapper.demapData([oldRow])[0];
+        const newRowData = mapper.demapData([{ ...oldRow, ...newRow }])[0];
+        const previousGridIDKey = oldRowData?.[demappedGridID];
+        const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
         let dataToUpdate;
         const censusID = parseInt((await getCookie('censusID')) ?? '0');
@@ -256,7 +259,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               failedTrimmed['Date'] = date.toISOString().split('T')[0];
             }
           }
-          const failedMeasurementID = Number(gridIDKey);
+          const failedMeasurementID = Number(updatedGridIDKey);
           const updateFailedQuery = format(
             `UPDATE ??.coremeasurements
              SET RawTreeTag = ?, RawStemTag = ?, RawSpCode = ?, RawQuadrat = ?,
@@ -320,23 +323,35 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         } else if (dataType === 'plots') {
           const { NumQuadrats, ...plotTrimmed } = newRowData;
           dataToUpdate = plotTrimmed;
-        } else if (['attributes', 'quadrats', 'species'].includes(dataType)) {
+        } else if (dataType === 'attributes') {
+          dataToUpdate = {
+            [demappedGridID]: updatedGridIDKey,
+            ...remainingProperties
+          };
+        } else if (['quadrats', 'species'].includes(dataType)) {
           const { CensusID, ...specTrimmed } = newRowData;
           dataToUpdate = specTrimmed;
         } else if (dataType === 'personnel') {
           const { CensusActive, ...personnelTrimmed } = newRowData;
-          const query = CensusActive
-            ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
-            : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
-          await connectionManager.executeQuery(query, [censusID, gridIDKey]);
+          const hasCensusActiveFlag =
+            Object.prototype.hasOwnProperty.call(oldRowData ?? {}, 'CensusActive') || Object.prototype.hasOwnProperty.call(newRowData, 'CensusActive');
+          if (hasCensusActiveFlag) {
+            if (!Number.isInteger(censusID) || censusID <= 0) {
+              throw new Error('Census context required to update personnel census activity');
+            }
+            const query = CensusActive
+              ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
+              : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
+            await connectionManager.executeQuery(query, [censusID, previousGridIDKey]);
+          }
           dataToUpdate = personnelTrimmed;
         } else dataToUpdate = remainingProperties;
 
-        const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]);
+        const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, previousGridIDKey]);
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
-        updateIDs = { [dataType]: gridIDKey };
+        updateIDs = { [dataType]: updatedGridIDKey };
       }
     }
     await connectionManager.commitTransaction(transactionID ?? '');

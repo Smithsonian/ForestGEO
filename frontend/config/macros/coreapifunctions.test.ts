@@ -187,6 +187,31 @@ describe('CoreAPIFunctions', () => {
       const hasInsertQuery = queries.some((q: string) => typeof q === 'string' && q.includes('INSERT IGNORE'));
       expect(hasInsertQuery).toBe(true);
     });
+
+    it('should skip personnel census-activity updates when CensusActive is not provided', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          newRow: { PersonnelID: 1, LastName: 'Updated' },
+          oldRow: { PersonnelID: 1, LastName: 'Original' }
+        })
+      });
+
+      mockMapper.demapData.mockImplementation((data: any[]) => data);
+
+      const mockParams = {
+        dataType: 'personnel',
+        slugs: ['testSchema', 'personnelID']
+      };
+
+      const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+      expect(response.status).toBe(200);
+      const censusActivityQueries = mockConnectionManager.executeQuery.mock.calls.filter(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('censusactivepersonnel')
+      );
+      expect(censusActivityQueries).toHaveLength(0);
+    });
   });
 
   describe('POST function', () => {
@@ -590,6 +615,32 @@ describe('CoreAPIFunctions', () => {
 
         const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
         expect(updateCall[0]).toMatch(/Code/i);
+      });
+
+      it('should update attributes.Code using the original code in the WHERE clause', async () => {
+        const mockRequest = new NextRequest('http://localhost/api/test', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            newRow: { Code: 'NEWCODE', Description: 'Updated' },
+            oldRow: { Code: 'OLDCODE', Description: 'Original' }
+          })
+        });
+
+        mockConnectionManager.executeQuery.mockResolvedValue([]);
+
+        const mockParams = {
+          dataType: 'attributes',
+          slugs: ['forestgeo_test', 'code']
+        };
+
+        const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+
+        expect(response.status).toBe(200);
+
+        const updateCall = mockConnectionManager.executeQuery.mock.calls.find((call: any) => typeof call[0] === 'string' && call[0].includes('UPDATE'));
+        expect(updateCall).toBeDefined();
+        expect(updateCall[0]).toContain('NEWCODE');
+        expect(updateCall[0]).toContain('OLDCODE');
       });
 
       it('should fallback to capitalized gridID for unmapped dataTypes', async () => {
