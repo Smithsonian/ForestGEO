@@ -568,20 +568,27 @@ describe('sqlpacketload fixed-data upload modes', () => {
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
   });
 
-  it('updates existing attributes and skips new codes in revisions mode', async () => {
+  it('updates existing attributes and inserts new codes in revisions mode', async () => {
     mockConnectionManager.executeQuery
+      // Row 1: SELECT existing (case-insensitive match found)
       .mockResolvedValueOnce([{ Code: 'EXISTING' }])
+      // Row 1: UPDATE existing row
       .mockResolvedValueOnce({ affectedRows: 1 })
+      // Row 2: SELECT existing (no match)
       .mockResolvedValueOnce([])
+      // Row 2: INSERT new row
+      .mockResolvedValueOnce({ insertId: 9 })
+      // changelog: SELECT existing entry
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ insertId: 9 });
+      // changelog: INSERT new entry
+      .mockResolvedValueOnce({ insertId: 10 });
 
     const res = await POST(
       makeFixedDataRequest(
         'attributes',
         {
           'row-1': { code: 'EXISTING', description: 'Updated description', status: 'alive' },
-          'row-2': { code: 'NEWCODE', description: 'Should skip', status: 'dead' }
+          'row-2': { code: 'NEWCODE', description: 'Brand new code', status: 'dead' }
         },
         { uploadMode: 'revisions' }
       )
@@ -590,21 +597,27 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(res?.status).toBe(200);
     await expect(res?.json()).resolves.toMatchObject({
       uploadMode: 'revisions',
-      insertedCount: 0,
+      insertedCount: 1,
       updatedCount: 1,
-      skippedCount: 1,
+      skippedCount: 0,
       transactionCompleted: true
     });
   });
 
-  it('syncs personnel rows in clean mode for the current census', async () => {
+  it('deletes existing personnel and inserts fresh in clean re-upload mode', async () => {
     handleUpsertMock.mockResolvedValueOnce({ id: 77, operation: 'inserted' });
     mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ insertId: 501 })
+      // DELETE censusactivepersonnel for this census
+      .mockResolvedValueOnce({ affectedRows: 2 })
+      // DELETE orphaned personnel
       .mockResolvedValueOnce({ affectedRows: 1 })
-      .mockResolvedValueOnce({ affectedRows: 0 })
+      // INSERT new personnel row
+      .mockResolvedValueOnce({ insertId: 501 })
+      // INSERT IGNORE censusactivepersonnel link
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // changelog: SELECT existing entry
       .mockResolvedValueOnce([])
+      // changelog: INSERT new entry
       .mockResolvedValueOnce({ insertId: 3 });
 
     const res = await POST(
@@ -626,12 +639,13 @@ describe('sqlpacketload fixed-data upload modes', () => {
       transactionCompleted: true
     });
 
+    // Verify the DELETE happened before the INSERT
+    const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM forestgeo_testing.censusactivepersonnel')
+    );
+    expect(deleteCalls.length).toBeGreaterThan(0);
+
     expect(mockConnectionManager.executeQuery.mock.calls.some((call: any[]) => String(call[0]).includes('INSERT INTO forestgeo_testing.personnel'))).toBe(true);
-    expect(
-      mockConnectionManager.executeQuery.mock.calls.some((call: any[]) =>
-        String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.censusactivepersonnel')
-      )
-    ).toBe(true);
   });
 
   it('normalizes camelCase personnel roles before upserting', async () => {

@@ -113,6 +113,11 @@ async function upsertAttributeRows(
   let updatedCount = 0;
   let skippedCount = 0;
 
+  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    const deleteSQL = format(`DELETE FROM ??.attributes WHERE IsActive = 1`, [schema]);
+    await connectionManager.executeQuery(deleteSQL, [], transactionID);
+  }
+
   for (const row of rows) {
     const code = normalizeRequiredString(row.code || row.codes);
     if (!code) {
@@ -120,21 +125,20 @@ async function upsertAttributeRows(
       continue;
     }
 
-    const existingSQL = format(`SELECT Code FROM ??.attributes WHERE Code = ? AND IsActive = 1 LIMIT 1`, [schema]);
-    const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
     const description = normalizeOptionalString(row.description || row.comments);
     const status = normalizeOptionalString(row.status);
 
-    if (existingRows.length > 0) {
-      const updateSQL = format(`UPDATE ??.attributes SET Description = ?, Status = ?, DeletedAt = NULL WHERE Code = ? AND IsActive = 1`, [schema]);
-      await connectionManager.executeQuery(updateSQL, [description, status, code], transactionID);
-      updatedCount += 1;
-      continue;
-    }
-
     if (uploadMode === UploadMode.REVISIONS) {
-      skippedCount += 1;
-      continue;
+      const existingSQL = format(`SELECT Code FROM ??.attributes WHERE LOWER(Code) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingRows = await connectionManager.executeQuery(existingSQL, [code], transactionID);
+
+      if (existingRows.length > 0) {
+        const existingCode = existingRows[0].Code;
+        const updateSQL = format(`UPDATE ??.attributes SET Code = ?, Description = ?, Status = ?, DeletedAt = NULL WHERE Code = ? AND IsActive = 1`, [schema]);
+        await connectionManager.executeQuery(updateSQL, [code, description, status, existingCode], transactionID);
+        updatedCount += 1;
+        continue;
+      }
     }
 
     const insertSQL = format(`INSERT INTO ??.attributes (Code, Description, Status, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
@@ -161,6 +165,11 @@ async function upsertQuadratRows(
   let updatedCount = 0;
   let skippedCount = 0;
 
+  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
+    await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
+  }
+
   for (const row of rows) {
     const quadratName = normalizeRequiredString(row.quadrat);
     if (!quadratName) {
@@ -168,8 +177,6 @@ async function upsertQuadratRows(
       continue;
     }
 
-    const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND QuadratName = ? AND IsActive = 1 LIMIT 1`, [schema]);
-    const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
     const payload = {
       StartX: row.startx,
       StartY: row.starty,
@@ -179,25 +186,25 @@ async function upsertQuadratRows(
       QuadratShape: normalizeOptionalString(row.quadratshape)
     };
 
-    if (existingRows.length > 0) {
-      const updateSQL = format(
-        `UPDATE ??.quadrats
-         SET StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
-         WHERE PlotID = ? AND QuadratName = ? AND IsActive = 1`,
-        [schema]
-      );
-      await connectionManager.executeQuery(
-        updateSQL,
-        [payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape, plotID, quadratName],
-        transactionID
-      );
-      updatedCount += 1;
-      continue;
-    }
-
     if (uploadMode === UploadMode.REVISIONS) {
-      skippedCount += 1;
-      continue;
+      const existingSQL = format(`SELECT QuadratID FROM ??.quadrats WHERE PlotID = ? AND LOWER(QuadratName) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingRows = await connectionManager.executeQuery(existingSQL, [plotID, quadratName], transactionID);
+
+      if (existingRows.length > 0) {
+        const updateSQL = format(
+          `UPDATE ??.quadrats
+           SET QuadratName = ?, StartX = ?, StartY = ?, DimensionX = ?, DimensionY = ?, Area = ?, QuadratShape = ?, DeletedAt = NULL
+           WHERE QuadratID = ?`,
+          [schema]
+        );
+        await connectionManager.executeQuery(
+          updateSQL,
+          [quadratName, payload.StartX, payload.StartY, payload.DimensionX, payload.DimensionY, payload.Area, payload.QuadratShape, existingRows[0].QuadratID],
+          transactionID
+        );
+        updatedCount += 1;
+        continue;
+      }
     }
 
     const insertSQL = format(
@@ -228,6 +235,11 @@ async function upsertSpeciesRows(
   let updatedCount = 0;
   let skippedCount = 0;
 
+  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    const deleteSQL = format(`DELETE FROM ??.species WHERE IsActive = 1`, [schema]);
+    await connectionManager.executeQuery(deleteSQL, [], transactionID);
+  }
+
   for (const row of rows) {
     const speciesCode = normalizeRequiredString(row.spcode);
     if (!speciesCode) {
@@ -251,8 +263,6 @@ async function upsertSpeciesRows(
       genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID')).id;
     }
 
-    const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE SpeciesCode = ? AND IsActive = 1 LIMIT 1`, [schema]);
-    const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
     const speciesPayload = {
       GenusID: genusID ?? null,
       SpeciesName: normalizeOptionalString(row.species),
@@ -262,33 +272,34 @@ async function upsertSpeciesRows(
       SubspeciesAuthority: normalizeOptionalString(row.subauthority)
     };
 
-    if (existingRows.length > 0) {
-      const updateSQL = format(
-        `UPDATE ??.species
-         SET GenusID = ?, SpeciesName = ?, SubspeciesName = ?, IDLevel = ?, SpeciesAuthority = ?, SubspeciesAuthority = ?, DeletedAt = NULL
-         WHERE SpeciesCode = ? AND IsActive = 1`,
-        [schema]
-      );
-      await connectionManager.executeQuery(
-        updateSQL,
-        [
-          speciesPayload.GenusID,
-          speciesPayload.SpeciesName,
-          speciesPayload.SubspeciesName,
-          speciesPayload.IDLevel,
-          speciesPayload.SpeciesAuthority,
-          speciesPayload.SubspeciesAuthority,
-          speciesCode
-        ],
-        transactionID
-      );
-      updatedCount += 1;
-      continue;
-    }
-
     if (uploadMode === UploadMode.REVISIONS) {
-      skippedCount += 1;
-      continue;
+      const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
+
+      if (existingRows.length > 0) {
+        const updateSQL = format(
+          `UPDATE ??.species
+           SET SpeciesCode = ?, GenusID = ?, SpeciesName = ?, SubspeciesName = ?, IDLevel = ?, SpeciesAuthority = ?, SubspeciesAuthority = ?, DeletedAt = NULL
+           WHERE SpeciesID = ?`,
+          [schema]
+        );
+        await connectionManager.executeQuery(
+          updateSQL,
+          [
+            speciesCode,
+            speciesPayload.GenusID,
+            speciesPayload.SpeciesName,
+            speciesPayload.SubspeciesName,
+            speciesPayload.IDLevel,
+            speciesPayload.SpeciesAuthority,
+            speciesPayload.SubspeciesAuthority,
+            existingRows[0].SpeciesID
+          ],
+          transactionID
+        );
+        updatedCount += 1;
+        continue;
+      }
     }
 
     const insertSQL = format(
@@ -331,7 +342,20 @@ async function upsertPersonnelRows(
   let insertedCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
-  const cleanUploadPersonnelIDs = new Set<number>();
+
+  if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    // Remove all census-active links for this census
+    const deleteCapSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ?`, [schema]);
+    await connectionManager.executeQuery(deleteCapSQL, [censusID], transactionID);
+    // Remove personnel who are no longer linked to any census
+    const deleteOrphanedSQL = format(
+      `DELETE p FROM ??.personnel p
+       LEFT JOIN ??.censusactivepersonnel cap ON cap.PersonnelID = p.PersonnelID
+       WHERE cap.PersonnelID IS NULL AND p.IsActive = 1`,
+      [schema, schema]
+    );
+    await connectionManager.executeQuery(deleteOrphanedSQL, [], transactionID);
+  }
 
   for (const row of rows) {
     const firstName = normalizeRequiredString(row.firstname);
@@ -363,41 +387,24 @@ async function upsertPersonnelRows(
       )
     ).id;
 
-    const existingSQL =
-      uploadMode === UploadMode.REVISIONS
-        ? format(
-            `SELECT p.PersonnelID
-             FROM ??.personnel p
-             INNER JOIN ??.censusactivepersonnel cap
-               ON cap.PersonnelID = p.PersonnelID
-              AND cap.CensusID = ?
-             WHERE p.FirstName = ? AND p.LastName = ? AND p.IsActive = 1
-             LIMIT 1`,
-            [schema, schema]
-          )
-        : format(`SELECT PersonnelID FROM ??.personnel WHERE FirstName = ? AND LastName = ? AND IsActive = 1 LIMIT 1`, [schema]);
+    if (uploadMode === UploadMode.REVISIONS) {
+      const existingSQL = format(
+        `SELECT p.PersonnelID FROM ??.personnel p
+         WHERE LOWER(p.FirstName) = LOWER(?) AND LOWER(p.LastName) = LOWER(?) AND p.IsActive = 1
+         LIMIT 1`,
+        [schema]
+      );
+      const existingRows = await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
 
-    const existingRows =
-      uploadMode === UploadMode.REVISIONS
-        ? await connectionManager.executeQuery(existingSQL, [censusID, firstName, lastName], transactionID)
-        : await connectionManager.executeQuery(existingSQL, [firstName, lastName], transactionID);
-
-    if (existingRows.length > 0) {
-      const personnelID = Number(existingRows[0].PersonnelID);
-      const updateSQL = format(`UPDATE ??.personnel SET RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
-      await connectionManager.executeQuery(updateSQL, [roleID, personnelID], transactionID);
-      updatedCount += 1;
-      if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-        cleanUploadPersonnelIDs.add(personnelID);
+      if (existingRows.length > 0) {
+        const personnelID = Number(existingRows[0].PersonnelID);
+        const updateSQL = format(`UPDATE ??.personnel SET FirstName = ?, LastName = ?, RoleID = ?, DeletedAt = NULL WHERE PersonnelID = ?`, [schema]);
+        await connectionManager.executeQuery(updateSQL, [firstName, lastName, roleID, personnelID], transactionID);
         const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
         await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
+        updatedCount += 1;
+        continue;
       }
-      continue;
-    }
-
-    if (uploadMode === UploadMode.REVISIONS) {
-      skippedCount += 1;
-      continue;
     }
 
     const insertSQL = format(`INSERT INTO ??.personnel (FirstName, LastName, RoleID, IsActive, DeletedAt) VALUES (?, ?, ?, 1, NULL)`, [schema]);
@@ -405,16 +412,7 @@ async function upsertPersonnelRows(
     const personnelID = Number(insertResult.insertId);
     const capSQL = format(`INSERT IGNORE INTO ??.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [schema]);
     await connectionManager.executeQuery(capSQL, [censusID, personnelID], transactionID);
-    cleanUploadPersonnelIDs.add(personnelID);
     insertedCount += 1;
-  }
-
-  if (uploadMode === UploadMode.CLEAN_REUPLOAD && cleanUploadPersonnelIDs.size > 0) {
-    const placeholders = Array.from(cleanUploadPersonnelIDs)
-      .map(() => '?')
-      .join(', ');
-    const cleanupSQL = format(`DELETE FROM ??.censusactivepersonnel WHERE CensusID = ? AND PersonnelID NOT IN (${placeholders})`, [schema]);
-    await connectionManager.executeQuery(cleanupSQL, [censusID, ...Array.from(cleanUploadPersonnelIDs)], transactionID);
   }
 
   return { insertedCount, updatedCount, skippedCount };

@@ -37,9 +37,7 @@ export default function UploadParentModal(props: UPMProps) {
   const { formType, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
   const requiresModeSelection = !skipToProcessing && formType !== FormType.measurements;
   const revisionMatchLabel = getRevisionMatchLabel(formType);
-  const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(
-    requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD
-  );
+  const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
 
   useEffect(() => {
     if (!isUploadModalOpen) {
@@ -114,33 +112,38 @@ export default function UploadParentModal(props: UPMProps) {
           ) : (
             <Stack spacing={2} sx={{ py: 3, px: 1 }}>
               <Typography level="h3">Choose Upload Mode</Typography>
-              <Typography level="body-sm">
-                Select how this {formType} CSV should be applied. Clean Re-Upload becomes the default replacement path.
-              </Typography>
+              <Typography level="body-sm">Select how this {formType} CSV should be applied.</Typography>
               <Card variant="outlined">
                 <CardContent>
                   <Stack spacing={1}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography level="title-md">{UploadModeLabels[UploadMode.CLEAN_REUPLOAD]}</Typography>
-                      <Chip color="success" size="sm">
-                        Recommended
+                      <Chip color="danger" size="sm">
+                        Destructive
                       </Chip>
                     </Box>
                     <Typography level="body-sm">
-                      Replaces the existing data for this upload scope with the incoming file.
+                      Deletes all existing {formType} data, then inserts the uploaded file as the new source of truth.
                     </Typography>
                   </Stack>
                 </CardContent>
                 <CardActions sx={{ justifyContent: 'flex-start' }}>
-                  <Button onClick={() => setUploadMode(UploadMode.CLEAN_REUPLOAD)}>Use Clean Re-Upload</Button>
+                  <Button color="danger" variant="outlined" onClick={() => setUploadMode(UploadMode.CLEAN_REUPLOAD)}>
+                    Use Clean Re-Upload
+                  </Button>
                 </CardActions>
               </Card>
               <Card variant="outlined">
                 <CardContent>
                   <Stack spacing={1}>
-                    <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
+                      <Chip color="success" size="sm">
+                        Recommended
+                      </Chip>
+                    </Box>
                     <Typography level="body-sm">
-                      Matches existing records by {revisionMatchLabel} and updates only rows that already exist.
+                      Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
                     </Typography>
                   </Stack>
                 </CardContent>

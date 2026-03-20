@@ -29,8 +29,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
   const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
 
-  const hasRunRef = useRef(false);
-
   const { triggerRefresh } = useDataValidityContext();
 
   const currentPlot = usePlotContext();
@@ -273,10 +271,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
   useEffect(() => {
-    if (hasRunRef.current) return;
-    hasRunRef.current = true;
-
     const abortController = new AbortController();
+
+    // Reset progress for each effect run (StrictMode may re-run this)
+    setProgress({ census: 0, plots: 0, quadrats: 0 });
+    setAllLoadsCompleted(false);
 
     const runAsyncTasks = async () => {
       try {
@@ -296,7 +295,17 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     runAsyncTasks().catch(ailogger.error);
 
     return () => abortController.abort();
-  }, [cleanupTemporaryMeasurements, currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
+  }, [
+    cleanupTemporaryMeasurements,
+    currentCensus?.dateRanges,
+    currentPlot?.plotID,
+    currentSite?.schemaName,
+    loadCensusData,
+    loadPlotsData,
+    loadQuadratsData,
+    triggerRefresh,
+    uploadForm
+  ]);
 
   // Calculate overall progress as average of the three data loads
   const overallProgress = (progress.census + progress.plots + progress.quadrats) / 3;

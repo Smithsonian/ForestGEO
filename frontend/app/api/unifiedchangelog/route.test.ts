@@ -474,12 +474,12 @@ describe('Unified Changelog Tracking System', () => {
 
       const exec = vi
         .spyOn(cm, 'executeQuery')
-        // upsertAttributeRows: row 1 (code='A')
-        .mockResolvedValueOnce([]) // SELECT existing for code 'A' (not found)
-        .mockResolvedValueOnce({}) // INSERT code 'A'
-        // upsertAttributeRows: row 2 (code='D')
-        .mockResolvedValueOnce([]) // SELECT existing for code 'D' (not found)
-        .mockResolvedValueOnce({}) // INSERT code 'D'
+        // clean re-upload: DELETE existing attributes
+        .mockResolvedValueOnce({ affectedRows: 0 })
+        // upsertAttributeRows: row 1 (code='A') INSERT
+        .mockResolvedValueOnce({})
+        // upsertAttributeRows: row 2 (code='D') INSERT
+        .mockResolvedValueOnce({})
         // changelog tracking
         .mockResolvedValueOnce([]) // SELECT existing changelog entry (none)
         .mockResolvedValueOnce({}); // INSERT changelog entry

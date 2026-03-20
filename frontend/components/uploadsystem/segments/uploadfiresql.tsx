@@ -1290,40 +1290,46 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
 
         // Additional verification: Check that data was actually inserted into the database
+        // Only applies to measurements — fixed-data uploads (attributes, quadrats, species, personnel)
+        // go directly to their target tables, not through temporarymeasurements.
         try {
-          if (isMountedRef.current) {
-            setVerificationStatus('Verifying uploaded data integrity...');
-          }
-
-          for (let i = 0; i < acceptedFiles.length; i++) {
-            const file = acceptedFiles[i];
-            const expectedUploadedRows = expectedTemporaryRowCounts.current.get(file.name) || 0;
-            const fileBatchID = measurementBatchIDs.current.get(file.name) || null;
+          if (uploadForm === 'measurements') {
             if (isMountedRef.current) {
-              setVerificationStep(i + 1);
-              setVerificationStatus(`Verifying file ${i + 1} of ${acceptedFiles.length}: ${file.name}...`);
+              setVerificationStatus('Verifying uploaded data integrity...');
             }
 
-            if (expectedUploadedRows === 0) {
-              ailogger.info(`Skipping temporary row verification for ${file.name}: no valid rows were expected to reach temporarymeasurements`);
-              continue;
-            }
+            for (let i = 0; i < acceptedFiles.length; i++) {
+              const file = acceptedFiles[i];
+              const expectedUploadedRows = expectedTemporaryRowCounts.current.get(file.name) || 0;
+              const fileBatchID = measurementBatchIDs.current.get(file.name) || null;
+              if (isMountedRef.current) {
+                setVerificationStep(i + 1);
+                setVerificationStatus(`Verifying file ${i + 1} of ${acceptedFiles.length}: ${file.name}...`);
+              }
 
-            const verificationResponse = await fetch(
-              `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}${fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : ''}&plotID=${currentPlotID}&censusID=${currentCensusID}`
-            );
-            if (!verificationResponse.ok) {
-              throw new Error(`Upload verification failed for ${file.name}: ${verificationResponse.status}`);
-            }
-            const verificationData = await verificationResponse.json();
-            if (verificationData.count !== expectedUploadedRows) {
-              throw new Error(
-                `Upload verification failed for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}: expected ${expectedUploadedRows} row(s) in temporarymeasurements, found ${verificationData.count}`
+              if (expectedUploadedRows === 0) {
+                ailogger.info(`Skipping temporary row verification for ${file.name}: no valid rows were expected to reach temporarymeasurements`);
+                continue;
+              }
+
+              const verificationResponse = await fetch(
+                `/api/verifyupload?schema=${schema}&fileName=${encodeURIComponent(file.name)}${fileBatchID ? `&batchID=${encodeURIComponent(fileBatchID)}` : ''}&plotID=${currentPlotID}&censusID=${currentCensusID}`
+              );
+              if (!verificationResponse.ok) {
+                throw new Error(`Upload verification failed for ${file.name}: ${verificationResponse.status}`);
+              }
+              const verificationData = await verificationResponse.json();
+              if (verificationData.count !== expectedUploadedRows) {
+                throw new Error(
+                  `Upload verification failed for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}: expected ${expectedUploadedRows} row(s) in temporarymeasurements, found ${verificationData.count}`
+                );
+              }
+              ailogger.info(
+                `Verified ${verificationData.count}/${expectedUploadedRows} row(s) uploaded for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}`
               );
             }
-            ailogger.info(
-              `Verified ${verificationData.count}/${expectedUploadedRows} row(s) uploaded for ${file.name}${fileBatchID ? ` (${fileBatchID})` : ''}`
-            );
+          } else {
+            ailogger.info(`Skipping temporarymeasurements verification for fixed-data upload (${uploadForm})`);
           }
 
           if (isMountedRef.current) {
