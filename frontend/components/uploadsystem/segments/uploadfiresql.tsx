@@ -463,7 +463,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploaded, completedChunks, totalChunks]);
 
   // Calculate unified ETA based on overall progress
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- calculateOverallProgressValue is intentionally
+
   // omitted: its underlying values (completedChunks, processedChunks, verificationStep, etc.) are already
   // listed, and including the callback itself causes an infinite re-render loop because useCallback recreates
   // the reference whenever any of its 12 deps change, triggering this effect, which calls setUnifiedETA,

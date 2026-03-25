@@ -238,10 +238,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const apiRef = useGridApiRef();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
-  const useAutoMeasurementRowHeight = useMemo(
-    () => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent),
-    []
-  );
+  const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
   const PAGE_CACHE_TTL_MS = 30_000;
   const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());

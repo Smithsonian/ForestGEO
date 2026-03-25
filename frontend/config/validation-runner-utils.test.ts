@@ -8,9 +8,7 @@ import {
 
 describe('validation-runner-utils', () => {
   it('uses the longer timeout budget for shared cross-census validations', () => {
-    expect(getValidationTaskTimeoutMs('ValidateQuadratMismatchAcrossCensuses+ValidateCoordinateDriftAcrossCensuses')).toBe(
-      SHARED_CROSS_CENSUS_TASK_TIMEOUT_MS
-    );
+    expect(getValidationTaskTimeoutMs('ValidateQuadratMismatchAcrossCensuses+ValidateCoordinateDriftAcrossCensuses')).toBe(SHARED_CROSS_CENSUS_TASK_TIMEOUT_MS);
     expect(getValidationTaskTimeoutMs('ValidateDBHGrowthExceedsMax+ValidateDBHShrinkageExceedsMax')).toBe(DEFAULT_VALIDATION_TASK_TIMEOUT_MS);
   });
 

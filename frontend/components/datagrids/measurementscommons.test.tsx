@@ -103,9 +103,7 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
 
     it('disables auto row height on Firefox to avoid DataGrid resize loops', () => {
       expect(shouldUseAutoMeasurementRowHeight('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:137.0) Gecko/20100101 Firefox/137.0')).toBe(false);
-      expect(shouldUseAutoMeasurementRowHeight('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.4 Safari/605.1.15')).toBe(
-        true
-      );
+      expect(shouldUseAutoMeasurementRowHeight('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.4 Safari/605.1.15')).toBe(true);
     });
 
     it('refreshes the measurements grid after a background validation run finishes', () => {

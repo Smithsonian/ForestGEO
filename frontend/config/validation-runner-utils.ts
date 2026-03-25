@@ -52,7 +52,11 @@ export function resolveValidationRunPersistence(responseOK: boolean, payload: un
 
   const reasonValue = data.error;
   const reason =
-    typeof reasonValue === 'string' && reasonValue.trim() !== '' ? reasonValue : responseOK ? 'Validation run API did not return a runID' : 'Validation run API request failed';
+    typeof reasonValue === 'string' && reasonValue.trim() !== ''
+      ? reasonValue
+      : responseOK
+        ? 'Validation run API did not return a runID'
+        : 'Validation run API request failed';
 
   return {
     conflict: false,

@@ -114,9 +114,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       setProgress(prev => ({ ...prev, census: 10 }));
       setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
       const response = await withTimeout(
-        fetch(
-        `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
-        ),
+        fetch(`/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`),
         REFRESH_TIMEOUT_MS
       );
 
@@ -326,7 +324,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     runAsyncTasks().catch(ailogger.error);
 
     return () => abortController.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally run once on mount;
+
     // loadCensusData updates currentCensus context which would re-trigger this effect
   }, []);
 

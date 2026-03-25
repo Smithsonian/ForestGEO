@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import ailogger from '@/ailogger';
 import { STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
+import { isAllowedStreamingDiagnosticHost, normalizeStreamingDiagnosticHost } from './helpers';
 
 export const runtime = 'nodejs';
 
@@ -14,14 +15,6 @@ const MAX_DURATION_SECONDS = 15 * 60;
 const MAX_HEARTBEAT_SECONDS = 60;
 const MIN_HEARTBEAT_SECONDS = 1;
 
-const ALLOWED_DIAGNOSTIC_HOSTS = new Set([
-  '127.0.0.1',
-  '127.0.0.1:3000',
-  'localhost',
-  'localhost:3000',
-  'forestgeo-development.azurewebsites.net'
-]);
-
 interface DiagnosticResult {
   actualDurationSeconds: number;
   completedAt: string;
@@ -31,19 +24,11 @@ interface DiagnosticResult {
   startedAt: string;
 }
 
-function normalizeHost(host: string | null): string {
-  return (host ?? '').trim().toLowerCase();
-}
-
 function parseInteger(value: string | null): number | null {
   if (value === null) return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return null;
   return parsed;
-}
-
-export function isAllowedStreamingDiagnosticHost(host: string | null): boolean {
-  return ALLOWED_DIAGNOSTIC_HOSTS.has(normalizeHost(host));
 }
 
 function createStreamingDiagnosticStream(durationSeconds: number, heartbeatSeconds: number, host: string): ReadableStream<Uint8Array> {
@@ -109,7 +94,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const forwardedHost = request.headers.get('x-forwarded-host');
-    const host = normalizeHost(forwardedHost || request.headers.get('host') || url.host);
+    const host = normalizeStreamingDiagnosticHost(forwardedHost || request.headers.get('host') || url.host);
     const rawDurationSeconds = url.searchParams.get('durationSeconds');
     const rawHeartbeatSeconds = url.searchParams.get('heartbeatSeconds');
 
@@ -121,34 +106,22 @@ export async function GET(request: Request) {
     const parsedHeartbeatSeconds = parseInteger(rawHeartbeatSeconds);
 
     if (rawDurationSeconds !== null && parsedDurationSeconds === null) {
-      return NextResponse.json(
-        { error: `durationSeconds must be an integer between 0 and ${MAX_DURATION_SECONDS}` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `durationSeconds must be an integer between 0 and ${MAX_DURATION_SECONDS}` }, { status: 400 });
     }
 
     if (rawHeartbeatSeconds !== null && parsedHeartbeatSeconds === null) {
-      return NextResponse.json(
-        { error: `heartbeatSeconds must be an integer between ${MIN_HEARTBEAT_SECONDS} and ${MAX_HEARTBEAT_SECONDS}` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `heartbeatSeconds must be an integer between ${MIN_HEARTBEAT_SECONDS} and ${MAX_HEARTBEAT_SECONDS}` }, { status: 400 });
     }
 
     const durationSeconds = parsedDurationSeconds ?? DEFAULT_DURATION_SECONDS;
     const heartbeatSeconds = parsedHeartbeatSeconds ?? DEFAULT_HEARTBEAT_SECONDS;
 
     if (durationSeconds < 0 || durationSeconds > MAX_DURATION_SECONDS) {
-      return NextResponse.json(
-        { error: `durationSeconds must be an integer between 0 and ${MAX_DURATION_SECONDS}` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `durationSeconds must be an integer between 0 and ${MAX_DURATION_SECONDS}` }, { status: 400 });
     }
 
     if (heartbeatSeconds < MIN_HEARTBEAT_SECONDS || heartbeatSeconds > MAX_HEARTBEAT_SECONDS) {
-      return NextResponse.json(
-        { error: `heartbeatSeconds must be an integer between ${MIN_HEARTBEAT_SECONDS} and ${MAX_HEARTBEAT_SECONDS}` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `heartbeatSeconds must be an integer between ${MIN_HEARTBEAT_SECONDS} and ${MAX_HEARTBEAT_SECONDS}` }, { status: 400 });
     }
 
     ailogger.info(`[StreamingDiagnostic] Starting ${durationSeconds}s diagnostic for host ${host}`);

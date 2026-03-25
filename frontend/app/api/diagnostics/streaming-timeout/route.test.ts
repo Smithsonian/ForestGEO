@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GET, isAllowedStreamingDiagnosticHost } from './route';
+import { GET } from './route';
+import { isAllowedStreamingDiagnosticHost } from './helpers';
 
 vi.mock('@/ailogger', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() }

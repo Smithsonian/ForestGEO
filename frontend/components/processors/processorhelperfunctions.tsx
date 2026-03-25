@@ -645,7 +645,9 @@ export async function runCombinedCrossCensusLocationValidations(
       if (isRetryableValidationExecutionError(e)) {
         const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
+          ailogger.error(
+            `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`
+          );
           const finalError = `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`;
           try {
             await connectionManager.rollbackTransaction(transactionID);

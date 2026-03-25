@@ -122,9 +122,7 @@ export default function UploadParentModal(props: UPMProps) {
                         Destructive
                       </Chip>
                     </Box>
-                    <Typography level="body-sm">
-                      Deletes all existing {formType} data, then inserts the uploaded file as the new source of truth.
-                    </Typography>
+                    <Typography level="body-sm">Deletes all existing {formType} data, then inserts the uploaded file as the new source of truth.</Typography>
                   </Stack>
                 </CardContent>
                 <CardActions sx={{ justifyContent: 'flex-start' }}>
