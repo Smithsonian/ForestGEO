@@ -9,6 +9,7 @@ import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
+import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 
 interface UploadReingestionProps {
   schema: string;
@@ -31,6 +32,7 @@ interface UploadReingestionProps {
 const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReviewState, setIsDataUnsaved }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { startValidation } = useBackgroundValidation();
   const [totalBatches, setTotalBatches] = useState(0);
   const [processedChunks, setProcessedChunks] = useState<number>(0);
   const [processETC, setProcessETC] = useState('');
@@ -510,12 +512,17 @@ const UploadReingestion: React.FC<UploadReingestionProps> = ({ schema, setReview
         return;
       }
 
-      ailogger.info('[REINGESTION COMPLETE] Reingestion finished successfully - transitioning to VALIDATE state');
+      ailogger.info('[REINGESTION COMPLETE] Reingestion finished successfully - starting background validation');
       setIsVerifying(false);
       setVerificationStatus('Reingestion completed successfully');
       setVerificationStep(0);
       setTotalVerificationSteps(0);
-      setReviewState(ReviewStates.VALIDATE);
+      const plotID = currentPlot?.plotID;
+      const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+      if (schema && plotID && censusID) {
+        startValidation({ schema, plotID, censusID });
+      }
+      setReviewState(ReviewStates.UPLOAD_AZURE);
       setIsDataUnsaved(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

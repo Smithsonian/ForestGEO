@@ -23,7 +23,9 @@ import {
   parseUploadSessionConflict,
   readResponsePayload
 } from '@/components/uploadsystemhelpers/uploadsessionconflicts';
+import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedParser } from '@/components/uploadsystemhelpers/uploadqueueguards';
 import { generateShortBatchID } from '@/config/utils';
+import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 
 function createAbortError(message: string): Error {
   const error = new Error(message);
@@ -86,6 +88,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const currentCensus = useOrgCensusContext();
   const currentPlotID = currentPlot?.plotID ?? null;
   const currentCensusID = currentCensus?.dateRanges?.[0]?.censusID ?? null;
+  const { startValidation } = useBackgroundValidation();
   const fatalUploadErrorRef = useRef<Error | null>(null);
 
   const markFatalUploadError = useCallback((error: Error): Error => {
@@ -460,11 +463,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploaded, completedChunks, totalChunks]);
 
   // Calculate unified ETA based on overall progress
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- calculateOverallProgressValue is intentionally
+  // omitted: its underlying values (completedChunks, processedChunks, verificationStep, etc.) are already
+  // listed, and including the callback itself causes an infinite re-render loop because useCallback recreates
+  // the reference whenever any of its 12 deps change, triggering this effect, which calls setUnifiedETA,
+  // which re-renders, which may recreate the callback again.
   useEffect(() => {
     if (uploadForm === 'measurements' && !processed) {
       const currentProgress = calculateOverallProgressValue();
 
-      // Only calculate if we have some progress started
       if (currentProgress > 0 && currentProgress < 100) {
         const etaMs = unifiedETACalculator.current.update(currentProgress, 100);
 
@@ -477,7 +484,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setUnifiedETA('Complete');
       }
     }
-  }, [uploadForm, processed, calculateOverallProgressValue, completedChunks, processedChunks, verificationStep]);
+  }, [uploadForm, processed, completedChunks, processedChunks, verificationStep, uploaded, totalChunks, totalBatches, isVerifying, totalVerificationSteps]);
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
@@ -925,7 +932,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   // Wait until the queue has room before resuming (with timeout protection)
                   const startTime = Date.now();
                   while (queue.size >= queuePauseThreshold) {
-                    if (Date.now() - startTime > queueWaitTimeoutMs) {
+                    if (fatalUploadErrorRef.current) {
+                      parser.abort();
+                      throw fatalUploadErrorRef.current;
+                    }
+                    if (shouldTimeoutPausedParser(queue.size, queuePauseThreshold, activeOperations.current.size, Date.now() - startTime, queueWaitTimeoutMs)) {
                       ailogger.error(`Queue wait timeout: queue size ${queue.size} did not drop below ${queuePauseThreshold} within ${queueWaitTimeoutMs}ms`);
                       throw new Error(`Queue processing stalled - timeout after ${queueWaitTimeoutMs}ms`);
                     }
@@ -974,14 +985,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     if (errorObj.name === 'AbortError') {
                       return;
                     }
-                    if (isUploadSessionRestartRequiredError(errorObj)) {
-                      markFatalUploadError(errorObj);
-                      queue.clear();
-                      parser.abort();
-                    }
+                    const fatalError = abortChunkProcessingAfterPermanentUploadFailure(errorObj, {
+                      clearQueue: () => queue.clear(),
+                      abortParser: () => parser.abort(),
+                      markFatalUploadError
+                    });
                     ailogger.error(`Chunk upload failed for ${file.name}:`, errorObj);
                     if (!firstChunkUploadError) {
-                      firstChunkUploadError = fatalUploadErrorRef.current ?? errorObj;
+                      firstChunkUploadError = fatalError;
                     }
                   } finally {
                     // Always increment completed chunks to ensure progress updates
@@ -2012,7 +2023,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
 
           hasUploaded.current = true;
-          setReviewState(ReviewStates.VALIDATE);
+          // Trigger background validation instead of blocking on VALIDATE state
+          if (schema && currentPlotID && currentCensusID) {
+            startValidation({ schema, plotID: currentPlotID, censusID: currentCensusID });
+          }
+          setReviewState(ReviewStates.UPLOAD_AZURE);
           setIsDataUnsaved(false);
         }
       } else {

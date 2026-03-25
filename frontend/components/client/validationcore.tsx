@@ -5,6 +5,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
+import { readValidationStream } from '@/components/processors/readvalidationstream';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 type ValidationExecutionResult = { procedureName: string; success: boolean; error?: string };
@@ -71,6 +72,12 @@ type VCProps = {
   onValidationComplete?: (result: ValidationResult) => void;
 };
 
+/**
+ * @deprecated Use ValidationRunner (config/validation-runner.ts) + useBackgroundValidation hook
+ * instead. This synchronous component blocks the UI during validation and is susceptible to
+ * Azure timeout on large datasets. Kept temporarily for the manual re-validation modal in
+ * measurementscommons.tsx — migrate that caller to the background runner before removing.
+ */
 export default function ValidationCore({ onValidationComplete }: VCProps) {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
@@ -207,16 +214,16 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             })
           });
 
-          const payload = await response.json().catch(() => null);
-
           if (!response.ok) {
-            const serverError = payload?.error || `HTTP ${response.status}`;
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
             throw new Error(`Error executing ${procedureName}: ${serverError}`);
           }
 
-          if (payload === false || payload?.success === false) {
-            const serverError = payload?.error || 'unknown server error';
-            throw new Error(`Validation returned failure for ${procedureName}: ${serverError}`);
+          const payload = await readValidationStream<boolean>(response, abortControllerRef.current?.signal);
+
+          if (payload === false) {
+            throw new Error(`Validation returned failure for ${procedureName}`);
           }
 
           if (isMounted.current) {
@@ -269,10 +276,19 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             })
           });
 
-          const payload = await response.json().catch(() => null);
-          if (!response.ok || payload?.success === false) {
-            const serverError = payload?.error || `HTTP ${response.status}`;
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
             throw new Error(`Error executing shared DBH validations: ${serverError}`);
+          }
+
+          const payload = await readValidationStream<{ success: boolean; ranGrowth: boolean; ranShrinkage: boolean; error?: string }>(
+            response,
+            abortControllerRef.current?.signal
+          );
+
+          if (!payload.success) {
+            throw new Error(`Shared DBH validations failed: ${payload.error ?? 'unknown error'}`);
           }
 
           if (isMounted.current) {
@@ -328,10 +344,21 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             })
           });
 
-          const payload = await response.json().catch(() => null);
-          if (!response.ok || payload?.success === false) {
-            const serverError = payload?.error || `HTTP ${response.status}`;
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
             throw new Error(`Error executing shared cross-census location validations: ${serverError}`);
+          }
+
+          const payload = await readValidationStream<{
+            success: boolean;
+            ranQuadratMismatch: boolean;
+            ranCoordinateDrift: boolean;
+            error?: string;
+          }>(response, abortControllerRef.current?.signal);
+
+          if (!payload.success) {
+            throw new Error(`Shared cross-census location validations failed: ${payload.error ?? 'unknown error'}`);
           }
 
           if (isMounted.current) {

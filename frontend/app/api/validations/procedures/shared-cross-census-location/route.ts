@@ -1,14 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { runCombinedCrossCensusLocationValidations } from '@/components/processors/processorhelperfunctions';
-import { HTTPResponses } from '@/config/macros';
+import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
 
 // Cross-census validations JOIN across large tables and can legitimately
-// take several minutes on 200K+ row datasets.  Allow up to 10 minutes so
-// the request isn't killed by the platform while the procedure is running.
-export const maxDuration = 600;
+// take well over 10 minutes on 200K+ row datasets. Keep the route budget
+// slightly above the MySQL statement limit so the database can fail first
+// and return an error instead of the client seeing an abrupt disconnect.
+export const maxDuration = 1500;
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,18 +20,11 @@ export async function POST(request: NextRequest) {
       throw new Error('schema not provided');
     }
 
-    const result = await runCombinedCrossCensusLocationValidations(schema, {
-      p_CensusID,
-      p_PlotID
-    });
+    const stream = streamWithHeartbeats(() => runCombinedCrossCensusLocationValidations(schema, { p_CensusID, p_PlotID }));
 
-    if (!result.success) {
-      return NextResponse.json(result, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
-    }
-
-    return NextResponse.json(result, { status: HTTPResponses.OK });
+    return new Response(stream, { headers: STREAMING_RESPONSE_HEADERS });
   } catch (error: any) {
     ailogger.error('Error during combined cross-census location validation:', error.message);
-    return NextResponse.json({ error: error.message, success: false }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return Response.json({ error: error.message, success: false }, { status: 500 });
   }
 }

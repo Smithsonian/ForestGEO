@@ -1,9 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { runCombinedDBHValidations } from '@/components/processors/processorhelperfunctions';
-import { HTTPResponses } from '@/config/macros';
+import { streamWithHeartbeats, STREAMING_RESPONSE_HEADERS } from '@/components/processors/streamingvalidation';
 import ailogger from '@/ailogger';
 
 export const runtime = 'nodejs';
+
+// DBH growth/shrinkage validations JOIN across large tables and can take
+// several minutes on 200K+ row datasets.  Match the cross-census location
+// route's 10-minute ceiling so Azure doesn't kill the request early.
+export const maxDuration = 600;
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,18 +19,11 @@ export async function POST(request: NextRequest) {
       throw new Error('schema not provided');
     }
 
-    const result = await runCombinedDBHValidations(schema, {
-      p_CensusID,
-      p_PlotID
-    });
+    const stream = streamWithHeartbeats(() => runCombinedDBHValidations(schema, { p_CensusID, p_PlotID }));
 
-    if (!result.success) {
-      return NextResponse.json(result, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
-    }
-
-    return NextResponse.json(result, { status: HTTPResponses.OK });
+    return new Response(stream, { headers: STREAMING_RESPONSE_HEADERS });
   } catch (error: any) {
     ailogger.error('Error during combined DBH validation:', error.message);
-    return NextResponse.json({ error: error.message, success: false }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    return Response.json({ error: error.message, success: false }, { status: 500 });
   }
 }
