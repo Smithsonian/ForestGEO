@@ -31,6 +31,7 @@ import { Plot, Site, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
+import ValidationStatusBadge from '@/components/client/validationstatusbadge';
 import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
@@ -899,6 +900,15 @@ export default function Sidebar(props: SidebarProps) {
                           </Tooltip>
                         )}
                       </Box>
+                      {currentCensus && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                          <ValidationStatusBadge
+                            schema={currentSite?.schemaName}
+                            plotID={currentPlot?.plotID}
+                            censusID={currentCensus?.dateRanges?.[0]?.censusID}
+                          />
+                        </Box>
+                      )}
                       <Divider orientation="horizontal" sx={{ marginTop: 2 }} />
                     </>
                   )}

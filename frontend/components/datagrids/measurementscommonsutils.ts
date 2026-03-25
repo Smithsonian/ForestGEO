@@ -102,6 +102,21 @@ export function arePaginationModelsEqual(left: GridPaginationModel, right: GridP
   return left.page === right.page && left.pageSize === right.pageSize;
 }
 
+export function shouldUseAutoMeasurementRowHeight(userAgent?: string | null): boolean {
+  if (!userAgent) {
+    return true;
+  }
+
+  return !/firefox/i.test(userAgent);
+}
+
+export function shouldRefreshMeasurementsAfterValidationTransition(
+  previousStatus: 'idle' | 'running' | 'completed' | 'failed',
+  nextStatus: 'idle' | 'running' | 'completed' | 'failed'
+): boolean {
+  return previousStatus === 'running' && (nextStatus === 'completed' || nextStatus === 'failed');
+}
+
 export function createResetValidationErrorsQuery(schema: string, plotID: number, censusID: number): FormattedQueryRequest {
   return {
     query: `UPDATE ??.measurement_error_log mel

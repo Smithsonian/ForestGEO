@@ -16,6 +16,7 @@ import ailogger from '@/ailogger';
 
 type LoadStatus = 'pending' | 'success' | 'warning' | 'error' | 'skipped';
 const CLEANUP_TIMEOUT_MS = 5000;
+const REFRESH_TIMEOUT_MS = 15000;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, uploadForm } = props;
@@ -110,9 +111,13 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, census: 10 }));
       setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-      const response = await fetch(
+      const response = await withTimeout(
+        fetch(
         `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+        ),
+        REFRESH_TIMEOUT_MS
       );
 
       if (!response.ok) {
@@ -135,6 +140,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         return;
       }
 
+      setProgress(prev => ({ ...prev, census: 60 }));
       setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
       const censusList = await createAndUpdateCensusList(censusRDSLoad);
 
@@ -144,6 +150,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }
       setCensusListStore(censusList); // Also update Zustand store
 
+      setProgress(prev => ({ ...prev, census: 85 }));
       if (currentCensus) {
         const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, censusList);
         if (reconciledCensus) {
@@ -161,8 +168,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       ailogger.error('Error loading census data:', error instanceof Error ? error : new Error(String(error)));
       // Mark as complete even on error to prevent hanging
       setProgress(prev => ({ ...prev, census: 100 }));
-      setProgressText(prev => ({ ...prev, census: 'Census refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, census: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, census: isTimeout ? 'Census refresh timed out.' : 'Census refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, census: isTimeout ? 'warning' : 'error' }));
     }
   }, [
     uploadForm,
@@ -185,8 +193,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, plots: 10 }));
       setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
-      const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+      const plotsResponse = await withTimeout(fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`), REFRESH_TIMEOUT_MS);
 
       if (!plotsResponse.ok) {
         const errorBody = await plotsResponse.json().catch(() => ({}));
@@ -207,6 +216,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         return;
       }
 
+      setProgress(prev => ({ ...prev, plots: 70 }));
       setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
       if (plotListDispatch) {
         await plotListDispatch({ plotList: plotsData });
@@ -217,8 +227,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     } catch (error: unknown) {
       ailogger.error('Error loading plots data:', error instanceof Error ? error : new Error(String(error)));
       setProgress(prev => ({ ...prev, plots: 100 }));
-      setProgressText(prev => ({ ...prev, plots: 'Plots refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, plots: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, plots: isTimeout ? 'Plots refresh timed out.' : 'Plots refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, plots: isTimeout ? 'warning' : 'error' }));
     }
   }, [currentSite, plotListDispatch]);
 
@@ -231,9 +242,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, quadrats: 10 }));
       setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
-      const quadratsResponse = await fetch(
-        `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
+      const quadratsResponse = await withTimeout(
+        fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`),
+        REFRESH_TIMEOUT_MS
       );
 
       if (!quadratsResponse.ok) {
@@ -255,6 +268,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         return;
       }
 
+      setProgress(prev => ({ ...prev, quadrats: 70 }));
       setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
       if (quadratListDispatch) {
         await quadratListDispatch({ quadratList: quadratsData });
@@ -265,24 +279,41 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     } catch (error: unknown) {
       ailogger.error('Error loading quadrats data:', error instanceof Error ? error : new Error(String(error)));
       setProgress(prev => ({ ...prev, quadrats: 100 }));
-      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, quadrats: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, quadrats: isTimeout ? 'Quadrats refresh timed out.' : 'Quadrats refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, quadrats: isTimeout ? 'warning' : 'error' }));
     }
   }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
+  // Run post-upload refresh exactly once on mount.
+  // loadCensusData mutates currentCensus (via censusDispatch), so including
+  // currentCensus?.dateRanges in deps caused an infinite loop: effect runs →
+  // census dispatch updates context → dateRanges changes → effect re-runs.
+  const hasRunRef = useRef(false);
   useEffect(() => {
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+
     const abortController = new AbortController();
 
-    // Reset progress for each effect run (StrictMode may re-run this)
     setProgress({ census: 0, plots: 0, quadrats: 0 });
     setAllLoadsCompleted(false);
 
     const runAsyncTasks = async () => {
       try {
-        await cleanupTemporaryMeasurements(abortController.signal);
+        setProgress(prev => ({ ...prev, census: 5 }));
+        void cleanupTemporaryMeasurements(abortController.signal).catch((error: unknown) => {
+          if (!abortController.signal.aborted) {
+            ailogger.error('[UploadComplete] Unexpected cleanup error:', error instanceof Error ? error : new Error(String(error)));
+          }
+        });
         if (abortController.signal.aborted) return;
-        triggerRefresh();
-        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
+        try {
+          triggerRefresh();
+        } catch (error: unknown) {
+          ailogger.error('[UploadComplete] Failed to trigger validity refresh:', error instanceof Error ? error : new Error(String(error)));
+        }
+        await Promise.allSettled([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         if (!abortController.signal.aborted) {
           setAllLoadsCompleted(true);
         }
@@ -295,17 +326,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     runAsyncTasks().catch(ailogger.error);
 
     return () => abortController.abort();
-  }, [
-    cleanupTemporaryMeasurements,
-    currentCensus?.dateRanges,
-    currentPlot?.plotID,
-    currentSite?.schemaName,
-    loadCensusData,
-    loadPlotsData,
-    loadQuadratsData,
-    triggerRefresh,
-    uploadForm
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally run once on mount;
+    // loadCensusData updates currentCensus context which would re-trigger this effect
+  }, []);
 
   // Calculate overall progress as average of the three data loads
   const overallProgress = (progress.census + progress.plots + progress.quadrats) / 3;

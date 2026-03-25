@@ -6,7 +6,9 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
-  mergeMeasurementFilterModel
+  mergeMeasurementFilterModel,
+  shouldRefreshMeasurementsAfterValidationTransition,
+  shouldUseAutoMeasurementRowHeight
 } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
@@ -72,8 +74,8 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       const previousModel = {
         items: [{ field: 'speciesCode', operator: 'contains', value: 'ACRU' }],
         quickFilterValues: ['tag-1'],
-        visible: ['errors', 'valid', 'pending'] as const,
-        tss: ['old tree', 'multi stem', 'new recruit'] as const
+        visible: ['errors', 'valid', 'pending'] as ('errors' | 'valid' | 'pending')[],
+        tss: ['old tree', 'multi stem', 'new recruit'] as ('old tree' | 'multi stem' | 'new recruit')[]
       };
 
       const nextModel = mergeMeasurementFilterModel(previousModel, {
@@ -97,6 +99,20 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
     it('treats identical sort models as equal', () => {
       expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'asc' }])).toBe(true);
       expect(areGridSortModelsEqual([{ field: 'measurementDate', sort: 'asc' }], [{ field: 'measurementDate', sort: 'desc' }])).toBe(false);
+    });
+
+    it('disables auto row height on Firefox to avoid DataGrid resize loops', () => {
+      expect(shouldUseAutoMeasurementRowHeight('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:137.0) Gecko/20100101 Firefox/137.0')).toBe(false);
+      expect(shouldUseAutoMeasurementRowHeight('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.4 Safari/605.1.15')).toBe(
+        true
+      );
+    });
+
+    it('refreshes the measurements grid after a background validation run finishes', () => {
+      expect(shouldRefreshMeasurementsAfterValidationTransition('running', 'completed')).toBe(true);
+      expect(shouldRefreshMeasurementsAfterValidationTransition('running', 'failed')).toBe(true);
+      expect(shouldRefreshMeasurementsAfterValidationTransition('completed', 'completed')).toBe(false);
+      expect(shouldRefreshMeasurementsAfterValidationTransition('idle', 'running')).toBe(false);
     });
   });
 

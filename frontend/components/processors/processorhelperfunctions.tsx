@@ -274,6 +274,27 @@ function isRetryableValidationLockError(error: any) {
   return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213 || error?.code === 'ER_LOCK_WAIT_TIMEOUT' || error?.errno === 1205;
 }
 
+function isRetryableValidationConnectionError(error: any) {
+  const message = String(error?.message ?? '');
+
+  return (
+    error?.code === 'ECONNRESET' ||
+    error?.code === 'PROTOCOL_CONNECTION_LOST' ||
+    error?.code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR' ||
+    error?.code === 'ER_CONNECTION_KILLED' ||
+    error?.errno === 1927 ||
+    error?.errno === 2013 ||
+    message.includes('Connection lost') ||
+    message.includes('server has gone away') ||
+    message.includes('server closed the connection') ||
+    message.includes('Connection was killed')
+  );
+}
+
+function isRetryableValidationExecutionError(error: any) {
+  return isRetryableValidationLockError(error) || isRetryableValidationConnectionError(error);
+}
+
 type ValidationExecutionParams = {
   p_CensusID?: number | null;
   p_PlotID?: number | null;
@@ -406,9 +427,10 @@ export async function runValidation(
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {
-      if (isRetryableValidationLockError(e)) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
+          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
@@ -417,7 +439,7 @@ export async function runValidation(
           return false;
         }
 
-        ailogger.info(`Validation attempt ${attempt}: retryable lock error encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
+        ailogger.info(`Validation attempt ${attempt}: ${retryReason} encountered (error code: ${e.code || e.errno || 'n/a'}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -491,9 +513,11 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
       await connectionManager.commitTransaction(transactionID);
       return { success: true, ranGrowth, ranShrinkage };
     } catch (e: any) {
-      if (isRetryableValidationLockError(e)) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
+          ailogger.error(`Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
+          const finalError = `Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`;
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
@@ -503,11 +527,11 @@ export async function runCombinedDBHValidations(schema: string, params: Validati
             success: false,
             ranGrowth: false,
             ranShrinkage: false,
-            error: `Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to lock contention/timeouts`
+            error: finalError
           };
         }
 
-        ailogger.info(`Combined DBH validation attempt ${attempt}: retryable lock error encountered. Retrying after ${delay}ms...`);
+        ailogger.info(`Combined DBH validation attempt ${attempt}: ${retryReason} encountered. Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -591,10 +615,11 @@ export async function runCombinedCrossCensusLocationValidations(
       }
 
       if (ranQuadratMismatch || ranCoordinateDrift) {
-        // Set a 10-minute MySQL statement timeout so an unoptimised query
-        // cannot run for 54+ minutes and orphan a connection.  10 minutes
-        // is needed for large cross-census comparisons (e.g. 212K × 192K rows).
-        const CROSS_CENSUS_TIMEOUT_MS = 10 * 60 * 1000;
+        // Keep the database-side timeout below the route/client timeouts so
+        // long-running comparisons fail cleanly with a SQL error rather than
+        // a dropped HTTP request. Large cross-census comparisons can exceed
+        // 10 minutes on 200K+ row datasets.
+        const CROSS_CENSUS_TIMEOUT_MS = 24 * 60 * 1000;
         await connectionManager.executeQuery(`SET SESSION MAX_EXECUTION_TIME = ${CROSS_CENSUS_TIMEOUT_MS}`, [], transactionID);
 
         try {
@@ -617,9 +642,11 @@ export async function runCombinedCrossCensusLocationValidations(
       await connectionManager.commitTransaction(transactionID);
       return { success: true, ranQuadratMismatch, ranCoordinateDrift };
     } catch (e: any) {
-      if (isRetryableValidationLockError(e)) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent lock contention/timeouts`);
+          ailogger.error(`Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
+          const finalError = `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`;
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
@@ -629,11 +656,11 @@ export async function runCombinedCrossCensusLocationValidations(
             success: false,
             ranQuadratMismatch: false,
             ranCoordinateDrift: false,
-            error: `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to lock contention/timeouts`
+            error: finalError
           };
         }
 
-        ailogger.info(`Combined cross-census location validation attempt ${attempt}: retryable lock error encountered. Retrying after ${delay}ms...`);
+        ailogger.info(`Combined cross-census location validation attempt ${attempt}: ${retryReason} encountered. Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {

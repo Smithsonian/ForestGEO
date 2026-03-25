@@ -67,6 +67,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
+import { useBackgroundValidationState } from '@/config/store/appstore';
 import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
@@ -92,12 +93,16 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
-  mergeMeasurementFilterModel
+  mergeMeasurementFilterModel,
+  shouldRefreshMeasurementsAfterValidationTransition,
+  shouldUseAutoMeasurementRowHeight
 } from './measurementscommonsutils';
 import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
 
 // Stable reference to prevent infinite resize observer loop in MUI DataGrid
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
+const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
+const FIREFOX_FIXED_ROW_HEIGHT = 112;
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -227,14 +232,20 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const { setLoading } = useLoading();
   // use the session
   const { data: session } = useSession();
+  const { status: backgroundValidationStatus } = useBackgroundValidationState();
   // Track mounted state for safe state updates in deferred callbacks
   const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const useAutoMeasurementRowHeight = useMemo(
+    () => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent),
+    []
+  );
 
   const PAGE_CACHE_TTL_MS = 30_000;
   const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+  const previousValidationStatusRef = useRef(backgroundValidationStatus);
 
   const refreshMeasurementsSummaryView = useCallback(async () => {
     if (!currentSite?.schemaName) {
@@ -519,6 +530,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // Only trigger on refresh flag changes — callback identity changes should not re-trigger
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh]);
+
+  useEffect(() => {
+    const previousStatus = previousValidationStatusRef.current;
+    if (shouldRefreshMeasurementsAfterValidationTransition(previousStatus, backgroundValidationStatus)) {
+      setRefresh(true);
+    }
+    previousValidationStatusRef.current = backgroundValidationStatus;
+  }, [backgroundValidationStatus, setRefresh]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -1529,7 +1548,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             showToolbar
-            getRowHeight={AUTO_ROW_HEIGHT}
+            getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
+            getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
+            rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
             isCellEditable={() => !locked}
           />
         </Box>
