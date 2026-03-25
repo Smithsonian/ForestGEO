@@ -62,12 +62,16 @@ describe('upload procedure regressions', () => {
   it('builds a deduped previous-census lookup before cross-census location validation aggregation', () => {
     const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
 
+    expect(canonicalSql).toContain('CREATE TEMPORARY TABLE current_cross_census_previous_map');
+    expect(canonicalSql).toContain('INSERT INTO current_cross_census_previous_map (CurrentCensusID, PreviousCensusID)');
+    expect(canonicalSql).toContain('SELECT c.CensusID, MAX(c_prev.CensusID) AS PreviousCensusID');
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE current_cross_census_keys');
     expect(canonicalSql).toContain('INSERT IGNORE INTO current_cross_census_keys (PreviousCensusID, TreeTag, StemTag)');
     expect(canonicalSql).toContain('CREATE TEMPORARY TABLE previous_cross_census_lookup');
     expect(canonicalSql).toContain('SELECT DISTINCT scope_keys.PreviousCensusID,');
     expect(canonicalSql).toContain('FROM current_cross_census_scope scope JOIN previous_cross_census_lookup prev_lookup');
     expect(canonicalSql).toContain('GROUP BY scope.CoreMeasurementID;');
+    expect(canonicalSql).toContain('JOIN current_cross_census_previous_map prev_map ON prev_map.CurrentCensusID = c.CensusID');
     expect(canonicalSql).not.toContain('INSERT INTO measurement_error_log (MeasurementID, ErrorID) SELECT scope.CoreMeasurementID');
   });
 

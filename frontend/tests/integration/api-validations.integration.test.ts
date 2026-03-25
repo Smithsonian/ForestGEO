@@ -25,9 +25,11 @@ import {
   runBulkIngestion,
   getValidationErrors,
   insertCrossCensusMeasurements,
+  insertDirectMeasurements,
   runValidationForTest,
   seedStatusAttributes,
   setupTwoCensusScenario,
+  createAdditionalCensus,
   type TestData
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
@@ -576,6 +578,79 @@ describe('Validation API Integration Tests', () => {
       } finally {
         await connection.query('UPDATE sitespecificvalidations SET IsEnabled = 1 WHERE ValidationID = 18');
       }
+    });
+
+    it('should select one previous census row when multiple active rows share the prior PlotCensusNumber', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName1 = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+      const quadratName2 = testData.quadrats[1]?.QuadratName || testData.quadrats[1]?.Quadrat;
+      const treeTag = 'API_DUP_PREV_SCOPE';
+
+      if (!speciesCode || !quadratName1 || !quadratName2) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
+        {
+          treeTag,
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName2,
+          quadratName2: quadratName1,
+          x: 30,
+          y: 30,
+          x2: 10,
+          y2: 10,
+          census1DBH: 100,
+          census2DBH: 110,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      const duplicatePrevious = await createAdditionalCensus(connection, testData, {
+        plotCensusNumber: 1,
+        startDate: '2024-07-01',
+        endDate: '2024-12-31'
+      });
+
+      await insertDirectMeasurements(connection, testData, duplicatePrevious.censusID, [
+        {
+          treeTag,
+          stemTag: 'S001',
+          speciesCode,
+          quadratName: quadratName1,
+          x: 10,
+          y: 10,
+          dbh: 105,
+          hom: 1.3,
+          date: '2024-09-15',
+          codes: 'A'
+        }
+      ]);
+
+      const result = await runCombinedCrossCensusLocationValidationsDirect(connection, {
+        censusID: census2ID,
+        plotID
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.ranQuadratMismatch).toBe(true);
+      expect(result.ranCoordinateDrift).toBe(true);
+
+      const quadratMismatchErrors = await getValidationErrors(connection, {
+        validationID: 17,
+        treeTag
+      });
+      const coordinateDriftErrors = await getValidationErrors(connection, {
+        validationID: 18,
+        treeTag
+      });
+
+      expect(quadratMismatchErrors.length).toBe(0);
+      expect(coordinateDriftErrors.length).toBe(0);
     });
   });
 

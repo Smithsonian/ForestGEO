@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-37 in order against a target schema.
+# Runs migrations 16-38 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -48,6 +48,7 @@ ORDERED_MIGRATIONS=(
     "35_add_temporarymeasurements_session_id.sql"
     "36_add_error_log_indexes.sql"
     "37_seed_duplicate_conflict_error_codes.sql"
+    "38_create_validation_runs.sql"
 )
 
 # ---------------------------------------------------------------------------

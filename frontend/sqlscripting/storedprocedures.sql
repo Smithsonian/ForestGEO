@@ -982,6 +982,30 @@ BEGIN
         END IF;
     END IF;
 
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_previous_map;
+    CREATE TEMPORARY TABLE current_cross_census_previous_map
+    (
+        CurrentCensusID  int NOT NULL PRIMARY KEY,
+        PreviousCensusID int NOT NULL,
+        KEY idx_previous_census_id (PreviousCensusID)
+    );
+
+    -- A plot census number can span multiple active census rows (date-range periods).
+    -- Pick one deterministic predecessor row per current census up front so each
+    -- CoreMeasurementID enters the scope table at most once.
+    INSERT INTO current_cross_census_previous_map (CurrentCensusID, PreviousCensusID)
+    SELECT c.CensusID,
+           MAX(c_prev.CensusID) AS PreviousCensusID
+    FROM census c
+             JOIN census c_prev
+                  ON c_prev.PlotID = c.PlotID
+                      AND c_prev.PlotCensusNumber = c.PlotCensusNumber - 1
+                      AND c_prev.IsActive = 1
+    WHERE c.IsActive = 1
+      AND (p_CensusID IS NULL OR c.CensusID = p_CensusID)
+      AND (p_PlotID IS NULL OR c.PlotID = p_PlotID)
+    GROUP BY c.CensusID;
+
     DROP TEMPORARY TABLE IF EXISTS current_cross_census_scope;
     CREATE TEMPORARY TABLE current_cross_census_scope
     (
@@ -997,7 +1021,7 @@ BEGIN
 
     INSERT INTO current_cross_census_scope (CoreMeasurementID, PreviousCensusID, TreeTag, StemTag, CurrentQuadratName, CurrentLocalX, CurrentLocalY)
     SELECT cm.CoreMeasurementID,
-           c_prev.CensusID,
+           prev_map.PreviousCensusID,
            t.TreeTag,
            s.StemTag,
            q_cur.QuadratName,
@@ -1007,10 +1031,8 @@ BEGIN
              JOIN census c
                   ON c.CensusID = cm.CensusID
                       AND c.IsActive = 1
-             JOIN census c_prev
-                  ON c_prev.PlotID = c.PlotID
-                      AND c_prev.PlotCensusNumber = c.PlotCensusNumber - 1
-                      AND c_prev.IsActive = 1
+             JOIN current_cross_census_previous_map prev_map
+                  ON prev_map.CurrentCensusID = c.CensusID
              JOIN stems s
                   ON s.StemGUID = cm.StemGUID
                       AND s.CensusID = cm.CensusID
@@ -1132,6 +1154,7 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS previous_cross_census_lookup;
     DROP TEMPORARY TABLE IF EXISTS current_cross_census_keys;
     DROP TEMPORARY TABLE IF EXISTS current_cross_census_scope;
+    DROP TEMPORARY TABLE IF EXISTS current_cross_census_previous_map;
 END $$
 
 create

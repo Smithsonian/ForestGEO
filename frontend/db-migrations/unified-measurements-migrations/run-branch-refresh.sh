@@ -53,6 +53,7 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "35_add_temporarymeasurements_session_id.sql"
     "36_add_error_log_indexes.sql"
     "37_seed_duplicate_conflict_error_codes.sql"
+    "38_create_validation_runs.sql"
 )
 
 REQUIRED_BASE_TABLES=(

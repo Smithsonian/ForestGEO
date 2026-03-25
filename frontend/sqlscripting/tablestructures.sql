@@ -1197,6 +1197,28 @@ create index idx_uploadmetrics_censusid
 create index idx_uploadmetrics_status
     on uploadmetrics (status);
 
+-- =====================================================================================
+-- Validation Runs (background validation tracking)
+-- =====================================================================================
+
+create table if not exists validation_runs
+(
+    RunID          int auto_increment primary key,
+    PlotID         int                                                      not null,
+    CensusID       int                                                      not null,
+    Status         enum ('running', 'completed', 'failed', 'cancelled')     not null default 'running',
+    TotalSteps     int                                                      not null default 0,
+    CompletedSteps int                                                      not null default 0,
+    FailedSteps    int                                                      not null default 0,
+    CurrentStep    varchar(100)                                             null,
+    ErrorMessages  json                                                     null,
+    StartedAt      datetime                                                 default CURRENT_TIMESTAMP not null,
+    CompletedAt    datetime                                                 null
+);
+
+create index idx_validation_runs_active
+    on validation_runs (PlotID, CensusID, Status);
+
 create index idx_uploadmetrics_dataloss
     on uploadmetrics (dataLossDetected);
 
