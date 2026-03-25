@@ -103,7 +103,10 @@ describe('admin clear failedmeasurements route', () => {
   it('DELETE clears failed measurements across all censusIDs for the selected logical census', async () => {
     mockExecuteQuery.mockResolvedValueOnce([{ total: 3 }]).mockResolvedValueOnce(undefined);
 
-    const response = await DELETE(new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any, makeParams());
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams()
+    );
 
     expect(response.status).toBe(200);
     expect(mockBeginTransaction).toHaveBeenCalledTimes(1);
@@ -134,7 +137,10 @@ describe('admin clear failedmeasurements route', () => {
   it('DELETE rejects authenticated non-admin users', async () => {
     authMock.mockResolvedValueOnce({ user: { id: 'test-user-id', userStatus: 'field crew' } });
 
-    const response = await DELETE(new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any, makeParams());
+    const response = await DELETE(
+      new Request('http://localhost/api/admin/clear/failedmeasurements/forestgeo_testing/1/2', { method: 'DELETE' }) as any,
+      makeParams()
+    );
 
     expect(response.status).toBe(403);
     expect(mockBeginTransaction).not.toHaveBeenCalled();

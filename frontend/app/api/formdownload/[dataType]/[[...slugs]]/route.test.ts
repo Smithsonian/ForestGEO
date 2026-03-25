@@ -301,10 +301,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
 
     const res = await GET(
       makeRequest(),
-      makeProps(
-        'measurements',
-        ['myschema', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })]
-      )
+      makeProps('measurements', ['myschema', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })])
     );
 
     expect(res.status).toBe(HTTPResponses.OK);

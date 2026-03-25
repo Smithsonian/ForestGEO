@@ -9,7 +9,14 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, useOrgCensusDispatch, useOrgCensusListContext, useOrgCensusListDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
+import {
+  useOrgCensusContext,
+  useOrgCensusDispatch,
+  useOrgCensusListContext,
+  useOrgCensusListDispatch,
+  usePlotContext,
+  useSiteContext
+} from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -307,7 +314,14 @@ export default function DashboardPage() {
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID, currentCensus?.plotCensusNumber, censusDispatch, censusListDispatch]);
+  }, [
+    currentSite?.schemaName,
+    currentPlot?.plotID,
+    currentCensus?.dateRanges?.[0]?.censusID,
+    currentCensus?.plotCensusNumber,
+    censusDispatch,
+    censusListDispatch
+  ]);
 
   // Census handlers
   const handleCensusDelete = useCallback((census: CensusWithStats | OrgCensusRDS) => {
@@ -644,7 +658,7 @@ export default function DashboardPage() {
             isLoading={false}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
-            onSelectCensus={(census) => {
+            onSelectCensus={census => {
               if (censusDispatch) {
                 const orgCensus = censusListContext?.find(c => c?.plotCensusNumber === census.plotCensusNumber);
                 censusDispatch({ census: orgCensus });

@@ -52,9 +52,7 @@ const SELECTORS = {
 function selectFirstSiteOption() {
   cy.get(SELECTORS.SITE_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).click();
   // Use aria-label pattern to find allowed site options (skipping "None" / deselect)
-  cy.get('[role="listbox"] [role="option"][aria-label^="Select "]', { timeout: TIMEOUTS.SELECTOR_POPULATE })
-    .first()
-    .click();
+  cy.get('[role="listbox"] [role="option"][aria-label^="Select "]', { timeout: TIMEOUTS.SELECTOR_POPULATE }).first().click();
 }
 
 /**
@@ -63,9 +61,7 @@ function selectFirstSiteOption() {
 function selectFirstPlotOption() {
   cy.get(SELECTORS.PLOT_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).click();
   // Plot options have aria-label="plot name option: {name}"
-  cy.get('[role="listbox"] [role="option"][aria-label^="plot name"]', { timeout: TIMEOUTS.SELECTOR_POPULATE })
-    .first()
-    .click();
+  cy.get('[role="listbox"] [role="option"][aria-label^="plot name"]', { timeout: TIMEOUTS.SELECTOR_POPULATE }).first().click();
 }
 
 /**
@@ -73,9 +69,7 @@ function selectFirstPlotOption() {
  */
 function selectFirstCensusOption() {
   cy.get(SELECTORS.CENSUS_SELECT, { timeout: TIMEOUTS.PAGE_LOAD }).click();
-  cy.get('[role="listbox"] [role="option"]', { timeout: TIMEOUTS.SELECTOR_POPULATE })
-    .first()
-    .click();
+  cy.get('[role="listbox"] [role="option"]', { timeout: TIMEOUTS.SELECTOR_POPULATE }).first().click();
 }
 
 describe('Census Creation & Management', () => {
@@ -106,9 +100,7 @@ describe('Census Creation & Management', () => {
 
       // At least one site option should be available from the DB
       // MUI Joy renders options in a portal listbox
-      cy.get('[role="listbox"]', { timeout: TIMEOUTS.SELECTOR_POPULATE })
-        .find('[role="option"]')
-        .should('have.length.greaterThan', 0);
+      cy.get('[role="listbox"]', { timeout: TIMEOUTS.SELECTOR_POPULATE }).find('[role="option"]').should('have.length.greaterThan', 0);
     });
 
     it('should load plots after selecting a site', () => {

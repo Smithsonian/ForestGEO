@@ -129,4 +129,3 @@ describe('POST /api/errors/explorer/facets', () => {
     expect(body.fields).toEqual(expect.arrayContaining([expect.objectContaining({ value: 'treeTag', count: 2 })]));
   });
 });
-

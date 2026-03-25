@@ -323,9 +323,10 @@ export async function POST(
           {
             const visibleClause = buildMeasurementVisibleClauseSql(schema, 'vft', filterModel.visible);
             const validTss = filterModel.tss.filter(tss => ['multi stem', 'old tree', 'new recruit'].includes(tss));
-            const tssClause = validTss.length > 0
-              ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
-              : ``;
+            const tssClause =
+              validTss.length > 0
+                ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
+                : ``;
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             const sharedWhere = `
             WHERE vft.PlotID = ?

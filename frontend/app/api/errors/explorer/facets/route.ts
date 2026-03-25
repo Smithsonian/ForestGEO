@@ -45,4 +45,3 @@ export async function POST(request: NextRequest) {
     await connectionManager.closeConnection();
   }
 }
-
