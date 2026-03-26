@@ -207,7 +207,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
                   CoreMeasurementID: mappedOldRow.CoreMeasurementID,
                   Code: code
                 },
-                'CMAID'
+                'CMAID',
+                transactionID
               );
             }
           }
@@ -388,7 +389,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       const { Genus, GenusAuthority } = newRowData;
       const { SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, ValidCode, FieldFamily, Description } = newRowData;
 
-      const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID');
+      const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID', transactionID);
 
       const { id: newGenusID } = await handleUpsert<GenusResult>(
         connectionManager,
@@ -399,7 +400,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           GenusAuthority,
           FamilyID: newFamilyID
         },
-        'GenusID'
+        'GenusID',
+        transactionID
       );
 
       await handleUpsert<SpeciesResult>(
@@ -418,7 +420,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           FieldFamily,
           Description
         },
-        'SpeciesID'
+        'SpeciesID',
+        transactionID
       );
     } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
       if (params.dataType === 'attributes') {
@@ -494,14 +497,13 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
-    const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
     if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
     } else if (params.dataType === 'failedmeasurements') {
       const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
       await connectionManager.executeQuery(deleteFailedQuery, [gridIDKey]);

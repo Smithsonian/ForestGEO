@@ -136,7 +136,8 @@ export async function handleUpsert<Result>(
   schema: string,
   tableName: string,
   data: Partial<Result>,
-  key: keyof Result
+  key: keyof Result,
+  transactionID?: string
 ): Promise<{ id: number; operation?: string }> {
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
@@ -147,7 +148,7 @@ export async function handleUpsert<Result>(
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, trimmed);
-    const result = await connectionManager.executeQuery(query, Object.values(trimmed));
+    const result = await connectionManager.executeQuery(query, Object.values(trimmed), transactionID);
     id = result.insertId;
 
     if (id === 0) {
@@ -183,7 +184,7 @@ export async function handleUpsert<Result>(
                                  WHERE ${whereConditions}`;
       // console.log('find existing query: ', findExistingQuery, 'values: ', values);
 
-      const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
+      const searchResult = await connectionManager.executeQuery(findExistingQuery, values, transactionID);
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;

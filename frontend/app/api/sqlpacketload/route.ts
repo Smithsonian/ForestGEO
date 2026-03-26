@@ -102,6 +102,41 @@ function normalizeRequiredString(value: unknown): string {
   return String(value ?? '').trim();
 }
 
+function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const row of rows) {
+    const speciesCode = normalizeOptionalString(row.spcode)?.toLowerCase();
+    if (!speciesCode) continue;
+    if (seen.has(speciesCode)) {
+      duplicates.add(speciesCode);
+      continue;
+    }
+    seen.add(speciesCode);
+  }
+
+  return Array.from(duplicates).sort();
+}
+
+function isRetryableUploadError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  const candidate = error as Error & { code?: string };
+  return (
+    candidate.message.includes('Lock wait timeout') ||
+    candidate.message.includes('Deadlock') ||
+    candidate.message.includes('Connection lost') ||
+    candidate.message.includes('server has gone away') ||
+    candidate.code === 'PROTOCOL_CONNECTION_LOST' ||
+    candidate.code === 'ECONNRESET'
+  );
+}
+
+function getUploadRetryDelayMs(attemptNumber: number): number {
+  return Math.min(1000 * Math.pow(2, attemptNumber - 1), 10000);
+}
+
 async function upsertAttributeRows(
   connectionManager: ConnectionManager,
   schema: string,
@@ -235,6 +270,11 @@ async function upsertSpeciesRows(
   let updatedCount = 0;
   let skippedCount = 0;
 
+  const duplicateSpeciesCodes = findDuplicateSpeciesCodes(rows);
+  if (duplicateSpeciesCodes.length > 0) {
+    throw new Error(`Species upload contains duplicate SpeciesCode values: ${duplicateSpeciesCodes.join(', ')}`);
+  }
+
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
     const deleteSQL = format(`DELETE FROM ??.species WHERE IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [], transactionID);
@@ -249,7 +289,9 @@ async function upsertSpeciesRows(
 
     let familyID: number | undefined;
     if (normalizeOptionalString(row.family)) {
-      familyID = (await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: normalizeOptionalString(row.family)! }, 'FamilyID')).id;
+      familyID = (
+        await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: normalizeOptionalString(row.family)! }, 'FamilyID', transactionID)
+      ).id;
     }
 
     let genusID: number | undefined;
@@ -260,7 +302,7 @@ async function upsertSpeciesRows(
       if (familyID) {
         genusPayload.FamilyID = familyID;
       }
-      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID')).id;
+      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', genusPayload, 'GenusID', transactionID)).id;
     }
 
     const speciesPayload = {
@@ -273,8 +315,12 @@ async function upsertSpeciesRows(
     };
 
     if (uploadMode === UploadMode.REVISIONS) {
-      const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 LIMIT 1`, [schema]);
+      const existingSQL = format(`SELECT SpeciesID FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1 ORDER BY SpeciesID`, [schema]);
       const existingRows = await connectionManager.executeQuery(existingSQL, [speciesCode], transactionID);
+
+      if (existingRows.length > 1) {
+        throw new Error(`Duplicate active species rows already exist for SpeciesCode "${speciesCode}". Remove the duplicates before uploading revisions.`);
+      }
 
       if (existingRows.length > 0) {
         const updateSQL = format(
@@ -383,7 +429,8 @@ async function upsertPersonnelRows(
           RoleName: normalizedRole,
           RoleDescription: roleDescription
         },
-        'RoleID'
+        'RoleID',
+        transactionID
       )
     ).id;
 
@@ -1237,16 +1284,8 @@ export async function POST(request: NextRequest) {
         }
 
         retryCount++;
-        const isRetryableError =
-          e.message?.includes('Lock wait timeout') ||
-          e.message?.includes('Deadlock') ||
-          e.message?.includes('Connection lost') ||
-          e.message?.includes('server has gone away') ||
-          e.code === 'PROTOCOL_CONNECTION_LOST' ||
-          e.code === 'ECONNRESET';
-
-        if (isRetryableError && retryCount <= maxRetries) {
-          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 10000); // Exponential backoff, max 10s
+        if (isRetryableUploadError(e) && retryCount <= maxRetries) {
+          const delay = getUploadRetryDelayMs(retryCount);
           ailogger.warn(`Retryable error for ${fileName} (attempt ${retryCount}/${maxRetries + 1}), retrying in ${delay}ms: ${e.message}`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -1264,136 +1303,157 @@ export async function POST(request: NextRequest) {
       }
     }
   } else {
-    transactionID = await connectionManager.beginTransaction();
-    let rowId = '';
-    let fixedDataProcessingResult: FixedDataProcessingResult = { insertedCount: 0, updatedCount: 0, skippedCount: 0 };
-    try {
-      const uploadRows = Object.values(fileRowSet);
-      if (formType === 'quadrats') {
-        fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
-      } else if (formType === 'attributes') {
-        fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
-      } else if (formType === 'species') {
-        fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
-      } else if (formType === 'personnel') {
-        fixedDataProcessingResult = await upsertPersonnelRows(
-          connectionManager,
-          schema,
-          census?.dateRanges?.[0]?.censusID,
-          uploadRows,
-          uploadMode,
-          transactionID
-        );
-      } else {
-        for (rowId in fileRowSet) {
-          const row = fileRowSet[rowId];
-          const props: InsertUpdateProcessingProps = {
+    const uploadRows = Object.values(fileRowSet);
+
+    while (retryCount <= maxRetries) {
+      let rowId = '';
+      let fixedDataProcessingResult: FixedDataProcessingResult = { insertedCount: 0, updatedCount: 0, skippedCount: 0 };
+
+      try {
+        transactionID = await connectionManager.beginTransaction();
+
+        if (formType === 'quadrats') {
+          fixedDataProcessingResult = await upsertQuadratRows(connectionManager, schema, plot?.plotID, uploadRows, uploadMode, transactionID);
+        } else if (formType === 'attributes') {
+          fixedDataProcessingResult = await upsertAttributeRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+        } else if (formType === 'species') {
+          fixedDataProcessingResult = await upsertSpeciesRows(connectionManager, schema, uploadRows, uploadMode, transactionID);
+        } else if (formType === 'personnel') {
+          fixedDataProcessingResult = await upsertPersonnelRows(
+            connectionManager,
             schema,
-            connectionManager: connectionManager,
-            formType,
-            rowData: row,
-            plot,
-            census,
-            fullName: user
-          };
-          try {
-            await insertOrUpdate(props);
-            fixedDataProcessingResult.updatedCount += 1;
-          } catch (e: any) {
-            ailogger.error(`Error processing row for file ${fileName}:`, e.message);
-            failingRows.add(row); // saving this for future processing
+            census?.dateRanges?.[0]?.censusID,
+            uploadRows,
+            uploadMode,
+            transactionID
+          );
+        } else {
+          for (rowId in fileRowSet) {
+            const row = fileRowSet[rowId];
+            const props: InsertUpdateProcessingProps = {
+              schema,
+              connectionManager: connectionManager,
+              formType,
+              rowData: row,
+              plot,
+              census,
+              fullName: user
+            };
+            try {
+              await insertOrUpdate(props);
+              fixedDataProcessingResult.updatedCount += 1;
+            } catch (e: any) {
+              ailogger.error(`Error processing row for file ${fileName}:`, e.message);
+              failingRows.add(row);
+            }
           }
         }
-      }
 
-      await connectionManager.commitTransaction(transactionID ?? '');
+        await connectionManager.commitTransaction(transactionID ?? '');
+        transactionID = undefined;
 
-      // Track file upload in unifiedchangelog (single row per file)
-      try {
-        const batchRowCount = Object.keys(fileRowSet).length;
-        const censusID = census?.dateRanges?.[0]?.censusID;
+        // Track file upload in unifiedchangelog (single row per file)
+        try {
+          const batchRowCount = Object.keys(fileRowSet).length;
+          const censusID = census?.dateRanges?.[0]?.censusID;
 
-        // Check if we've already logged this file upload - use format() for schema
-        const existingEntrySQL = format(
-          `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
-           WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
-           ORDER BY ChangeID DESC LIMIT 1`,
-          [schema]
-        );
-        const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID]);
+          // Check if we've already logged this file upload - use format() for schema
+          const existingEntrySQL = format(
+            `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
+             WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
+             ORDER BY ChangeID DESC LIMIT 1`,
+            [schema]
+          );
+          const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID]);
 
-        if (existingEntry.length === 0) {
-          // First batch for this file - insert new entry
-          const uploadMetadata = JSON.stringify({
-            fileName,
-            formType,
-            uploadMode,
-            rowCount: batchRowCount,
+          if (existingEntry.length === 0) {
+            // First batch for this file - insert new entry
+            const uploadMetadata = JSON.stringify({
+              fileName,
+              formType,
+              uploadMode,
+              rowCount: batchRowCount,
+              insertedCount: fixedDataProcessingResult.insertedCount,
+              updatedCount: fixedDataProcessingResult.updatedCount,
+              skippedCount: fixedDataProcessingResult.skippedCount,
+              batchCount: 1
+            });
+            const insertChangelogSQL = format(
+              `INSERT INTO ??.unifiedchangelog
+              (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+              VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
+              [schema]
+            );
+            await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
+          } else {
+            // Subsequent batch - update the existing entry with accumulated count
+            // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
+            const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
+            metadata.uploadMode = uploadMode;
+            metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
+            metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
+            metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
+            metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
+            metadata.batchCount = (metadata.batchCount || 1) + 1;
+            const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
+            await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
+          }
+        } catch (logError: any) {
+          // Log but don't fail the upload if changelog tracking fails
+          ailogger.error('Failed to log file upload to changelog', logError);
+        }
+
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: uploadMode === UploadMode.REVISIONS ? `Revisions upload completed` : `Clean re-upload completed`,
+            failingRows: Array.from(failingRows),
             insertedCount: fixedDataProcessingResult.insertedCount,
             updatedCount: fixedDataProcessingResult.updatedCount,
             skippedCount: fixedDataProcessingResult.skippedCount,
-            batchCount: 1
-          });
-          const insertChangelogSQL = format(
-            `INSERT INTO ??.unifiedchangelog
-            (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
-            VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-            [schema]
-          );
-          await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, user, plot?.plotID, censusID]);
-        } else {
-          // Subsequent batch - update the existing entry with accumulated count
-          // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
-          const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
-          metadata.uploadMode = uploadMode;
-          metadata.rowCount = (metadata.rowCount || 0) + batchRowCount;
-          metadata.insertedCount = (metadata.insertedCount || 0) + fixedDataProcessingResult.insertedCount;
-          metadata.updatedCount = (metadata.updatedCount || 0) + fixedDataProcessingResult.updatedCount;
-          metadata.skippedCount = (metadata.skippedCount || 0) + fixedDataProcessingResult.skippedCount;
-          metadata.batchCount = (metadata.batchCount || 1) + 1;
-          const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
-          await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID]);
-        }
-      } catch (logError: any) {
-        // Log but don't fail the upload if changelog tracking fails
-        ailogger.error('Failed to log file upload to changelog', logError);
-      }
-    } catch (error: any) {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
-      ailogger.error('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
-      ailogger.error(`Row ${rowId} failed processing:`, error);
-      if (error instanceof Error) {
-        ailogger.error(`Error processing row for file ${fileName}:`, error);
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: `Error processing row in file ${fileName}`,
-            error: error.message,
-            failingRows: Array.from(failingRows)
+            uploadMode,
+            transactionCompleted: true
           }),
-          { status: HTTPResponses.SERVICE_UNAVAILABLE }
+          { status: HTTPResponses.OK }
         );
-      } else {
+      } catch (error: any) {
+        if (transactionID) {
+          await connectionManager.rollbackTransaction(transactionID);
+          transactionID = undefined;
+        }
+
+        retryCount++;
+        if (isRetryableUploadError(error) && retryCount <= maxRetries) {
+          const delay = getUploadRetryDelayMs(retryCount);
+          ailogger.warn(`Retryable fixed-data error for ${fileName} (attempt ${retryCount}/${maxRetries + 1}), retrying in ${delay}ms: ${error.message}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        ailogger.error('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
+        ailogger.error(`Row ${rowId} failed processing:`, error);
+        if (error instanceof Error) {
+          ailogger.error(`Error processing row for file ${fileName}:`, error);
+          return new NextResponse(
+            JSON.stringify({
+              responseMessage: `Error processing row in file ${fileName}`,
+              error: error.message,
+              failingRows: Array.from(failingRows),
+              retryCount
+            }),
+            { status: HTTPResponses.SERVICE_UNAVAILABLE }
+          );
+        }
+
         ailogger.error('Unknown error processing row:', error);
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Unknown processing error at row, in file ${fileName}`,
-            failingRows: Array.from(failingRows)
+            failingRows: Array.from(failingRows),
+            retryCount
           }),
           { status: HTTPResponses.SERVICE_UNAVAILABLE }
         );
       }
     }
-    return new NextResponse(
-      JSON.stringify({
-        responseMessage: uploadMode === UploadMode.REVISIONS ? `Revisions upload completed` : `Clean re-upload completed`,
-        failingRows: Array.from(failingRows),
-        insertedCount: fixedDataProcessingResult.insertedCount,
-        updatedCount: fixedDataProcessingResult.updatedCount,
-        skippedCount: fixedDataProcessingResult.skippedCount,
-        uploadMode,
-        transactionCompleted: true
-      }),
-      { status: HTTPResponses.OK }
-    );
   }
 }
