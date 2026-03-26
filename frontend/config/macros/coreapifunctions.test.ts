@@ -394,6 +394,26 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(200);
     });
 
+    it('should delete alltaxonomiesview rows by SpeciesID without a CensusID filter', async () => {
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'DELETE',
+        body: JSON.stringify({ newRow: { SpeciesID: 99 } })
+      });
+
+      mockMapper.demapData.mockReturnValue([{ SpeciesID: 99 }]);
+      mockConnectionManager.executeQuery.mockResolvedValue({ affectedRows: 1 });
+
+      const mockParams = {
+        dataType: 'alltaxonomiesview',
+        slugs: ['testSchema', 'speciesID', '99']
+      };
+
+      const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
+
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith('DELETE FROM testSchema.species WHERE SpeciesID = ?', [99]);
+      expect(response.status).toBe(200);
+    });
+
     it('should close connection in finally block on error', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'DELETE',

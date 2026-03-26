@@ -673,8 +673,119 @@ describe('sqlpacketload fixed-data upload modes', () => {
       mockConnectionManager,
       'forestgeo_testing',
       'roles',
-      expect.objectContaining({ RoleName: 'lead tech' }),
-      'RoleID'
+      { RoleName: 'lead tech', RoleDescription: 'Lead technician' },
+      'RoleID',
+      'tx-fixed'
     );
+  });
+
+  it('rejects duplicate SpeciesCode values within a species upload file', async () => {
+    const res = await POST(
+      makeFixedDataRequest(
+        'species',
+        {
+          'row-1': { spcode: 'swars1', species: 'simplex ochnacea' },
+          'row-2': { spcode: 'SWARS1', species: 'swarzia simplex' }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    await expect(res?.json()).resolves.toMatchObject({
+      error: 'Species upload contains duplicate SpeciesCode values: swars1'
+    });
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesID: 11 }, { SpeciesID: 19 }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'species',
+        {
+          'row-1': { spcode: 'swars1', species: 'simplex ochnacea' }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    await expect(res?.json()).resolves.toMatchObject({
+      error: 'Duplicate active species rows already exist for SpeciesCode "swars1". Remove the duplicates before uploading revisions.'
+    });
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+  });
+
+  it('keeps species family and genus upserts on the active transaction', async () => {
+    handleUpsertMock.mockResolvedValueOnce({ id: 15, operation: 'inserted' }).mockResolvedValueOnce({ id: 27, operation: 'inserted' });
+
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 44 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 5 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'species',
+        {
+          'row-1': { spcode: 'querc1', family: 'Fagaceae', genus: 'Quercus', species: 'alba' }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    expect(handleUpsertMock).toHaveBeenNthCalledWith(1, mockConnectionManager, 'forestgeo_testing', 'family', { Family: 'Fagaceae' }, 'FamilyID', 'tx-fixed');
+    expect(handleUpsertMock).toHaveBeenNthCalledWith(
+      2,
+      mockConnectionManager,
+      'forestgeo_testing',
+      'genus',
+      { Genus: 'Quercus', FamilyID: 15 },
+      'GenusID',
+      'tx-fixed'
+    );
+  });
+
+  it('retries transient lock wait failures for species revisions uploads', async () => {
+    const originalSetTimeout = global.setTimeout;
+    const immediateSetTimeout = vi.spyOn(global, 'setTimeout').mockImplementation(((callback: TimerHandler) => {
+      if (typeof callback === 'function') callback();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout);
+
+    mockConnectionManager.executeQuery
+      .mockRejectedValueOnce(new Error('Lock wait timeout exceeded; try restarting transaction'))
+      .mockResolvedValueOnce([{ SpeciesID: 11 }])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ insertId: 5 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'species',
+        {
+          'row-1': { spcode: 'swars1', species: 'simplex ochnacea' }
+        },
+        { uploadMode: 'revisions' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    await expect(res?.json()).resolves.toMatchObject({
+      uploadMode: 'revisions',
+      updatedCount: 1,
+      transactionCompleted: true
+    });
+    expect(mockConnectionManager.beginTransaction).toHaveBeenCalledTimes(2);
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-fixed');
+
+    immediateSetTimeout.mockRestore();
+    global.setTimeout = originalSetTimeout;
   });
 });

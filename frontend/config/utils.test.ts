@@ -187,6 +187,15 @@ describe('Database Query Utilities', () => {
       expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(1);
     });
 
+    it('should pass transactionID through executeQuery calls when provided', async () => {
+      const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
+      (mockConnectionManager.executeQuery as any).mockResolvedValueOnce({ insertId: 123 });
+
+      await handleUpsert(mockConnectionManager, 'testSchema', 'users', data, 'id', 'tx-123');
+
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith(expect.any(String), ['Test', 25], 'tx-123');
+    });
+
     it('should handle update operation when insertId is 0', async () => {
       const data: { id?: number; name: string; age: number } = { name: 'Test', age: 25 };
       (mockConnectionManager.executeQuery as any)

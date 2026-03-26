@@ -53,6 +53,7 @@ jobs:
           echo OTEL_LOG_LEVEL=debug >> frontend/.env
           echo REACT_EDITOR=code >> frontend/.env
           echo PORT=3000 >> frontend/.env
+          echo NEXT_PUBLIC_E2E_TESTING=false >> frontend/.env
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
           echo REPO=${{ secrets.REPO }} >> frontend/.env
@@ -70,7 +71,7 @@ jobs:
       - name: Build application
         run: |
           cd frontend/
-          npm run build
+          NEXT_PUBLIC_E2E_TESTING=false npm run build
 
       - name: Move directories into build/standalone to reduce app load
         run: |
