@@ -1564,7 +1564,9 @@ BEGIN
 
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
-            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+                quadrat_resolution, species_resolution,
+                filter_validity, filtered,
                 classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
                 requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
@@ -1789,7 +1791,9 @@ BEGIN
         'processing', NOW()
     );
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+        quadrat_resolution, species_resolution,
+        filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
@@ -1959,6 +1963,42 @@ BEGIN
     -- ============================================================
     SET vStageStart = NOW(6);
 
+    -- Build aggregating resolution tables for quadrat and species lookups.
+    -- These collapse the reference rows down to one row per (PlotID, QuadratName)
+    -- and one row per SpeciesCode, recording how many active rows matched. Joining
+    -- against these tables instead of the raw reference tables guarantees that a
+    -- single source row can never fan out into multiple candidates downstream,
+    -- and lets us distinguish "no match" (INVALID_*) from "ambiguous match"
+    -- (AMBIGUOUS_*) explicitly instead of silently producing duplicate rows.
+    CREATE TEMPORARY TABLE quadrat_resolution AS
+    SELECT q.PlotID,
+           q.QuadratName,
+           COUNT(*)        AS MatchCount,
+           MIN(q.QuadratID) AS QuadratID,
+           LEFT(GROUP_CONCAT(q.QuadratID ORDER BY q.QuadratID SEPARATOR ','), 200) AS MatchingIDs
+    FROM quadrats q
+    INNER JOIN (SELECT DISTINCT PlotID, QuadratName FROM initial_dup_filter) i
+        ON i.PlotID = q.PlotID AND i.QuadratName = q.QuadratName
+    WHERE q.IsActive = 1
+    GROUP BY q.PlotID, q.QuadratName;
+
+    CREATE INDEX idx_quadrat_resolution_lookup
+        ON quadrat_resolution (PlotID, QuadratName);
+
+    CREATE TEMPORARY TABLE species_resolution AS
+    SELECT s.SpeciesCode,
+           COUNT(*)        AS MatchCount,
+           MIN(s.SpeciesID) AS SpeciesID,
+           LEFT(GROUP_CONCAT(s.SpeciesID ORDER BY s.SpeciesID SEPARATOR ','), 200) AS MatchingIDs
+    FROM species s
+    INNER JOIN (SELECT DISTINCT SpeciesCode FROM initial_dup_filter) i
+        ON i.SpeciesCode = s.SpeciesCode
+    WHERE s.IsActive = 1
+    GROUP BY s.SpeciesCode;
+
+    CREATE INDEX idx_species_resolution_lookup
+        ON species_resolution (SpeciesCode);
+
     CREATE TEMPORARY TABLE filter_validity AS
     SELECT i.id, i.FileID, i.BatchID, i.PlotID, i.CensusID, i.TreeTag,
            IFNULL(i.StemTag, '') AS StemTag, i.SpeciesCode, i.QuadratName,
@@ -1966,17 +2006,33 @@ BEGIN
            IFNULL(i.DBH, 0) AS DBH, IFNULL(i.HOM, 0) AS HOM,
            i.MeasurementDate, i.Codes, i.Comments,
            CASE
-               WHEN tq.QuadratID IS NULL THEN CONCAT('Invalid quadrat name: "', i.QuadratName, '" not found in database')
-               WHEN ts.SpeciesID IS NULL THEN CONCAT('Invalid species code: "', i.SpeciesCode, '" not found in database')
+               WHEN tq.PlotID IS NULL
+                   THEN CONCAT('Invalid quadrat name: "', i.QuadratName, '" not found in database')
+               WHEN tq.MatchCount > 1
+                   THEN CONCAT('Ambiguous quadrat name: "', i.QuadratName,
+                               '" matches ', tq.MatchCount,
+                               ' active quadrats in plot ', i.PlotID,
+                               ' (QuadratIDs: ', tq.MatchingIDs, ')')
+               WHEN ts.SpeciesCode IS NULL
+                   THEN CONCAT('Invalid species code: "', i.SpeciesCode, '" not found in database')
+               WHEN ts.MatchCount > 1
+                   THEN CONCAT('Ambiguous species code: "', i.SpeciesCode,
+                               '" matches ', ts.MatchCount,
+                               ' active species records (SpeciesIDs: ', ts.MatchingIDs, ')')
                ELSE NULL
            END AS FailureReason,
-           CASE WHEN tq.QuadratID IS NULL OR ts.SpeciesID IS NULL THEN FALSE ELSE TRUE END AS Valid,
+           CASE
+               WHEN tq.PlotID IS NULL OR tq.MatchCount > 1
+                 OR ts.SpeciesCode IS NULL OR ts.MatchCount > 1
+                   THEN FALSE
+               ELSE TRUE
+           END AS Valid,
            tq.QuadratID, ts.SpeciesID
     FROM initial_dup_filter i
-    LEFT JOIN quadrats tq
-        ON tq.PlotID = i.PlotID AND tq.QuadratName = i.QuadratName AND tq.IsActive = 1
-    LEFT JOIN species ts
-        ON ts.SpeciesCode = i.SpeciesCode AND ts.IsActive = 1;
+    LEFT JOIN quadrat_resolution tq
+        ON tq.PlotID = i.PlotID AND tq.QuadratName = i.QuadratName
+    LEFT JOIN species_resolution ts
+        ON ts.SpeciesCode = i.SpeciesCode;
 
     CREATE INDEX idx_validity_valid ON filter_validity (Valid);
     CREATE INDEX idx_validity_tree ON filter_validity (TreeTag, SpeciesID, CensusID);
@@ -1991,13 +2047,17 @@ BEGIN
     CREATE INDEX idx_filtered_stem_tree ON filtered (StemTag, TreeTag);
     CREATE INDEX idx_filtered_species ON filtered (SpeciesID);
 
+    -- Prefix-anchored matching: order matters because the more-specific
+    -- "Ambiguous quadrat name" must be tested before any pattern that would
+    -- also match "quadrat name". Each branch maps directly to the message
+    -- shape produced by the filter_validity CASE above.
     INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
     SELECT fv.id,
            CASE
-               WHEN fv.FailureReason LIKE '%invalid quadrat%' OR fv.FailureReason LIKE '%quadrat name%'
-                   THEN 'INVALID_QUADRAT'
-               WHEN fv.FailureReason LIKE '%invalid species%' OR fv.FailureReason LIKE '%species code%'
-                   THEN 'INVALID_SPECIES'
+               WHEN fv.FailureReason LIKE 'Ambiguous quadrat name%' THEN 'AMBIGUOUS_QUADRAT'
+               WHEN fv.FailureReason LIKE 'Ambiguous species code%' THEN 'AMBIGUOUS_SPECIES'
+               WHEN fv.FailureReason LIKE 'Invalid quadrat name%'  THEN 'INVALID_QUADRAT'
+               WHEN fv.FailureReason LIKE 'Invalid species code%'  THEN 'INVALID_SPECIES'
                ELSE 'SQL_EXCEPTION'
            END,
            LEFT(fv.FailureReason, 255)
@@ -2014,7 +2074,7 @@ BEGIN
         ) VALUES (
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'INVALID_REFERENCE_DATA',
-            CONCAT(@invalid_count, ' records with invalid species codes or quadrat names'),
+            CONCAT(@invalid_count, ' records with invalid or ambiguous species codes / quadrat names'),
             'warning',
             vBatchRowCount, 0, @invalid_count, 0
         );
@@ -2865,7 +2925,9 @@ BEGIN
     -- Info-level census warnings are intentionally excluded from the hot ingest path.
     -- They can be recomputed later from persisted coremeasurements if needed.
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+        quadrat_resolution, species_resolution,
+        filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
@@ -2922,7 +2984,9 @@ BEGIN
             endTime = NOW(6)
         WHERE uploadId = vUploadId;
 
-        DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, filter_validity, filtered,
+        DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+            quadrat_resolution, species_resolution,
+            filter_validity, filtered,
             classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
             requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,

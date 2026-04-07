@@ -36,7 +36,7 @@ export interface UseUploadSessionReturn {
   session: UploadSessionState;
   isSessionActive: boolean;
   getCurrentSessionId: () => string | null;
-  createSession: (fileId: string, totalChunks?: number, fileHash?: string) => Promise<string | null>;
+  createSession: (fileId: string, totalChunks?: number, fileHash?: string, mode?: string) => Promise<string | null>;
   updateProgress: (updates: { uploadedChunks?: number; processedBatches?: number; totalBatches?: number; state?: string }) => Promise<void>;
   updateState: (state: string, errorMessage?: string) => Promise<void>;
   completeSession: () => Promise<void>;
@@ -153,7 +153,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
    * Create a new upload session
    */
   const createSession = useCallback(
-    async (fileId: string, totalChunks: number = 0, fileHash?: string): Promise<string | null> => {
+    async (fileId: string, totalChunks: number = 0, fileHash?: string, mode?: string): Promise<string | null> => {
       try {
         const response = await fetch('/api/uploadsession', {
           method: 'POST',
@@ -165,7 +165,8 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
             userId,
             fileId,
             totalChunks,
-            fileHash
+            fileHash,
+            mode
           })
         });
 

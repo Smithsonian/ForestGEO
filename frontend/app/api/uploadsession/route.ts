@@ -65,7 +65,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    const { plotId, censusId, userId, fileId, totalChunks, fileHash } = body;
+    const { plotId, censusId, userId, fileId, totalChunks, fileHash, mode } = body;
 
     if (!plotId || !censusId || !userId || !fileId) {
       return new NextResponse(JSON.stringify({ error: 'Missing required parameters' }), {
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Generate idempotency key if file hash provided
     const idempotencyKey = fileHash ? generateIdempotencyKey(schema, plotId, censusId, fileHash) : undefined;
 
-    const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey);
+    const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey, mode);
 
     return new NextResponse(JSON.stringify({ session }), {
       status: HTTPResponses.CREATED

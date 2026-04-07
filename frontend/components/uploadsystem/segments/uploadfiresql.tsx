@@ -1212,7 +1212,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Create upload session before any chunks are uploaded so every write path can prove scope ownership.
         const primaryFileName = acceptedFiles[0]?.name || 'unknown';
         ailogger.info(`Attempting upload session creation for ${primaryFileName}`);
-        const createdSessionId = await createSession(primaryFileName, acceptedFiles.length, uploadAttemptKey);
+        const createdSessionId = await createSession(primaryFileName, acceptedFiles.length, uploadAttemptKey, uploadMode);
         if (!createdSessionId) {
           throw new Error(`Failed to create upload session for ${primaryFileName}`);
         }

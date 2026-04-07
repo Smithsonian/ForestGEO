@@ -52,6 +52,10 @@ export interface UploadSession {
   updatedAt: Date;
   errorMessage?: string;
   idempotencyKey?: string;
+  // The UploadMode the client selected for this session (e.g. 'clean_reupload' or 'revisions').
+  // Persisted so historical sessions can be audited; nullable because legacy rows
+  // and non-mode-bearing upload paths won't supply it.
+  mode?: string;
 }
 
 /**
@@ -264,6 +268,7 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       error_message TEXT,
       idempotency_key VARCHAR(255),
+      mode VARCHAR(32),
       active_scope_key VARCHAR(255)
         GENERATED ALWAYS AS (
           CASE
@@ -303,7 +308,8 @@ export async function createUploadSession(
   userId: string,
   fileId: string,
   totalChunks: number,
-  idempotencyKey?: string
+  idempotencyKey?: string,
+  mode?: string
 ): Promise<UploadSession> {
   const sessionId = generateSessionId();
 
@@ -337,17 +343,17 @@ export async function createUploadSession(
   const insertSQL = `
     INSERT INTO ${schema}.upload_sessions (
       session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-      total_chunks, uploaded_chunks, idempotency_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      total_chunks, uploaded_chunks, idempotency_key, mode
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `;
 
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
     await ensureUploadSessionScopeLock(conn, schema);
-    await runQuery(conn, insertSQL, [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null]);
+    await runQuery(conn, insertSQL, [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null, mode || null]);
 
-    ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}`);
+    ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}${mode ? ` (mode: ${mode})` : ''}`);
 
     return {
       sessionId,
@@ -364,7 +370,8 @@ export async function createUploadSession(
       lastHeartbeat: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      idempotencyKey
+      idempotencyKey,
+      mode
     };
   } catch (error: unknown) {
     if (isActiveScopeDuplicateKeyError(error)) {

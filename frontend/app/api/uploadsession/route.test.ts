@@ -95,6 +95,38 @@ describe('POST /api/uploadsession', () => {
     await expect(response.json()).resolves.toEqual({ session: { sessionId: 'session-2' } });
     expect(mocks.ensureUploadSessionsTable).toHaveBeenCalledWith('forestgeo_testing');
     expect(mocks.generateIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-1');
-    expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'file.csv', 3, 'idem-1');
+    expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'file.csv', 3, 'idem-1', undefined);
+  });
+
+  it('forwards the upload mode from the request body to createUploadSession', async () => {
+    mocks.createUploadSession.mockResolvedValue({ sessionId: 'session-3' });
+
+    const request = new Request('http://localhost/api/uploadsession', {
+      method: 'POST',
+      body: JSON.stringify({
+        schema: 'forestgeo_testing',
+        plotId: 1,
+        censusId: 2,
+        userId: 'mason',
+        fileId: 'spplist.csv',
+        totalChunks: 1,
+        fileHash: 'hash-2',
+        mode: 'clean_reupload'
+      })
+    }) as any;
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(201);
+    expect(mocks.createUploadSession).toHaveBeenCalledWith(
+      'forestgeo_testing',
+      1,
+      2,
+      'mason',
+      'spplist.csv',
+      1,
+      'idem-1',
+      'clean_reupload'
+    );
   });
 });

@@ -823,6 +823,8 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'MISSING_FIELD_DATE', 'Missing required field: MeasurementDate'),
        ('ingestion', 'INVALID_QUADRAT', 'Invalid quadrat reference'),
        ('ingestion', 'INVALID_SPECIES', 'Invalid species reference'),
+       ('ingestion', 'AMBIGUOUS_QUADRAT', 'Quadrat name resolves to multiple active quadrats in the same plot'),
+       ('ingestion', 'AMBIGUOUS_SPECIES', 'Species code resolves to multiple active species records'),
        ('ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch across censuses'),
        ('ingestion', 'COORDINATE_DRIFT', 'Coordinate drift exceeds allowed threshold'),
        ('ingestion', 'DUPLICATE_ENTRY', 'Duplicate measurement row detected'),
@@ -1090,6 +1092,7 @@ create table if not exists upload_sessions
     updated_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP,
     error_message     text                                                                                                                                       null,
     idempotency_key   varchar(255)                                                                                                                               null,
+    mode              varchar(32)                                                                                                                                null,
     active_scope_key  varchar(255) as (case
                                            when (`state` in ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing'))
                                                then concat_ws('#', `schema_name`, `plot_id`, `census_id`)
