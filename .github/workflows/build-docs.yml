@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Manual DB action: migrate or inspect_species_duplicates"
+        description: "Manual DB action: migrate, inspect_species_duplicates, or cleanup_species_duplicates"
         required: false
         default: "migrate"
       target_schemas:
@@ -274,6 +274,99 @@ jobs:
               "
             done
           } | tee "$REPORT_DIR/species-tree-collision-details.tsv"
+
+      - name: Cleanup duplicate active species rows
+        if: steps.resolve_inputs.outputs.operation == 'cleanup_species_duplicates'
+        env:
+          MYSQL_PWD: ${{ secrets.AZURE_SQL_PASSWORD }}
+          TARGET_SCHEMAS: ${{ steps.resolve_inputs.outputs.target_schemas }}
+        run: |
+          set -euo pipefail
+
+          REPORT_DIR="$GITHUB_WORKSPACE/migration-audit"
+          BACKUP_DIR="$GITHUB_WORKSPACE/frontend/db-migrations/unified-measurements-migrations/backups"
+          mkdir -p "$REPORT_DIR" "$BACKUP_DIR"
+
+          mysql_base=(mysql --ssl-mode=REQUIRED -h "$AZURE_SQL_SERVER" -P "$AZURE_SQL_PORT" -u "$AZURE_SQL_USER" -N -B)
+          dump_base=(mysqldump --ssl-mode=REQUIRED -h "$AZURE_SQL_SERVER" -P "$AZURE_SQL_PORT" -u "$AZURE_SQL_USER" --single-transaction --quick --routines --triggers)
+          read -r -a schemas <<< "$TARGET_SCHEMAS"
+
+          {
+            echo -e "schema\tspecies_code\tcanonical_species_id\tduplicate_species_id\ttree_refs\tspecieslimit_refs"
+            for schema in "${schemas[@]}"; do
+              backup_file="$BACKUP_DIR/${schema}_species_cleanup_$(date +%Y%m%d_%H%M%S).sql.gz"
+              echo "Backing up ${schema} to ${backup_file}"
+              "${dump_base[@]}" "$schema" | gzip > "$backup_file"
+
+              "${mysql_base[@]}" -e "
+                SELECT
+                  '${schema}' AS schema_name,
+                  dup.SpeciesCode,
+                  canon.canonical_species_id,
+                  dup.SpeciesID AS duplicate_species_id,
+                  COALESCE(t.tree_refs, 0) AS tree_refs,
+                  COALESCE(sl.specieslimit_refs, 0) AS specieslimit_refs
+                FROM \`${schema}\`.species dup
+                INNER JOIN (
+                  SELECT SpeciesCode, MIN(SpeciesID) AS canonical_species_id
+                  FROM \`${schema}\`.species
+                  WHERE IsActive = 1
+                  GROUP BY SpeciesCode
+                  HAVING COUNT(*) > 1
+                ) canon
+                  ON canon.SpeciesCode <=> dup.SpeciesCode
+                 AND dup.IsActive = 1
+                 AND dup.SpeciesID <> canon.canonical_species_id
+                LEFT JOIN (
+                  SELECT SpeciesID, COUNT(*) AS tree_refs
+                  FROM \`${schema}\`.trees
+                  GROUP BY SpeciesID
+                ) t
+                  ON t.SpeciesID = dup.SpeciesID
+                LEFT JOIN (
+                  SELECT SpeciesID, COUNT(*) AS specieslimit_refs
+                  FROM \`${schema}\`.specieslimits
+                  GROUP BY SpeciesID
+                ) sl
+                  ON sl.SpeciesID = dup.SpeciesID
+                ORDER BY dup.SpeciesCode, dup.SpeciesID;
+              "
+
+              "${mysql_base[@]}" -e "
+                UPDATE \`${schema}\`.species dup
+                INNER JOIN (
+                  SELECT SpeciesCode, MIN(SpeciesID) AS canonical_species_id
+                  FROM \`${schema}\`.species
+                  WHERE IsActive = 1
+                  GROUP BY SpeciesCode
+                  HAVING COUNT(*) > 1
+                ) canon
+                  ON canon.SpeciesCode <=> dup.SpeciesCode
+                SET dup.IsActive = 0,
+                    dup.DeletedAt = COALESCE(dup.DeletedAt, UTC_TIMESTAMP())
+                WHERE dup.IsActive = 1
+                  AND dup.SpeciesID <> canon.canonical_species_id;
+              "
+            done
+          } | tee "$REPORT_DIR/species-cleanup-actions.tsv"
+
+          {
+            echo -e "schema\tremaining_active_species_code_dupes"
+            for schema in "${schemas[@]}"; do
+              "${mysql_base[@]}" -e "
+                SELECT
+                  '${schema}' AS schema_name,
+                  COUNT(*)
+                FROM (
+                  SELECT SpeciesCode
+                  FROM \`${schema}\`.species
+                  WHERE IsActive = 1
+                  GROUP BY SpeciesCode
+                  HAVING COUNT(*) > 1
+                ) d;
+              "
+            done
+          } | tee "$REPORT_DIR/species-cleanup-postcheck.tsv"
 
       - name: Audit live schemas before migration
         if: steps.resolve_inputs.outputs.operation == 'migrate'
