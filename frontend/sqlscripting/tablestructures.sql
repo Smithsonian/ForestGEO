@@ -166,7 +166,9 @@ create table if not exists plots
     DefaultCoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
     DefaultAreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' not null,
     DefaultDBHUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'mm' not null,
-    DefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null
+    DefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
+    constraint uq_plots_plotname
+        unique (PlotName)
 );
 
 create table if not exists census
@@ -182,7 +184,9 @@ create table if not exists census
     DeletedAt        datetime             null,
     constraint Census_Plots_PlotID_fk
         foreign key (PlotID) references plots (PlotID)
-            on delete cascade
+            on delete cascade,
+    constraint uq_census_plot_number
+        unique (PlotID, PlotCensusNumber)
 );
 
 create index idx_description
@@ -308,6 +312,8 @@ create table if not exists quadrats
         unique (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive),
     constraint uq_quadrats_full
         unique (unique_sig),
+    constraint uq_quadrats_active_name
+        unique (PlotID, QuadratName, IsActive),
     constraint Quadrats_Plots_FK
         foreign key (PlotID) references plots (PlotID)
             on delete cascade
@@ -444,8 +450,10 @@ create table if not exists personnel
                                            coalesce(`IsActive`, _utf8mb4''))) stored invisible,
     constraint personnel_FirstName_LastName_RoleID__uindex
         unique (FirstName, LastName, IsActive),
-    constraint uq_personnel_full
-        unique (unique_sig),
+    -- uq_personnel_full (unique_sig) intentionally removed in migration 45 because
+    -- it was the same full-signature anti-pattern that produced the species and
+    -- quadrats fan-out bugs. The named (FirstName, LastName, IsActive) constraint
+    -- above is the real semantic key.
     constraint personnel_roles_RoleID_fk
         foreign key (RoleID) references roles (RoleID)
             on delete cascade
@@ -494,7 +502,9 @@ create table if not exists sitespecificvalidations
     Criteria            varchar(255)     null,
     Definition          text             null,
     ChangelogDefinition text             null,
-    IsEnabled           bit default b'1' not null
+    IsEnabled           bit default b'1' not null,
+    constraint uq_sitespecificvalidations_procedurename
+        unique (ProcedureName)
 );
 
 create table if not exists species
@@ -524,6 +534,8 @@ create table if not exists species
                                                    coalesce(`Description`, _utf8mb4''))) stored invisible,
     constraint uq_species_sig
         unique (unique_sig),
+    constraint uq_species_active_code
+        unique (SpeciesCode, IsActive),
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID)
             on delete cascade,
@@ -677,7 +689,7 @@ create table if not exists stems
     QuadratID       int                  null,
     CensusID        int                  null,
     StemCrossID     int                  null,
-    StemTag         varchar(10)          null,
+    StemTag         varchar(10)          default '' not null,
     LocalX          decimal(12, 6)       null,
     LocalY          decimal(12, 6)       null,
     Moved           bit                  null,
