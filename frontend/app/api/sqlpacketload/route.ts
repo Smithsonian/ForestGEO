@@ -276,6 +276,55 @@ async function upsertSpeciesRows(
   }
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    // CLEAN_REUPLOAD wipes the active species list and re-inserts the upload contents.
+    // The species table has ON DELETE CASCADE foreign keys all the way down to
+    // coremeasurements (species -> trees -> stems -> coremeasurements), so any
+    // species code currently referenced by an existing tree would have its entire
+    // measurement subtree silently destroyed by the DELETE. To prevent this, we
+    // first compute (in-use codes) - (codes in upload). If that set is non-empty,
+    // we refuse the upload with an actionable error and suggest using REVISIONS
+    // mode instead. Codes that ARE in the upload can safely be wiped because the
+    // re-insertion immediately recreates a row with the same SpeciesCode -- the
+    // foreign keys point at SpeciesID, not SpeciesCode, but trees/stems/measurements
+    // are also rebuilt by every measurement upload, so this remains the established
+    // behavior.
+    //
+    // The upload's set of incoming codes uses LOWER() comparison to mirror how
+    // the rest of the species upload paths key on SpeciesCode case-insensitively.
+    const incomingCodes = new Set<string>();
+    for (const row of rows) {
+      const code = normalizeOptionalString(row.spcode)?.toLowerCase();
+      if (code) incomingCodes.add(code);
+    }
+
+    const inUseSQL = format(
+      `SELECT DISTINCT s.SpeciesCode
+       FROM ??.species s
+       INNER JOIN ??.trees t ON t.SpeciesID = s.SpeciesID
+       WHERE s.IsActive = 1 AND s.SpeciesCode IS NOT NULL`,
+      [schema, schema]
+    );
+    const inUseRows = await connectionManager.executeQuery(inUseSQL, [], transactionID);
+
+    const blockingCodes: string[] = [];
+    for (const row of inUseRows as Array<{ SpeciesCode: string }>) {
+      if (row.SpeciesCode && !incomingCodes.has(row.SpeciesCode.toLowerCase())) {
+        blockingCodes.push(row.SpeciesCode);
+      }
+    }
+
+    if (blockingCodes.length > 0) {
+      const MAX_CODES_IN_MESSAGE = 20;
+      const truncated = blockingCodes.slice(0, MAX_CODES_IN_MESSAGE).sort();
+      const moreCount = blockingCodes.length - truncated.length;
+      const codeList = truncated.join(', ') + (moreCount > 0 ? `, ...and ${moreCount} more` : '');
+      throw new Error(
+        `Clean re-upload refused: the following species code(s) are still referenced ` +
+          `by existing trees and would have their downstream measurements cascade-deleted: ${codeList}. ` +
+          `Use Revisions Upload instead, or include these codes in your upload file.`
+      );
+    }
+
     const deleteSQL = format(`DELETE FROM ??.species WHERE IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [], transactionID);
   }
@@ -323,6 +372,13 @@ async function upsertSpeciesRows(
       }
 
       if (existingRows.length > 0) {
+        // REVISIONS source-of-truth semantics: every column that the species upload
+        // CSV format can carry is overwritten unconditionally. Fields the row omits
+        // are normalized to NULL by normalizeOptionalString and so wipe whatever was
+        // previously in the database. This is intentional -- the user explicitly
+        // chose Option (a) ("Replace the whole row") when this behavior was
+        // confirmed. If the CSV format ever grows new columns, add them here to
+        // keep the overwrite semantics complete.
         const updateSQL = format(
           `UPDATE ??.species
            SET SpeciesCode = ?, GenusID = ?, SpeciesName = ?, SubspeciesName = ?, IDLevel = ?, SpeciesAuthority = ?, SubspeciesAuthority = ?, DeletedAt = NULL
