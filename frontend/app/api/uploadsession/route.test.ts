@@ -128,6 +128,12 @@ describe('POST /api/uploadsession', () => {
       'idem-1',
       'clean_reupload'
     );
-    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-2', 'clean_reupload');
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith(
+      'forestgeo_testing',
+      1,
+      2,
+      'hash-2',
+      'clean_reupload'
+    );
   });
 });

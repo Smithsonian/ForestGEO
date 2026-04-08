@@ -120,13 +120,9 @@ function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
 }
 
 function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
-  const uniqueValues = Array.from(
-    new Set(
-      values
-        .map(value => String(value ?? '').trim())
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right));
+  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right)
+  );
 
   const truncatedValues = uniqueValues.slice(0, maxValues);
   const remainingCount = uniqueValues.length - truncatedValues.length;
@@ -237,9 +233,7 @@ async function upsertQuadratRows(
     );
     const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
     const blockingQuadratNames = Array.isArray(blockingQuadratRows)
-      ? blockingQuadratRows
-          .map((row: any) => String(row.QuadratName ?? '').trim())
-          .filter(Boolean)
+      ? blockingQuadratRows.map((row: any) => String(row.QuadratName ?? '').trim()).filter(Boolean)
       : [];
 
     if (blockingQuadratNames.length > 0) {
@@ -353,11 +347,7 @@ async function upsertSpeciesRows(
       [schema, schema, schema]
     );
     const blockingSpeciesRows = await connectionManager.executeQuery(blockingSpeciesSQL, [], transactionID);
-    const blockingCodes = Array.isArray(blockingSpeciesRows)
-      ? blockingSpeciesRows
-          .map((row: any) => String(row.SpeciesCode ?? '').trim())
-          .filter(Boolean)
-      : [];
+    const blockingCodes = Array.isArray(blockingSpeciesRows) ? blockingSpeciesRows.map((row: any) => String(row.SpeciesCode ?? '').trim()).filter(Boolean) : [];
 
     if (blockingCodes.length > 0) {
       throw new Error(
