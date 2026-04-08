@@ -70,6 +70,13 @@ jobs:
       AZURE_SQL_PORT: 3306
       AZURE_SQL_USER: azureroot
       AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
+      TARGET_SCHEMAS: >-
+        forestgeo_harvard
+        forestgeo_mpala
+        forestgeo_ngel_nyaki
+        forestgeo_panama
+        forestgeo_rabi
+        forestgeo_serc
 
     steps:
       - name: Checkout code
@@ -91,10 +98,10 @@ jobs:
 
           mysql_base=(mysql --ssl-mode=REQUIRED -h "$AZURE_SQL_SERVER" -P "$AZURE_SQL_PORT" -u "$AZURE_SQL_USER" -N -B)
 
-          mapfile -t schemas < <("${mysql_base[@]}" -e "SHOW DATABASES LIKE 'forestgeo_%';")
+          read -r -a schemas <<< "$TARGET_SCHEMAS"
 
           if [[ ${#schemas[@]} -eq 0 ]]; then
-            echo "No forestgeo_* schemas found."
+            echo "No target schemas configured."
             exit 1
           fi
 
@@ -208,7 +215,7 @@ jobs:
           mkdir -p "$LOG_DIR"
           echo "schema,status" > "$REPORT_DIR/migration-results.csv"
 
-          mapfile -t schemas < <(mysql --ssl-mode=REQUIRED -h "$AZURE_SQL_SERVER" -P "$AZURE_SQL_PORT" -u "$AZURE_SQL_USER" -N -B -e "SHOW DATABASES LIKE 'forestgeo_%';")
+          read -r -a schemas <<< "$TARGET_SCHEMAS"
 
           for schema in "${schemas[@]}"; do
             echo "=== Running unified migrations for ${schema} ==="
