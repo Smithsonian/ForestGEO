@@ -108,7 +108,7 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(body.totalCount).toBe(42);
     expect(String(body.finishedQuery)).toMatch(/FORMATTED_SQL:/);
     expect(String(body.finishedQuery)).toMatch(/FROM myschema\.unifiedchangelog/i);
-    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,3,25,25\]/);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,7,3,25,25\]/);
 
     expect(getMapperSpy).toHaveBeenCalledWith('unifiedchangelog');
     expect(mapDataSpy).toHaveBeenCalled();
