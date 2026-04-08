@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   sendHeartbeat: vi.fn(),
   runSessionCleanup: vi.fn(),
   ensureUploadSessionsTable: vi.fn(),
-  generateIdempotencyKey: vi.fn(() => 'idem-1'),
+  generateUploadSessionIdempotencyKey: vi.fn(() => 'idem-1'),
   isValidSchema: vi.fn(() => true),
   loggerError: vi.fn()
 }));
@@ -33,7 +33,7 @@ vi.mock('@/config/uploadsessiontracker', () => ({
     ABANDONED: 'abandoned',
     CLEANED_UP: 'cleaned_up'
   },
-  generateIdempotencyKey: mocks.generateIdempotencyKey,
+  generateUploadSessionIdempotencyKey: mocks.generateUploadSessionIdempotencyKey,
   UploadSessionOwnershipError: class UploadSessionOwnershipError extends Error {}
 }));
 
@@ -94,7 +94,7 @@ describe('POST /api/uploadsession', () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ session: { sessionId: 'session-2' } });
     expect(mocks.ensureUploadSessionsTable).toHaveBeenCalledWith('forestgeo_testing');
-    expect(mocks.generateIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-1');
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-1', undefined);
     expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'file.csv', 3, 'idem-1', undefined);
   });
 
@@ -128,5 +128,6 @@ describe('POST /api/uploadsession', () => {
       'idem-1',
       'clean_reupload'
     );
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-2', 'clean_reupload');
   });
 });

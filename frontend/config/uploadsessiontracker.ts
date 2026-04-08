@@ -80,6 +80,11 @@ export const ACTIVE_UPLOAD_SESSION_STATES = [
 const ACTIVE_UPLOAD_SESSION_STATE_LIST = ACTIVE_UPLOAD_SESSION_STATES.map(state => `'${state}'`).join(', ');
 const ACTIVE_SCOPE_KEY_INDEX_NAME = 'uq_upload_sessions_active_scope';
 const ACTIVE_SCOPE_KEY_COLUMN_NAME = 'active_scope_key';
+const UPLOAD_SESSION_SELECT_COLUMNS = `
+  session_id, schema_name, plot_id, census_id, user_id, state, file_id,
+  total_chunks, uploaded_chunks, processed_batches, total_batches,
+  last_heartbeat, created_at, updated_at, error_message, idempotency_key, mode
+`;
 
 export class UploadSessionOwnershipError extends Error {
   status: number;
@@ -246,6 +251,30 @@ export function generateIdempotencyKey(schema: string, plotId: number, censusId:
   return `${schema}_${plotId}_${censusId}_${fileHash}`;
 }
 
+export function generateUploadSessionIdempotencyKey(
+  schema: string,
+  plotId: number,
+  censusId: number,
+  fileHash: string,
+  mode?: string
+): string {
+  return [schema, plotId, censusId, fileHash, mode || 'mode:unspecified'].join('#');
+}
+
+function buildCreateUploadSessionInsertValues(
+  sessionId: string,
+  schema: string,
+  plotId: number,
+  censusId: number,
+  userId: string,
+  fileId: string,
+  totalChunks: number,
+  idempotencyKey?: string,
+  mode?: string
+): (string | number | null)[] {
+  return [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null, mode || null];
+}
+
 /**
  * Create the upload_sessions table if it doesn't exist
  */
@@ -351,7 +380,7 @@ export async function createUploadSession(
   try {
     conn = await getConn();
     await ensureUploadSessionScopeLock(conn, schema);
-    await runQuery(conn, insertSQL, [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null, mode || null]);
+    await runQuery(conn, insertSQL, buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode));
 
     ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}${mode ? ` (mode: ${mode})` : ''}`);
 
@@ -394,17 +423,7 @@ export async function createUploadSession(
             UploadSessionState.ABANDONED,
             getStaleSessionReason(`session creation retry for plot ${plotId}, census ${censusId}`)
           );
-          await runQuery(conn, insertSQL, [
-            sessionId,
-            schema,
-            plotId,
-            censusId,
-            userId,
-            UploadSessionState.INITIALIZED,
-            fileId,
-            totalChunks,
-            idempotencyKey || null
-          ]);
+          await runQuery(conn, insertSQL, buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode));
 
           ailogger.info(`[UploadSessionTracker] Created session ${sessionId} after reclaiming stale scope lock for plot ${plotId}, census ${censusId}`);
           return {
@@ -422,7 +441,8 @@ export async function createUploadSession(
             lastHeartbeat: new Date(),
             createdAt: new Date(),
             updatedAt: new Date(),
-            idempotencyKey
+            idempotencyKey,
+            mode
           };
         }
 
@@ -527,9 +547,7 @@ export async function sendHeartbeat(schema: string, sessionId: string): Promise<
  */
 export async function getSession(schema: string, sessionId: string): Promise<UploadSession | null> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE session_id = ?
   `;
@@ -552,9 +570,7 @@ export async function getSession(schema: string, sessionId: string): Promise<Upl
  */
 export async function findSessionByIdempotencyKey(schema: string, idempotencyKey: string): Promise<UploadSession | null> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE idempotency_key = ?
     ORDER BY created_at DESC
@@ -578,9 +594,7 @@ export async function findSessionByIdempotencyKey(schema: string, idempotencyKey
  */
 export async function findActiveSessionsForPlotCensus(schema: string, plotId: number, censusId: number): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE plot_id = ? AND census_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
     ORDER BY last_heartbeat DESC, updated_at DESC, created_at DESC
@@ -603,9 +617,7 @@ export async function findActiveSessionsForPlotCensus(schema: string, plotId: nu
  */
 export async function findStaleSessions(schema: string): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE state IN ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing')
       AND last_heartbeat < DATE_SUB(NOW(), INTERVAL ? SECOND)
@@ -631,9 +643,7 @@ export async function findStaleSessions(schema: string): Promise<UploadSession[]
  */
 export async function findAbandonedSessionsNeedingCleanup(schema: string): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE state = 'abandoned'
       AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)
@@ -872,7 +882,8 @@ function mapRowToSession(row: any): UploadSession {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     errorMessage: row.error_message,
-    idempotencyKey: row.idempotency_key
+    idempotencyKey: row.idempotency_key,
+    mode: row.mode ?? undefined
   };
 }
 

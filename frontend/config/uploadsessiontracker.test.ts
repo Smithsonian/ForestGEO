@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   commitTransaction: vi.fn(),
   rollbackTransaction: vi.fn(),
   moveTemporaryBatchToFailedMeasurements: vi.fn(),
+  getConn: vi.fn(),
+  runQuery: vi.fn(),
   loggerInfo: vi.fn(),
   loggerWarn: vi.fn(),
   loggerError: vi.fn()
@@ -27,8 +29,8 @@ vi.mock('@/lib/batchfailuretransfer', () => ({
 }));
 
 vi.mock('@/components/processors/processormacros', () => ({
-  getConn: vi.fn(),
-  runQuery: vi.fn()
+  getConn: mocks.getConn,
+  runQuery: mocks.runQuery
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -39,7 +41,7 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-import { cleanupOrphanedData, UploadSessionState } from './uploadsessiontracker';
+import { cleanupOrphanedData, createUploadSession, UploadSessionState } from './uploadsessiontracker';
 
 describe('cleanupOrphanedData', () => {
   beforeEach(() => {
@@ -112,5 +114,98 @@ describe('cleanupOrphanedData', () => {
 
     expect(mocks.rollbackTransaction).toHaveBeenCalledWith('tx-cleanup');
     expect(mocks.commitTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('createUploadSession', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('retries stale scope-lock collisions with the same mode-aware insert payload', async () => {
+    const schema = 'forestgeo_uploadsession_retry_test';
+    const staleHeartbeat = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const initialConn = { release: vi.fn() };
+    const precheckConn = { release: vi.fn() };
+    const insertConn = { release: vi.fn() };
+    const catchLookupConn = { release: vi.fn() };
+    const catchUpdateConn = { release: vi.fn() };
+
+    mocks.getConn
+      .mockResolvedValueOnce(initialConn)
+      .mockResolvedValueOnce(precheckConn)
+      .mockResolvedValueOnce(insertConn)
+      .mockResolvedValueOnce(catchLookupConn)
+      .mockResolvedValueOnce(catchUpdateConn);
+
+    const duplicateScopeError = Object.assign(new Error('Duplicate entry for key uq_upload_sessions_active_scope'), {
+      code: 'ER_DUP_ENTRY',
+      sqlMessage: 'Duplicate entry for key uq_upload_sessions_active_scope'
+    });
+
+    mocks.runQuery
+      // findSessionByIdempotencyKey
+      .mockResolvedValueOnce([])
+      // abandonStaleSessionsForScope -> findActiveSessionsForPlotCensus
+      .mockResolvedValueOnce([])
+      // ensureUploadSessionScopeLock -> hasColumn(active_scope_key)
+      .mockResolvedValueOnce([{ count: 1 }])
+      // ensureUploadSessionScopeLock -> abandonDuplicateActiveScopeSessions
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // ensureUploadSessionScopeLock -> hasIndex(uq_upload_sessions_active_scope)
+      .mockResolvedValueOnce([{ count: 1 }])
+      // initial INSERT hits duplicate-key race
+      .mockRejectedValueOnce(duplicateScopeError)
+      // catch branch -> findActiveSessionsForPlotCensus
+      .mockResolvedValueOnce([
+        {
+          session_id: 'stale-session-1',
+          schema_name: schema,
+          plot_id: 7,
+          census_id: 9,
+          user_id: 'mason',
+          state: 'initialized',
+          file_id: 'file.csv',
+          total_chunks: 3,
+          uploaded_chunks: 0,
+          processed_batches: 0,
+          total_batches: 0,
+          last_heartbeat: staleHeartbeat,
+          created_at: staleHeartbeat,
+          updated_at: staleHeartbeat,
+          error_message: null,
+          idempotency_key: 'older-idem',
+          mode: 'revisions'
+        }
+      ])
+      // catch branch -> updateSessionState(stale-session-1, abandoned)
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      // catch branch -> retry INSERT succeeds
+      .mockResolvedValueOnce({ affectedRows: 1 });
+
+    const created = await createUploadSession(schema, 7, 9, 'mason', 'file.csv', 3, 'idem-1', 'clean_reupload');
+
+    expect(created).toMatchObject({
+      schema,
+      plotId: 7,
+      censusId: 9,
+      userId: 'mason',
+      fileId: 'file.csv',
+      totalChunks: 3,
+      idempotencyKey: 'idem-1',
+      mode: 'clean_reupload'
+    });
+    expect(mocks.runQuery.mock.calls.at(-1)?.[2]).toEqual([
+      created.sessionId,
+      schema,
+      7,
+      9,
+      'mason',
+      'initialized',
+      'file.csv',
+      3,
+      'idem-1',
+      'clean_reupload'
+    ]);
   });
 });

@@ -119,6 +119,20 @@ function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
   return Array.from(duplicates).sort();
 }
 
+function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
+  const uniqueValues = Array.from(
+    new Set(
+      values
+        .map(value => String(value ?? '').trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right));
+
+  const truncatedValues = uniqueValues.slice(0, maxValues);
+  const remainingCount = uniqueValues.length - truncatedValues.length;
+  return truncatedValues.join(', ') + (remainingCount > 0 ? `, ...and ${remainingCount} more` : '');
+}
+
 function isRetryableUploadError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
 
@@ -201,6 +215,42 @@ async function upsertQuadratRows(
   let skippedCount = 0;
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
+    // CLEAN_REUPLOAD deletes every active quadrat in the plot before re-inserting
+    // the upload contents. Because stems references quadrats via ON DELETE CASCADE,
+    // removing a quadrat that is already in use would also destroy its stems and
+    // any downstream measurements, even if the same QuadratName appears again in
+    // the upload. Only allow this path when the plot has no stems attached to any
+    // active quadrat rows yet.
+    const blockingQuadratSQL = format(
+      `SELECT DISTINCT q.QuadratName
+       FROM ??.quadrats q
+       WHERE q.PlotID = ?
+         AND q.IsActive = 1
+         AND q.QuadratName IS NOT NULL
+         AND EXISTS (
+           SELECT 1
+           FROM ??.stems s
+           WHERE s.QuadratID = q.QuadratID
+         )
+       ORDER BY q.QuadratName`,
+      [schema, schema]
+    );
+    const blockingQuadratRows = await connectionManager.executeQuery(blockingQuadratSQL, [plotID], transactionID);
+    const blockingQuadratNames = Array.isArray(blockingQuadratRows)
+      ? blockingQuadratRows
+          .map((row: any) => String(row.QuadratName ?? '').trim())
+          .filter(Boolean)
+      : [];
+
+    if (blockingQuadratNames.length > 0) {
+      throw new Error(
+        `Clean re-upload refused: active quadrat rows in plot ${plotID} are already referenced ` +
+          `by stems for the following QuadratName value(s): ${formatBlockedCleanReuploadValues(blockingQuadratNames)}. ` +
+          `Deleting quadrats would cascade-delete stems and downstream measurements even if the same names appear in the upload. ` +
+          `Use Revisions Upload instead.`
+      );
+    }
+
     const deleteSQL = format(`DELETE FROM ??.quadrats WHERE PlotID = ? AND IsActive = 1`, [schema]);
     await connectionManager.executeQuery(deleteSQL, [plotID], transactionID);
   }
@@ -276,52 +326,45 @@ async function upsertSpeciesRows(
   }
 
   if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-    // CLEAN_REUPLOAD wipes the active species list and re-inserts the upload contents.
-    // The species table has ON DELETE CASCADE foreign keys all the way down to
-    // coremeasurements (species -> trees -> stems -> coremeasurements), so any
-    // species code currently referenced by an existing tree would have its entire
-    // measurement subtree silently destroyed by the DELETE. To prevent this, we
-    // first compute (in-use codes) - (codes in upload). If that set is non-empty,
-    // we refuse the upload with an actionable error and suggest using REVISIONS
-    // mode instead. Codes that ARE in the upload can safely be wiped because the
-    // re-insertion immediately recreates a row with the same SpeciesCode -- the
-    // foreign keys point at SpeciesID, not SpeciesCode, but trees/stems/measurements
-    // are also rebuilt by every measurement upload, so this remains the established
-    // behavior.
-    //
-    // The upload's set of incoming codes uses LOWER() comparison to mirror how
-    // the rest of the species upload paths key on SpeciesCode case-insensitively.
-    const incomingCodes = new Set<string>();
-    for (const row of rows) {
-      const code = normalizeOptionalString(row.spcode)?.toLowerCase();
-      if (code) incomingCodes.add(code);
-    }
-
-    const inUseSQL = format(
+    // CLEAN_REUPLOAD deletes every active species row before re-inserting the file.
+    // That DELETE is only safe when no live records depend on those SpeciesIDs yet.
+    // trees and specieslimits both reference species via ON DELETE CASCADE, so
+    // including the same SpeciesCode in the upload does NOT preserve downstream data:
+    // the delete would still remove the dependent rows before the replacement
+    // SpeciesID exists. Block the mode entirely once any active species row is in use.
+    const blockingSpeciesSQL = format(
       `SELECT DISTINCT s.SpeciesCode
        FROM ??.species s
-       INNER JOIN ??.trees t ON t.SpeciesID = s.SpeciesID
-       WHERE s.IsActive = 1 AND s.SpeciesCode IS NOT NULL`,
-      [schema, schema]
+       WHERE s.IsActive = 1
+         AND s.SpeciesCode IS NOT NULL
+         AND (
+           EXISTS (
+             SELECT 1
+             FROM ??.trees t
+             WHERE t.SpeciesID = s.SpeciesID
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM ??.specieslimits sl
+             WHERE sl.SpeciesID = s.SpeciesID
+           )
+         )
+       ORDER BY s.SpeciesCode`,
+      [schema, schema, schema]
     );
-    const inUseRows = await connectionManager.executeQuery(inUseSQL, [], transactionID);
-
-    const blockingCodes: string[] = [];
-    for (const row of inUseRows as Array<{ SpeciesCode: string }>) {
-      if (row.SpeciesCode && !incomingCodes.has(row.SpeciesCode.toLowerCase())) {
-        blockingCodes.push(row.SpeciesCode);
-      }
-    }
+    const blockingSpeciesRows = await connectionManager.executeQuery(blockingSpeciesSQL, [], transactionID);
+    const blockingCodes = Array.isArray(blockingSpeciesRows)
+      ? blockingSpeciesRows
+          .map((row: any) => String(row.SpeciesCode ?? '').trim())
+          .filter(Boolean)
+      : [];
 
     if (blockingCodes.length > 0) {
-      const MAX_CODES_IN_MESSAGE = 20;
-      const truncated = blockingCodes.slice(0, MAX_CODES_IN_MESSAGE).sort();
-      const moreCount = blockingCodes.length - truncated.length;
-      const codeList = truncated.join(', ') + (moreCount > 0 ? `, ...and ${moreCount} more` : '');
       throw new Error(
-        `Clean re-upload refused: the following species code(s) are still referenced ` +
-          `by existing trees and would have their downstream measurements cascade-deleted: ${codeList}. ` +
-          `Use Revisions Upload instead, or include these codes in your upload file.`
+        `Clean re-upload refused: active species rows are already referenced by trees or species limits ` +
+          `for the following SpeciesCode value(s): ${formatBlockedCleanReuploadValues(blockingCodes)}. ` +
+          `Deleting species would cascade-delete dependent records even if the same codes appear in the upload. ` +
+          `Use Revisions Upload instead.`
       );
     }
 

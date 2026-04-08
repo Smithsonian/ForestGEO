@@ -699,50 +699,12 @@ describe('sqlpacketload fixed-data upload modes', () => {
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
-  it('refuses species clean re-upload when in-use codes are missing from the upload', async () => {
-    // The in-use lookup is the FIRST executeQuery call in the species CLEAN_REUPLOAD path,
-    // returning every active SpeciesCode currently referenced by a row in trees. The upload
-    // payload below intentionally omits 'querc1' and 'fagr2', so the precheck must refuse
-    // the upload before any DELETE runs and name the offending codes in the error message.
+  it('refuses species clean re-upload when active species rows are already referenced', async () => {
+    // The dependency lookup is the FIRST executeQuery call in the species CLEAN_REUPLOAD
+    // path, returning every active SpeciesCode that is already referenced by trees or
+    // species limits. Once a SpeciesID is in use, deleting the active species list would
+    // still cascade-delete dependent data even if the upload includes the same code again.
     mockConnectionManager.executeQuery.mockResolvedValueOnce([{ SpeciesCode: 'querc1' }, { SpeciesCode: 'fagr2' }]);
-
-    const res = await POST(
-      makeFixedDataRequest(
-        'species',
-        {
-          'row-1': { spcode: 'maple1', species: 'rubrum' }
-        },
-        { uploadMode: 'clean_reupload' }
-      )
-    );
-
-    expect(res?.status).toBe(503);
-    const body = await res?.json();
-    expect(body.error).toContain('Clean re-upload refused');
-    expect(body.error).toContain('querc1');
-    expect(body.error).toContain('fagr2');
-    expect(body.error).toContain('Use Revisions Upload instead');
-    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
-    // The DELETE FROM species must NOT have run -- the only executeQuery call should
-    // have been the in-use lookup itself.
-    const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
-      String(call[0]).includes('DELETE FROM forestgeo_testing.species')
-    );
-    expect(deleteCalls.length).toBe(0);
-  });
-
-  it('allows species clean re-upload when every in-use code is included in the upload', async () => {
-    // In-use codes are 'querc1' and 'fagr2'; the upload covers both, so the precheck
-    // passes and the existing DELETE+INSERT flow proceeds.
-    mockConnectionManager.executeQuery
-      // 1: in-use precheck returns codes the upload covers
-      .mockResolvedValueOnce([{ SpeciesCode: 'QUERC1' }, { SpeciesCode: 'FAGR2' }])
-      // 2: DELETE FROM species
-      .mockResolvedValueOnce({ affectedRows: 2 })
-      // 3: INSERT row 1 (querc1)
-      .mockResolvedValueOnce({ insertId: 101 })
-      // 4: INSERT row 2 (fagr2)
-      .mockResolvedValueOnce({ insertId: 102 });
 
     const res = await POST(
       makeFixedDataRequest(
@@ -755,18 +717,29 @@ describe('sqlpacketload fixed-data upload modes', () => {
       )
     );
 
-    expect(res?.status).toBe(200);
+    expect(res?.status).toBe(503);
+    const body = await res?.json();
+    expect(body.error).toContain('Clean re-upload refused');
+    expect(body.error).toContain('querc1');
+    expect(body.error).toContain('fagr2');
+    expect(body.error).toContain('same codes appear in the upload');
+    expect(body.error).toContain('Use Revisions Upload instead');
+    expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('tx-fixed');
+    // The DELETE FROM species must NOT have run. The precheck itself should mention
+    // both trees and specieslimits in the dependency SQL so this guard covers every
+    // current ON DELETE CASCADE path hanging off species.
     const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
       String(call[0]).includes('DELETE FROM forestgeo_testing.species')
     );
-    expect(deleteCalls.length).toBe(1);
+    expect(deleteCalls.length).toBe(0);
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
   });
 
-  it('allows species clean re-upload on a fresh site with no trees referencing any species', async () => {
-    // In-use precheck returns zero rows because no trees exist; the wipe-and-reload
-    // proceeds normally.
+  it('allows species clean re-upload on a fresh site with no dependent references', async () => {
+    // No trees or species limits reference the current active species rows, so the
+    // wipe-and-reload remains safe.
     mockConnectionManager.executeQuery
-      // 1: in-use precheck returns nothing
+      // 1: dependency precheck returns nothing
       .mockResolvedValueOnce([])
       // 2: DELETE FROM species
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -784,6 +757,57 @@ describe('sqlpacketload fixed-data upload modes', () => {
     );
 
     expect(res?.status).toBe(200);
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('specieslimits');
+  });
+
+  it('refuses quadrat clean re-upload when active quadrats are already referenced by stems', async () => {
+    mockConnectionManager.executeQuery.mockResolvedValueOnce([{ QuadratName: '1011' }, { QuadratName: '1012' }]);
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: '1011', startx: 0, starty: 0, dimx: 20, dimy: 20 }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(503);
+    const body = await res?.json();
+    expect(body.error).toContain('Clean re-upload refused');
+    expect(body.error).toContain('1011');
+    expect(body.error).toContain('1012');
+    expect(body.error).toContain('stems and downstream measurements');
+    expect(body.error).toContain('Use Revisions Upload instead');
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM forestgeo_testing.stems');
+    const deleteCalls = mockConnectionManager.executeQuery.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM forestgeo_testing.quadrats')
+    );
+    expect(deleteCalls.length).toBe(0);
+  });
+
+  it('allows quadrat clean re-upload when the plot has no stems on active quadrats', async () => {
+    mockConnectionManager.executeQuery
+      // 1: dependency precheck returns nothing
+      .mockResolvedValueOnce([])
+      // 2: DELETE FROM quadrats
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      // 3: INSERT new quadrat
+      .mockResolvedValueOnce({ insertId: 1 });
+
+    const res = await POST(
+      makeFixedDataRequest(
+        'quadrats',
+        {
+          'row-1': { quadrat: '1011', startx: 0, starty: 0, dimx: 20, dimy: 20 }
+        },
+        { uploadMode: 'clean_reupload' }
+      )
+    );
+
+    expect(res?.status).toBe(200);
+    expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('FROM forestgeo_testing.stems');
   });
 
   it('rejects revisions when multiple active species rows already exist for one SpeciesCode', async () => {

@@ -31,6 +31,8 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   MISSING_FIELD_SPECIESCODE: 'Missing required field: SpeciesCode',
   MISSING_FIELD_QUADRATNAME: 'Missing required field: QuadratName',
   MISSING_FIELD_DATE: 'Missing required field: MeasurementDate',
+  AMBIGUOUS_QUADRAT: 'Quadrat name resolves to multiple active quadrats in the same plot',
+  AMBIGUOUS_SPECIES: 'Species code resolves to multiple active species records',
   INVALID_QUADRAT: 'Invalid quadrat reference',
   INVALID_SPECIES: 'Invalid species reference',
   QUADRAT_MISMATCH: 'Quadrat mismatch across censuses',
@@ -61,8 +63,10 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('missing required field: date') || text.includes('missing date') || text.includes('missing measurementdate')) {
     codes.push('MISSING_FIELD_DATE');
   }
-  if (text.includes('invalid quadrat') || text.includes('quadrat name')) codes.push('INVALID_QUADRAT');
-  if (text.includes('invalid species') || text.includes('species code')) codes.push('INVALID_SPECIES');
+  if (text.includes('ambiguous quadrat')) codes.push('AMBIGUOUS_QUADRAT');
+  if (text.includes('ambiguous species')) codes.push('AMBIGUOUS_SPECIES');
+  if ((text.includes('invalid quadrat') || text.includes('quadrat name')) && !text.includes('ambiguous quadrat')) codes.push('INVALID_QUADRAT');
+  if ((text.includes('invalid species') || text.includes('species code')) && !text.includes('ambiguous species')) codes.push('INVALID_SPECIES');
   if (text.includes('quadrat mismatch')) codes.push('QUADRAT_MISMATCH');
   if (text.includes('coordinate drift')) codes.push('COORDINATE_DRIFT');
   if (text.includes('duplicate')) codes.push('DUPLICATE_ENTRY');
@@ -611,19 +615,28 @@ export async function revalidateEditedFailedRow(
     const plotRows: any[] = await connectionManager.executeQuery(plotIDQuery, [censusID], transactionID);
     const plotID = plotRows?.[0]?.PlotID;
     if (plotID) {
-      const quadratCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.quadrats WHERE QuadratName = ? AND PlotID = ?');
+      const quadratCheckSQL = safeFormatQuery(
+        schema,
+        'SELECT COUNT(*) as cnt FROM ??.quadrats WHERE LOWER(QuadratName) = LOWER(?) AND PlotID = ? AND IsActive = 1'
+      );
       const quadratResult: any[] = await connectionManager.executeQuery(quadratCheckSQL, [String(fields.Quadrat).trim(), plotID], transactionID);
-      if (quadratResult?.[0]?.cnt === 0) {
+      const quadratCount = Number(quadratResult?.[0]?.cnt ?? 0);
+      if (quadratCount === 0) {
         errors.push({ errorCode: 'INVALID_QUADRAT', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_QUADRAT'] });
+      } else if (quadratCount > 1) {
+        errors.push({ errorCode: 'AMBIGUOUS_QUADRAT', errorMessage: INGESTION_ERROR_MESSAGES['AMBIGUOUS_QUADRAT'] });
       }
     }
   }
 
   if (!isEmpty(fields.SpCode)) {
-    const speciesCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.species WHERE SpeciesCode = ?');
+    const speciesCheckSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as cnt FROM ??.species WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1');
     const speciesResult: any[] = await connectionManager.executeQuery(speciesCheckSQL, [String(fields.SpCode).trim()], transactionID);
-    if (speciesResult?.[0]?.cnt === 0) {
+    const speciesCount = Number(speciesResult?.[0]?.cnt ?? 0);
+    if (speciesCount === 0) {
       errors.push({ errorCode: 'INVALID_SPECIES', errorMessage: INGESTION_ERROR_MESSAGES['INVALID_SPECIES'] });
+    } else if (speciesCount > 1) {
+      errors.push({ errorCode: 'AMBIGUOUS_SPECIES', errorMessage: INGESTION_ERROR_MESSAGES['AMBIGUOUS_SPECIES'] });
     }
   }
 

@@ -19,7 +19,7 @@ import {
   runSessionCleanup,
   ensureUploadSessionsTable,
   UploadSessionState,
-  generateIdempotencyKey,
+  generateUploadSessionIdempotencyKey,
   UploadSessionOwnershipError
 } from '@/config/uploadsessiontracker';
 import ailogger from '@/ailogger';
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await ensureUploadSessionsTable(schema);
 
     // Generate idempotency key if file hash provided
-    const idempotencyKey = fileHash ? generateIdempotencyKey(schema, plotId, censusId, fileHash) : undefined;
+    const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, plotId, censusId, fileHash, mode) : undefined;
 
     const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey, mode);
 

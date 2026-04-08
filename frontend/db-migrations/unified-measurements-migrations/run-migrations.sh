@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-38 in order against a target schema.
+# Runs migrations 16-48 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -49,6 +49,16 @@ ORDERED_MIGRATIONS=(
     "36_add_error_log_indexes.sql"
     "37_seed_duplicate_conflict_error_codes.sql"
     "38_create_validation_runs.sql"
+    "39_seed_ambiguous_reference_error_codes.sql"
+    "40_add_upload_session_mode.sql"
+    "41_add_plots_name_unique.sql"
+    "42_add_census_plot_number_unique.sql"
+    "43_add_sitespecificvalidations_name_unique.sql"
+    "44_stems_stemtag_not_null.sql"
+    "45_drop_redundant_personnel_full_index.sql"
+    "46_add_species_active_code_unique.sql"
+    "47_add_quadrats_active_name_unique.sql"
+    "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql"
 )
 
 # ---------------------------------------------------------------------------
@@ -369,7 +379,7 @@ main() {
         applied_count=$((applied_count + 1))
 
         # Some migrations rely on the canonical storedprocedures.sql deployment
-        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" ]]; then
+        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" ]]; then
             log_info "Migration $file requires a stored procedure redeploy. Deploying stored procedures..."
             if ! deploy_stored_procedures; then
                 log_error "Stored procedure deployment failed after $file."

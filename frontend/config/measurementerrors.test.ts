@@ -162,4 +162,45 @@ describe('measurementerrors helpers', () => {
       errorMessage: 'Coordinate drift exceeds allowed threshold'
     });
   });
+
+  it('flags ambiguous active quadrat and species lookups during revalidation', async () => {
+    const executeQuery = vi
+      .fn()
+      .mockResolvedValueOnce([{ PlotID: 22 }])
+      .mockResolvedValueOnce([{ cnt: 2 }])
+      .mockResolvedValueOnce([{ cnt: 2 }])
+      .mockResolvedValueOnce([]);
+
+    const connectionManager = { executeQuery } as any;
+
+    const errors = await revalidateEditedFailedRow(
+      connectionManager,
+      'forestgeo_testing',
+      4,
+      {
+        Tag: '100001',
+        StemTag: '1',
+        SpCode: 'FAGR',
+        Quadrat: '1301',
+        X: 10,
+        Y: 20,
+        DBH: 3.5,
+        HOM: 1.3,
+        Date: '2010-03-17',
+        Codes: 'LI'
+      },
+      'tx-1'
+    );
+
+    expect(errors).toContainEqual({
+      errorCode: 'AMBIGUOUS_QUADRAT',
+      errorMessage: 'Quadrat name resolves to multiple active quadrats in the same plot'
+    });
+    expect(errors).toContainEqual({
+      errorCode: 'AMBIGUOUS_SPECIES',
+      errorMessage: 'Species code resolves to multiple active species records'
+    });
+    expect(String(executeQuery.mock.calls[1]?.[0])).toContain('IsActive = 1');
+    expect(String(executeQuery.mock.calls[2]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
+  });
 });

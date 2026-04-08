@@ -212,6 +212,57 @@ describe('CoreAPIFunctions', () => {
       );
       expect(censusActivityQueries).toHaveLength(0);
     });
+
+    it('uses active and plot-scoped lookups when patching measurement summary species and quadrat references', async () => {
+      const oldRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'OLDSP',
+        QuadratID: 7,
+        QuadratName: '1201'
+      };
+      const newRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'NEWSP',
+        QuadratID: 7,
+        QuadratName: '1301'
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ SpeciesID: 101 }])
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce([{ QuadratID: 205 }])
+        .mockResolvedValueOnce({ affectedRows: 1 })
+        .mockResolvedValueOnce({ affectedRows: 0 })
+        .mockResolvedValueOnce({ affectedRows: 1 });
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: ['testSchema', 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('IsActive = 1');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
+      expect(mockConnectionManager.executeQuery.mock.calls[2]?.[1]).toEqual(['1301', 22]);
+      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('PlotID = ?');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('IsActive = 1');
+    });
   });
 
   describe('POST function', () => {

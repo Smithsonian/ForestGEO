@@ -73,9 +73,15 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           ...Object.fromEntries(Object.entries(getUpdatedValues(mappedOldRow, mappedUpdatedRow)).filter(([, val]: any) => val !== undefined && val !== null))
         };
         if (updatedFields.SpeciesCode) {
-          const speciesSearchResults = await connectionManager.executeQuery(`SELECT SpeciesID FROM ${schema}.species WHERE SpeciesCode = ? LIMIT 1`, [
-            updatedFields.SpeciesCode
-          ]);
+          const speciesSearchResults = await connectionManager.executeQuery(
+            `SELECT SpeciesID
+             FROM ${schema}.species
+             WHERE LOWER(SpeciesCode) = LOWER(?)
+               AND IsActive = 1
+             ORDER BY SpeciesID
+             LIMIT 1`,
+            [updatedFields.SpeciesCode]
+          );
           if (speciesSearchResults.length === 0) throw new Error('Species not found');
           mappedUpdatedRow.SpeciesID = speciesSearchResults[0].SpeciesID;
           if (updatedFields.SpeciesName || updatedFields.SubspeciesName) {
@@ -114,9 +120,18 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         if (updatedFields.QuadratName) {
           changesFound = true;
-          const quadratSearchResults = await connectionManager.executeQuery(`SELECT QuadratID FROM ${schema}.quadrats WHERE QuadratName = ? LIMIT 1`, [
-            updatedFields.QuadratName
-          ]);
+          const plotID = mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID;
+          if (!plotID) throw new Error('Plot not found for quadrat lookup');
+          const quadratSearchResults = await connectionManager.executeQuery(
+            `SELECT QuadratID
+             FROM ${schema}.quadrats
+             WHERE LOWER(QuadratName) = LOWER(?)
+               AND PlotID = ?
+               AND IsActive = 1
+             ORDER BY QuadratID
+             LIMIT 1`,
+            [updatedFields.QuadratName, plotID]
+          );
           if (quadratSearchResults.length === 0) throw new Error('Quadrat not found');
           mappedUpdatedRow.QuadratID = quadratSearchResults[0].QuadratID;
           await connectionManager.executeQuery(
@@ -224,7 +239,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
           await connectionManager.executeQuery(deleteErrorsQuery, [mappedUpdatedRow.CoreMeasurementID]);
 
-          const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
+          const resetValidationQuery = format('/* skip_changelog */ UPDATE ?? SET ?? = ? WHERE ?? = ?', [
             `${schema}.coremeasurements`,
             'IsValidated',
             null,

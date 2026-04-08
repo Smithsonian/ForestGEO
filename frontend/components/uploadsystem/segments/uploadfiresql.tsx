@@ -183,8 +183,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadAttemptKey = useMemo(() => {
     const fileSignature =
       acceptedFiles.map(file => `${file.name}:${file.size}:${file.lastModified}:${selectedDelimiters[file.name] ?? 'auto'}`).join('|') || 'no-files';
-    return [uploadForm ?? 'no-form', schema ?? 'no-schema', currentPlotID ?? 'no-plot', currentCensusID ?? 'no-census', fileSignature].join('::');
-  }, [acceptedFiles, currentCensusID, currentPlotID, schema, selectedDelimiters, uploadForm]);
+    return [uploadForm ?? 'no-form', uploadMode ?? 'no-mode', schema ?? 'no-schema', currentPlotID ?? 'no-plot', currentCensusID ?? 'no-census', fileSignature].join('::');
+  }, [acceptedFiles, currentCensusID, currentPlotID, schema, selectedDelimiters, uploadForm, uploadMode]);
 
   const _generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
