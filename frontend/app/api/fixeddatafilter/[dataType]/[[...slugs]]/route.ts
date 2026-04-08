@@ -261,21 +261,22 @@ export async function POST(
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
             paginatedQuery = `
             SELECT * FROM ${schema}.${params.dataType} uc
-            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            JOIN ${schema}.census c ON uc.CensusID = c.CensusID
-            WHERE p.PlotID = ?
-            AND c.PlotCensusNumber = ?
-            ${filterClause}`;
+            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
+              AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
+            ${filterClause}
+            ORDER BY uc.ChangeTimestamp DESC`;
             countQuery = `
             SELECT COUNT(*) as totalRows FROM ${schema}.${params.dataType} uc
-            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            JOIN ${schema}.census c ON uc.CensusID = c.CensusID
-            WHERE p.PlotID = ?
-            AND c.PlotCensusNumber = ?
+            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
+              AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
             ${filterClause}`;
-            countParams.push(plotID, plotCensusNumber);
+            countParams.push(plotID, plotID, plotCensusNumber);
           }
-          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'quadrats':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'q');
