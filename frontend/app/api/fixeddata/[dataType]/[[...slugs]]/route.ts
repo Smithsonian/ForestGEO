@@ -106,13 +106,11 @@ export async function GET(
       case 'unifiedchangelog':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.${params.dataType} uc
-            LEFT JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
-            LEFT JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
-            WHERE (uc.PlotID = ? OR uc.PlotID IS NULL)
-              AND (c.PlotID = ? AND c.PlotCensusNumber = ? OR uc.CensusID IS NULL)
-            ORDER BY uc.ChangeTimestamp DESC
-            LIMIT ?, ?;`;
-        queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
+            WHERE p.PlotID = ?
+            AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'failedmeasurements':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.*

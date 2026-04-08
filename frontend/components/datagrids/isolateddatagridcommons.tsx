@@ -148,10 +148,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const PAGE_CACHE_TTL_MS = 30_000;
   const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
-  const skipNextProcessRowUpdateRef = useRef(false);
-  const clearPageCache = useCallback(() => {
-    pageCacheRef.current.clear();
-  }, []);
 
   const fetchPaginatedData = useCallback(
     async (pageToFetch: number) => {
@@ -235,9 +231,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const handleRefresh = useCallback(async () => {
-    clearPageCache();
+    pageCacheRef.current.clear();
     await fetchPaginatedData(paginationModel.page);
-  }, [clearPageCache, paginationModel.page, fetchPaginatedData]);
+  }, [paginationModel.page, fetchPaginatedData]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
@@ -582,7 +578,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (oldRow.isNew) {
           setIsNewRowAdded(false);
           setShouldAddRowAfterFetch(false);
-          clearPageCache();
           await fetchPaginatedData(paginationModel.page);
         }
 
@@ -595,7 +590,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setLoading(false);
       }
     },
-    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, clearPageCache]
+    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
   );
 
   const performSaveAction = useCallback(
@@ -604,10 +599,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       setLoading(true);
       try {
-        // Confirmation-driven saves already persist via updateRow below. When the
-        // row mode flips back to view, MUI will invoke processRowUpdate; skip the
-        // next invocation so the row is not patched a second time.
-        skipNextProcessRowUpdateRef.current = true;
         setRowModesModel(prevModel => ({
           ...prevModel,
           [id]: { mode: GridRowModes.View }
@@ -638,7 +629,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       setLoading(false);
-      clearPageCache();
       await fetchPaginatedData(paginationModel.page);
     },
     [
@@ -652,7 +642,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       paginationModel,
       triggerRefresh,
       setLoading,
-      clearPageCache,
       fetchPaginatedData,
       updateRow,
       onDataUpdate
@@ -700,7 +689,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-          clearPageCache();
           await fetchPaginatedData(paginationModel.page);
         }
       } catch (error: unknown) {
@@ -713,7 +701,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setLoading(false);
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, clearPageCache, fetchPaginatedData]
+    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, fetchPaginatedData]
   );
 
   const handleConfirmAction = useCallback(
@@ -843,11 +831,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
-      if (skipNextProcessRowUpdateRef.current) {
-        skipNextProcessRowUpdateRef.current = false;
-        return newRow;
-      }
-
       if (newRow?.isNew && !newRow?.id) {
         return oldRow;
       }

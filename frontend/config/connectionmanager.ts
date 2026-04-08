@@ -4,7 +4,7 @@ import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
-import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
+import { patchConnectionManager } from '@/lib/connectionlogger';
 import ailogger from '@/ailogger';
 
 /**
@@ -230,15 +230,9 @@ class ConnectionManager {
     try {
       await connection.commit();
       ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
-
-      // Flush buffered changelog entries now that the transaction is committed
-      flushTransactionChangelog(transactionId);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
-
-      // Discard changelog entries if commit itself failed
-      discardTransactionChangelog(transactionId);
       throw error;
     } finally {
       // Clean up application locks before releasing connection
@@ -283,9 +277,6 @@ class ConnectionManager {
       ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
       throw error;
     } finally {
-      // Discard any buffered changelog entries — the transaction was rolled back
-      discardTransactionChangelog(transactionId);
-
       // Clean up application locks before releasing connection
       await this.cleanupApplicationLocks(transactionId);
       connection.release();

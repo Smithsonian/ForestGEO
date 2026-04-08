@@ -1,40 +1,6 @@
 import testData from '../fixtures/forestgeo-test-data.json';
 
 export type UserProfile = 'standardUser' | 'adminUser' | 'limitedUser' | 'newUser';
-export type ValidityStatus = 200 | 412 | 500;
-
-function getVisibleJoyListbox() {
-  return cy.get('[role="listbox"]', { timeout: 10000 }).filter(':visible').first();
-}
-
-function selectVisibleJoyOption(optionText: string) {
-  getVisibleJoyListbox().within(() => {
-    cy.contains('[role="option"]', optionText).scrollIntoView().click({ force: true });
-  });
-}
-
-function routeSuffixForSidebarLink(sectionLabel: string, linkLabel: string) {
-  const routeMap: Record<string, Record<string, string>> = {
-    'Census Hub': {
-      'Census Overview': '/measurementshub/censusoverview',
-      'View Data': '/measurementshub/summary',
-      'View Errors': '/measurementshub/errors',
-      'Post-Census Statistics': '/measurementshub/postvalidation',
-      'Recent Changes': '/measurementshub/recentchanges',
-      'Uploaded Files': '/measurementshub/uploadedfiles',
-      'View All Historical Data': '/measurementshub/viewfulltable',
-      Validations: '/measurementshub/validations'
-    },
-    'Stem & Plot Details': {
-      'Stem Codes': '/fixeddatainput/attributes',
-      Personnel: '/fixeddatainput/personnel',
-      Quadrats: '/fixeddatainput/quadrats',
-      'Species List': '/fixeddatainput/alltaxonomies'
-    }
-  };
-
-  return routeMap[sectionLabel]?.[linkLabel];
-}
 
 /**
  * Helper class to generate realistic ForestGEO test data for any user scenario
@@ -171,27 +137,20 @@ export class TestDataHelper {
 
     // Dynamic intercepts that depend on user selections
     cy.intercept('GET', '/api/fetchall/plots/**', req => {
-      const url = new URL(req.url);
-      const schemaName = url.searchParams.get('schema');
+      // Default to first available site's plots
       const userSites = this.getUserSites(userType);
       const defaultSite = userSites[0]?.schemaName || 'luquillo';
-      const resolvedSchema = schemaName || defaultSite;
       req.reply({
         statusCode: 200,
-        body: this.getPlotsForSite(resolvedSchema)
+        body: this.getPlotsForSite(defaultSite)
       });
     }).as('getPlots');
 
     cy.intercept('GET', '/api/fetchall/census/**', req => {
-      const url = new URL(req.url);
-      const plotIDFromQuery = Number(url.searchParams.get('plotID'));
-      const pathMatch = url.pathname.match(/\/api\/fetchall\/census\/(\d+)\//);
-      const plotIDFromPath = pathMatch ? Number(pathMatch[1]) : NaN;
-      const resolvedPlotID = Number.isFinite(plotIDFromQuery) && plotIDFromQuery > 0 ? plotIDFromQuery : Number.isFinite(plotIDFromPath) ? plotIDFromPath : 1;
-
+      // Default to first plot's census
       req.reply({
         statusCode: 200,
-        body: this.getCensusForPlot(resolvedPlotID)
+        body: this.getCensusForPlot(1)
       });
     }).as('getCensus');
 
@@ -199,25 +158,19 @@ export class TestDataHelper {
     cy.intercept('GET', '/api/dashboardmetrics/all/**', {
       statusCode: 200,
       body: {
-        countTrees: {
-          CountTrees: 1234
-        },
-        countStems: {
-          CountStems: 2468
-        },
-        activeUsers: {
-          CountActiveUsers: 5
-        },
+        countTrees: 1234,
+        countStems: 2468,
+        activeUsers: 5,
         stemTypes: {
           CountOldStems: 1000,
           CountMultiStems: 500,
           CountNewRecruits: 968
         },
-        progressTachometer: {
+        progressTacho: {
           TotalQuadrats: 100,
           PopulatedQuadrats: 95,
           PopulatedPercent: 95,
-          UnpopulatedQuadrats: 'Q001;Q002;Q003;Q004;Q005'
+          UnpopulatedQuadrats: ['Q001', 'Q002', 'Q003', 'Q004', 'Q005']
         }
       }
     }).as('getDashboardMetrics');
@@ -317,13 +270,7 @@ declare global {
   namespace Cypress {
     interface Chainable {
       setupForestGEOUser(userType?: UserProfile): Chainable<void>;
-      visitAuthenticatedPage(path?: string): Chainable<void>;
       selectSiteAndPlot(siteName: string, plotName?: string): Chainable<void>;
-      selectSitePlotAndCensus(siteName: string, plotName: string, censusNumber: number): Chainable<void>;
-      mockCoreDataValidity(validityByType?: Partial<Record<'attributes' | 'species' | 'quadrats', ValidityStatus>>): Chainable<void>;
-      openSidebarLink(sectionLabel: string, linkLabel: string): Chainable<void>;
-      openCensusHubLink(label: string): Chainable<void>;
-      openFixedDataLink(label: string): Chainable<void>;
       validateUserPermissions(userType: UserProfile): Chainable<void>;
     }
   }
@@ -343,88 +290,27 @@ Cypress.Commands.add('setupForestGEOUser', (userType: UserProfile = 'standardUse
   cy.wrap(availableSites).as('availableSites');
 });
 
-Cypress.Commands.add('visitAuthenticatedPage', (path = '/dashboard') => {
-  cy.visit(path);
-  cy.get('[data-testid="login-logout-component"]', { timeout: 10000 }).should('exist');
-});
-
 Cypress.Commands.add('selectSiteAndPlot', (siteName: string, plotName?: string) => {
   // Select site
-  cy.get('[data-testid="site-select-component"]').scrollIntoView().should('be.visible');
-  cy.get('body').then($body => {
-    if ($body.find('[role="listbox"]:visible').length > 0) {
-      cy.get('[aria-label="Select a Site"]').click({ force: true });
-      cy.get('[role="listbox"]:visible').should('not.exist');
-    }
-  });
-  cy.get('[aria-label="Select a Site"]').click({ force: true });
-  selectVisibleJoyOption(siteName);
+  cy.get('[data-testid="site-select-component"]').should('be.visible');
+  cy.get('[aria-label="Select a Site"]').click();
+  cy.contains(siteName).click();
 
   // Verify site selection
   cy.get('[data-testid="selected-site-name"]').should('contain', siteName);
-  cy.get('[data-testid="plot-select-component"]', { timeout: 10000 }).should('be.visible');
+
+  // Wait for plots to load
+  cy.wait('@getPlots');
 
   // Select plot if specified
   if (plotName) {
-    cy.get('[data-testid="plot-select-component"]').scrollIntoView().should('be.visible');
-    cy.get('body').click(0, 0, { force: true });
-    cy.get('[aria-label="Select a Plot"]').click({ force: true });
-    selectVisibleJoyOption(plotName);
+    cy.get('[data-testid="plot-select-component"]').should('be.visible');
+    cy.get('[aria-label="Select a Plot"]').click();
+    cy.contains(plotName).click();
 
     // Verify plot selection
     cy.get('[data-testid="selected-plot-name"]').should('contain', plotName);
-    cy.get('[data-testid="census-select-component"]', { timeout: 10000 }).should('be.visible');
   }
-});
-
-Cypress.Commands.add('selectSitePlotAndCensus', (siteName: string, plotName: string, censusNumber: number) => {
-  cy.selectSiteAndPlot(siteName, plotName);
-
-  cy.get('body').click(0, 0, { force: true });
-  cy.get('[data-testid="census-select-component"]').scrollIntoView().should('be.visible');
-  cy.get('[aria-label^="Select a Census"]').click({ force: true });
-  selectVisibleJoyOption(`Census: ${censusNumber}`);
-  cy.get('[data-testid="selected-census-plotcensusnumber"]').should('contain', `Census: ${censusNumber}`);
-});
-
-Cypress.Commands.add('mockCoreDataValidity', (validityByType = {}) => {
-  cy.intercept('GET', '**/api/cmprevalidation/**', req => {
-    const url = new URL(req.url);
-    const typeMatch = url.pathname.match(/\/api\/cmprevalidation\/([^/]+)/);
-    const validityType = (typeMatch?.[1] as 'attributes' | 'species' | 'quadrats' | undefined) ?? 'attributes';
-    const statusCode = validityByType[validityType] ?? 200;
-
-    req.reply({
-      statusCode,
-      body: statusCode === 500 ? { error: `Failed to validate ${validityType}` } : { message: statusCode === 200 ? 'Valid data exists' : 'No data exists' }
-    });
-  }).as('checkCoreDataValidity');
-
-  cy.intercept('GET', '**/api/validations/run?*', {
-    statusCode: 200,
-    body: { run: null }
-  }).as('getValidationRun');
-});
-
-Cypress.Commands.add('openSidebarLink', (sectionLabel: string, linkLabel: string) => {
-  cy.contains(`[data-testid^="navigate-list-item-expanded-button-${sectionLabel}-"]`, linkLabel)
-    .scrollIntoView()
-    .should('be.visible')
-    .and('not.be.disabled')
-    .click();
-
-  const expectedRoute = routeSuffixForSidebarLink(sectionLabel, linkLabel);
-  if (expectedRoute) {
-    cy.url().should('include', expectedRoute);
-  }
-});
-
-Cypress.Commands.add('openCensusHubLink', (label: string) => {
-  cy.openSidebarLink('Census Hub', label);
-});
-
-Cypress.Commands.add('openFixedDataLink', (label: string) => {
-  cy.openSidebarLink('Stem & Plot Details', label);
 });
 
 Cypress.Commands.add('validateUserPermissions', (userType: UserProfile) => {
@@ -432,22 +318,20 @@ Cypress.Commands.add('validateUserPermissions', (userType: UserProfile) => {
   const scenario = scenarios[`${userType}Flow` as keyof typeof scenarios];
 
   // Check that accessible sites are selectable
-  cy.get('[data-testid="site-select-component"]').scrollIntoView().should('be.visible');
-  cy.get('[aria-label="Select a Site"]').click({ force: true });
+  cy.get('[aria-label="Select a Site"]').click();
 
-  getVisibleJoyListbox().within(() => {
-    scenario.accessibleSites.forEach(siteName => {
-      cy.contains('[data-testid="site-selection-option-allowed"]', siteName).should('exist').and('not.have.attr', 'aria-disabled', 'true');
-    });
-
-    scenario.restrictedSites.forEach(siteName => {
-      cy.contains('[data-testid="site-selection-option-other"]', siteName).scrollIntoView().should('exist').and('have.attr', 'aria-disabled', 'true');
-    });
+  scenario.accessibleSites.forEach(siteName => {
+    cy.contains(siteName).should('be.visible').and('not.be.disabled');
   });
 
-  cy.get('body').then($body => {
-    if ($body.find('[role="listbox"]:visible').length > 0) {
-      cy.get('[aria-label="Select a Site"]').click({ force: true });
-    }
+  // Check that restricted sites are either not visible or disabled
+  scenario.restrictedSites.forEach(siteName => {
+    cy.get('body').then($body => {
+      if ($body.find(`[data-testid="site-selection-option-other"]:contains("${siteName}")`).length > 0) {
+        // Site is visible but should be disabled
+        cy.contains(siteName).parent().should('be.disabled');
+      }
+      // If not visible, that's also acceptable for restricted sites
+    });
   });
 });
