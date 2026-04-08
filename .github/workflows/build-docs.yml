@@ -221,7 +221,7 @@ jobs:
             echo "=== Running unified migrations for ${schema} ==="
             log_file="$LOG_DIR/${schema}.log"
 
-            if frontend/db-migrations/unified-measurements-migrations/run-migrations.sh \
+            if frontend/db-migrations/unified-measurements-migrations/run-branch-refresh.sh \
               "$schema" \
               --host "$AZURE_SQL_SERVER" \
               --user "$AZURE_SQL_USER" \
