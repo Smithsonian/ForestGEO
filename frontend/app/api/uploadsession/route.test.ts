@@ -118,22 +118,7 @@ describe('POST /api/uploadsession', () => {
     const response = await POST(request);
 
     expect(response.status).toBe(201);
-    expect(mocks.createUploadSession).toHaveBeenCalledWith(
-      'forestgeo_testing',
-      1,
-      2,
-      'mason',
-      'spplist.csv',
-      1,
-      'idem-1',
-      'clean_reupload'
-    );
-    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith(
-      'forestgeo_testing',
-      1,
-      2,
-      'hash-2',
-      'clean_reupload'
-    );
+    expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'spplist.csv', 1, 'idem-1', 'clean_reupload');
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-2', 'clean_reupload');
   });
 });

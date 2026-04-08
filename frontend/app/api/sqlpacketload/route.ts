@@ -120,9 +120,7 @@ function findDuplicateSpeciesCodes(rows: FileRow[]): string[] {
 }
 
 function formatBlockedCleanReuploadValues(values: string[], maxValues: number = 20): string {
-  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) =>
-    left.localeCompare(right)
-  );
+  const uniqueValues = Array.from(new Set(values.map(value => String(value ?? '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
 
   const truncatedValues = uniqueValues.slice(0, maxValues);
   const remainingCount = uniqueValues.length - truncatedValues.length;
