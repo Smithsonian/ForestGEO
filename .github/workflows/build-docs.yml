@@ -183,6 +183,98 @@ jobs:
             done
           } | tee "$REPORT_DIR/species-duplicate-details.tsv"
 
+          {
+            echo -e "schema\tspecies_code\tcanonical_species_id\tduplicate_species_id\tduplicate_tree_rows\tcolliding_tree_rows"
+            for schema in "${schemas[@]}"; do
+              "${mysql_base[@]}" -e "
+                SELECT
+                  '${schema}' AS schema_name,
+                  dup.SpeciesCode,
+                  canon.canonical_species_id,
+                  dup.SpeciesID AS duplicate_species_id,
+                  COALESCE(dup_tree.total_duplicate_tree_rows, 0) AS duplicate_tree_rows,
+                  COALESCE(collisions.colliding_tree_rows, 0) AS colliding_tree_rows
+                FROM \`${schema}\`.species dup
+                INNER JOIN (
+                  SELECT SpeciesCode, MIN(SpeciesID) AS canonical_species_id
+                  FROM \`${schema}\`.species
+                  WHERE IsActive = 1
+                  GROUP BY SpeciesCode
+                  HAVING COUNT(*) > 1
+                ) canon
+                  ON canon.SpeciesCode <=> dup.SpeciesCode
+                 AND dup.IsActive = 1
+                 AND dup.SpeciesID <> canon.canonical_species_id
+                LEFT JOIN (
+                  SELECT SpeciesID, COUNT(*) AS total_duplicate_tree_rows
+                  FROM \`${schema}\`.trees
+                  GROUP BY SpeciesID
+                ) dup_tree
+                  ON dup_tree.SpeciesID = dup.SpeciesID
+                LEFT JOIN (
+                  SELECT
+                    d.SpeciesID AS duplicate_species_id,
+                    COUNT(*) AS colliding_tree_rows
+                  FROM \`${schema}\`.species d
+                  INNER JOIN (
+                    SELECT SpeciesCode, MIN(SpeciesID) AS canonical_species_id
+                    FROM \`${schema}\`.species
+                    WHERE IsActive = 1
+                    GROUP BY SpeciesCode
+                    HAVING COUNT(*) > 1
+                  ) c
+                    ON c.SpeciesCode <=> d.SpeciesCode
+                   AND d.IsActive = 1
+                   AND d.SpeciesID <> c.canonical_species_id
+                  INNER JOIN \`${schema}\`.trees t_dup
+                    ON t_dup.SpeciesID = d.SpeciesID
+                  INNER JOIN \`${schema}\`.trees t_can
+                    ON t_can.SpeciesID = c.canonical_species_id
+                   AND t_can.TreeTag <=> t_dup.TreeTag
+                   AND t_can.CensusID <=> t_dup.CensusID
+                  GROUP BY d.SpeciesID
+                ) collisions
+                  ON collisions.duplicate_species_id = dup.SpeciesID
+                ORDER BY dup.SpeciesCode, dup.SpeciesID;
+              "
+            done
+          } | tee "$REPORT_DIR/species-tree-collision-summary.tsv"
+
+          {
+            echo -e "schema\tspecies_code\tcanonical_species_id\tduplicate_species_id\tcanonical_tree_id\tduplicate_tree_id\ttree_tag\tcensus_id"
+            for schema in "${schemas[@]}"; do
+              "${mysql_base[@]}" -e "
+                SELECT
+                  '${schema}' AS schema_name,
+                  d.SpeciesCode,
+                  c.canonical_species_id,
+                  d.SpeciesID AS duplicate_species_id,
+                  t_can.TreeID AS canonical_tree_id,
+                  t_dup.TreeID AS duplicate_tree_id,
+                  COALESCE(t_dup.TreeTag, ''),
+                  COALESCE(t_dup.CensusID, '')
+                FROM \`${schema}\`.species d
+                INNER JOIN (
+                  SELECT SpeciesCode, MIN(SpeciesID) AS canonical_species_id
+                  FROM \`${schema}\`.species
+                  WHERE IsActive = 1
+                  GROUP BY SpeciesCode
+                  HAVING COUNT(*) > 1
+                ) c
+                  ON c.SpeciesCode <=> d.SpeciesCode
+                 AND d.IsActive = 1
+                 AND d.SpeciesID <> c.canonical_species_id
+                INNER JOIN \`${schema}\`.trees t_dup
+                  ON t_dup.SpeciesID = d.SpeciesID
+                INNER JOIN \`${schema}\`.trees t_can
+                  ON t_can.SpeciesID = c.canonical_species_id
+                 AND t_can.TreeTag <=> t_dup.TreeTag
+                 AND t_can.CensusID <=> t_dup.CensusID
+                ORDER BY d.SpeciesCode, duplicate_tree_id;
+              "
+            done
+          } | tee "$REPORT_DIR/species-tree-collision-details.tsv"
+
       - name: Audit live schemas before migration
         if: steps.resolve_inputs.outputs.operation == 'migrate'
         env:
