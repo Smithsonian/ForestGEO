@@ -206,6 +206,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         }
 
         if (updatedFields.Attributes) {
+          changesFound = true;
           const parsedCodes = updatedFields.Attributes.split(';')
             .map((code: string) => code.trim())
             .filter(Boolean);

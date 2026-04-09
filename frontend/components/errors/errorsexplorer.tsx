@@ -48,6 +48,7 @@ import {
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
+import { loadSelectableOptions } from '@/components/client/clientmacros';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -138,6 +139,17 @@ function getDisplayedContradictionTypes(row: Pick<ErrorExplorerRow, 'contradicti
   return row.contradictionType ? [row.contradictionType] : [];
 }
 
+export function parseCodesString(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(';')
+    .map(c => c.trim())
+    .filter(Boolean);
+}
+
+export function joinCodesArray(codes: unknown): string {
+  return Array.isArray(codes) ? (codes as string[]).join(';') : '';
+}
+
 function mergeEditedRow(existingRow: ErrorExplorerRow, updatedRow: ErrorExplorerRow): ErrorExplorerRow {
   return {
     ...existingRow,
@@ -166,6 +178,7 @@ export default function ErrorsExplorer() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+  const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
 
   useEffect(() => {
     if (!storageKey) return;
@@ -331,6 +344,13 @@ export default function ErrorsExplorer() {
     }
     fetchDetails(selectedMeasurementID).catch(() => undefined);
   }, [fetchDetails, selectedMeasurementID]);
+
+  useEffect(() => {
+    if (!currentSite?.schemaName) return;
+    const controller = new AbortController();
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts, controller.signal).catch(() => undefined);
+    return () => controller.abort();
+  }, [currentSite, currentPlot, currentCensus]);
 
   const updateFilters = useCallback((updater: (prev: ErrorExplorerFilters) => ErrorExplorerFilters) => {
     setFilters(prev => updater(prev));
@@ -568,9 +588,51 @@ export default function ErrorsExplorer() {
         headerAlign: 'left',
         align: 'left',
         renderCell: params => renderPreviewCell(params.value as string | undefined, 2)
+      },
+      {
+        field: 'attributes',
+        headerName: 'Codes',
+        minWidth: 180,
+        flex: 0.9,
+        editable: true,
+        headerAlign: 'left',
+        align: 'left',
+        renderCell: params => {
+          const codes = parseCodesString(params.value as string | undefined);
+          if (codes.length === 0) {
+            return <Typography level="body-sm">—</Typography>;
+          }
+          return (
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', py: 0.5 }}>
+              {codes.map(code => (
+                <Chip key={code} size="sm" variant="soft">
+                  {code}
+                </Chip>
+              ))}
+            </Stack>
+          );
+        },
+        renderEditCell: params => (
+          <Autocomplete
+            sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+            multiple
+            autoHighlight
+            clearOnBlur={false}
+            options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))}
+            value={parseCodesString(params.value as string | undefined)}
+            isOptionEqualToValue={(o, v) => o === v}
+            onChange={(_event, next) => {
+              params.api.setEditCellValue({
+                id: params.id,
+                field: params.field,
+                value: joinCodesArray(next)
+              });
+            }}
+          />
+        )
       }
     ],
-    [rowModesModel]
+    [rowModesModel, selectableOpts]
   );
 
   return (

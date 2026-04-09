@@ -213,6 +213,57 @@ describe('CoreAPIFunctions', () => {
       expect(censusActivityQueries).toHaveLength(0);
     });
 
+    it('issues validation-reset queries when only Attributes changes in measurementssummary PATCH', async () => {
+      const coreMeasurementID = 77;
+      const schema = 'testSchema';
+
+      const oldRow = {
+        CoreMeasurementID: coreMeasurementID,
+        TreeID: 10,
+        StemGUID: 20,
+        PlotID: 5,
+        Attributes: 'A'
+      };
+      const newRow = {
+        CoreMeasurementID: coreMeasurementID,
+        TreeID: 10,
+        StemGUID: 20,
+        PlotID: 5,
+        Attributes: 'D'
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      // demapData returns the row as-is so CoreMeasurementID and Attributes are preserved
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      // All queries succeed with empty result sets
+      mockConnectionManager.executeQuery.mockResolvedValue([]);
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: [schema, 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(200);
+
+      const deleteErrorLogCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('measurement_error_log') && call[0].includes('ErrorSource')
+      );
+      expect(deleteErrorLogCall, 'Expected DELETE against measurement_error_log with ErrorSource filter to be called').toBeDefined();
+      expect(deleteErrorLogCall![0]).toContain("'validation'");
+
+      const resetValidationCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('IsValidated') && call[0].includes('coremeasurements')
+      );
+      expect(resetValidationCall, 'Expected UPDATE coremeasurements SET IsValidated = NULL to be called').toBeDefined();
+      expect(resetValidationCall![0]).toContain('skip_changelog');
+    });
+
     it('uses active and plot-scoped lookups when patching measurement summary species and quadrat references', async () => {
       const oldRow = {
         CoreMeasurementID: 88,
