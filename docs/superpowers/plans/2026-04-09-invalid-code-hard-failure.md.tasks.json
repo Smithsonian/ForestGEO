@@ -1,0 +1,33 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-09-invalid-code-hard-failure.md",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 1: Add INVALID_ATTRIBUTE_CODE error to seed data",
+      "status": "pending",
+      "description": "**Goal:** Register the new ingestion error code in measurement_errors seed data.\n\n**Files:**\n- Modify: `frontend/sqlscripting/tablestructures.sql:858`\n\n**Acceptance Criteria:**\n- [ ] `INVALID_ATTRIBUTE_CODE` error row exists in seed data\n- [ ] Existing `('validation', '14', ...)` row preserved\n\n**Verify:** `grep 'INVALID_ATTRIBUTE_CODE' frontend/sqlscripting/tablestructures.sql`\n\n```json:metadata\n{\"files\": [\"frontend/sqlscripting/tablestructures.sql\"], \"verifyCommand\": \"grep 'INVALID_ATTRIBUTE_CODE' frontend/sqlscripting/tablestructures.sql\", \"acceptanceCriteria\": [\"INVALID_ATTRIBUTE_CODE error row exists\", \"validation 14 row preserved\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 2: Add Stage 1b code validation to bulkingestionprocess",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Detect and hard-fail rows with invalid attribute codes before deduplication.\n\n**Files:**\n- Modify: `frontend/sqlscripting/storedprocedures.sql:1892` (new stage)\n- Modify: `frontend/sqlscripting/storedprocedures.sql:1910` (dedup exclusion fix)\n- Modify: `frontend/sqlscripting/storedprocedures.sql:1567,1794,3003,3062` (cleanup lists)\n\n**Acceptance Criteria:**\n- [ ] Stage 1b validates codes against attributes table\n- [ ] Rows with any invalid code routed to hard_failure_rows\n- [ ] Failure reason lists specific invalid codes\n- [ ] Stage 2 dedup excludes all hard_failure_rows\n- [ ] invalid_code_rows in all cleanup lists\n\n**Verify:** Run verify-codes.ts test from Task 4\n\n```json:metadata\n{\"files\": [\"frontend/sqlscripting/storedprocedures.sql\"], \"verifyCommand\": \"npx tsx tests/benchmarks/verify-codes.ts\", \"acceptanceCriteria\": [\"Stage 1b validates codes\", \"Invalid code rows hard-fail\", \"Failure reason lists codes\", \"Dedup excludes hard_failure_rows\", \"Cleanup lists updated\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 3: Simplify Stage 9 attribute materialization",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Remove redundant invalid-code handling from Stage 9.\n\n**Files:**\n- Modify: `frontend/sqlscripting/storedprocedures.sql:2909-2920`\n\n**Acceptance Criteria:**\n- [ ] cmattributes INSERT no longer JOINs against attributes\n- [ ] Error '14' logging block removed\n- [ ] INSERT IGNORE retained\n\n**Verify:** Run verify-codes.ts test from Task 4\n\n```json:metadata\n{\"files\": [\"frontend/sqlscripting/storedprocedures.sql\"], \"verifyCommand\": \"npx tsx tests/benchmarks/verify-codes.ts\", \"acceptanceCriteria\": [\"cmattributes INSERT simplified\", \"Error 14 logging removed\", \"INSERT IGNORE retained\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 4: Update and extend verify-codes.ts test",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Extend test to cover invalid-code hard failure and mixed-code failure.\n\n**Files:**\n- Modify: `frontend/tests/benchmarks/verify-codes.ts`\n\n**Acceptance Criteria:**\n- [ ] Existing valid-code tests still pass\n- [ ] All-invalid codes hard-fail\n- [ ] Mixed codes hard-fail entirely\n- [ ] Failure reason contains code names\n- [ ] measurement_error_log has INVALID_ATTRIBUTE_CODE\n\n**Verify:** `npx tsx tests/benchmarks/verify-codes.ts` → exit 0\n\n```json:metadata\n{\"files\": [\"frontend/tests/benchmarks/verify-codes.ts\"], \"verifyCommand\": \"npx tsx tests/benchmarks/verify-codes.ts\", \"acceptanceCriteria\": [\"Valid codes still pass\", \"All-invalid codes hard-fail\", \"Mixed codes hard-fail\", \"Failure reason has code names\", \"Error log has INVALID_ATTRIBUTE_CODE\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-09T00:00:00Z"
+}

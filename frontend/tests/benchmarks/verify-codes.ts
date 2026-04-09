@@ -48,7 +48,9 @@ async function main() {
 
   // Seed error definitions
   await conn.query(`INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
-    VALUES ('ingestion', 'SQL_EXCEPTION', 'err'), ('validation', '14', 'Invalid attribute code')`);
+    VALUES ('ingestion', 'SQL_EXCEPTION', 'err'),
+           ('ingestion', 'INVALID_ATTRIBUTE_CODE', 'Row contains invalid attribute code(s)'),
+           ('validation', '14', 'Invalid attribute code')`);
 
   // Base data
   await conn.query(`INSERT INTO species (SpeciesCode,SpeciesName,IDLevel,IsActive) VALUES ('ACERRU','Acer','species',1)`);
@@ -68,7 +70,7 @@ async function main() {
   const [[{ SpeciesID: spID }]] = await conn.query<mysql.RowDataPacket[]>(`SELECT SpeciesID FROM species WHERE SpeciesCode='ACERRU'`);
 
   // Seed census 1 (3 trees)
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 5; i++) {
     await conn.query(`INSERT INTO trees (TreeTag,SpeciesID,CensusID,IsActive) VALUES (?,?,?,1)`, [`T${i}`, spID, c1]);
     const [[{ TreeID: tid }]] = await conn.query<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS TreeID');
     await conn.query(`INSERT INTO stems (TreeID,QuadratID,CensusID,StemTag,LocalX,LocalY,IsActive) VALUES (?,?,?,?,?,?,1)`, [tid, plotID, c1, '1', i, i]);
@@ -89,8 +91,11 @@ async function main() {
      VALUES
      (?,?,?,?,'T1','1','ACERRU','Q01',1,1,11,1.3,'2025-06-15','A',NULL),
      (?,?,?,?,'T2','1','ACERRU','Q01',2,2,12,1.3,'2025-06-15','D',NULL),
-     (?,?,?,?,'T3','1','ACERRU','Q01',3,3,13,1.3,'2025-06-15','A;D',NULL)`,
-    [fileID, batchID, plotID, c2, fileID, batchID, plotID, c2, fileID, batchID, plotID, c2]
+     (?,?,?,?,'T3','1','ACERRU','Q01',3,3,13,1.3,'2025-06-15','A;D',NULL),
+     (?,?,?,?,'T4','1','ACERRU','Q01',4,4,14,1.3,'2025-06-15','MX',NULL),
+     (?,?,?,?,'T5','1','ACERRU','Q01',5,5,15,1.3,'2025-06-15','D;MX',NULL)`,
+    [fileID, batchID, plotID, c2, fileID, batchID, plotID, c2, fileID, batchID, plotID, c2,
+     fileID, batchID, plotID, c2, fileID, batchID, plotID, c2]
   );
 
   // Run ingest
@@ -129,16 +134,53 @@ async function main() {
   console.log(`T2 codes: [${t2Codes}] (expected: [D])`);
   console.log(`T3 codes: [${t3Codes}] (expected: [A,D])`);
 
-  const pass =
-    t1Codes.length === 1 &&
-    t1Codes[0] === 'A' &&
-    t2Codes.length === 1 &&
-    t2Codes[0] === 'D' &&
-    t3Codes.length === 2 &&
-    t3Codes[0] === 'A' &&
-    t3Codes[1] === 'D';
+  // T4: all invalid code "MX" → should hard-fail (StemGUID IS NULL)
+  const [t4Failed] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT CoreMeasurementID, RawCodes, Description FROM coremeasurements
+     WHERE CensusID=? AND RawTreeTag='T4' AND StemGUID IS NULL`, [c2]
+  );
+  const t4Pass = t4Failed.length === 1
+    && (t4Failed[0].Description as string).includes('MX');
+  console.log(`T4 failed: ${t4Failed.length === 1} reason includes MX: ${t4Pass} (expected: true)`);
 
-  console.log(pass ? '\nPASS: Codes correctly assigned' : '\nFAIL: Code assignment broken');
+  // T5: mixed code "D;MX" → should hard-fail entirely (not partial success)
+  const [t5Failed] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT CoreMeasurementID, RawCodes, Description FROM coremeasurements
+     WHERE CensusID=? AND RawTreeTag='T5' AND StemGUID IS NULL`, [c2]
+  );
+  const t5Pass = t5Failed.length === 1
+    && (t5Failed[0].Description as string).includes('MX');
+  console.log(`T5 failed: ${t5Failed.length === 1} reason includes MX: ${t5Pass} (expected: true)`);
+
+  // Verify no cmattributes for T4 or T5
+  const [t4t5Attrs] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT ca.Code FROM cmattributes ca
+     JOIN coremeasurements cm ON cm.CoreMeasurementID=ca.CoreMeasurementID
+     WHERE cm.CensusID=? AND cm.RawTreeTag IN ('T4','T5')`, [c2]
+  );
+  const noAttrsPass = t4t5Attrs.length === 0;
+  console.log(`T4/T5 no attrs: ${noAttrsPass} (expected: true)`);
+
+  // Verify measurement_error_log has INVALID_ATTRIBUTE_CODE for T4 and T5
+  const [errorLogRows] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT cm.RawTreeTag, me.ErrorCode FROM measurement_error_log mel
+     JOIN coremeasurements cm ON cm.CoreMeasurementID=mel.MeasurementID
+     JOIN measurement_errors me ON me.ErrorID=mel.ErrorID
+     WHERE cm.CensusID=? AND me.ErrorCode='INVALID_ATTRIBUTE_CODE'
+     ORDER BY cm.RawTreeTag`, [c2]
+  );
+  const errorLogPass = errorLogRows.length === 2
+    && errorLogRows.some((r: any) => r.RawTreeTag === 'T4')
+    && errorLogRows.some((r: any) => r.RawTreeTag === 'T5');
+  console.log(`Error log entries: ${errorLogRows.length} (expected: 2), pass: ${errorLogPass}`);
+
+  const pass =
+    t1Codes.length === 1 && t1Codes[0] === 'A' &&
+    t2Codes.length === 1 && t2Codes[0] === 'D' &&
+    t3Codes.length === 2 && t3Codes[0] === 'A' && t3Codes[1] === 'D' &&
+    t4Pass && t5Pass && noAttrsPass && errorLogPass;
+
+  console.log(pass ? '\nPASS: Codes correctly assigned and invalid codes hard-fail' : '\nFAIL: Code handling broken');
 
   await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
   await conn.end();
