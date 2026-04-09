@@ -840,6 +840,7 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch across censuses'),
        ('ingestion', 'COORDINATE_DRIFT', 'Coordinate drift exceeds allowed threshold'),
        ('ingestion', 'DUPLICATE_ENTRY', 'Duplicate measurement row detected'),
+       ('ingestion', 'DUPLICATE_TAG_STEMTAG', 'Duplicate TreeTag/StemTag within upload batch'),
        ('ingestion', 'NEGATIVE_DBH', 'DBH must be non-negative'),
        ('ingestion', 'NEGATIVE_HOM', 'HOM must be non-negative'),
        ('ingestion', 'INVALID_COORDINATE', 'Coordinate value is negative'),

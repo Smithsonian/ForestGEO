@@ -251,13 +251,7 @@ export function generateIdempotencyKey(schema: string, plotId: number, censusId:
   return `${schema}_${plotId}_${censusId}_${fileHash}`;
 }
 
-export function generateUploadSessionIdempotencyKey(
-  schema: string,
-  plotId: number,
-  censusId: number,
-  fileHash: string,
-  mode?: string
-): string {
+export function generateUploadSessionIdempotencyKey(schema: string, plotId: number, censusId: number, fileHash: string, mode?: string): string {
   return [schema, plotId, censusId, fileHash, mode || 'mode:unspecified'].join('#');
 }
 
@@ -380,7 +374,11 @@ export async function createUploadSession(
   try {
     conn = await getConn();
     await ensureUploadSessionScopeLock(conn, schema);
-    await runQuery(conn, insertSQL, buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode));
+    await runQuery(
+      conn,
+      insertSQL,
+      buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode)
+    );
 
     ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}${mode ? ` (mode: ${mode})` : ''}`);
 
@@ -423,7 +421,11 @@ export async function createUploadSession(
             UploadSessionState.ABANDONED,
             getStaleSessionReason(`session creation retry for plot ${plotId}, census ${censusId}`)
           );
-          await runQuery(conn, insertSQL, buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode));
+          await runQuery(
+            conn,
+            insertSQL,
+            buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode)
+          );
 
           ailogger.info(`[UploadSessionTracker] Created session ${sessionId} after reclaiming stale scope lock for plot ${plotId}, census ${censusId}`);
           return {

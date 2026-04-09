@@ -1564,7 +1564,7 @@ BEGIN
 
             DELETE FROM temporarymeasurements WHERE FileID = vFileID AND BatchID = vBatchID;
 
-            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+            DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
                 quadrat_resolution, species_resolution,
                 filter_validity, filtered,
                 classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -1791,7 +1791,7 @@ BEGIN
         'processing', NOW()
     );
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -1949,6 +1949,81 @@ BEGIN
             CONCAT(@dup_count, ' duplicate records detected and flagged as unresolved'),
             'info',
             vBatchRowCount, 0, @dup_count, 0
+        );
+
+        UPDATE uploadmetrics
+        SET duplicatesDetected = 1
+        WHERE uploadId = vUploadId;
+    END IF;
+
+    -- ----------------------------------------------------------------
+    -- Stage 2b: Within-batch TreeTag+StemTag collision detection.
+    -- Any rows sharing (CensusID, TreeTag, StemTag) within this batch
+    -- that were NOT collapsed as exact duplicates in Stage 2a are
+    -- flagged as DUPLICATE_TAG_STEMTAG. ALL rows in the collision
+    -- group fail (no winner is picked, because non-tag fields differ
+    -- and we have no safe basis to choose).
+    -- ----------------------------------------------------------------
+    CREATE TEMPORARY TABLE tag_stemtag_collision_groups AS
+    SELECT CensusID, TreeTag, StemTag, COUNT(*) AS collision_count
+    FROM temporarymeasurements
+    WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
+      AND id NOT IN (SELECT id FROM validation_failures)
+      AND id NOT IN (SELECT id FROM duplicate_failures)
+      AND TreeTag IS NOT NULL AND TRIM(TreeTag) <> ''
+      AND StemTag IS NOT NULL AND TRIM(StemTag) <> ''
+    GROUP BY CensusID, TreeTag, StemTag
+    HAVING COUNT(*) > 1;
+
+    CREATE INDEX idx_tag_stemtag_collision_groups
+        ON tag_stemtag_collision_groups (CensusID, TreeTag, StemTag);
+
+    CREATE TEMPORARY TABLE tag_stemtag_collision_failures AS
+    SELECT tm.id,
+           LEFT(CONCAT('Duplicate TreeTag/StemTag within upload batch: "',
+                       tm.TreeTag, '"/"', tm.StemTag,
+                       '" appears ', g.collision_count,
+                       ' times with differing data; resolve in source file.'),
+                255) AS FailureReason
+    FROM temporarymeasurements tm
+    INNER JOIN tag_stemtag_collision_groups g
+        ON g.CensusID = tm.CensusID
+       AND g.TreeTag = tm.TreeTag
+       AND g.StemTag = tm.StemTag
+    WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID
+      AND tm.id NOT IN (SELECT id FROM validation_failures)
+      AND tm.id NOT IN (SELECT id FROM duplicate_failures);
+
+    CREATE INDEX idx_tag_stemtag_collision_failures_id
+        ON tag_stemtag_collision_failures (id);
+
+    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
+    SELECT id, 'DUPLICATE_TAG_STEMTAG', FailureReason
+    FROM tag_stemtag_collision_failures;
+
+    -- Remove collision rows from initial_dup_filter so they never reach
+    -- filter_validity / filtered / downstream stages. In Scenario B each
+    -- collision row has duplicate_count=1 in Stage 2a's GROUP BY, so its
+    -- MIN(id) equals its own id — deleting by id is safe.
+    DELETE idf
+    FROM initial_dup_filter idf
+    INNER JOIN tag_stemtag_collision_failures cf ON cf.id = idf.id;
+
+    IF EXISTS(SELECT 1 FROM tag_stemtag_collision_failures) THEN
+        SET @tag_stemtag_collision_count =
+            (SELECT COUNT(*) FROM tag_stemtag_collision_failures);
+
+        INSERT IGNORE INTO uploadintegrityalerts (
+            uploadId, fileID, batchID, plotID, censusID,
+            type, message, severity,
+            sourceRecords, processedRecords, failedRecords, missingRecords
+        ) VALUES (
+            vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
+            'DUPLICATE_TAG_STEMTAG',
+            CONCAT(@tag_stemtag_collision_count,
+                   ' records share a TreeTag/StemTag within the batch and were failed'),
+            'warning',
+            vBatchRowCount, 0, @tag_stemtag_collision_count, 0
         );
 
         UPDATE uploadmetrics
@@ -2925,7 +3000,7 @@ BEGIN
     -- Info-level census warnings are intentionally excluded from the hot ingest path.
     -- They can be recomputed later from persisted coremeasurements if needed.
 
-    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+    DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
         classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
@@ -2984,7 +3059,7 @@ BEGIN
             endTime = NOW(6)
         WHERE uploadId = vUploadId;
 
-        DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures,
+        DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
             quadrat_resolution, species_resolution,
             filter_validity, filtered,
             classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,

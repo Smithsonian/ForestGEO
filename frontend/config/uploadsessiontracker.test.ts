@@ -195,17 +195,6 @@ describe('createUploadSession', () => {
       idempotencyKey: 'idem-1',
       mode: 'clean_reupload'
     });
-    expect(mocks.runQuery.mock.calls.at(-1)?.[2]).toEqual([
-      created.sessionId,
-      schema,
-      7,
-      9,
-      'mason',
-      'initialized',
-      'file.csv',
-      3,
-      'idem-1',
-      'clean_reupload'
-    ]);
+    expect(mocks.runQuery.mock.calls.at(-1)?.[2]).toEqual([created.sessionId, schema, 7, 9, 'mason', 'initialized', 'file.csv', 3, 'idem-1', 'clean_reupload']);
   });
 });

@@ -59,6 +59,7 @@ ORDERED_MIGRATIONS=(
     "46_add_species_active_code_unique.sql"
     "47_add_quadrats_active_name_unique.sql"
     "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql"
+    "49_add_duplicate_tag_stemtag_detection.sql"
 )
 
 # ---------------------------------------------------------------------------
@@ -379,7 +380,7 @@ main() {
         applied_count=$((applied_count + 1))
 
         # Some migrations rely on the canonical storedprocedures.sql deployment
-        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" ]]; then
+        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" || "$file" == "49_add_duplicate_tag_stemtag_detection.sql" ]]; then
             log_info "Migration $file requires a stored procedure redeploy. Deploying stored procedures..."
             if ! deploy_stored_procedures; then
                 log_error "Stored procedure deployment failed after $file."
