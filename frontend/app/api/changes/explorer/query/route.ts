@@ -37,14 +37,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'plotID is required' }, { status: HTTPResponses.INVALID_REQUEST });
     }
 
-    const response = await queryRecentChanges(
-      connectionManager,
-      body.schema,
-      body.plotID,
-      body.page,
-      body.pageSize,
-      body.filters
-    );
+    const response = await queryRecentChanges(connectionManager, body.schema, body.plotID, body.page, body.pageSize, body.filters);
     return NextResponse.json(response, { status: HTTPResponses.OK });
   } catch (error) {
     const errorObj = error instanceof Error ? error : new Error(String(error));

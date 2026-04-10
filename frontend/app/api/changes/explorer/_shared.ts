@@ -158,11 +158,7 @@ export async function queryRecentChanges(
   return { items, totalItems, summary, hasMore };
 }
 
-export async function queryRecentChangesFacets(
-  connectionManager: ExplorerConnection,
-  schema: string,
-  plotID: number
-): Promise<RecentChangesFacetsResponse> {
+export async function queryRecentChangesFacets(connectionManager: ExplorerConnection, schema: string, plotID: number): Promise<RecentChangesFacetsResponse> {
   const plotCondition = '(uc.PlotID = ? OR uc.PlotID IS NULL)';
   const plotParams = [plotID];
 
@@ -176,8 +172,7 @@ export async function queryRecentChangesFacets(
     connectionManager.executeQuery(operationQuery, plotParams) as Promise<Array<{ Operation: string; cnt: number }>>
   ]);
 
-  const toFacetOptions = (rows: Array<{ value: string; cnt: number }>): FacetOption[] =>
-    rows.map(row => ({ value: row.value, count: Number(row.cnt) }));
+  const toFacetOptions = (rows: Array<{ value: string; cnt: number }>): FacetOption[] => rows.map(row => ({ value: row.value, count: Number(row.cnt) }));
 
   const operationMap = new Map(operationResult.map(row => [row.Operation, Number(row.cnt)]));
 
