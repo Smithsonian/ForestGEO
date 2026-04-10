@@ -1,5 +1,5 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { format } from 'mysql2/promise';
 import {
   ChangelogEntry,
   RecentChangesFilters,
@@ -78,40 +78,23 @@ function buildWhereClause(filters: RecentChangesFilters): { clause: string; para
 }
 
 function buildChangelogQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT uc.ChangeID, uc.TableName, uc.RecordID, uc.Operation,
-            uc.OldRowState, uc.NewRowState, uc.ChangeTimestamp, uc.ChangedBy
-     FROM ??.unifiedchangelog uc`
-  );
+  return `SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildCountQuery(schema: string): string {
-  return safeFormatQuery(schema, `SELECT COUNT(*) AS total FROM ??.unifiedchangelog uc`);
+  return `SELECT COUNT(*) AS total FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildSummaryQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT uc.Operation, COUNT(*) AS cnt
-     FROM ??.unifiedchangelog uc`
-  );
+  return `SELECT uc.Operation, COUNT(*) AS cnt FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildFacetsUsersQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT uc.ChangedBy AS value, COUNT(*) AS cnt
-     FROM ??.unifiedchangelog uc`
-  );
+  return `SELECT uc.ChangedBy AS value, COUNT(*) AS cnt FROM ${schema}.unifiedchangelog uc`;
 }
 
 function buildFacetsTablesQuery(schema: string): string {
-  return safeFormatQuery(
-    schema,
-    `SELECT uc.TableName AS value, COUNT(*) AS cnt
-     FROM ??.unifiedchangelog uc`
-  );
+  return `SELECT uc.TableName AS value, COUNT(*) AS cnt FROM ${schema}.unifiedchangelog uc`;
 }
 
 export async function queryRecentChanges(
@@ -135,9 +118,9 @@ export async function queryRecentChanges(
   const summaryQuery = `${buildSummaryQuery(schema)} WHERE ${clause} GROUP BY uc.Operation`;
 
   const [rawRows, countResult, summaryResult] = await Promise.all([
-    connectionManager.executeQuery(dataQuery, dataParams) as Promise<RawChangelogRow[]>,
-    connectionManager.executeQuery(countQuery, allWhereParams) as Promise<Array<{ total: number }>>,
-    connectionManager.executeQuery(summaryQuery, allWhereParams) as Promise<Array<{ Operation: string; cnt: number }>>
+    connectionManager.executeQuery(format(dataQuery, dataParams)) as Promise<RawChangelogRow[]>,
+    connectionManager.executeQuery(format(countQuery, allWhereParams)) as Promise<Array<{ total: number }>>,
+    connectionManager.executeQuery(format(summaryQuery, allWhereParams)) as Promise<Array<{ Operation: string; cnt: number }>>
   ]);
 
   const hasMore = rawRows.length > pageSize;
@@ -167,9 +150,9 @@ export async function queryRecentChangesFacets(connectionManager: ExplorerConnec
   const operationQuery = `${buildSummaryQuery(schema)} WHERE ${plotCondition} GROUP BY uc.Operation`;
 
   const [usersResult, tablesResult, operationResult] = await Promise.all([
-    connectionManager.executeQuery(usersQuery, plotParams) as Promise<Array<{ value: string; cnt: number }>>,
-    connectionManager.executeQuery(tablesQuery, plotParams) as Promise<Array<{ value: string; cnt: number }>>,
-    connectionManager.executeQuery(operationQuery, plotParams) as Promise<Array<{ Operation: string; cnt: number }>>
+    connectionManager.executeQuery(format(usersQuery, plotParams)) as Promise<Array<{ value: string; cnt: number }>>,
+    connectionManager.executeQuery(format(tablesQuery, plotParams)) as Promise<Array<{ value: string; cnt: number }>>,
+    connectionManager.executeQuery(format(operationQuery, plotParams)) as Promise<Array<{ Operation: string; cnt: number }>>
   ]);
 
   const toFacetOptions = (rows: Array<{ value: string; cnt: number }>): FacetOption[] => rows.map(row => ({ value: row.value, count: Number(row.cnt) }));
