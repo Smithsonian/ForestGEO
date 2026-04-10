@@ -228,67 +228,73 @@ export default function ErrorsExplorer() {
     window.localStorage.setItem(storageKey, JSON.stringify(filters));
   }, [filters, storageKey]);
 
-  const fetchRows = useCallback(async (scopeOverride?: ExplorerScope | null) => {
-    const scope = scopeOverride ?? resolveExplorerScope();
-    if (!scope) return;
-    setLoadingRows(true);
-    setErrorMessage(null);
-    try {
-      const response = await fetch('/api/errors/explorer/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schema: scope.schema,
-          plotID: scope.plotID,
-          censusID: scope.censusID,
-          page: paginationModel.page,
-          pageSize: paginationModel.pageSize,
-          filters
-        })
-      });
-      const data = (await response.json()) as ErrorExplorerQueryResponse | { error: string };
-      if (!response.ok || 'error' in data) {
-        throw new Error('error' in data ? data.error : 'Failed to load errors');
+  const fetchRows = useCallback(
+    async (scopeOverride?: ExplorerScope | null) => {
+      const scope = scopeOverride ?? resolveExplorerScope();
+      if (!scope) return;
+      setLoadingRows(true);
+      setErrorMessage(null);
+      try {
+        const response = await fetch('/api/errors/explorer/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schema: scope.schema,
+            plotID: scope.plotID,
+            censusID: scope.censusID,
+            page: paginationModel.page,
+            pageSize: paginationModel.pageSize,
+            filters
+          })
+        });
+        const data = (await response.json()) as ErrorExplorerQueryResponse | { error: string };
+        if (!response.ok || 'error' in data) {
+          throw new Error('error' in data ? data.error : 'Failed to load errors');
+        }
+        setResults(data);
+        if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
+          setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
+        }
+      } catch (error) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        setErrorMessage(errorObj.message);
+      } finally {
+        setLoadingRows(false);
       }
-      setResults(data);
-      if (selectedMeasurementID && !data.rows.some(row => row.coreMeasurementID === selectedMeasurementID)) {
-        setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
-      }
-    } catch (error) {
-      const errorObj = error instanceof Error ? error : new Error(String(error));
-      setErrorMessage(errorObj.message);
-    } finally {
-      setLoadingRows(false);
-    }
-  }, [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]);
+    },
+    [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]
+  );
 
-  const fetchFacets = useCallback(async (scopeOverride?: ExplorerScope | null) => {
-    const scope = scopeOverride ?? resolveExplorerScope();
-    if (!scope) return;
-    setLoadingFacets(true);
-    try {
-      const response = await fetch('/api/errors/explorer/facets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schema: scope.schema,
-          plotID: scope.plotID,
-          censusID: scope.censusID,
-          filters
-        })
-      });
-      const data = (await response.json()) as ErrorExplorerFacetsResponse | { error: string };
-      if (!response.ok || 'error' in data) {
-        throw new Error('error' in data ? data.error : 'Failed to load filters');
+  const fetchFacets = useCallback(
+    async (scopeOverride?: ExplorerScope | null) => {
+      const scope = scopeOverride ?? resolveExplorerScope();
+      if (!scope) return;
+      setLoadingFacets(true);
+      try {
+        const response = await fetch('/api/errors/explorer/facets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schema: scope.schema,
+            plotID: scope.plotID,
+            censusID: scope.censusID,
+            filters
+          })
+        });
+        const data = (await response.json()) as ErrorExplorerFacetsResponse | { error: string };
+        if (!response.ok || 'error' in data) {
+          throw new Error('error' in data ? data.error : 'Failed to load filters');
+        }
+        setFacets(data);
+      } catch (error) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        setErrorMessage(errorObj.message);
+      } finally {
+        setLoadingFacets(false);
       }
-      setFacets(data);
-    } catch (error) {
-      const errorObj = error instanceof Error ? error : new Error(String(error));
-      setErrorMessage(errorObj.message);
-    } finally {
-      setLoadingFacets(false);
-    }
-  }, [filters, resolveExplorerScope]);
+    },
+    [filters, resolveExplorerScope]
+  );
 
   const fetchDetails = useCallback(
     async (measurementID: number, scopeOverride?: ExplorerScope | null) => {
@@ -320,26 +326,29 @@ export default function ErrorsExplorer() {
     [filters.contradictionTypes, resolveExplorerScope]
   );
 
-  const refreshMeasurementsSummaryScope = useCallback(async (scopeOverride?: ExplorerScope | null) => {
-    const scope = scopeOverride ?? resolveExplorerScope();
-    if (!scope) {
-      throw new Error('Explorer scope is not available');
-    }
+  const refreshMeasurementsSummaryScope = useCallback(
+    async (scopeOverride?: ExplorerScope | null) => {
+      const scope = scopeOverride ?? resolveExplorerScope();
+      if (!scope) {
+        throw new Error('Explorer scope is not available');
+      }
 
-    const response = await fetch(`/api/refreshviews/measurementssummary/${scope.schema}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        plotID: scope.plotID,
-        censusID: scope.censusID
-      })
-    });
+      const response = await fetch(`/api/refreshviews/measurementssummary/${scope.schema}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plotID: scope.plotID,
+          censusID: scope.censusID
+        })
+      });
 
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(body?.error || body?.message || 'Failed to refresh errors explorer data');
-    }
-  }, [resolveExplorerScope]);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.error || body?.message || 'Failed to refresh errors explorer data');
+      }
+    },
+    [resolveExplorerScope]
+  );
 
   const syncEditedRowLocally = useCallback((updatedRow: ErrorExplorerRow) => {
     setResults(current => ({
@@ -447,7 +456,16 @@ export default function ErrorsExplorer() {
       ]);
       return updatedRow;
     },
-    [currentSite?.schemaName, fetchDetails, fetchFacets, fetchRows, refreshMeasurementsSummaryScope, resolveExplorerScope, selectedMeasurementID, syncEditedRowLocally]
+    [
+      currentSite?.schemaName,
+      fetchDetails,
+      fetchFacets,
+      fetchRows,
+      refreshMeasurementsSummaryScope,
+      resolveExplorerScope,
+      selectedMeasurementID,
+      syncEditedRowLocally
+    ]
   );
 
   const handleProcessRowUpdateError = useCallback((error: Error) => {
