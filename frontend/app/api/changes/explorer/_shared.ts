@@ -24,11 +24,18 @@ interface RawChangelogRow {
   ChangedBy: string;
 }
 
-function parseJsonField(value: string | Record<string, unknown> | null): Record<string, unknown> | null {
+function unwrapArray(obj: unknown): Record<string, unknown> | null {
+  if (Array.isArray(obj)) {
+    return obj.length === 1 && typeof obj[0] === 'object' && obj[0] !== null ? (obj[0] as Record<string, unknown>) : null;
+  }
+  return typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>) : null;
+}
+
+function parseJsonField(value: string | Record<string, unknown> | unknown[] | null): Record<string, unknown> | null {
   if (value === null || value === undefined) return null;
-  if (typeof value === 'object') return value;
+  if (typeof value === 'object') return unwrapArray(value);
   try {
-    return JSON.parse(value);
+    return unwrapArray(JSON.parse(value));
   } catch {
     return null;
   }
