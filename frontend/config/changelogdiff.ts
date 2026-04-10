@@ -4,24 +4,9 @@ export interface DiffEntry {
   newValue: unknown;
 }
 
-const EXCLUDED_FIELDS = new Set([
-  'id',
-  'changeID',
-  'plotID',
-  'censusID',
-  'PlotID',
-  'CensusID',
-  'ChangeID',
-  'CreatedAt',
-  'UpdatedAt',
-  'createdAt',
-  'updatedAt'
-]);
+const EXCLUDED_FIELDS = new Set(['id', 'changeID', 'plotID', 'censusID', 'PlotID', 'CensusID', 'ChangeID', 'CreatedAt', 'UpdatedAt', 'createdAt', 'updatedAt']);
 
-export function computeDiff(
-  oldRowState: Record<string, unknown> | null,
-  newRowState: Record<string, unknown> | null
-): DiffEntry[] {
+export function computeDiff(oldRowState: Record<string, unknown> | null, newRowState: Record<string, unknown> | null): DiffEntry[] {
   if (!oldRowState && !newRowState) return [];
 
   const oldObj = oldRowState ?? {};

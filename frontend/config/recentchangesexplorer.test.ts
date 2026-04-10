@@ -92,7 +92,14 @@ describe('groupIntoBatches', () => {
     const entries = [
       makeEntry({ changeID: 1, operation: 'INSERT', changeTimestamp: '2026-04-09T14:30:00.000Z' }),
       makeEntry({ changeID: 2, operation: 'INSERT', changeTimestamp: '2026-04-09T14:30:05.000Z', recordID: '101' }),
-      makeEntry({ changeID: 3, operation: 'UPDATE', changeTimestamp: '2026-04-09T14:30:10.000Z', recordID: '102', oldRowState: { MeasuredDBH: 10 }, newRowState: { MeasuredDBH: 12 } }),
+      makeEntry({
+        changeID: 3,
+        operation: 'UPDATE',
+        changeTimestamp: '2026-04-09T14:30:10.000Z',
+        recordID: '102',
+        oldRowState: { MeasuredDBH: 10 },
+        newRowState: { MeasuredDBH: 12 }
+      }),
       makeEntry({ changeID: 4, operation: 'INSERT', changeTimestamp: '2026-04-09T14:30:15.000Z', recordID: '103' })
     ];
     const result = groupIntoBatches(entries);

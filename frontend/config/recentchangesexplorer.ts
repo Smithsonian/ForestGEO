@@ -122,17 +122,11 @@ export function groupIntoBatches(entries: ChangelogEntry[]): FeedItem[] {
       const next = entries[j];
       const prev = batchEntries[batchEntries.length - 1];
 
-      if (
-        next.operation !== 'INSERT' ||
-        next.tableName !== current.tableName ||
-        next.changedBy !== current.changedBy
-      ) {
+      if (next.operation !== 'INSERT' || next.tableName !== current.tableName || next.changedBy !== current.changedBy) {
         break;
       }
 
-      const timeDiff = Math.abs(
-        new Date(next.changeTimestamp).getTime() - new Date(prev.changeTimestamp).getTime()
-      );
+      const timeDiff = Math.abs(new Date(next.changeTimestamp).getTime() - new Date(prev.changeTimestamp).getTime());
       if (timeDiff > BATCH_WINDOW_MS) {
         break;
       }
