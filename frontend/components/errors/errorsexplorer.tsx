@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -104,6 +104,12 @@ function stripRowForUpdate(row: ErrorExplorerRow) {
   };
 }
 
+interface ExplorerScope {
+  schema: string;
+  plotID: number;
+  censusID: number;
+}
+
 function getFilterStorageKey(schema?: string, plotID?: number, censusID?: number) {
   if (!schema || !plotID || !censusID) return null;
   return `errors-explorer-filters:${schema}:${plotID}:${censusID}`;
@@ -166,6 +172,24 @@ export default function ErrorsExplorer() {
     () => getFilterStorageKey(currentSite?.schemaName, currentPlot?.plotID, activeCensusID),
     [currentSite?.schemaName, currentPlot?.plotID, activeCensusID]
   );
+  const resolveExplorerScope = useCallback(
+    (fallbackRow?: Partial<ErrorExplorerRow> | null): ExplorerScope | null => {
+      if (!currentSite?.schemaName) return null;
+
+      const fallbackPlotID = typeof fallbackRow?.plotID === 'number' && fallbackRow.plotID > 0 ? fallbackRow.plotID : null;
+      const fallbackCensusID = typeof fallbackRow?.censusID === 'number' && fallbackRow.censusID > 0 ? fallbackRow.censusID : null;
+      const plotID = currentPlot?.plotID ?? fallbackPlotID;
+      const censusID = activeCensusID ?? fallbackCensusID;
+      if (!plotID || !censusID) return null;
+
+      return {
+        schema: currentSite.schemaName,
+        plotID,
+        censusID
+      };
+    },
+    [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]
+  );
 
   const [filters, setFilters] = useState<ErrorExplorerFilters>(DEFAULT_ERROR_EXPLORER_FILTERS);
   const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
@@ -179,6 +203,7 @@ export default function ErrorsExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
+  const editGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!storageKey) return;
@@ -203,8 +228,9 @@ export default function ErrorsExplorer() {
     window.localStorage.setItem(storageKey, JSON.stringify(filters));
   }, [filters, storageKey]);
 
-  const fetchRows = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+  const fetchRows = useCallback(async (scopeOverride?: ExplorerScope | null) => {
+    const scope = scopeOverride ?? resolveExplorerScope();
+    if (!scope) return;
     setLoadingRows(true);
     setErrorMessage(null);
     try {
@@ -212,9 +238,9 @@ export default function ErrorsExplorer() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          schema: currentSite.schemaName,
-          plotID: currentPlot.plotID,
-          censusID: activeCensusID,
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
           page: paginationModel.page,
           pageSize: paginationModel.pageSize,
           filters
@@ -234,19 +260,20 @@ export default function ErrorsExplorer() {
     } finally {
       setLoadingRows(false);
     }
-  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters, paginationModel.page, paginationModel.pageSize, selectedMeasurementID]);
+  }, [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]);
 
-  const fetchFacets = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+  const fetchFacets = useCallback(async (scopeOverride?: ExplorerScope | null) => {
+    const scope = scopeOverride ?? resolveExplorerScope();
+    if (!scope) return;
     setLoadingFacets(true);
     try {
       const response = await fetch('/api/errors/explorer/facets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          schema: currentSite.schemaName,
-          plotID: currentPlot.plotID,
-          censusID: activeCensusID,
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
           filters
         })
       });
@@ -261,17 +288,18 @@ export default function ErrorsExplorer() {
     } finally {
       setLoadingFacets(false);
     }
-  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters]);
+  }, [filters, resolveExplorerScope]);
 
   const fetchDetails = useCallback(
-    async (measurementID: number) => {
-      if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) return;
+    async (measurementID: number, scopeOverride?: ExplorerScope | null) => {
+      const scope = scopeOverride ?? resolveExplorerScope();
+      if (!scope) return;
       setLoadingDetails(true);
       try {
         const searchParams = new URLSearchParams({
-          schema: currentSite.schemaName,
-          plotID: String(currentPlot.plotID),
-          censusID: String(activeCensusID)
+          schema: scope.schema,
+          plotID: String(scope.plotID),
+          censusID: String(scope.censusID)
         });
         if (filters.contradictionTypes.length === 1) {
           searchParams.set('activeContradictionType', filters.contradictionTypes[0]);
@@ -289,20 +317,21 @@ export default function ErrorsExplorer() {
         setLoadingDetails(false);
       }
     },
-    [activeCensusID, currentPlot?.plotID, currentSite?.schemaName, filters.contradictionTypes]
+    [filters.contradictionTypes, resolveExplorerScope]
   );
 
-  const refreshMeasurementsSummaryScope = useCallback(async () => {
-    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+  const refreshMeasurementsSummaryScope = useCallback(async (scopeOverride?: ExplorerScope | null) => {
+    const scope = scopeOverride ?? resolveExplorerScope();
+    if (!scope) {
       throw new Error('Explorer scope is not available');
     }
 
-    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+    const response = await fetch(`/api/refreshviews/measurementssummary/${scope.schema}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        plotID: currentPlot.plotID,
-        censusID: activeCensusID
+        plotID: scope.plotID,
+        censusID: scope.censusID
       })
     });
 
@@ -310,7 +339,7 @@ export default function ErrorsExplorer() {
     if (!response.ok) {
       throw new Error(body?.error || body?.message || 'Failed to refresh errors explorer data');
     }
-  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
+  }, [resolveExplorerScope]);
 
   const syncEditedRowLocally = useCallback((updatedRow: ErrorExplorerRow) => {
     setResults(current => ({
@@ -373,6 +402,8 @@ export default function ErrorsExplorer() {
         throw new Error('Site context not available');
       }
 
+      const generation = ++editGenerationRef.current;
+
       const response = await fetch(`/api/fixeddata/measurementssummary/${currentSite.schemaName}/coreMeasurementID`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -388,20 +419,35 @@ export default function ErrorsExplorer() {
       }
 
       const updatedRow = newRow as ErrorExplorerRow;
+      const rowScope = resolveExplorerScope(updatedRow) ?? resolveExplorerScope(oldRow as ErrorExplorerRow);
       syncEditedRowLocally(updatedRow);
 
+      // A newer edit has started — skip the slow refresh+fetch cycle so we
+      // don't overwrite the newer edit's data with a stale view snapshot.
+      if (editGenerationRef.current !== generation) {
+        return updatedRow;
+      }
+
       try {
-        await refreshMeasurementsSummaryScope();
+        await refreshMeasurementsSummaryScope(rowScope);
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(`Row updated, but the explorer could not refresh: ${errorObj.message}`);
         return updatedRow;
       }
 
-      await Promise.all([fetchRows(), fetchFacets(), selectedMeasurementID ? fetchDetails(selectedMeasurementID) : Promise.resolve()]);
+      if (editGenerationRef.current !== generation) {
+        return updatedRow;
+      }
+
+      await Promise.all([
+        fetchRows(rowScope),
+        fetchFacets(rowScope),
+        selectedMeasurementID ? fetchDetails(selectedMeasurementID, rowScope) : Promise.resolve()
+      ]);
       return updatedRow;
     },
-    [currentSite?.schemaName, fetchDetails, fetchFacets, fetchRows, refreshMeasurementsSummaryScope, selectedMeasurementID, syncEditedRowLocally]
+    [currentSite?.schemaName, fetchDetails, fetchFacets, fetchRows, refreshMeasurementsSummaryScope, resolveExplorerScope, selectedMeasurementID, syncEditedRowLocally]
   );
 
   const handleProcessRowUpdateError = useCallback((error: Error) => {
