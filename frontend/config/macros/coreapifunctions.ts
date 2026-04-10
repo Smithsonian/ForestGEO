@@ -172,7 +172,9 @@ async function resolveMeasurementSummaryStem(
       throw new Error(`Stem resolution failed: matching TreeID ${normalizedTreeID} / StemTag "${StemTag}" exists but is inactive for this census`);
     }
     if (blockingStem.QuadratID !== normalizedQuadratID) {
-      throw new Error(`Stem resolution failed: TreeTag "${TreeTag ?? normalizedTreeID}" / StemTag "${StemTag}" already exists in a different quadrat for this census`);
+      throw new Error(
+        `Stem resolution failed: TreeTag "${TreeTag ?? normalizedTreeID}" / StemTag "${StemTag}" already exists in a different quadrat for this census`
+      );
     }
     return blockingStem.StemGUID;
   }
@@ -261,14 +263,18 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           if (speciesSearchResults.length === 0) throw new Error('Species not found');
           mappedUpdatedRow.SpeciesID = speciesSearchResults[0].SpeciesID;
           if (hasUpdatedField('SpeciesName') || hasUpdatedField('SubspeciesName')) {
-            await connectionManager.executeQuery('UPDATE ?? SET ? WHERE SpeciesID = ?', [
-              `${schema}.species`,
-              {
-                SpeciesName: updatedFields.SpeciesName ?? mappedUpdatedRow.SpeciesName,
-                SubspeciesName: updatedFields.SubspeciesName ?? mappedUpdatedRow.SubspeciesName
-              },
-              mappedUpdatedRow.SpeciesID
-            ], transactionID);
+            await connectionManager.executeQuery(
+              'UPDATE ?? SET ? WHERE SpeciesID = ?',
+              [
+                `${schema}.species`,
+                {
+                  SpeciesName: updatedFields.SpeciesName ?? mappedUpdatedRow.SpeciesName,
+                  SubspeciesName: updatedFields.SubspeciesName ?? mappedUpdatedRow.SubspeciesName
+                },
+                mappedUpdatedRow.SpeciesID
+              ],
+              transactionID
+            );
           }
         }
         if (hasUpdatedField('TreeTag')) {
@@ -277,19 +283,29 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         if (hasUpdatedField('QuadratName')) {
           changesFound = true;
-          mappedUpdatedRow.QuadratID = await resolveMeasurementSummaryQuadratID(connectionManager, schema, {
-            QuadratID: null,
-            QuadratName: updatedFields.QuadratName,
-            PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
-          }, transactionID);
+          mappedUpdatedRow.QuadratID = await resolveMeasurementSummaryQuadratID(
+            connectionManager,
+            schema,
+            {
+              QuadratID: null,
+              QuadratName: updatedFields.QuadratName,
+              PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
+            },
+            transactionID
+          );
         }
 
         if (shouldResolveTree) {
-          mappedUpdatedRow.TreeID = await resolveMeasurementSummaryTree(connectionManager, schema, {
-            TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
-            SpeciesID: mappedUpdatedRow.SpeciesID ?? mappedOldRow.SpeciesID,
-            CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID
-          }, transactionID);
+          mappedUpdatedRow.TreeID = await resolveMeasurementSummaryTree(
+            connectionManager,
+            schema,
+            {
+              TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
+              SpeciesID: mappedUpdatedRow.SpeciesID ?? mappedOldRow.SpeciesID,
+              CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID
+            },
+            transactionID
+          );
         }
 
         const resolvedTreeID = toPositiveNumber(mappedUpdatedRow.TreeID ?? mappedOldRow.TreeID);
@@ -297,21 +313,31 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         if (needsStemResolution) {
           changesFound = true;
-          const resolvedQuadratID = await resolveMeasurementSummaryQuadratID(connectionManager, schema, {
-            QuadratID: mappedUpdatedRow.QuadratID ?? mappedOldRow.QuadratID,
-            QuadratName: mappedUpdatedRow.QuadratName ?? mappedOldRow.QuadratName,
-            PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
-          }, transactionID);
+          const resolvedQuadratID = await resolveMeasurementSummaryQuadratID(
+            connectionManager,
+            schema,
+            {
+              QuadratID: mappedUpdatedRow.QuadratID ?? mappedOldRow.QuadratID,
+              QuadratName: mappedUpdatedRow.QuadratName ?? mappedOldRow.QuadratName,
+              PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
+            },
+            transactionID
+          );
           mappedUpdatedRow.QuadratID = resolvedQuadratID;
-          const resolvedStemGUID = await resolveMeasurementSummaryStem(connectionManager, schema, {
-            TreeID: mappedUpdatedRow.TreeID ?? mappedOldRow.TreeID,
-            TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
-            CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID,
-            StemTag: mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag,
-            QuadratID: resolvedQuadratID,
-            StemLocalX: hasUpdatedField('StemLocalX') ? updatedFields.StemLocalX : mappedUpdatedRow.StemLocalX,
-            StemLocalY: hasUpdatedField('StemLocalY') ? updatedFields.StemLocalY : mappedUpdatedRow.StemLocalY
-          }, transactionID);
+          const resolvedStemGUID = await resolveMeasurementSummaryStem(
+            connectionManager,
+            schema,
+            {
+              TreeID: mappedUpdatedRow.TreeID ?? mappedOldRow.TreeID,
+              TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
+              CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID,
+              StemTag: mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag,
+              QuadratID: resolvedQuadratID,
+              StemLocalX: hasUpdatedField('StemLocalX') ? updatedFields.StemLocalX : mappedUpdatedRow.StemLocalX,
+              StemLocalY: hasUpdatedField('StemLocalY') ? updatedFields.StemLocalY : mappedUpdatedRow.StemLocalY
+            },
+            transactionID
+          );
           if (resolvedStemGUID !== mappedUpdatedRow.StemGUID) {
             await connectionManager.executeQuery(
               format(`UPDATE ?? SET ? WHERE ?? = ?`, [
@@ -367,7 +393,11 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           const parsedCodes = updatedFields.Attributes.split(';')
             .map((code: string) => code.trim())
             .filter(Boolean);
-          await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID], transactionID);
+          await connectionManager.executeQuery(
+            `DELETE FROM ?? WHERE ?? = ?`,
+            [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID],
+            transactionID
+          );
           if (parsedCodes.length === 0) {
             ailogger.error('No valid attribute codes found:', updatedFields.Attributes);
           } else {

@@ -264,26 +264,37 @@ describe('CoreAPIFunctions', () => {
       expect(resetValidationCall![0]).toContain('skip_changelog');
     });
 
-    it('uses active and plot-scoped lookups when patching measurement summary species and quadrat references', async () => {
+    it('reuses active destination tree and stem rows when patching measurement summary species and quadrat references', async () => {
+      const refreshMock = refreshIngestionErrorsForMeasurement as ReturnType<typeof vi.fn>;
       const oldRow = {
         CoreMeasurementID: 88,
         TreeID: 12,
         StemGUID: 34,
+        CensusID: 19,
         PlotID: 22,
         SpeciesID: 5,
         SpeciesCode: 'OLDSP',
+        TreeTag: '011134',
+        StemTag: '011134',
         QuadratID: 7,
-        QuadratName: '1201'
+        QuadratName: '1201',
+        StemLocalX: 10,
+        StemLocalY: 20
       };
       const newRow = {
         CoreMeasurementID: 88,
         TreeID: 12,
         StemGUID: 34,
+        CensusID: 19,
         PlotID: 22,
         SpeciesID: 5,
         SpeciesCode: 'NEWSP',
+        TreeTag: '011134',
+        StemTag: '011134',
         QuadratID: 7,
-        QuadratName: '1301'
+        QuadratName: '1301',
+        StemLocalX: 10,
+        StemLocalY: 20
       };
 
       const mockRequest = new NextRequest('http://localhost/api/test', {
@@ -293,12 +304,14 @@ describe('CoreAPIFunctions', () => {
 
       mockMapper.demapData.mockImplementation((rows: any[]) => rows);
       mockConnectionManager.executeQuery
-        .mockResolvedValueOnce([{ SpeciesID: 101 }])
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce([{ QuadratID: 205 }])
-        .mockResolvedValueOnce({ affectedRows: 1 })
-        .mockResolvedValueOnce({ affectedRows: 0 })
-        .mockResolvedValueOnce({ affectedRows: 1 });
+        .mockResolvedValueOnce([{ SpeciesID: 101 }]) // species lookup
+        .mockResolvedValueOnce([{ QuadratID: 205 }]) // quadrat lookup
+        .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // matching tree lookup (active)
+        .mockResolvedValueOnce([{ StemGUID: 77 }]) // exact active stem lookup
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements UPDATE (reassign to resolved stem)
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements raw-field sync
+        .mockResolvedValueOnce({ affectedRows: 0 }) // validation error cleanup
+        .mockResolvedValueOnce({ affectedRows: 1 }); // IsValidated reset
 
       const response = await PATCH(mockRequest, {
         params: Promise.resolve({
@@ -308,11 +321,204 @@ describe('CoreAPIFunctions', () => {
       });
 
       expect(response.status).toBe(200);
+      // Species lookup uses IsActive and case-insensitive match
       expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('IsActive = 1');
       expect(String(mockConnectionManager.executeQuery.mock.calls[0]?.[0])).toContain('LOWER(SpeciesCode) = LOWER(?)');
-      expect(mockConnectionManager.executeQuery.mock.calls[2]?.[1]).toEqual(['1301', 22]);
-      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('PlotID = ?');
-      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('IsActive = 1');
+      // Quadrat lookup uses PlotID and IsActive
+      expect(mockConnectionManager.executeQuery.mock.calls[1]?.[1]).toEqual(['1301', 22]);
+      expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('PlotID = ?');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[1]?.[0])).toContain('IsActive = 1');
+      // Tree lookup uses the full unique key, without blindly inserting a duplicate.
+      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('TreeTag = ?');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('SpeciesID = ?');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[2]?.[0])).toContain('CensusID = ?');
+      // Stem resolution checks for an exact active match before any fallback path.
+      expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('QuadratID <=> ?');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('IsActive = 1');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[4]?.[0])).toContain('coremeasurements');
+      expect(String(mockConnectionManager.executeQuery.mock.calls[4]?.[0])).toContain('StemGUID');
+      expect(mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => call[2])).toEqual(
+        Array(mockConnectionManager.executeQuery.mock.calls.length).fill('transaction-123')
+      );
+      const rawSyncCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('RawSpCode') && call[0].includes('RawQuadrat')
+      );
+      expect(rawSyncCall, 'Expected measurementssummary PATCH to sync raw coremeasurement fields').toBeDefined();
+      expect(String(rawSyncCall?.[0])).toContain('NEWSP');
+      expect(String(rawSyncCall?.[0])).toContain('1301');
+      expect(refreshMock).toHaveBeenCalledWith(
+        mockConnectionManager,
+        'testSchema',
+        88,
+        19,
+        expect.objectContaining({
+          Tag: '011134',
+          StemTag: '011134',
+          SpCode: 'NEWSP',
+          Quadrat: '1301'
+        }),
+        'transaction-123'
+      );
+
+      const inPlaceStemMoves = mockConnectionManager.executeQuery.mock.calls.filter(
+        (call: any[]) =>
+          typeof call[0] === 'string' &&
+          call[0].includes('UPDATE') &&
+          call[0].includes('stems') &&
+          (call[0].includes('TreeID') || call[0].includes('QuadratID'))
+      );
+      expect(inPlaceStemMoves).toHaveLength(0);
+    });
+
+    it('returns a controlled error when only an inactive matching tree exists', async () => {
+      const oldRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        CensusID: 19,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'OLDSP',
+        TreeTag: '011134',
+        StemTag: '011134',
+        QuadratID: 7,
+        QuadratName: '1201'
+      };
+      const newRow = {
+        ...oldRow,
+        SpeciesCode: 'NEWSP'
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ SpeciesID: 101 }]) // species lookup
+        .mockResolvedValueOnce([{ TreeID: 55, IsActive: 0 }]); // matching tree lookup (inactive)
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: ['testSchema', 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: expect.stringContaining('matching tree exists but is inactive')
+      });
+      expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
+    });
+
+    it('species-only change reuses the destination stem instead of mutating the current stem', async () => {
+      const oldRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        CensusID: 19,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'OLDSP',
+        TreeTag: '011134',
+        StemTag: '011134',
+        QuadratID: 7,
+        QuadratName: '1201'
+      };
+      const newRow = {
+        ...oldRow,
+        SpeciesCode: 'NEWSP'
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ SpeciesID: 101 }]) // species lookup
+        .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // tree resolve (find existing)
+        .mockResolvedValueOnce([{ StemGUID: 77 }]) // exact active destination stem lookup
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements UPDATE (reassign to resolved stem)
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements raw-field sync
+        .mockResolvedValueOnce({ affectedRows: 0 }) // validation error cleanup
+        .mockResolvedValueOnce({ affectedRows: 1 }); // IsValidated reset
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: ['testSchema', 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const stemsUpdate = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('UPDATE') && call[0].includes('stems') && call[0].includes('TreeID')
+      );
+      expect(stemsUpdate, 'Species-only edits should not rewrite stems.TreeID in place').toBeUndefined();
+      const stemLookup = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('stems') && call[0].includes('QuadratID <=> ?')
+      );
+      expect(stemLookup, 'Expected species-only edits to resolve the destination stem').toBeDefined();
+      const measurementStemUpdate = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('coremeasurements') && call[0].includes('StemGUID')
+      );
+      expect(measurementStemUpdate, 'Expected species-only edits to relink the measurement to the resolved stem').toBeDefined();
+      const rawSyncCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('RawSpCode') && call[0].includes('RawTreeTag')
+      );
+      expect(rawSyncCall, 'Expected measurementssummary PATCH to sync raw fields for species-only edits').toBeDefined();
+      expect(String(rawSyncCall?.[0])).toContain('NEWSP');
+    });
+
+    it('returns a controlled error when only an inactive matching stem exists during full stem resolution', async () => {
+      const oldRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        CensusID: 19,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'OLDSP',
+        TreeTag: '011134',
+        StemTag: '011134',
+        QuadratID: 7,
+        QuadratName: '1201'
+      };
+      const newRow = {
+        ...oldRow,
+        SpeciesCode: 'NEWSP',
+        QuadratName: '1301' // QuadratName change triggers full stem resolution
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ SpeciesID: 101 }]) // species lookup
+        .mockResolvedValueOnce([{ QuadratID: 205 }]) // quadrat lookup (QuadratName changed)
+        .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // tree resolve
+        .mockResolvedValueOnce([]) // exact active stem lookup (none found)
+        .mockResolvedValueOnce([{ StemGUID: 78, QuadratID: 205, IsActive: 0 }]); // blocking stem is inactive
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: ['testSchema', 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: expect.stringContaining('exists but is inactive')
+      });
+      expect(mockConnectionManager.commitTransaction).not.toHaveBeenCalled();
     });
   });
 
