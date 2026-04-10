@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Card, Chip, FormControl, FormLabel, Input, Option, Select, Sheet, Skeleton, Stack, Typography } from '@mui/joy';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -41,6 +41,10 @@ const DEFAULT_FACETS: RecentChangesFacetsResponse = {
   tables: [],
   operationCounts: { INSERT: 0, UPDATE: 0, DELETE: 0 }
 };
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 function formatRelativeTime(timestamp: string): { relative: string; full: string } {
   const m = moment(timestamp);
@@ -275,6 +279,10 @@ function FeedItemCard({ item }: { item: FeedItem }) {
 export default function RecentChangesExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
+  const facetsAbortRef = useRef<AbortController | null>(null);
+  const itemsAbortRef = useRef<AbortController | null>(null);
+  const facetsRequestRef = useRef(0);
+  const itemsRequestRef = useRef(0);
 
   const [filters, setFilters] = useState<RecentChangesFilters>(DEFAULT_RECENT_CHANGES_FILTERS);
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -301,27 +309,43 @@ export default function RecentChangesExplorer() {
 
   const fetchFacets = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotID) return;
+    facetsAbortRef.current?.abort();
+    const controller = new AbortController();
+    facetsAbortRef.current = controller;
+    const requestID = ++facetsRequestRef.current;
     setLoadingFacets(true);
     try {
       const response = await fetch('/api/changes/explorer/facets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schema: currentSite.schemaName, plotID: currentPlot.plotID })
+        body: JSON.stringify({ schema: currentSite.schemaName, plotID: currentPlot.plotID }),
+        signal: controller.signal
       });
       if (!response.ok) throw new Error(`Facets request failed: ${response.status}`);
       const data: RecentChangesFacetsResponse = await response.json();
+      if (facetsRequestRef.current !== requestID || controller.signal.aborted) return;
       setFacets(data);
     } catch (error) {
+      if (isAbortError(error)) return;
       const msg = error instanceof Error ? error.message : String(error);
       setErrorMessage(msg);
     } finally {
-      setLoadingFacets(false);
+      if (facetsRequestRef.current === requestID) {
+        setLoadingFacets(false);
+        if (facetsAbortRef.current === controller) {
+          facetsAbortRef.current = null;
+        }
+      }
     }
   }, [currentSite?.schemaName, currentPlot?.plotID]);
 
   const fetchItems = useCallback(
     async (pageNum: number, append: boolean) => {
       if (!currentSite?.schemaName || !currentPlot?.plotID) return;
+      itemsAbortRef.current?.abort();
+      const controller = new AbortController();
+      itemsAbortRef.current = controller;
+      const requestID = ++itemsRequestRef.current;
       if (append) {
         setLoadingMore(true);
       } else {
@@ -339,10 +363,12 @@ export default function RecentChangesExplorer() {
             page: pageNum,
             pageSize: DEFAULT_PAGE_SIZE,
             filters
-          })
+          }),
+          signal: controller.signal
         });
         if (!response.ok) throw new Error(`Query request failed: ${response.status}`);
         const data: RecentChangesQueryResponse = await response.json();
+        if (itemsRequestRef.current !== requestID || controller.signal.aborted) return;
 
         if (append) {
           setItems(prev => [...prev, ...data.items]);
@@ -352,15 +378,28 @@ export default function RecentChangesExplorer() {
         setSummary(data.summary);
         setHasMore(data.hasMore);
       } catch (error) {
+        if (isAbortError(error)) return;
         const msg = error instanceof Error ? error.message : String(error);
         setErrorMessage(msg);
       } finally {
-        setLoading(false);
-        setLoadingMore(false);
+        if (itemsRequestRef.current === requestID) {
+          setLoading(false);
+          setLoadingMore(false);
+          if (itemsAbortRef.current === controller) {
+            itemsAbortRef.current = null;
+          }
+        }
       }
     },
     [currentSite?.schemaName, currentPlot?.plotID, filters]
   );
+
+  useEffect(() => {
+    return () => {
+      facetsAbortRef.current?.abort();
+      itemsAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     fetchFacets();
@@ -371,10 +410,11 @@ export default function RecentChangesExplorer() {
   }, [fetchItems]);
 
   const handleLoadMore = useCallback(() => {
+    if (loading || loadingMore) return;
     const nextPage = page + 1;
     setPage(nextPage);
     fetchItems(nextPage, true);
-  }, [page, fetchItems]);
+  }, [page, fetchItems, loading, loadingMore]);
 
   if (!currentSite?.schemaName || !currentPlot?.plotID) {
     return (

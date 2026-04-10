@@ -13,6 +13,9 @@ import {
 
 type ExplorerConnection = ReturnType<typeof ConnectionManager.getInstance>;
 
+const CHANGELOG_ORDER_BY = 'ORDER BY uc.ChangeTimestamp DESC, uc.ChangeID DESC';
+const MIN_RAW_FETCH_CHUNK_SIZE = 100;
+
 interface RawChangelogRow {
   ChangeID: number;
   TableName: string;
@@ -104,6 +107,50 @@ function buildFacetsTablesQuery(schema: string): string {
   return `SELECT uc.TableName AS value, COUNT(*) AS cnt FROM ${schema}.unifiedchangelog uc`;
 }
 
+function buildDataQuery(schema: string, clause: string): string {
+  return `${buildChangelogQuery(schema)} WHERE ${clause} ${CHANGELOG_ORDER_BY} LIMIT ?, ?`;
+}
+
+async function queryRecentChangesPage(
+  connectionManager: ExplorerConnection,
+  schema: string,
+  page: number,
+  pageSize: number,
+  clause: string,
+  whereParams: unknown[]
+): Promise<{ items: FeedItem[]; hasMore: boolean }> {
+  const startItemIndex = page * pageSize;
+  const endItemIndexExclusive = startItemIndex + pageSize;
+  const chunkSize = Math.max(MIN_RAW_FETCH_CHUNK_SIZE, pageSize * 4);
+  const entries: ChangelogEntry[] = [];
+  let groupedItems: FeedItem[] = [];
+  let offset = 0;
+
+  while (true) {
+    const dataQuery = buildDataQuery(schema, clause);
+    const rawRows = (await connectionManager.executeQuery(format(dataQuery, [...whereParams, offset, chunkSize]))) as RawChangelogRow[];
+
+    if (rawRows.length === 0) {
+      break;
+    }
+
+    entries.push(...rawRows.map(toChangelogEntry));
+    groupedItems = groupIntoBatches(entries);
+
+    const reachedEndOfRows = rawRows.length < chunkSize;
+    if (reachedEndOfRows || groupedItems.length > endItemIndexExclusive) {
+      break;
+    }
+
+    offset += rawRows.length;
+  }
+
+  return {
+    items: groupedItems.slice(startItemIndex, endItemIndexExclusive),
+    hasMore: groupedItems.length > endItemIndexExclusive
+  };
+}
+
 export async function queryRecentChanges(
   connectionManager: ExplorerConnection,
   schema: string,
@@ -116,24 +163,16 @@ export async function queryRecentChanges(
   const plotParams = [plotID];
   const allWhereParams = [...plotParams, ...params];
 
-  const baseQuery = buildChangelogQuery(schema);
-  const dataQuery = `${baseQuery} WHERE ${clause} ORDER BY uc.ChangeTimestamp DESC LIMIT ?, ?`;
-  const offset = page * pageSize;
-  const dataParams = [...allWhereParams, offset, pageSize + 1];
-
   const countQuery = `${buildCountQuery(schema)} WHERE ${clause}`;
   const summaryQuery = `${buildSummaryQuery(schema)} WHERE ${clause} GROUP BY uc.Operation`;
+  const countPromise = connectionManager.executeQuery(format(countQuery, allWhereParams)) as Promise<Array<{ total: number }>>;
+  const summaryPromise = connectionManager.executeQuery(format(summaryQuery, allWhereParams)) as Promise<Array<{ Operation: string; cnt: number }>>;
 
-  const [rawRows, countResult, summaryResult] = await Promise.all([
-    connectionManager.executeQuery(format(dataQuery, dataParams)) as Promise<RawChangelogRow[]>,
-    connectionManager.executeQuery(format(countQuery, allWhereParams)) as Promise<Array<{ total: number }>>,
-    connectionManager.executeQuery(format(summaryQuery, allWhereParams)) as Promise<Array<{ Operation: string; cnt: number }>>
+  const [{ items, hasMore }, countResult, summaryResult] = await Promise.all([
+    queryRecentChangesPage(connectionManager, schema, page, pageSize, clause, allWhereParams),
+    countPromise,
+    summaryPromise
   ]);
-
-  const hasMore = rawRows.length > pageSize;
-  const trimmedRows = hasMore ? rawRows.slice(0, pageSize) : rawRows;
-  const entries = trimmedRows.map(toChangelogEntry);
-  const items = groupIntoBatches(entries);
 
   const totalItems = countResult[0]?.total ?? 0;
 
