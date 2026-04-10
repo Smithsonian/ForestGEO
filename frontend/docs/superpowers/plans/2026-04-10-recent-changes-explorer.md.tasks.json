@@ -1,0 +1,53 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-10-recent-changes-explorer.md",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 1: Config Types, Presets, and Batch Grouping",
+      "status": "pending",
+      "description": "**Goal:** Create the types module with filter state, presets, request/response interfaces, and the batch grouping pure function.\n\n**Files:**\n- Create: `config/recentchangesexplorer.ts`\n- Create: `config/recentchangesexplorer.test.ts`\n\n**Verify:** `npx vitest run config/recentchangesexplorer.test.ts`\n\n```json:metadata\n{\"files\": [\"config/recentchangesexplorer.ts\", \"config/recentchangesexplorer.test.ts\"], \"verifyCommand\": \"npx vitest run config/recentchangesexplorer.test.ts\", \"acceptanceCriteria\": [\"All TypeScript interfaces exported\", \"Four presets with correct operation mappings\", \"groupIntoBatches groups consecutive INSERTs\", \"Unit tests pass\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 2: Diff Utility",
+      "status": "pending",
+      "description": "**Goal:** Create the pure diff function that compares old/new row state and returns only changed fields.\n\n**Files:**\n- Create: `config/changelogdiff.ts`\n- Create: `config/changelogdiff.test.ts`\n\n**Verify:** `npx vitest run config/changelogdiff.test.ts`\n\n```json:metadata\n{\"files\": [\"config/changelogdiff.ts\", \"config/changelogdiff.test.ts\"], \"verifyCommand\": \"npx vitest run config/changelogdiff.test.ts\", \"acceptanceCriteria\": [\"computeDiff returns only changed fields\", \"Metadata fields excluded\", \"Sorted by field name\", \"Unit tests pass\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 3: API Shared Query Logic",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Create the shared module with SQL query builders and query/facets execution functions.\n\n**Files:**\n- Create: `app/api/changes/explorer/_shared.ts`\n\n**Verify:** TypeScript compiles\n\n```json:metadata\n{\"files\": [\"app/api/changes/explorer/_shared.ts\"], \"verifyCommand\": \"npx tsc --noEmit\", \"acceptanceCriteria\": [\"Uses safeFormatQuery\", \"Filters by plotID\", \"All filter types supported\", \"Follows ConnectionManager pattern\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 4: API Route Endpoints",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Create the query and facets POST endpoints.\n\n**Files:**\n- Create: `app/api/changes/explorer/query/route.ts`\n- Create: `app/api/changes/explorer/facets/route.ts`\n\n**Verify:** `npx tsc --noEmit`\n\n```json:metadata\n{\"files\": [\"app/api/changes/explorer/query/route.ts\", \"app/api/changes/explorer/facets/route.ts\"], \"verifyCommand\": \"npx tsc --noEmit\", \"acceptanceCriteria\": [\"Schema validation\", \"plotID required\", \"ConnectionManager pattern\", \"Proper status codes\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 5: RecentChangesExplorer Component",
+      "status": "pending",
+      "blockedBy": [7, 8, 9, 10],
+      "description": "**Goal:** Build the main UI component with filter panel, card feed, and load-more pagination.\n\n**Files:**\n- Create: `components/changes/recentchangesexplorer.tsx`\n\n**Verify:** `npx next build`\n\n```json:metadata\n{\"files\": [\"components/changes/recentchangesexplorer.tsx\"], \"verifyCommand\": \"npx next build\", \"acceptanceCriteria\": [\"Summary cards render\", \"Preset chips toggle\", \"UPDATE cards show diff\", \"Batch INSERTs group\", \"Load more works\", \"Error states handled\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 6: Page Route Swap and Cleanup",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Update the page route to render the new component.\n\n**Files:**\n- Modify: `app/(hub)/measurementshub/recentchanges/page.tsx`\n\n**Verify:** `npx next build`\n\n```json:metadata\n{\"files\": [\"app/(hub)/measurementshub/recentchanges/page.tsx\"], \"verifyCommand\": \"npx next build\", \"acceptanceCriteria\": [\"Renders RecentChangesExplorer\", \"Old imports removed\", \"Build succeeds\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 7: Build Verification and Manual Testing",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** Verify the full feature works end-to-end.\n\n**Verify:** `npx vitest run config/changelogdiff.test.ts config/recentchangesexplorer.test.ts && npx next build`\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"npx vitest run config/changelogdiff.test.ts config/recentchangesexplorer.test.ts && npx next build\", \"acceptanceCriteria\": [\"Unit tests pass\", \"Build succeeds\", \"Manual smoke test passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-10T00:00:00.000Z"
+}
