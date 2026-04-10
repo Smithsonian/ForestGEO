@@ -4,7 +4,7 @@
     {
       "id": 7,
       "subject": "Task 1: Config Types, Presets, and Batch Grouping",
-      "status": "pending",
+      "status": "done",
       "description": "**Goal:** Create the types module with filter state, presets, request/response interfaces, and the batch grouping pure function.\n\n**Files:**\n- Create: `config/recentchangesexplorer.ts`\n- Create: `config/recentchangesexplorer.test.ts`\n\n**Verify:** `npx vitest run config/recentchangesexplorer.test.ts`\n\n```json:metadata\n{\"files\": [\"config/recentchangesexplorer.ts\", \"config/recentchangesexplorer.test.ts\"], \"verifyCommand\": \"npx vitest run config/recentchangesexplorer.test.ts\", \"acceptanceCriteria\": [\"All TypeScript interfaces exported\", \"Four presets with correct operation mappings\", \"groupIntoBatches groups consecutive INSERTs\", \"Unit tests pass\"]}\n```"
     },
     {
@@ -16,7 +16,7 @@
     {
       "id": 9,
       "subject": "Task 3: API Shared Query Logic",
-      "status": "pending",
+      "status": "done",
       "blockedBy": [7],
       "description": "**Goal:** Create the shared module with SQL query builders and query/facets execution functions.\n\n**Files:**\n- Create: `app/api/changes/explorer/_shared.ts`\n\n**Verify:** TypeScript compiles\n\n```json:metadata\n{\"files\": [\"app/api/changes/explorer/_shared.ts\"], \"verifyCommand\": \"npx tsc --noEmit\", \"acceptanceCriteria\": [\"Uses safeFormatQuery\", \"Filters by plotID\", \"All filter types supported\", \"Follows ConnectionManager pattern\"]}\n```"
     },
