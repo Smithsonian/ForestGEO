@@ -42,6 +42,7 @@ BEGIN
                                             IsValidated,
                                             Description,
                                             Attributes,
+                                            RawCodes,
                                             UserDefinedFields,
                                             Errors)
     SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
@@ -65,6 +66,7 @@ BEGIN
            cm.IsValidated                                       AS IsValidated,
            cm.Description                                       AS Description,
            attr_summary.Attributes                              AS Attributes,
+           cm.RawCodes                                          AS RawCodes,
            cm.UserDefinedFields                                 AS UserDefinedFields,
            validation_errors.Errors                             AS Errors
     FROM coremeasurements cm
@@ -161,6 +163,7 @@ BEGIN
                                       FamilyID,
                                       Family,
                                       Attributes,
+                                      RawCodes,
                                       UserDefinedFields)
     SELECT cm.CoreMeasurementID                                AS CoreMeasurementID,
            cm.MeasurementDate                                  AS MeasurementDate,
@@ -191,7 +194,7 @@ BEGIN
            c.Description                                       AS CensusDescription,
            c.PlotCensusNumber                                  AS PlotCensusNumber,
            q.QuadratID                                         AS QuadratID,
-           q.QuadratName                                       AS QuadratName,
+           COALESCE(q.QuadratName, cm.RawQuadrat)              AS QuadratName,
            q.DimensionX                                        AS QuadratDimensionX,
            q.DimensionY                                        AS QuadratDimensionY,
            q.Area                                              AS QuadratArea,
@@ -199,13 +202,13 @@ BEGIN
            q.StartY                                            AS QuadratStartY,
            q.QuadratShape                                      AS QuadratShape,
            t.TreeID                                            AS TreeID,
-           t.TreeTag                                           AS TreeTag,
-           s.StemGUID                                          AS StemGUID,
-           s.StemTag                                           AS StemTag,
-           s.LocalX                                            AS StemLocalX,
-           s.LocalY                                            AS StemLocalY,
+           COALESCE(t.TreeTag, cm.RawTreeTag)                  AS TreeTag,
+           COALESCE(s.StemGUID, cm.StemGUID)                   AS StemGUID,
+           COALESCE(s.StemTag, cm.RawStemTag)                  AS StemTag,
+           COALESCE(s.LocalX, cm.RawX)                         AS StemLocalX,
+           COALESCE(s.LocalY, cm.RawY)                         AS StemLocalY,
            sp.SpeciesID                                        AS SpeciesID,
-           sp.SpeciesCode                                      AS SpeciesCode,
+           COALESCE(sp.SpeciesCode, cm.RawSpCode)              AS SpeciesCode,
            sp.SpeciesName                                      AS SpeciesName,
            sp.SubspeciesName                                   AS SubspeciesName,
            sp.SubspeciesAuthority                              AS SubspeciesAuthority,
@@ -216,23 +219,23 @@ BEGIN
            f.FamilyID                                          AS FamilyID,
            f.Family                                            AS Family,
            view_attrs.Attributes                               AS Attributes,
+           cm.RawCodes                                         AS RawCodes,
            cm.UserDefinedFields                                AS UserDefinedFields
     FROM coremeasurements cm
              JOIN census c ON cm.CensusID = c.CensusID
-             JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = c.CensusID
-             JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = c.CensusID
+             LEFT JOIN stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = c.CensusID
+             LEFT JOIN trees t ON s.TreeID = t.TreeID AND t.CensusID = c.CensusID
              LEFT JOIN species sp ON t.SpeciesID = sp.SpeciesID
              LEFT JOIN genus g ON sp.GenusID = g.GenusID
              LEFT JOIN family f ON g.FamilyID = f.FamilyID
              LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
-             LEFT JOIN plots p ON q.PlotID = p.PlotID
+             LEFT JOIN plots p ON COALESCE(q.PlotID, c.PlotID) = p.PlotID
              LEFT JOIN (
                  SELECT ca.CoreMeasurementID,
                         GROUP_CONCAT(ca.Code SEPARATOR '; ') AS Attributes
                  FROM cmattributes ca
                  GROUP BY ca.CoreMeasurementID
-             ) view_attrs ON view_attrs.CoreMeasurementID = cm.CoreMeasurementID
-    WHERE cm.StemGUID IS NOT NULL;
+             ) view_attrs ON view_attrs.CoreMeasurementID = cm.CoreMeasurementID;
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
 END $$

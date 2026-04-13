@@ -67,6 +67,78 @@ function normalizeMeasurementSummaryDate(value: unknown): string | null {
   return null;
 }
 
+type TreeStemStateLabel = 'old tree' | 'multi stem' | 'new recruit';
+
+async function computeTreeStemState(
+  connectionManager: ConnectionManager,
+  schema: string,
+  treeTag: string,
+  stemTag: string,
+  currentCensusID: number,
+  plotID: number,
+  transactionID?: string
+): Promise<TreeStemStateLabel> {
+  // Find the previous census for this plot (same logic as bulkingestionprocess Stage 4)
+  const prevCensusRows = await connectionManager.executeQuery(
+    `SELECT c_prev.CensusID
+     FROM ${schema}.census c_curr
+     INNER JOIN ${schema}.census c_prev
+       ON c_prev.PlotID = c_curr.PlotID
+       AND c_prev.PlotCensusNumber = c_curr.PlotCensusNumber - 1
+       AND c_prev.IsActive = 1
+     WHERE c_curr.CensusID = ?
+       AND c_curr.PlotID = ?
+       AND c_curr.IsActive = 1
+     ORDER BY c_prev.CensusID DESC
+     LIMIT 1`,
+    [currentCensusID, plotID],
+    transactionID
+  );
+
+  if (prevCensusRows.length === 0) {
+    // No previous census exists — every row is a new recruit
+    return 'new recruit';
+  }
+
+  const previousCensusID = prevCensusRows[0].CensusID;
+
+  // Check for previous stem match (TreeTag + StemTag in the previous census)
+  const prevStemMatch = await connectionManager.executeQuery(
+    `SELECT COUNT(*) AS MatchCount
+     FROM ${schema}.stems s
+     INNER JOIN ${schema}.trees t
+       ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+     WHERE t.TreeTag = ?
+       AND s.StemTag = ?
+       AND t.CensusID = ?
+       AND t.IsActive = 1
+       AND s.IsActive = 1`,
+    [treeTag, stemTag, previousCensusID],
+    transactionID
+  );
+
+  if (prevStemMatch[0]?.MatchCount > 0) {
+    return 'old tree';
+  }
+
+  // Check for previous tree match (TreeTag only in the previous census)
+  const prevTreeMatch = await connectionManager.executeQuery(
+    `SELECT COUNT(*) AS MatchCount
+     FROM ${schema}.trees t
+     WHERE t.TreeTag = ?
+       AND t.CensusID = ?
+       AND t.IsActive = 1`,
+    [treeTag, previousCensusID],
+    transactionID
+  );
+
+  if (prevTreeMatch[0]?.MatchCount > 0) {
+    return 'multi stem';
+  }
+
+  return 'new recruit';
+}
+
 async function resolveMeasurementSummaryQuadratID(
   connectionManager: ConnectionManager,
   schema: string,
@@ -351,6 +423,52 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             );
           }
           mappedUpdatedRow.StemGUID = resolvedStemGUID;
+
+          // Recompute treestemstate — hard-failed rows never got this during
+          // ingestion (they fail before Stage 4 classification), so corrected
+          // rows would remain hidden in View Data without it.
+          const resolvedTreeTag = String(mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag ?? '');
+          const resolvedStemTag = String(mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag ?? '');
+          const resolvedCensusID = toPositiveNumber(mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID);
+          const resolvedPlotID = toPositiveNumber(mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID);
+          const coreMeasurementID = mappedUpdatedRow.CoreMeasurementID;
+
+          if (resolvedTreeTag && resolvedStemTag && resolvedCensusID && resolvedPlotID && coreMeasurementID) {
+            const treeStemState = await computeTreeStemState(
+              connectionManager,
+              schema,
+              resolvedTreeTag,
+              resolvedStemTag,
+              resolvedCensusID,
+              resolvedPlotID,
+              transactionID
+            );
+
+            // Read existing UserDefinedFields and merge treestemstate
+            const existingUDFRows = await connectionManager.executeQuery(
+              `SELECT UserDefinedFields FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ?`,
+              [coreMeasurementID],
+              transactionID
+            );
+            const rawUDF = existingUDFRows?.[0]?.UserDefinedFields;
+            const currentFields: Record<string, unknown> = rawUDF
+              ? typeof rawUDF === 'string'
+                ? JSON.parse(rawUDF)
+                : rawUDF
+              : {};
+            currentFields.treestemstate = treeStemState;
+
+            await connectionManager.executeQuery(
+              format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+                `${schema}.coremeasurements`,
+                { UserDefinedFields: JSON.stringify(currentFields) },
+                'CoreMeasurementID',
+                coreMeasurementID
+              ]),
+              [],
+              transactionID
+            );
+          }
         }
 
         if (hasUpdatedField('StemLocalX') || hasUpdatedField('StemLocalY')) {

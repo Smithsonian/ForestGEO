@@ -88,6 +88,20 @@ async function refreshMeasurementsSummary(schema: string, plotID: number, census
   }
 }
 
+async function refreshViewFullTable(schema: string, plotID: number, censusID: number, signal: AbortSignal) {
+  const response = await fetch(`/api/refreshviews/viewfulltable/${schema}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({ plotID, censusID })
+  });
+
+  if (!response.ok) {
+    const body = await readResponsePayload(response);
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+}
+
 function buildValidationTasks(validationMessages: ValidationMessages, schema: string, plotID: number, censusID: number): ValidationTask[] {
   const allNames = Object.keys(validationMessages);
   const hasCombinedDBH = Boolean(validationMessages[DBH_GROWTH_PROCEDURE] && validationMessages[DBH_SHRINKAGE_PROCEDURE]);
@@ -305,13 +319,13 @@ async function executeRun(params: ValidationRunParams, abortController: AbortCon
   }
 
   try {
-    await refreshMeasurementsSummary(schema, plotID, censusID, signal);
+    await Promise.all([refreshMeasurementsSummary(schema, plotID, censusID, signal), refreshViewFullTable(schema, plotID, censusID, signal)]);
   } catch (err: any) {
     if (err.name === 'AbortError') return;
-    ailogger.error('[ValidationRunner] Failed to refresh measurements summary view:', err);
+    ailogger.error('[ValidationRunner] Failed to refresh summary views:', err);
     failedSteps++;
     hadBlockingFailure = true;
-    errorMessages.push(`Failed to refresh measurements summary view: ${err.message}`);
+    errorMessages.push(`Failed to refresh summary views: ${err.message}`);
   }
 
   const finalStatus = failedSteps > 0 ? 'failed' : 'completed';

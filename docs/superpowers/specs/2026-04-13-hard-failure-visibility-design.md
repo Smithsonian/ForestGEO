@@ -1,193 +1,180 @@
 # Hard Failure Visibility and Correction
 
 Date: 2026-04-13
-Status: Approved
+Status: Revised
 
 ## Problem
 
-Hard-failed records (invalid species, duplicate tags, etc.) are inserted into `coremeasurements` with `StemGUID = NULL` but are invisible in every user-facing view:
+The current visibility problem is not one bug. It is two primary gaps plus two secondary UX issues.
 
-- `measurementssummary` has NOT NULL constraints on StemGUID, TreeID, SpeciesID, QuadratID (all part of the composite primary key). `INSERT IGNORE` silently drops hard-failed rows.
-- `viewfulltable` uses `INNER JOIN stems` and `WHERE cm.StemGUID IS NOT NULL`, explicitly filtering them out.
-- View Errors also depends on `measurement_error_log`, not just `measurementssummary`. The Errors Explorer reads `measurement_error_log -> coremeasurements -> measurementssummary`; rows with no unresolved error-log link are invisible there even if they exist in `measurementssummary`.
-- View Data queries `viewfulltable`, so hard failures never appear.
+Primary gaps:
 
-Additionally, invalid attribute codes (like "MX", "I") are silently dropped from `cmattributes` after commit `1c8fbbbb`. The original codes are preserved in `coremeasurements.RawCodes` but never exposed to the UI. Users see an empty Attributes column with no explanation.
+- View Errors depends on `measurement_error_log`, not just `measurementssummary`. The Errors Explorer reads `measurement_error_log -> coremeasurements -> measurementssummary`. If an unresolved row has no unresolved `measurement_error_log` link, it is invisible there even when the row exists in `coremeasurements` and `measurementssummary`.
+- View Data uses `measurementssummary`, not `viewfulltable`. Its default filters require `UserDefinedFields.$.treestemstate` to be one of `old tree`, `multi stem`, or `new recruit`. A row corrected through the Errors Explorer can resolve onto a real stem and still remain hidden if `treestemstate` is not restored.
 
-Finally, after correcting a record in View Errors, only `measurementssummary` is refreshed. `viewfulltable` stays stale until a manual "Reset View" click, which does a full TRUNCATE + rebuild. Separately, the correction path can resolve a row onto a real stem without restoring `UserDefinedFields.treestemstate`, so the row still fails the default View Data tree-stem-state filter and remains hidden.
+Secondary issues:
 
-### Affected Scenarios (from user report)
+- `viewfulltable` can remain stale after an inline correction. That affects the historical-data screen, not the primary View Data symptom.
+- Invalid attribute codes remain soft-validated and are dropped from `cmattributes`. The original value survives in `coremeasurements.RawCodes`, but the UI does not expose it, so users can see a blank Attributes column with no explanation.
 
-| Tree | Issue | Root Cause | Current Behavior |
-|------|-------|-----------|-----------------|
-| 011375 stem 5 | Typo `ixorfi` (invalid species) | INVALID_SPECIES hard failure | Invisible everywhere |
-| 011377 | Code "I" + possibly invalid species `hirtra` | Hard failure | Invisible everywhere |
-| 011381 | Code "MX" (invalid attribute) | Soft validation, codes silently dropped | Appears in View Data with empty Attributes |
-| 011383 | Duplicate stemtag (two rows with tag=1) | DUPLICATE_TAG_STEMTAG hard failure | Invisible everywhere |
+Important correction to the earlier design assumption: in live Panama, unresolved rows are not consistently being dropped from `measurementssummary`. We verified rows already materialized there with sentinel foreign-key values (`0`). That makes a nullable-foreign-key redesign optional cleanup, not the root fix for the Cocoli report.
 
-## Design
+### Verified Scenarios
 
-All ingested records (valid and invalid) should appear in View Data. Records with unresolved errors also appear in View Errors. Users filter by `IsValidated` to distinguish:
-- `FALSE` = hard failure (StemGUID IS NULL, ingestion rejected)
-- `NULL` = ingested, not yet validated
-- `TRUE` = validated, no errors
+| Case | Verified live state | Root cause |
+|------|---------------------|------------|
+| `011375` stem `5` | Corrected row is ingested and resolved, but `UserDefinedFields` is `NULL` | Missing `treestemstate` after correction |
+| `011377` | `hirtra` is a valid species; row is unresolved with invalid code `I` and no unresolved `measurement_error_log` row | Orphan unresolved row |
+| `011381` stem `1` | Unresolved row with invalid code `MX` has no unresolved `measurement_error_log` row; a different clean stem for tree `011381` is what the user sees in View Data | Orphan unresolved row; separate RawCodes UX gap |
+| `011383` | Duplicate tag/stem rows are unresolved and lack unresolved `measurement_error_log` rows | Orphan unresolved rows, likely missing seeded error definition or failed log insert |
 
-### Section 1: Schema Migration (measurementssummary)
+## Design Goals
 
-Make StemGUID, TreeID, SpeciesID, QuadratID nullable. Change primary key from `(CoreMeasurementID, StemGUID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)` to `(CoreMeasurementID)`.
+1. Every unresolved hard failure must appear in View Errors.
+2. Every successfully corrected row must reappear in default View Data without requiring users to change filters.
+3. Historical-data screens should refresh promptly after inline corrections.
+4. Invalid dropped codes should be inspectable, but that is a secondary UX improvement.
+5. Schema cleanup for unresolved rows should not block the first two fixes.
 
-PlotID, CensusID remain NOT NULL (hard failures always have a valid census).
+## Section 1: Error Log Integrity for Unresolved Rows
 
-`viewfulltable` already defines these columns as nullable. No FK-nullable schema change needed there (RawCodes column addition is in Section 5).
+`measurement_error_log` remains the system of record for unresolved ingestion and validation visibility:
 
-`measurementssummary.MeasurementDate` is currently `NOT NULL`. Hard failures use `NULLIF(tm.MeasurementDate, '1900-01-01')` which can produce NULL. Make MeasurementDate nullable, or use `COALESCE(cm.MeasurementDate, '1900-01-01')` in refresh queries to ensure a value. Prefer making it nullable for data honesty — a missing date should show as missing, not as a sentinel.
+- View Errors reads from it.
+- measurement visibility filters treat unresolved `measurement_error_log` rows as error rows.
+- refresh queries derive the `Errors` display column from it.
 
-Migration script:
+Required changes:
 
-```sql
-ALTER TABLE measurementssummary DROP PRIMARY KEY;
-ALTER TABLE measurementssummary
-  MODIFY StemGUID INT NULL,
-  MODIFY TreeID INT NULL,
-  MODIFY SpeciesID INT NULL,
-  MODIFY QuadratID INT NULL,
-  MODIFY MeasurementDate DATE NULL;
-ALTER TABLE measurementssummary ADD PRIMARY KEY (CoreMeasurementID);
-```
+1. **Guarantee unresolved log creation**
+   - Audit `bulkingestionprocess` so every supported hard-failure row can join to a real `measurement_errors` definition and insert into `measurement_error_log`.
+   - Add any missing seeded error definitions for still-supported hard-failure codes.
+   - If an ingestion path produces an unresolved row but cannot create the error-log link, fail noisily in logs instead of silently leaving the row orphaned.
 
-### Section 2: Refresh Query Updates
+2. **Backfill existing orphan rows**
+   - Add a one-off repair script or migration that finds unresolved `coremeasurements` rows missing an unresolved `measurement_error_log` row.
+   - Map those rows to canonical `measurement_errors` definitions and insert the missing unresolved links.
+   - Prefer mapping from structured ingest context or known error code outputs. Do not rely on brittle free-text `Description` parsing unless there is no better key.
 
-Three queries need the same pattern change:
+3. **Do not reintroduce invalid attribute codes as a permanent hard failure**
+   - Invalid attribute codes should stay soft-validated.
+   - If the brief hard-fail regression already left orphan rows behind in a deployed schema, repair those rows one-off instead of institutionalizing `INVALID_ATTRIBUTE_CODE` as a required hard-failure seed.
 
-1. `RefreshMeasurementsSummary` stored proc (storedprocedures.sql)
-2. `refreshMeasurementsSummaryForScope` TS function (refreshviews route.ts)
-3. `RefreshViewFullTable` stored proc (storedprocedures.sql)
+4. **Do not bypass `measurement_error_log`**
+   - The Errors Explorer query shape stays the same.
+   - The fix is to restore the missing unresolved links, not to teach the UI to infer errors from `coremeasurements.Description`.
 
-Changes:
-- Convert INNER JOINs on `stems` and `trees` to LEFT JOINs
-- Remove `WHERE cm.StemGUID IS NOT NULL` from RefreshViewFullTable
-- Use Raw* column fallbacks for display columns:
-
-```sql
-COALESCE(t.TreeTag, cm.RawTreeTag)       AS TreeTag,
-COALESCE(s.StemTag, cm.RawStemTag)       AS StemTag,
-COALESCE(sp.SpeciesCode, cm.RawSpCode)   AS SpeciesCode,
-COALESCE(q.QuadratName, cm.RawQuadrat)   AS QuadratName,
-COALESCE(s.LocalX, cm.RawX)             AS StemLocalX,
-COALESCE(s.LocalY, cm.RawY)             AS StemLocalY,
-```
-
-`RefreshMeasurementsSummary` already uses LEFT JOINs and some COALESCE fallbacks. The remaining fallbacks (StemTag, coordinates) need adding. `RefreshViewFullTable` needs both the JOIN change and the fallback additions.
-
-### Section 3: Error Explorer Query Updates
-
-The error explorer queries in `_shared.ts` are already null-tolerant:
-
-- `buildRawErrorsQuery`: JOINs measurement_error_log to measurementssummary. Hard failures will now be in measurementssummary, so this works without changes.
-- `buildDuplicateGroupsQuery`: Groups by TreeTag + StemTag. Raw* fallbacks mean these are populated for hard failures. No change needed.
-- `buildSameBatchConflictGroupsQuery`: Uses `COALESCE(ms.SpeciesCode, '')`. No change needed.
-- Quick search filters on string columns that will be populated via Raw* fallbacks.
-
-No code changes required in this section.
-
-### Section 4: Error Log Integrity for Unresolved Rows
-
-`measurement_error_log` remains the system of record for unresolved ingestion/validation visibility:
-
-- View Errors reads from `measurement_error_log`
-- measurement visibility filters treat unresolved error-log rows as invalid/error rows
-- refresh queries derive the `Errors` display column from `measurement_error_log`
-
-Therefore, unresolved rows must always have the appropriate `measurement_error_log` links.
-
-Changes:
-
-1. **Guarantee error-log creation for hard failures**
-   - Audit `bulkingestionprocess` paths so every `hard_failure_rows.ErrorCode` can join to a real `measurement_errors` row and insert into `measurement_error_log`.
-   - Add any missing seeded error definitions required by the still-supported hard-failure codes.
-
-2. **Backfill orphaned unresolved rows**
-   - Add a one-off repair script/migration that finds `coremeasurements` rows with `StemGUID IS NULL` whose `Description` / known ingest context indicates a hard failure but which have no unresolved `measurement_error_log` row.
-   - Insert the missing `measurement_error_log` links by mapping to the canonical `measurement_errors` definitions.
-
-3. **Do not change Errors Explorer query shape**
-   - `_shared.ts` continues to read `measurement_error_log -> coremeasurements -> measurementssummary`.
-   - The fix is to restore the missing log links, not to bypass `measurement_error_log`.
-
-### Section 5: Restore / Recompute `treestemstate` After Correction
+## Section 2: Restore / Recompute `treestemstate` After Correction
 
 When a View Errors correction resolves a row onto a real tree/stem, the row must regain the same `UserDefinedFields.treestemstate` metadata that bulk ingestion would have assigned. Without that metadata, the default View Data filters hide the row even though it is fully resolved.
 
-Changes:
+Required changes:
 
-1. **Update the correction path in `coreapifunctions.ts`**
+1. **Update the correction path**
    - After species/tree/stem resolution succeeds for a `measurementssummary` PATCH, compute the row's tree-stem state using the same classification rules as ingestion:
      - previous census stem match -> `old tree`
      - previous census tree match only -> `multi stem`
      - no previous match -> `new recruit`
+   - Only write `treestemstate` once the row is truly resolved onto a real stem/tree identity.
 
 2. **Preserve existing metadata**
    - Merge the recomputed `treestemstate` into `coremeasurements.UserDefinedFields`.
-   - Preserve existing `uploadSession` or other keys already present in `UserDefinedFields`.
+   - Preserve existing `uploadSession` and any other keys already present in `UserDefinedFields`.
 
-3. **Refresh summary views after metadata repair**
-   - After writing the corrected `UserDefinedFields`, refresh `measurementssummary`.
-   - `viewfulltable` refresh remains a separate concern for the historical-data screen.
+3. **Prefer shared logic over duplicate logic**
+   - Reuse the same classification logic as ingestion where possible.
+   - The single-row reingest path already preserves `UserDefinedFields` from a successfully reprocessed row. The inline correction path should either share that logic or produce the same output, so the two correction paths do not drift.
 
-### Section 6: Scoped viewfulltable Refresh + PATCH Wiring
+4. **Refresh `measurementssummary` after metadata repair**
+   - Once `UserDefinedFields` is repaired, refresh `measurementssummary` for the affected plot/census scope.
+   - This is the change that fixes the `011375` stem `5` symptom in the default View Data screen.
 
-**New function:** `refreshViewFullTableForScope` in `frontend/app/api/refreshviews/[view]/[schema]/route.ts`. Follows the same DELETE + INSERT pattern as `refreshMeasurementsSummaryForScope`:
-- `DELETE FROM viewfulltable WHERE PlotID = ? AND CensusID = ?`
-- Re-insert using the updated SELECT (LEFT JOINs, Raw* fallbacks) scoped to that plot+census.
+## Section 3: Scoped `viewfulltable` Refresh for Historical Data
 
-**Update refresh API route** (line 246-252): When `view === 'viewfulltable'` and plotID+censusID are provided, call the scoped version instead of `CALL RefreshViewFullTable()`.
+This is still worth doing, but it is secondary. It fixes historical-data staleness after inline corrections; it is not the primary fix for the missing row in View Data.
 
-**Wire into errors explorer PATCH flow** (errorsexplorer.tsx:441): After the existing measurementssummary refresh, add a parallel viewfulltable refresh:
+Changes:
 
-```typescript
-await Promise.all([
-  refreshMeasurementsSummaryScope(rowScope),
-  refreshViewFullTableScope(rowScope)
-]);
-```
+1. Add `refreshViewFullTableForScope` in `frontend/app/api/refreshviews/[view]/[schema]/route.ts`.
+2. Update the refresh API route so scoped `viewfulltable` refreshes do not require a full rebuild.
+3. Call the scoped `viewfulltable` refresh alongside the existing scoped `measurementssummary` refresh after an Errors Explorer correction.
+4. Verify the post-ingestion flow also refreshes `viewfulltable` where appropriate.
 
-**Verify ingestion completion flow:** After `bulkingestionprocess` finishes, both RefreshMeasurementsSummary and RefreshViewFullTable should be called. Check `frontend/components/processors/processbulkingestion.tsx` for the post-ingestion refresh calls. If RefreshViewFullTable is missing, add it alongside the existing RefreshMeasurementsSummary call.
+## Section 4: Invalid Attribute Code Visibility
 
-### Section 7: Invalid Attribute Code Visibility
+This remains a useful UX improvement, but it is not the root fix for the Cocoli visibility bugs.
 
-**Add `RawCodes` column** to both `viewfulltable` and `measurementssummary` refresh queries. Include `cm.RawCodes` in the SELECT statements.
+Changes:
 
-Schema additions:
-- `viewfulltable`: add `RawCodes varchar(255) null`
-- `measurementssummary`: add `RawCodes varchar(255) null`
+1. Expose `RawCodes` somewhere user-visible for rows where materialized `Attributes` differs from the original code list.
+2. Keep invalid attribute codes as soft validation only.
+3. Make the UI explain when codes were dropped rather than showing a blank Attributes cell with no context.
 
-**Frontend:** When `RawCodes` differs from `Attributes`, the UI indicates that some codes were dropped. Exact treatment (tooltip, icon, secondary text) decided during implementation. The key is that the data is available for display.
+Implementation options:
 
-No change to ingestion behavior. Invalid codes still get dropped from `cmattributes`. We are only making the drop visible.
+- add `RawCodes` to `measurementssummary` and `viewfulltable`, or
+- expose it from `coremeasurements` in a detail panel / error drawer without widening both summary tables.
+
+The exact UI can be decided later. The important point is preserving soft-validation behavior while making the drop visible.
+
+## Section 5: Optional Cleanup for `measurementssummary`
+
+If we want to represent unresolved rows more honestly, we can later replace the current sentinel-value behavior with nullable foreign keys and a simpler primary key.
+
+That cleanup is optional and should be treated as a separate migration project, not as a prerequisite for the Cocoli fixes.
+
+If pursued later:
+
+1. Make `StemGUID`, `TreeID`, `SpeciesID`, and `QuadratID` nullable in `measurementssummary`.
+2. Consider simplifying the primary key to `CoreMeasurementID`.
+3. Audit any indexes or SQL logic that currently assume non-null foreign keys or rely on `0` sentinel behavior.
+4. Confirm duplicate detection and summary consumers still behave correctly with `NULL` values.
+
+## Implementation Order
+
+1. Repair error-log integrity for unresolved rows.
+2. Restore / recompute `treestemstate` in the inline correction path.
+3. Add scoped `viewfulltable` refresh for historical data.
+4. Expose `RawCodes` if we want clearer invalid-code UX.
+5. Evaluate nullable-foreign-key cleanup separately.
 
 ## Files to Modify
 
+### Required for the primary fixes
+
 | File | Changes |
 |------|---------|
-| `frontend/sqlscripting/tablestructures.sql` | measurementssummary PK + nullable columns, RawCodes column on both tables |
-| `frontend/db-migrations/` | New migration script for schema changes |
-| `frontend/sqlscripting/storedprocedures.sql` | RefreshMeasurementsSummary + RefreshViewFullTable: LEFT JOINs, Raw* fallbacks, remove WHERE filter, add RawCodes |
-| `frontend/app/api/refreshviews/[view]/[schema]/route.ts` | Update refreshMeasurementsSummaryForScope, add refreshViewFullTableForScope, update route handler |
-| `frontend/components/errors/errorsexplorer.tsx` | Add viewfulltable refresh to PATCH flow |
-| `frontend/config/macros/coreapifunctions.ts` | Recompute and persist `UserDefinedFields.treestemstate` after successful correction |
-| `frontend/config/measurementerrors.ts` or repair script | Ensure / backfill `measurement_error_log` links for unresolved hard failures |
+| `frontend/sqlscripting/storedprocedures.sql` | Ensure supported hard failures consistently create unresolved `measurement_error_log` rows |
+| `frontend/db-migrations/` or repair script location | Seed missing still-supported hard-failure codes and backfill orphan unresolved rows |
+| `frontend/config/macros/coreapifunctions.ts` | Recompute and persist `UserDefinedFields.treestemstate` after successful inline correction |
+
+### Secondary follow-on work
+
+| File | Changes |
+|------|---------|
+| `frontend/app/api/refreshviews/[view]/[schema]/route.ts` | Add scoped `viewfulltable` refresh for historical data |
+| `frontend/components/errors/errorsexplorer.tsx` | Call scoped `viewfulltable` refresh after correction |
+| `frontend/sqlscripting/storedprocedures.sql` and/or refresh routes | Expose `RawCodes` if we decide to surface dropped invalid codes |
+
+### Optional cleanup
+
+| File | Changes |
+|------|---------|
+| `frontend/sqlscripting/tablestructures.sql` | Nullable foreign keys / key-shape cleanup for `measurementssummary` |
+| `frontend/db-migrations/` | Separate migration for nullable-foreign-key cleanup |
 
 ## What Does NOT Change
 
-- `bulkingestionprocess` stored procedure (ingestion logic unchanged)
-- Hard failure detection and classification (same error codes)
-- Error explorer component queries (already null-tolerant; visibility is fixed by restoring missing `measurement_error_log` links)
-- TypeScript type definitions (already mark these fields as optional)
-- Frontend grid column definitions (already handle null/undefined)
-- `cmattributes` materialization (invalid codes still dropped, correct behavior)
+- The Errors Explorer continues to read `measurement_error_log -> coremeasurements -> measurementssummary`.
+- View Data continues to use `measurementssummary`, not `viewfulltable`.
+- Default tree-stem-state filters remain in place; the fix is to restore the missing metadata, not to loosen the filters.
+- Invalid attribute codes remain soft-validated.
+- `viewfulltable` remains the historical-data path, not the primary View Data source.
+- Nullable-foreign-key cleanup in `measurementssummary` is not required to fix the current user report.
 
 ## Risks
 
-- **Code assuming measurementssummary rows have resolved FKs:** Audit found no TypeScript code making this assumption (types already optional). SQL-side, the collapser and post-validation queries operate on `coremeasurements` directly, not measurementssummary.
-- **Index changes on measurementssummary:** The `idx_mss_dup_detect` composite index includes StemGUID. With NULLs, its behavior changes (NULLs are not equal in MySQL index comparisons). Verify dedup detection still works.
-- **Performance of scoped viewfulltable refresh:** DELETE + INSERT for a single plot+census should be fast. The full TRUNCATE+rebuild (manual "Reset View") remains available as fallback.
+- **Backfill mapping can be brittle:** Prefer canonical error-code or ingest-path mapping over parsing `Description` text.
+- **TSS logic can drift:** If the inline correction path reimplements tree-stem-state classification independently, it may diverge from ingestion. Shared logic is preferable.
+- **Temporary invalid-code regression data may still exist in deployed schemas:** Repair those rows one-off, but do not let them drive permanent hard-failure design.
+- **Nullable-foreign-key cleanup would still require an audit:** If we later replace sentinel `0` values with `NULL`, we must recheck indexes, duplicate detection, and any SQL consumers that currently depend on the existing shape.

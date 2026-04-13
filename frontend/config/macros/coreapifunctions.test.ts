@@ -309,6 +309,10 @@ describe('CoreAPIFunctions', () => {
         .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // matching tree lookup (active)
         .mockResolvedValueOnce([{ StemGUID: 77 }]) // exact active stem lookup
         .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements UPDATE (reassign to resolved stem)
+        .mockResolvedValueOnce([{ CensusID: 18 }]) // treestemstate: previous census lookup
+        .mockResolvedValueOnce([{ MatchCount: 1 }]) // treestemstate: prev stem match (old tree)
+        .mockResolvedValueOnce([{ UserDefinedFields: '{"uploadSession":{"fileID":1,"batchID":"b1"}}' }]) // treestemstate: UDF read
+        .mockResolvedValueOnce({ affectedRows: 1 }) // treestemstate: UDF write
         .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements raw-field sync
         .mockResolvedValueOnce({ affectedRows: 0 }) // validation error cleanup
         .mockResolvedValueOnce({ affectedRows: 1 }); // IsValidated reset
@@ -337,6 +341,17 @@ describe('CoreAPIFunctions', () => {
       expect(String(mockConnectionManager.executeQuery.mock.calls[3]?.[0])).toContain('IsActive = 1');
       expect(String(mockConnectionManager.executeQuery.mock.calls[4]?.[0])).toContain('coremeasurements');
       expect(String(mockConnectionManager.executeQuery.mock.calls[4]?.[0])).toContain('StemGUID');
+      // treestemstate computation queries follow stem resolution
+      const prevCensusCall = mockConnectionManager.executeQuery.mock.calls[5];
+      expect(String(prevCensusCall?.[0])).toContain('PlotCensusNumber');
+      const prevStemCall = mockConnectionManager.executeQuery.mock.calls[6];
+      expect(String(prevStemCall?.[0])).toContain('MatchCount');
+      // UDF is read and written back with treestemstate merged
+      const udfWriteCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('UserDefinedFields') && call[0].includes('UPDATE')
+      );
+      expect(udfWriteCall, 'Expected treestemstate to be persisted into UserDefinedFields').toBeDefined();
+      expect(String(udfWriteCall?.[0])).toContain('old tree');
       expect(mockConnectionManager.executeQuery.mock.calls.map((call: any[]) => call[2])).toEqual(
         Array(mockConnectionManager.executeQuery.mock.calls.length).fill('transaction-123')
       );
@@ -443,6 +458,11 @@ describe('CoreAPIFunctions', () => {
         .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // tree resolve (find existing)
         .mockResolvedValueOnce([{ StemGUID: 77 }]) // exact active destination stem lookup
         .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements UPDATE (reassign to resolved stem)
+        .mockResolvedValueOnce([{ CensusID: 18 }]) // treestemstate: previous census lookup
+        .mockResolvedValueOnce([{ MatchCount: 0 }]) // treestemstate: prev stem match (no match)
+        .mockResolvedValueOnce([{ MatchCount: 0 }]) // treestemstate: prev tree match (no match → new recruit)
+        .mockResolvedValueOnce([{ UserDefinedFields: null }]) // treestemstate: UDF read
+        .mockResolvedValueOnce({ affectedRows: 1 }) // treestemstate: UDF write
         .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements raw-field sync
         .mockResolvedValueOnce({ affectedRows: 0 }) // validation error cleanup
         .mockResolvedValueOnce({ affectedRows: 1 }); // IsValidated reset

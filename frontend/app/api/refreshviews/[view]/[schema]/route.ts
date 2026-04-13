@@ -50,6 +50,7 @@ async function refreshMeasurementsSummaryForScope(
                                                 IsValidated,
                                                 Description,
                                                 Attributes,
+                                                RawCodes,
                                                 UserDefinedFields,
                                                 Errors)
      SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
@@ -73,6 +74,7 @@ async function refreshMeasurementsSummaryForScope(
             cm.IsValidated                                       AS IsValidated,
             cm.Description                                       AS Description,
             attr_summary.Attributes                              AS Attributes,
+            cm.RawCodes                                          AS RawCodes,
             cm.UserDefinedFields                                 AS UserDefinedFields,
             validation_errors.Errors                             AS Errors
      FROM ??.coremeasurements cm
@@ -103,6 +105,152 @@ async function refreshMeasurementsSummaryForScope(
                   WHERE mel.IsResolved = FALSE
                   GROUP BY mel.MeasurementID
               ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID
+     WHERE c.PlotID = ?
+       AND cm.CensusID = ?`
+  );
+
+  await connectionManager.executeQuery(insertQuery, [plotID, censusID], transactionID);
+}
+
+async function refreshViewFullTableForScope(
+  connectionManager: typeof ConnectionManager.prototype,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  transactionID?: string
+): Promise<void> {
+  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.viewfulltable WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
+
+  const insertQuery = safeFormatQuery(
+    schema,
+    `INSERT IGNORE INTO ??.viewfulltable (CoreMeasurementID,
+                                          MeasurementDate,
+                                          MeasuredDBH,
+                                          MeasuredHOM,
+                                          Description,
+                                          IsValidated,
+                                          PlotID,
+                                          PlotName,
+                                          LocationName,
+                                          CountryName,
+                                          DimensionX,
+                                          DimensionY,
+                                          PlotArea,
+                                          PlotGlobalX,
+                                          PlotGlobalY,
+                                          PlotGlobalZ,
+                                          PlotShape,
+                                          PlotDescription,
+                                          PlotDefaultDimensionUnits,
+                                          PlotDefaultCoordinateUnits,
+                                          PlotDefaultAreaUnits,
+                                          PlotDefaultDBHUnits,
+                                          PlotDefaultHOMUnits,
+                                          CensusID,
+                                          CensusStartDate,
+                                          CensusEndDate,
+                                          CensusDescription,
+                                          PlotCensusNumber,
+                                          QuadratID,
+                                          QuadratName,
+                                          QuadratDimensionX,
+                                          QuadratDimensionY,
+                                          QuadratArea,
+                                          QuadratStartX,
+                                          QuadratStartY,
+                                          QuadratShape,
+                                          TreeID,
+                                          TreeTag,
+                                          StemGUID,
+                                          StemTag,
+                                          StemLocalX,
+                                          StemLocalY,
+                                          SpeciesID,
+                                          SpeciesCode,
+                                          SpeciesName,
+                                          SubspeciesName,
+                                          SubspeciesAuthority,
+                                          SpeciesIDLevel,
+                                          GenusID,
+                                          Genus,
+                                          GenusAuthority,
+                                          FamilyID,
+                                          Family,
+                                          Attributes,
+                                          RawCodes,
+                                          UserDefinedFields)
+     SELECT cm.CoreMeasurementID                                AS CoreMeasurementID,
+            cm.MeasurementDate                                  AS MeasurementDate,
+            cm.MeasuredDBH                                      AS MeasuredDBH,
+            cm.MeasuredHOM                                      AS MeasuredHOM,
+            cm.Description                                      AS Description,
+            cm.IsValidated                                      AS IsValidated,
+            p.PlotID                                            AS PlotID,
+            p.PlotName                                          AS PlotName,
+            p.LocationName                                      AS LocationName,
+            p.CountryName                                       AS CountryName,
+            p.DimensionX                                        AS DimensionX,
+            p.DimensionY                                        AS DimensionY,
+            p.Area                                              AS PlotArea,
+            p.GlobalX                                           AS PlotGlobalX,
+            p.GlobalY                                           AS PlotGlobalY,
+            p.GlobalZ                                           AS PlotGlobalZ,
+            p.PlotShape                                         AS PlotShape,
+            p.PlotDescription                                   AS PlotDescription,
+            p.DefaultDimensionUnits                             AS PlotDimensionUnits,
+            p.DefaultCoordinateUnits                            AS PlotCoordinateUnits,
+            p.DefaultAreaUnits                                  AS PlotAreaUnits,
+            p.DefaultDBHUnits                                   AS PlotDefaultDBHUnits,
+            p.DefaultHOMUnits                                   AS PlotDefaultHOMUnits,
+            c.CensusID                                          AS CensusID,
+            c.StartDate                                         AS CensusStartDate,
+            c.EndDate                                           AS CensusEndDate,
+            c.Description                                       AS CensusDescription,
+            c.PlotCensusNumber                                  AS PlotCensusNumber,
+            q.QuadratID                                         AS QuadratID,
+            COALESCE(q.QuadratName, cm.RawQuadrat)              AS QuadratName,
+            q.DimensionX                                        AS QuadratDimensionX,
+            q.DimensionY                                        AS QuadratDimensionY,
+            q.Area                                              AS QuadratArea,
+            q.StartX                                            AS QuadratStartX,
+            q.StartY                                            AS QuadratStartY,
+            q.QuadratShape                                      AS QuadratShape,
+            t.TreeID                                            AS TreeID,
+            COALESCE(t.TreeTag, cm.RawTreeTag)                  AS TreeTag,
+            COALESCE(s.StemGUID, cm.StemGUID)                   AS StemGUID,
+            COALESCE(s.StemTag, cm.RawStemTag)                  AS StemTag,
+            COALESCE(s.LocalX, cm.RawX)                         AS StemLocalX,
+            COALESCE(s.LocalY, cm.RawY)                         AS StemLocalY,
+            sp.SpeciesID                                        AS SpeciesID,
+            COALESCE(sp.SpeciesCode, cm.RawSpCode)              AS SpeciesCode,
+            sp.SpeciesName                                      AS SpeciesName,
+            sp.SubspeciesName                                    AS SubspeciesName,
+            sp.SubspeciesAuthority                              AS SubspeciesAuthority,
+            sp.IDLevel                                          AS SpeciesIDLevel,
+            g.GenusID                                           AS GenusID,
+            g.Genus                                             AS Genus,
+            g.GenusAuthority                                    AS GenusAuthority,
+            f.FamilyID                                          AS FamilyID,
+            f.Family                                            AS Family,
+            view_attrs.Attributes                               AS Attributes,
+            cm.RawCodes                                         AS RawCodes,
+            cm.UserDefinedFields                                AS UserDefinedFields
+     FROM ??.coremeasurements cm
+              JOIN ??.census c ON cm.CensusID = c.CensusID
+              LEFT JOIN ??.stems s ON cm.StemGUID = s.StemGUID AND s.CensusID = c.CensusID
+              LEFT JOIN ??.trees t ON s.TreeID = t.TreeID AND t.CensusID = c.CensusID
+              LEFT JOIN ??.species sp ON t.SpeciesID = sp.SpeciesID
+              LEFT JOIN ??.genus g ON sp.GenusID = g.GenusID
+              LEFT JOIN ??.family f ON g.FamilyID = f.FamilyID
+              LEFT JOIN ??.quadrats q ON s.QuadratID = q.QuadratID
+              LEFT JOIN ??.plots p ON COALESCE(q.PlotID, c.PlotID) = p.PlotID
+              LEFT JOIN (
+                  SELECT ca.CoreMeasurementID,
+                         GROUP_CONCAT(ca.Code SEPARATOR '; ') AS Attributes
+                  FROM ??.cmattributes ca
+                  GROUP BY ca.CoreMeasurementID
+              ) view_attrs ON view_attrs.CoreMeasurementID = cm.CoreMeasurementID
      WHERE c.PlotID = ?
        AND cm.CensusID = ?`
   );
@@ -243,8 +391,12 @@ export async function POST(request: NextRequest, props: { params: Promise<{ view
       transactionID = await connectionManager.beginTransaction();
 
       // Execute the view refresh procedure - view is validated above against whitelist
-      if (view === 'measurementssummary' && _plotID != null && _censusID != null) {
-        await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
+      if (_plotID != null && _censusID != null) {
+        if (view === 'measurementssummary') {
+          await refreshMeasurementsSummaryForScope(connectionManager, schema, _plotID, _censusID, transactionID);
+        } else {
+          await refreshViewFullTableForScope(connectionManager, schema, _plotID, _censusID, transactionID);
+        }
       } else {
         const procedureName = view === 'viewfulltable' ? 'RefreshViewFullTable' : 'RefreshMeasurementsSummary';
         const query = safeFormatQuery(schema, `CALL ??.${procedureName}()`);

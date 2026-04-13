@@ -350,6 +350,30 @@ export default function ErrorsExplorer() {
     [resolveExplorerScope]
   );
 
+  const refreshViewFullTableScope = useCallback(
+    async (scopeOverride?: ExplorerScope | null) => {
+      const scope = scopeOverride ?? resolveExplorerScope();
+      if (!scope) {
+        throw new Error('Explorer scope is not available');
+      }
+
+      const response = await fetch(`/api/refreshviews/viewfulltable/${scope.schema}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plotID: scope.plotID,
+          censusID: scope.censusID
+        })
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body?.error || body?.message || 'Failed to refresh view full table data');
+      }
+    },
+    [resolveExplorerScope]
+  );
+
   const syncEditedRowLocally = useCallback((updatedRow: ErrorExplorerRow) => {
     setResults(current => ({
       ...current,
@@ -438,7 +462,7 @@ export default function ErrorsExplorer() {
       }
 
       try {
-        await refreshMeasurementsSummaryScope(rowScope);
+        await Promise.all([refreshMeasurementsSummaryScope(rowScope), refreshViewFullTableScope(rowScope)]);
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(`Row updated, but the explorer could not refresh: ${errorObj.message}`);
@@ -462,6 +486,7 @@ export default function ErrorsExplorer() {
       fetchFacets,
       fetchRows,
       refreshMeasurementsSummaryScope,
+      refreshViewFullTableScope,
       resolveExplorerScope,
       selectedMeasurementID,
       syncEditedRowLocally

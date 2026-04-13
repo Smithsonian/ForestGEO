@@ -56,10 +56,10 @@ create index idx_upload_errors_plot_census
 create table if not exists measurementssummary
 (
     CoreMeasurementID int              not null,
-    StemGUID          int              not null,
-    TreeID            int              not null,
-    SpeciesID         int              not null,
-    QuadratID         int              not null,
+    StemGUID          int              null,
+    TreeID            int              null,
+    SpeciesID         int              null,
+    QuadratID         int              null,
     PlotID            int              not null,
     CensusID          int              not null,
     SpeciesName       varchar(64)      null,
@@ -70,15 +70,16 @@ create table if not exists measurementssummary
     StemLocalX        decimal(12, 6)   null,
     StemLocalY        decimal(12, 6)   null,
     QuadratName       varchar(255)     null,
-    MeasurementDate   date             not null,
+    MeasurementDate   date             null,
     MeasuredDBH       decimal(12, 6)   null,
     MeasuredHOM       decimal(12, 6)   null,
     IsValidated       bit default b'0' null,
     Description       varchar(255)     null,
     Attributes        varchar(255)     null,
+    RawCodes          varchar(255)     null,
     UserDefinedFields json             null,
     Errors            text             null,
-    primary key (CoreMeasurementID, StemGUID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
+    primary key (CoreMeasurementID)
 );
 
 create index idx_attributes
@@ -1080,6 +1081,7 @@ create table if not exists viewfulltable
     FamilyID                   int                                                                 null,
     Family                     varchar(32)                                                         null,
     Attributes                 varchar(255)                                                        null,
+    RawCodes                   varchar(255)                                                        null,
     UserDefinedFields          json                                                                null
 );
 
