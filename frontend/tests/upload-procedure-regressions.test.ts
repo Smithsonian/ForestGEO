@@ -89,4 +89,15 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).not.toContain("' active trees in census ', vPreviousCensusID");
     expect(canonicalSql).not.toContain("' active stems in census ', vPreviousCensusID");
   });
+
+  it('keeps invalid attribute codes as soft validation 14 instead of hard-failing them', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const tableStructuresSql = readSql('sqlscripting/tablestructures.sql');
+
+    expect(canonicalSql).not.toContain("SELECT id, 'INVALID_ATTRIBUTE_CODE', FailureReason");
+    expect(canonicalSql).toContain("ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'");
+    expect(canonicalSql).toContain('LEFT JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1');
+    expect(tableStructuresSql).toContain("('validation', '14', 'Invalid attribute code')");
+    expect(tableStructuresSql).not.toContain('INVALID_ATTRIBUTE_CODE');
+  });
 });

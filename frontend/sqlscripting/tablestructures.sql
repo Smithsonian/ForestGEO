@@ -856,7 +856,6 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'DUPLICATE_TAG_CONFLICT', 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch'),
        ('ingestion', 'DUPLICATE_TAG_CONFLICT_EXISTING', 'Conflicting TreeTag/StemTag matches existing census measurement'),
        ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
-       ('ingestion', 'INVALID_ATTRIBUTE_CODE', 'Row contains invalid attribute code(s)'),
        ('validation', '14', 'Invalid attribute code'),
        ('validation', '20', 'Species mismatch from previous census'),
        ('validation', '21', 'Same-batch species conflict');

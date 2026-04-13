@@ -1567,7 +1567,7 @@ BEGIN
             DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
                 quadrat_resolution, species_resolution,
                 filter_validity, filtered,
-                classified_filtered, validation_failures, invalid_code_rows, hard_failure_rows, requested_prev_trees,
+                classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
                 requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
                 prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
                 current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
@@ -1794,7 +1794,7 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
-        classified_filtered, validation_failures, invalid_code_rows, hard_failure_rows, requested_prev_trees,
+        classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
         current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
@@ -1892,32 +1892,6 @@ BEGIN
     SET vValidationMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
 
     -- ============================================================
-    -- STAGE 1b: CODE VALIDATION
-    -- ============================================================
-
-    CREATE TEMPORARY TABLE invalid_code_rows AS
-    SELECT tm.id,
-           LEFT(CONCAT('Invalid attribute code(s): ',
-                GROUP_CONCAT(DISTINCT TRIM(jt.code) ORDER BY TRIM(jt.code) SEPARATOR ', ')), 255) AS FailureReason
-    FROM temporarymeasurements tm,
-    JSON_TABLE(
-        CONCAT('["', REPLACE(TRIM(tm.Codes), ';', '","'), '"]'),
-        '$[*]' COLUMNS (code VARCHAR(10) COLLATE utf8mb4_0900_ai_ci PATH '$')
-    ) jt
-    LEFT JOIN attributes a ON a.Code = TRIM(jt.code) AND a.IsActive = 1
-    WHERE tm.FileID = vFileID AND tm.BatchID = vBatchID AND tm.CensusID = vCurrentCensusID
-      AND tm.id NOT IN (SELECT id FROM validation_failures)
-      AND tm.Codes IS NOT NULL AND TRIM(tm.Codes) != ''
-      AND a.Code IS NULL
-    GROUP BY tm.id;
-
-    CREATE INDEX idx_invalid_code_rows_id ON invalid_code_rows (id);
-
-    INSERT IGNORE INTO hard_failure_rows (SourceRowIndex, ErrorCode, FailureReason)
-    SELECT id, 'INVALID_ATTRIBUTE_CODE', FailureReason
-    FROM invalid_code_rows;
-
-    -- ============================================================
     -- STAGE 2: DEDUPLICATION
     -- ============================================================
     SET vStageStart = NOW(6);
@@ -1933,7 +1907,9 @@ BEGIN
                    ORDER BY Comments SEPARATOR ' | '), '') AS Comments
     FROM temporarymeasurements
     WHERE FileID = vFileID AND BatchID = vBatchID AND CensusID = vCurrentCensusID
-      AND id NOT IN (SELECT SourceRowIndex FROM hard_failure_rows)
+      -- validation_failures is the only pre-dedup failure source; hard_failure_rows
+      -- is equivalent here but would mask the intent if future stages insert into it earlier
+      AND id NOT IN (SELECT id FROM validation_failures)
     GROUP BY FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode,
              QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate;
 
@@ -2934,7 +2910,16 @@ BEGIN
 
         INSERT IGNORE INTO cmattributes (CoreMeasurementID, Code)
         SELECT tc.CoreMeasurementID, tc.Code
-        FROM tempcodes tc;
+        FROM tempcodes tc
+        INNER JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1;
+
+        INSERT IGNORE INTO measurement_error_log (MeasurementID, ErrorID, IsResolved)
+        SELECT DISTINCT tc.CoreMeasurementID, me.ErrorID, FALSE
+        FROM tempcodes tc
+        LEFT JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1
+        INNER JOIN measurement_errors me
+            ON me.ErrorSource = 'validation' AND me.ErrorCode = '14'
+        WHERE a.Code IS NULL;
     END IF;
 
     SET vAttributesMs = TIMESTAMPDIFF(MICROSECOND, vStageStart, NOW(6)) DIV 1000;
@@ -3020,7 +3005,7 @@ BEGIN
     DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
         quadrat_resolution, species_resolution,
         filter_validity, filtered,
-        classified_filtered, validation_failures, invalid_code_rows, hard_failure_rows, requested_prev_trees,
+        classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
         requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
         prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
         current_tree_lookup, stem_resolution_rows, stem_insert_candidates,
@@ -3079,7 +3064,7 @@ BEGIN
         DROP TEMPORARY TABLE IF EXISTS initial_dup_filter, duplicate_failures, tag_stemtag_collision_groups, tag_stemtag_collision_failures,
             quadrat_resolution, species_resolution,
             filter_validity, filtered,
-            classified_filtered, validation_failures, invalid_code_rows, hard_failure_rows, requested_prev_trees,
+            classified_filtered, validation_failures, hard_failure_rows, requested_prev_trees,
             requested_prev_stems, prev_tree_lookup, prev_stem_lookup,
             prev_match_ambiguities, tree_insert_candidates, tree_insert_failures,
             current_tree_lookup, stem_resolution_rows, stem_insert_candidates,

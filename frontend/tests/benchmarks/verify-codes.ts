@@ -49,7 +49,6 @@ async function main() {
   // Seed error definitions
   await conn.query(`INSERT IGNORE INTO measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
     VALUES ('ingestion', 'SQL_EXCEPTION', 'err'),
-           ('ingestion', 'INVALID_ATTRIBUTE_CODE', 'Row contains invalid attribute code(s)'),
            ('validation', '14', 'Invalid attribute code')`);
 
   // Base data
@@ -133,40 +132,36 @@ async function main() {
   console.log(`T2 codes: [${t2Codes}] (expected: [D])`);
   console.log(`T3 codes: [${t3Codes}] (expected: [A,D])`);
 
-  // T4: all invalid code "MX" → should hard-fail (StemGUID IS NULL)
-  const [t4Failed] = await conn.query<mysql.RowDataPacket[]>(
-    `SELECT CoreMeasurementID, RawCodes, Description FROM coremeasurements
-     WHERE CensusID=? AND RawTreeTag='T4' AND StemGUID IS NULL`,
+  const t4Codes = getCodes('T4');
+  const t5Codes = getCodes('T5');
+
+  console.log(`T4 codes: [${t4Codes}] (expected: [])`);
+  console.log(`T5 codes: [${t5Codes}] (expected: [D])`);
+
+  // T4: all invalid code "MX" → should ingest, materialize no codes, and get validation 14
+  const [t4Rows] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT CoreMeasurementID, RawCodes, StemGUID FROM coremeasurements
+     WHERE CensusID=? AND RawTreeTag='T4' AND StemGUID IS NOT NULL`,
     [c2]
   );
-  const t4Pass = t4Failed.length === 1 && (t4Failed[0].Description as string).includes('MX');
-  console.log(`T4 failed: ${t4Failed.length === 1} reason includes MX: ${t4Pass} (expected: true)`);
+  const t4Pass = t4Rows.length === 1 && t4Codes.length === 0;
+  console.log(`T4 ingested with no attrs: ${t4Pass} (expected: true)`);
 
-  // T5: mixed code "D;MX" → should hard-fail entirely (not partial success)
-  const [t5Failed] = await conn.query<mysql.RowDataPacket[]>(
-    `SELECT CoreMeasurementID, RawCodes, Description FROM coremeasurements
-     WHERE CensusID=? AND RawTreeTag='T5' AND StemGUID IS NULL`,
+  // T5: mixed code "D;MX" → should ingest, keep only valid code "D", and get validation 14
+  const [t5Rows] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT CoreMeasurementID, RawCodes, StemGUID FROM coremeasurements
+     WHERE CensusID=? AND RawTreeTag='T5' AND StemGUID IS NOT NULL`,
     [c2]
   );
-  const t5Pass = t5Failed.length === 1 && (t5Failed[0].Description as string).includes('MX');
-  console.log(`T5 failed: ${t5Failed.length === 1} reason includes MX: ${t5Pass} (expected: true)`);
+  const t5Pass = t5Rows.length === 1 && t5Codes.length === 1 && t5Codes[0] === 'D';
+  console.log(`T5 ingested with valid attrs retained: ${t5Pass} (expected: true)`);
 
-  // Verify no cmattributes for T4 or T5
-  const [t4t5Attrs] = await conn.query<mysql.RowDataPacket[]>(
-    `SELECT ca.Code FROM cmattributes ca
-     JOIN coremeasurements cm ON cm.CoreMeasurementID=ca.CoreMeasurementID
-     WHERE cm.CensusID=? AND cm.RawTreeTag IN ('T4','T5')`,
-    [c2]
-  );
-  const noAttrsPass = t4t5Attrs.length === 0;
-  console.log(`T4/T5 no attrs: ${noAttrsPass} (expected: true)`);
-
-  // Verify measurement_error_log has INVALID_ATTRIBUTE_CODE for T4 and T5
+  // Verify measurement_error_log has validation 14 for T4 and T5
   const [errorLogRows] = await conn.query<mysql.RowDataPacket[]>(
-    `SELECT cm.RawTreeTag, me.ErrorCode FROM measurement_error_log mel
+    `SELECT cm.RawTreeTag, me.ErrorSource, me.ErrorCode FROM measurement_error_log mel
      JOIN coremeasurements cm ON cm.CoreMeasurementID=mel.MeasurementID
      JOIN measurement_errors me ON me.ErrorID=mel.ErrorID
-     WHERE cm.CensusID=? AND me.ErrorCode='INVALID_ATTRIBUTE_CODE'
+     WHERE cm.CensusID=? AND me.ErrorSource='validation' AND me.ErrorCode='14'
      ORDER BY cm.RawTreeTag`,
     [c2]
   );
@@ -184,10 +179,9 @@ async function main() {
     t3Codes[1] === 'D' &&
     t4Pass &&
     t5Pass &&
-    noAttrsPass &&
     errorLogPass;
 
-  console.log(pass ? '\nPASS: Codes correctly assigned and invalid codes hard-fail' : '\nFAIL: Code handling broken');
+  console.log(pass ? '\nPASS: Codes correctly assigned and invalid codes stay soft-flagged' : '\nFAIL: Code handling broken');
 
   await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
   await conn.end();
