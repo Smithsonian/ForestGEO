@@ -356,7 +356,7 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(cleanupCall[1]).toEqual([TEST_FILE_NAME, TEST_PLOT_ID, TEST_CENSUS_ID, TEST_BATCH_ID]);
   });
 
-  it('cleans up previous upload data and allows re-upload of the same file', async () => {
+  it('cleans up previous census upload data and allows clean re-upload even when the filename changed', async () => {
     mockConnectionManager.executeQuery
       // census scope check
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
@@ -392,20 +392,31 @@ describe('sqlpacketload measurement scope validation', () => {
     expect(body.insertedCount).toBe(1);
     expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('tx-test');
 
+    const findOldBatchesCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('SELECT batchID FROM forestgeo_testing.uploadmetrics')
+    );
+    expect(findOldBatchesCall).toBeDefined();
+    expect(String(findOldBatchesCall?.[0])).toContain('WHERE plotID = ? AND censusID = ? AND batchID <> ?');
+    expect(String(findOldBatchesCall?.[0])).not.toContain('fileID = ?');
+
     const deleteValidationErrorsCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('DELETE mel FROM forestgeo_testing.measurement_error_log')
     );
     expect(deleteValidationErrorsCall).toBeDefined();
+    expect(String(deleteValidationErrorsCall?.[0])).toContain('WHERE cm.CensusID = ? AND cm.UploadBatchID IN');
+    expect(String(deleteValidationErrorsCall?.[0])).not.toContain('cm.UploadFileID');
 
-    const deleteCmCall = mockConnectionManager.executeQuery.mock.calls.find(
-      (call: any[]) => String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements') && String(call[0]).includes('UploadFileID')
+    const deleteCmCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('DELETE FROM forestgeo_testing.coremeasurements')
     );
     expect(deleteCmCall).toBeDefined();
+    expect(String(deleteCmCall?.[0])).toContain('WHERE CensusID = ? AND UploadBatchID IN');
+    expect(String(deleteCmCall?.[0])).not.toContain('UploadFileID');
 
     const deleteFailedCall = mockConnectionManager.executeQuery.mock.calls.find(
       (call: any[]) =>
         String(call[0]).includes('DELETE FROM forestgeo_testing.failedmeasurements') &&
-        String(call[0]).includes('WHERE FileID = ?') &&
+        String(call[0]).includes('WHERE CensusID = ?') &&
         String(call[0]).includes('BatchID IN')
     );
     expect(deleteFailedCall).toBeDefined();
