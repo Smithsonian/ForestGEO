@@ -451,11 +451,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               transactionID
             );
             const rawUDF = existingUDFRows?.[0]?.UserDefinedFields;
-            const currentFields: Record<string, unknown> = rawUDF
-              ? typeof rawUDF === 'string'
-                ? JSON.parse(rawUDF)
-                : rawUDF
-              : {};
+            const currentFields: Record<string, unknown> = rawUDF ? (typeof rawUDF === 'string' ? JSON.parse(rawUDF) : rawUDF) : {};
             currentFields.treestemstate = treeStemState;
 
             await connectionManager.executeQuery(

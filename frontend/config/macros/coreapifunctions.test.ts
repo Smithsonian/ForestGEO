@@ -494,6 +494,64 @@ describe('CoreAPIFunctions', () => {
       expect(String(rawSyncCall?.[0])).toContain('NEWSP');
     });
 
+    it('species-only change classifies as multi stem when tree existed in previous census but stem did not', async () => {
+      const oldRow = {
+        CoreMeasurementID: 88,
+        TreeID: 12,
+        StemGUID: 34,
+        CensusID: 19,
+        PlotID: 22,
+        SpeciesID: 5,
+        SpeciesCode: 'OLDSP',
+        TreeTag: '011134',
+        StemTag: '011134',
+        QuadratID: 7,
+        QuadratName: '1201'
+      };
+      const newRow = {
+        ...oldRow,
+        SpeciesCode: 'NEWSP'
+      };
+
+      const mockRequest = new NextRequest('http://localhost/api/test', {
+        method: 'PATCH',
+        body: JSON.stringify({ newRow, oldRow })
+      });
+
+      mockMapper.demapData.mockImplementation((rows: any[]) => rows);
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce([{ SpeciesID: 101 }]) // species lookup
+        .mockResolvedValueOnce([{ TreeID: 55, IsActive: 1 }]) // tree resolve (find existing)
+        .mockResolvedValueOnce([{ StemGUID: 77 }]) // exact active destination stem lookup
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements UPDATE (reassign to resolved stem)
+        .mockResolvedValueOnce([{ CensusID: 18 }]) // treestemstate: previous census lookup
+        .mockResolvedValueOnce([{ MatchCount: 0 }]) // treestemstate: prev stem match (no match)
+        .mockResolvedValueOnce([{ MatchCount: 1 }]) // treestemstate: prev tree match (tree exists → multi stem)
+        .mockResolvedValueOnce([{ UserDefinedFields: '{"uploadSession":{"fileID":2,"batchID":"b2"}}' }]) // treestemstate: UDF read
+        .mockResolvedValueOnce({ affectedRows: 1 }) // treestemstate: UDF write
+        .mockResolvedValueOnce({ affectedRows: 1 }) // coremeasurements raw-field sync
+        .mockResolvedValueOnce({ affectedRows: 0 }) // validation error cleanup
+        .mockResolvedValueOnce({ affectedRows: 1 }); // IsValidated reset
+
+      const response = await PATCH(mockRequest, {
+        params: Promise.resolve({
+          dataType: 'measurementssummary',
+          slugs: ['testSchema', 'coreMeasurementID']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      // Verify the treestemstate classification hit the multi stem branch:
+      // prev stem match returned 0 (no stem), prev tree match returned 1 (tree exists)
+      const udfWriteCall = mockConnectionManager.executeQuery.mock.calls.find(
+        (call: any[]) => typeof call[0] === 'string' && call[0].includes('UserDefinedFields') && call[0].includes('UPDATE')
+      );
+      expect(udfWriteCall, 'Expected treestemstate to be persisted into UserDefinedFields').toBeDefined();
+      expect(String(udfWriteCall?.[0])).toContain('multi stem');
+      // Existing uploadSession key must survive the merge
+      expect(String(udfWriteCall?.[0])).toContain('uploadSession');
+    });
+
     it('returns a controlled error when only an inactive matching stem exists during full stem resolution', async () => {
       const oldRow = {
         CoreMeasurementID: 88,

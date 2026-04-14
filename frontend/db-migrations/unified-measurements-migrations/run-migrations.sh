@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-48 in order against a target schema.
+# Runs migrations 16-51 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -60,6 +60,8 @@ ORDERED_MIGRATIONS=(
     "47_add_quadrats_active_name_unique.sql"
     "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql"
     "49_add_duplicate_tag_stemtag_detection.sql"
+    "50_relax_measurementssummary_add_rawcodes.sql"
+    "51_backfill_hard_failure_error_log.sql"
 )
 
 # ---------------------------------------------------------------------------

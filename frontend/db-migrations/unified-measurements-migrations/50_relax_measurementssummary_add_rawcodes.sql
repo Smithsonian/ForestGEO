@@ -19,144 +19,114 @@
 --   The existing Attributes column holds only valid/materialized codes. When
 --   they differ, the UI can indicate that some codes were dropped.
 --
---   Idempotent: each step checks current state before applying changes.
+--   Idempotent: uses stored procedure wrapper to check state before applying.
 -- =====================================================================================
 
--- Step 1: Drop composite PK and add single-column PK on CoreMeasurementID.
--- We check if the current PK has more than one column before attempting the change.
-SET @pk_col_count := (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
+-- Use a stored procedure to allow IF/THEN logic within piped mysql input.
+-- The procedure is created, called, then dropped immediately.
+
+DROP PROCEDURE IF EXISTS _run_migration_50;
+
+DELIMITER $$
+
+CREATE PROCEDURE _run_migration_50()
+BEGIN
+    DECLARE pk_col_count INT;
+    DECLARE col_nullable VARCHAR(3);
+    DECLARE col_exists INT;
+
+    -- Step 1: Drop composite PK and add single-column PK
+    SELECT COUNT(*) INTO pk_col_count
+    FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND INDEX_NAME   = 'PRIMARY'
-);
+      AND INDEX_NAME   = 'PRIMARY';
 
-SET @ddl_pk := IF(@pk_col_count > 1,
-    'ALTER TABLE measurementssummary DROP PRIMARY KEY, ADD PRIMARY KEY (CoreMeasurementID)',
-    'SELECT ''measurementssummary PK already single-column'' AS Status'
-);
+    IF pk_col_count > 1 THEN
+        ALTER TABLE measurementssummary DROP PRIMARY KEY, ADD PRIMARY KEY (CoreMeasurementID);
+    END IF;
 
-PREPARE stmt FROM @ddl_pk;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 2: Make StemGUID nullable
-SET @col_nullable := (
-    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+    -- Step 2: Make StemGUID nullable
+    SELECT IS_NULLABLE INTO col_nullable
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'StemGUID'
-);
+      AND COLUMN_NAME  = 'StemGUID';
 
-SET @ddl := IF(@col_nullable = 'NO',
-    'ALTER TABLE measurementssummary MODIFY COLUMN StemGUID INT NULL',
-    'SELECT ''measurementssummary.StemGUID already nullable'' AS Status'
-);
+    IF col_nullable = 'NO' THEN
+        ALTER TABLE measurementssummary MODIFY COLUMN StemGUID INT NULL;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 3: Make TreeID nullable
-SET @col_nullable := (
-    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+    -- Step 3: Make TreeID nullable
+    SELECT IS_NULLABLE INTO col_nullable
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'TreeID'
-);
+      AND COLUMN_NAME  = 'TreeID';
 
-SET @ddl := IF(@col_nullable = 'NO',
-    'ALTER TABLE measurementssummary MODIFY COLUMN TreeID INT NULL',
-    'SELECT ''measurementssummary.TreeID already nullable'' AS Status'
-);
+    IF col_nullable = 'NO' THEN
+        ALTER TABLE measurementssummary MODIFY COLUMN TreeID INT NULL;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 4: Make SpeciesID nullable
-SET @col_nullable := (
-    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+    -- Step 4: Make SpeciesID nullable
+    SELECT IS_NULLABLE INTO col_nullable
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'SpeciesID'
-);
+      AND COLUMN_NAME  = 'SpeciesID';
 
-SET @ddl := IF(@col_nullable = 'NO',
-    'ALTER TABLE measurementssummary MODIFY COLUMN SpeciesID INT NULL',
-    'SELECT ''measurementssummary.SpeciesID already nullable'' AS Status'
-);
+    IF col_nullable = 'NO' THEN
+        ALTER TABLE measurementssummary MODIFY COLUMN SpeciesID INT NULL;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 5: Make QuadratID nullable
-SET @col_nullable := (
-    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+    -- Step 5: Make QuadratID nullable
+    SELECT IS_NULLABLE INTO col_nullable
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'QuadratID'
-);
+      AND COLUMN_NAME  = 'QuadratID';
 
-SET @ddl := IF(@col_nullable = 'NO',
-    'ALTER TABLE measurementssummary MODIFY COLUMN QuadratID INT NULL',
-    'SELECT ''measurementssummary.QuadratID already nullable'' AS Status'
-);
+    IF col_nullable = 'NO' THEN
+        ALTER TABLE measurementssummary MODIFY COLUMN QuadratID INT NULL;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 6: Make MeasurementDate nullable
-SET @col_nullable := (
-    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+    -- Step 6: Make MeasurementDate nullable
+    SELECT IS_NULLABLE INTO col_nullable
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'MeasurementDate'
-);
+      AND COLUMN_NAME  = 'MeasurementDate';
 
-SET @ddl := IF(@col_nullable = 'NO',
-    'ALTER TABLE measurementssummary MODIFY COLUMN MeasurementDate DATE NULL',
-    'SELECT ''measurementssummary.MeasurementDate already nullable'' AS Status'
-);
+    IF col_nullable = 'NO' THEN
+        ALTER TABLE measurementssummary MODIFY COLUMN MeasurementDate DATE NULL;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 7: Add RawCodes column to measurementssummary
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
+    -- Step 7: Add RawCodes column to measurementssummary
+    SELECT COUNT(*) INTO col_exists
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'measurementssummary'
-      AND COLUMN_NAME  = 'RawCodes'
-);
+      AND COLUMN_NAME  = 'RawCodes';
 
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE measurementssummary ADD COLUMN RawCodes VARCHAR(255) NULL AFTER Attributes',
-    'SELECT ''measurementssummary.RawCodes already exists'' AS Status'
-);
+    IF col_exists = 0 THEN
+        ALTER TABLE measurementssummary ADD COLUMN RawCodes VARCHAR(255) NULL AFTER Attributes;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Step 8: Add RawCodes column to viewfulltable
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
+    -- Step 8: Add RawCodes column to viewfulltable
+    SELECT COUNT(*) INTO col_exists
+    FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME   = 'viewfulltable'
-      AND COLUMN_NAME  = 'RawCodes'
-);
+      AND COLUMN_NAME  = 'RawCodes';
 
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE viewfulltable ADD COLUMN RawCodes VARCHAR(255) NULL AFTER Attributes',
-    'SELECT ''viewfulltable.RawCodes already exists'' AS Status'
-);
+    IF col_exists = 0 THEN
+        ALTER TABLE viewfulltable ADD COLUMN RawCodes VARCHAR(255) NULL AFTER Attributes;
+    END IF;
 
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+    SELECT 'Migration 50 complete.' AS Status;
+END$$
 
-SELECT 'Migration 50 complete: measurementssummary PK relaxed to (CoreMeasurementID), nullable columns updated, RawCodes added to both materialized tables.' AS Status;
+DELIMITER ;
+
+CALL _run_migration_50();
+DROP PROCEDURE IF EXISTS _run_migration_50;
