@@ -815,8 +815,9 @@ async function cleanupStaleMeasurementBatchesForFile(
 }
 
 /**
- * Clean up all data from previous uploads of the same file for the same census.
- * This allows researchers to re-upload files freely — new data fully replaces old.
+ * Clean up all data from previous uploads for the same plot/census scope.
+ * Clean measurement uploads are census replacements: a new upload fully replaces
+ * any earlier measurement batches for that census, even if the filename changed.
  *
  * Removes: validation error links, coremeasurements, failedmeasurements (if legacy table exists), uploadmetrics
  */
@@ -831,26 +832,27 @@ async function cleanupPreviousFileUploads(
 ): Promise<number> {
   const findBatchesSQL = format(
     `SELECT batchID FROM ??.uploadmetrics
-     WHERE fileID = ? AND plotID = ? AND censusID = ? AND batchID <> ?`,
+     WHERE plotID = ? AND censusID = ? AND batchID <> ?`,
     [schema]
   );
-  const previousBatches = await connectionManager.executeQuery(findBatchesSQL, [fileName, plotID, censusID, currentBatchID], transactionID);
+  const previousBatches = await connectionManager.executeQuery(findBatchesSQL, [plotID, censusID, currentBatchID], transactionID);
 
   if (!Array.isArray(previousBatches) || previousBatches.length === 0) return 0;
 
   const oldBatchIDs = previousBatches.map((row: { batchID: string }) => row.batchID);
   const placeholders = oldBatchIDs.map(() => '?').join(', ');
 
-  // Delete validation error links linked to old coremeasurements from previous uploads.
+  // Delete validation error links linked to old coremeasurements from previous uploads
+  // in the same census scope, regardless of the original filename.
   // Prefer the unified measurement_error_log table, but fall back to cmverrors in legacy schemas.
   const deleteValidationErrorsSQL = format(
     `DELETE mel FROM ??.measurement_error_log mel
      INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
-     WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
+     WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
     [schema, schema]
   );
   try {
-    await connectionManager.executeQuery(deleteValidationErrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
   } catch (error: unknown) {
     if (!isMissingTableError(error, 'measurement_error_log')) {
       throw error;
@@ -859,29 +861,29 @@ async function cleanupPreviousFileUploads(
     const deleteLegacyValidationErrorsSQL = format(
       `DELETE e FROM ??.cmverrors e
        INNER JOIN ??.coremeasurements cm ON cm.CoreMeasurementID = e.CoreMeasurementID
-       WHERE cm.UploadFileID = ? AND cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
+       WHERE cm.CensusID = ? AND cm.UploadBatchID IN (${placeholders})`,
       [schema, schema]
     );
-    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteLegacyValidationErrorsSQL, [censusID, ...oldBatchIDs], transactionID);
   }
 
   // Delete old coremeasurements
   const deleteCmSQL = format(
     `DELETE FROM ??.coremeasurements
-     WHERE UploadFileID = ? AND CensusID = ? AND UploadBatchID IN (${placeholders})`,
+     WHERE CensusID = ? AND UploadBatchID IN (${placeholders})`,
     [schema]
   );
-  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+  const cmResult = await connectionManager.executeQuery(deleteCmSQL, [censusID, ...oldBatchIDs], transactionID);
   const deletedCmRows = Number((cmResult as { affectedRows?: number })?.affectedRows ?? 0);
 
   // Delete old failedmeasurements
   const deleteFailedSQL = format(
     `DELETE FROM ??.failedmeasurements
-     WHERE FileID = ? AND CensusID = ? AND BatchID IN (${placeholders})`,
+     WHERE CensusID = ? AND BatchID IN (${placeholders})`,
     [schema]
   );
   try {
-    await connectionManager.executeQuery(deleteFailedSQL, [fileName, censusID, ...oldBatchIDs], transactionID);
+    await connectionManager.executeQuery(deleteFailedSQL, [censusID, ...oldBatchIDs], transactionID);
   } catch (error: unknown) {
     if (!isMissingTableError(error, 'failedmeasurements')) {
       throw error;
@@ -892,14 +894,14 @@ async function cleanupPreviousFileUploads(
   // Delete old uploadmetrics so the stored procedure won't skip the new batch
   const deleteMetricsSQL = format(
     `DELETE FROM ??.uploadmetrics
-     WHERE fileID = ? AND plotID = ? AND censusID = ? AND batchID IN (${placeholders})`,
+     WHERE plotID = ? AND censusID = ? AND batchID IN (${placeholders})`,
     [schema]
   );
-  await connectionManager.executeQuery(deleteMetricsSQL, [fileName, plotID, censusID, ...oldBatchIDs], transactionID);
+  await connectionManager.executeQuery(deleteMetricsSQL, [plotID, censusID, ...oldBatchIDs], transactionID);
 
   if (deletedCmRows > 0) {
     ailogger.info(
-      `Re-upload cleanup for ${fileName}: removed ${deletedCmRows} coremeasurement(s) and associated errors ` +
+      `Clean re-upload for ${fileName}: removed ${deletedCmRows} coremeasurement(s) and associated errors ` +
         `from ${oldBatchIDs.length} previous batch(es) for census ${censusID}`
     );
   }
@@ -1126,8 +1128,8 @@ export async function POST(request: NextRequest) {
         // behind by an earlier interrupted upload for the same plot/census.
         if (preInsertCount === 0) {
           if (uploadMode === UploadMode.CLEAN_REUPLOAD) {
-            // Clean up data from any previous uploads of this file for this census.
-            // This allows researchers to re-upload freely — new data fully replaces old.
+            // Clean up data from any previous uploads for this census.
+            // Clean re-upload is census replacement, not filename replacement.
             await cleanupPreviousFileUploads(connectionManager, schema, fileName, batchID, resolvedPlotID, resolvedCensusID, transactionID);
           }
 
