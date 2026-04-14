@@ -1438,6 +1438,62 @@ where cm.IsValidated is null and cm.IsActive is true
   and (cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', false);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
+    VALUES (14, 'ValidateFindInvalidAttributeCodes',
+            'Attribute code does not exist in attributes table',
+            'attributes',
+            'insert into measurement_error_log (MeasurementID, ErrorID)
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
+from coremeasurements cm
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         , json_table(
+             IF(cm.RawCodes IS NULL OR cm.RawCodes = '''' OR TRIM(cm.RawCodes) = '''', ''[]'',
+                CONCAT(''["'', REPLACE(TRIM(cm.RawCodes), '';'', ''","''), ''"]'')),
+             ''$[*]'' columns (code varchar(10) COLLATE utf8mb4_0900_ai_ci path ''$'')
+         ) jt
+         left join attributes a on a.Code = TRIM(jt.code) and a.IsActive is true
+         left join measurement_error_log e
+                   on e.MeasurementID = cm.CoreMeasurementID and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
+where cm.IsValidated is null
+  and cm.IsActive is true
+  and cm.RawCodes is not null
+  and TRIM(cm.RawCodes) != ''''
+  and a.Code is null  -- Attribute code doesn''t exist in attributes table
+  and e.MeasurementID is null
+  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
+    INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
+                                         ChangelogDefinition, IsEnabled)
+    VALUES (15, 'ValidateFindAbnormallyHighDBH',
+            'DBH exceeds absolute maximum threshold (3500mm or 350cm)',
+            'measuredDBH',
+            'insert into measurement_error_log (MeasurementID, ErrorID)
+select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
+from coremeasurements cm
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         join plots p on c.PlotID = p.PlotID
+         left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID
+              and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
+where cm.IsValidated is null
+  and cm.IsActive is true
+  and cm.MeasuredDBH is not null
+  and e.MeasurementID is null
+  and (
+      (cm.MeasuredDBH * (case p.DefaultDBHUnits
+                            when ''km'' THEN 1000000
+                            when ''hm'' THEN 100000
+                            when ''dam'' THEN 10000
+                            when ''m'' THEN 1000
+                            when ''dm'' THEN 100
+                            when ''cm'' THEN 10
+                            when ''mm'' THEN 1
+                            else 1 end)) >= 3500
+  )
+  and (@p_CensusID is null or cm.CensusID = @p_CensusID)
+  and (@p_PlotID is null or c.PlotID = @p_PlotID)
+on duplicate key update IsResolved = FALSE, ResolvedAt = NULL;', '', true);
     set foreign_key_checks = 1;
 end $$
 

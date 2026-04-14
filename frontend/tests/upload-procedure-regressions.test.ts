@@ -6,6 +6,16 @@ function readSql(relativePath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf-8').replace(/\s+/g, ' ');
 }
 
+function extractSqlSegment(sql: string, startMarker: string, endMarker: string): string {
+  const start = sql.indexOf(startMarker);
+  expect(start).toBeGreaterThanOrEqual(0);
+
+  const end = sql.indexOf(endMarker, start + startMarker.length);
+  expect(end).toBeGreaterThan(start);
+
+  return sql.slice(start, end);
+}
+
 describe('upload procedure regressions', () => {
   it('uses bounded hashed upload ids in bulkingestionprocess sources', () => {
     const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
@@ -99,5 +109,28 @@ describe('upload procedure regressions', () => {
     expect(canonicalSql).toContain('LEFT JOIN attributes a ON a.Code = tc.Code AND a.IsActive = 1');
     expect(tableStructuresSql).toContain("('validation', '14', 'Invalid attribute code')");
     expect(tableStructuresSql).not.toContain('INVALID_ATTRIBUTE_CODE');
+  });
+
+  it('rebuilds validation 14 from RawCodes during validation reruns', () => {
+    const coreQueriesSql = readSql('sqlscripting/corequeries.sql');
+    const procedureSql = readSql('sqlscripting/storedprocedures.sql');
+    const migrationSql = readSql('db-migrations/unified-measurements-migrations/52_fix_validation14_rawcodes_replay.sql');
+
+    const coreValidation14 = extractSqlSegment(
+      coreQueriesSql,
+      "VALUES (14, 'ValidateFindInvalidAttributeCodes'",
+      "VALUES (15, 'ValidateFindAbnormallyHighDBH'"
+    );
+    const procedureValidation14 = extractSqlSegment(
+      procedureSql,
+      "VALUES (14, 'ValidateFindInvalidAttributeCodes'",
+      "VALUES (15, 'ValidateFindAbnormallyHighDBH'"
+    );
+
+    for (const sql of [coreValidation14, procedureValidation14, migrationSql]) {
+      expect(sql).toContain('cm.RawCodes');
+      expect(sql).toContain('json_table(');
+      expect(sql).not.toContain('join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID');
+    }
   });
 });

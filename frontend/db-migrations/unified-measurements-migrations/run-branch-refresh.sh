@@ -67,6 +67,7 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "49_add_duplicate_tag_stemtag_detection.sql"
     "50_relax_measurementssummary_add_rawcodes.sql"
     "51_backfill_hard_failure_error_log.sql"
+    "52_fix_validation14_rawcodes_replay.sql"
 )
 
 REQUIRED_BASE_TABLES=(

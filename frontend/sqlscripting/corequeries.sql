@@ -277,12 +277,18 @@ VALUES (14, 'ValidateFindInvalidAttributeCodes',
 select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
-         left join attributes a on cma.Code = a.Code and a.IsActive is true
+         , json_table(
+             IF(cm.RawCodes IS NULL OR cm.RawCodes = '''' OR TRIM(cm.RawCodes) = '''', ''[]'',
+                CONCAT(''["'', REPLACE(TRIM(cm.RawCodes), '';'', ''","''), ''"]'')),
+             ''$[*]'' columns (code varchar(10) COLLATE utf8mb4_0900_ai_ci path ''$'')
+         ) jt
+         left join attributes a on a.Code = TRIM(jt.code) and a.IsActive is true
          left join measurement_error_log e on e.MeasurementID = cm.CoreMeasurementID
               and e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 where cm.IsValidated is null
   and cm.IsActive is true
+  and cm.RawCodes is not null
+  and TRIM(cm.RawCodes) != ''''
   and a.Code is null  -- Attribute code doesn''t exist in attributes table
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
