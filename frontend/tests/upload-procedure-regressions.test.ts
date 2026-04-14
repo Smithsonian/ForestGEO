@@ -114,7 +114,7 @@ describe('upload procedure regressions', () => {
   it('rebuilds validation 14 from RawCodes during validation reruns', () => {
     const coreQueriesSql = readSql('sqlscripting/corequeries.sql');
     const procedureSql = readSql('sqlscripting/storedprocedures.sql');
-    const migrationSql = readSql('db-migrations/unified-measurements-migrations/52_fix_validation14_rawcodes_replay.sql');
+    const migrationSql = readSql('db-migrations/unified-measurements-migrations/53_reapply_validation14_rawcodes_replay.sql');
 
     const coreValidation14 = extractSqlSegment(
       coreQueriesSql,
@@ -129,7 +129,7 @@ describe('upload procedure regressions', () => {
 
     for (const sql of [coreValidation14, procedureValidation14, migrationSql]) {
       expect(sql).toContain('cm.RawCodes');
-      expect(sql).toContain('json_table(');
+      expect(sql).toContain('cross join json_table(');
       expect(sql).not.toContain('join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID');
     }
   });

@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-52 in order against a target schema.
+# Runs migrations 16-53 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -63,6 +63,7 @@ ORDERED_MIGRATIONS=(
     "50_relax_measurementssummary_add_rawcodes.sql"
     "51_backfill_hard_failure_error_log.sql"
     "52_fix_validation14_rawcodes_replay.sql"
+    "53_reapply_validation14_rawcodes_replay.sql"
 )
 
 # ---------------------------------------------------------------------------

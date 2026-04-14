@@ -1447,7 +1447,7 @@ where cm.IsValidated is null and cm.IsActive is true
 select distinct cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = ''validation'' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         , json_table(
+         cross join json_table(
              IF(cm.RawCodes IS NULL OR cm.RawCodes = '''' OR TRIM(cm.RawCodes) = '''', ''[]'',
                 CONCAT(''["'', REPLACE(TRIM(cm.RawCodes), '';'', ''","''), ''"]'')),
              ''$[*]'' columns (code varchar(10) COLLATE utf8mb4_0900_ai_ci path ''$'')
