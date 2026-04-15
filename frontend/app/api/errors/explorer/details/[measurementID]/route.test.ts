@@ -55,6 +55,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
           IsValidated: false,
           MeasurementDescription: 'row 101',
           Attributes: null,
+          RawCodes: 'MX,I',
           UserDefinedFields: '{}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -86,6 +87,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
           IsValidated: false,
           MeasurementDescription: 'row 102',
           Attributes: null,
+          RawCodes: 'A',
           UserDefinedFields: '{}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -114,6 +116,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
     const body = await response.json();
     expect(body.row).toMatchObject({
       coreMeasurementID: 101,
+      rawCodes: 'MX,I',
       hasContradiction: true,
       contradictionType: 'duplicate_tag_stem'
     });
@@ -168,6 +171,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
           IsValidated: false,
           MeasurementDescription: 'row 101',
           Attributes: null,
+          RawCodes: 'MX,I',
           UserDefinedFields: '{}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -199,6 +203,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
           IsValidated: false,
           MeasurementDescription: 'row 102',
           Attributes: null,
+          RawCodes: 'A',
           UserDefinedFields: '{}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -237,6 +242,7 @@ describe('GET /api/errors/explorer/details/[measurementID]', () => {
 
     expect(body.row).toMatchObject({
       coreMeasurementID: 101,
+      rawCodes: 'MX,I',
       contradictionType: 'same_batch_conflict'
     });
     expect(body.row.contradictionTypes).toEqual(expect.arrayContaining(['duplicate_tag_stem', 'same_batch_conflict']));

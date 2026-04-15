@@ -145,21 +145,80 @@ function getDisplayedContradictionTypes(row: Pick<ErrorExplorerRow, 'contradicti
   return row.contradictionType ? [row.contradictionType] : [];
 }
 
-export function parseCodesString(raw: string | undefined): string[] {
+type CodesRow = Pick<ErrorExplorerRow, 'attributes' | 'rawCodes'>;
+
+function normalizeCodeValue(value?: string | null): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function parseCodesString(raw: string | undefined | null): string[] {
   return (raw ?? '')
-    .split(';')
-    .map(c => c.trim())
+    .split(/[;,]/)
+    .map(code => code.trim())
     .filter(Boolean);
 }
 
 export function joinCodesArray(codes: unknown): string {
-  return Array.isArray(codes) ? (codes as string[]).join(';') : '';
+  if (!Array.isArray(codes)) {
+    return '';
+  }
+
+  return Array.from(new Set((codes as string[]).map(code => code.trim()).filter(Boolean))).join(';');
+}
+
+export function getUploadedCodesValue(row?: Partial<CodesRow> | null): string {
+  const rawCodes = normalizeCodeValue(row?.rawCodes);
+  return rawCodes || normalizeCodeValue(row?.attributes);
+}
+
+export function getMaterializedCodesValue(row?: Partial<CodesRow> | null): string {
+  return normalizeCodeValue(row?.attributes);
+}
+
+export function hasCodesMismatch(row?: Partial<CodesRow> | null): boolean {
+  const uploadedCodes = joinCodesArray(parseCodesString(getUploadedCodesValue(row)));
+  const materializedCodes = joinCodesArray(parseCodesString(getMaterializedCodesValue(row)));
+
+  return uploadedCodes.length > 0 && uploadedCodes !== materializedCodes;
+}
+
+function getCodesMismatchMessage(row?: Partial<CodesRow> | null): string {
+  if (!hasCodesMismatch(row)) {
+    return '';
+  }
+
+  return getMaterializedCodesValue(row)
+    ? 'Some uploaded codes were not materialized.'
+    : 'No valid codes were materialized. Check invalid codes or delimiters.';
+}
+
+function getCodesEditValue(row?: Partial<CodesRow> | null, currentValue?: string | null): string {
+  const editedValue = normalizeCodeValue(currentValue);
+  return editedValue || getUploadedCodesValue(row);
+}
+
+function renderCodesChips(codesValue: string, emptyLabel = '—') {
+  const codes = parseCodesString(codesValue);
+  if (codes.length === 0) {
+    return <Typography level="body-sm">{emptyLabel}</Typography>;
+  }
+
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', py: 0.5 }}>
+      {codes.map((code, index) => (
+        <Chip key={`${code}-${index}`} size="sm" variant="soft">
+          {code}
+        </Chip>
+      ))}
+    </Stack>
+  );
 }
 
 function mergeEditedRow(existingRow: ErrorExplorerRow, updatedRow: ErrorExplorerRow): ErrorExplorerRow {
   return {
     ...existingRow,
-    ...stripRowForUpdate(updatedRow)
+    ...stripRowForUpdate(updatedRow),
+    rawCodes: updatedRow.rawCodes ?? existingRow.rawCodes
   };
 }
 
@@ -451,7 +510,10 @@ export default function ErrorsExplorer() {
         throw new Error(body?.message || body?.error || 'Failed to update row');
       }
 
-      const updatedRow = newRow as ErrorExplorerRow;
+      const updatedRow = { ...(newRow as ErrorExplorerRow) };
+      if (updatedRow.attributes !== (oldRow as ErrorExplorerRow).attributes) {
+        updatedRow.rawCodes = updatedRow.attributes;
+      }
       const rowScope = resolveExplorerScope(updatedRow) ?? resolveExplorerScope(oldRow as ErrorExplorerRow);
       syncEditedRowLocally(updatedRow);
 
@@ -687,17 +749,18 @@ export default function ErrorsExplorer() {
         headerAlign: 'left',
         align: 'left',
         renderCell: params => {
-          const codes = parseCodesString(params.value as string | undefined);
-          if (codes.length === 0) {
-            return <Typography level="body-sm">—</Typography>;
-          }
+          const row = params.row as ErrorExplorerRow;
+          const displayedCodes = getUploadedCodesValue(row);
+          const mismatchMessage = getCodesMismatchMessage(row);
+
           return (
-            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', py: 0.5 }}>
-              {codes.map(code => (
-                <Chip key={code} size="sm" variant="soft">
-                  {code}
-                </Chip>
-              ))}
+            <Stack spacing={0.25} sx={{ py: 0.5 }}>
+              {renderCodesChips(displayedCodes)}
+              {mismatchMessage ? (
+                <Typography level="body-xs" color="warning" sx={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
+                  {mismatchMessage}
+                </Typography>
+              ) : null}
             </Stack>
           );
         },
@@ -705,10 +768,11 @@ export default function ErrorsExplorer() {
           <Autocomplete
             sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
             multiple
+            freeSolo
             autoHighlight
             clearOnBlur={false}
             options={[...selectableOpts.codes].sort((a, b) => a.localeCompare(b))}
-            value={parseCodesString(params.value as string | undefined)}
+            value={parseCodesString(getCodesEditValue(params.row as ErrorExplorerRow, params.value as string | undefined))}
             isOptionEqualToValue={(o, v) => o === v}
             onChange={(_event, next) => {
               params.api.setEditCellValue({
@@ -1089,6 +1153,36 @@ export default function ErrorsExplorer() {
                     ))}
                   </Stack>
                 </Stack>
+
+                {(getUploadedCodesValue(details.row) || getMaterializedCodesValue(details.row)) && (
+                  <Stack spacing={0.75}>
+                    <Typography level="title-sm">Codes</Typography>
+                    <Card size="sm" variant={hasCodesMismatch(details.row) ? 'soft' : 'outlined'} color={hasCodesMismatch(details.row) ? 'warning' : 'neutral'}>
+                      <Stack spacing={1}>
+                        <Stack spacing={0.25}>
+                          <Typography level="body-xs" textTransform="uppercase">
+                            Uploaded
+                          </Typography>
+                          {renderCodesChips(getUploadedCodesValue(details.row))}
+                        </Stack>
+
+                        {hasCodesMismatch(details.row) && (
+                          <>
+                            <Stack spacing={0.25}>
+                              <Typography level="body-xs" textTransform="uppercase">
+                                Materialized
+                              </Typography>
+                              {renderCodesChips(getMaterializedCodesValue(details.row), 'None')}
+                            </Stack>
+                            <Typography level="body-xs" color="warning">
+                              {getCodesMismatchMessage(details.row)}
+                            </Typography>
+                          </>
+                        )}
+                      </Stack>
+                    </Card>
+                  </Stack>
+                )}
 
                 {details.row.hasContradiction && details.relatedRows.length > 0 && (
                   <>

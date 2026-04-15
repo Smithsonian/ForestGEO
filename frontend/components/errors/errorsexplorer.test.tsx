@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { joinCodesArray, parseCodesString } from './errorsexplorer';
+import { getUploadedCodesValue, hasCodesMismatch, joinCodesArray, parseCodesString } from './errorsexplorer';
 
 describe('ErrorsExplorer — Codes column helpers', () => {
   describe('parseCodesString', () => {
@@ -18,6 +18,10 @@ describe('ErrorsExplorer — Codes column helpers', () => {
 
     it('parses multiple semicolon-delimited codes', () => {
       expect(parseCodesString('D;M;A')).toEqual(['D', 'M', 'A']);
+    });
+
+    it('parses comma-delimited codes', () => {
+      expect(parseCodesString('D,M,A')).toEqual(['D', 'M', 'A']);
     });
 
     it('trims whitespace around each code segment', () => {
@@ -46,6 +50,10 @@ describe('ErrorsExplorer — Codes column helpers', () => {
       expect(joinCodesArray(null)).toBe('');
       expect(joinCodesArray(undefined)).toBe('');
     });
+
+    it('normalizes whitespace, commas, and duplicate values into the stored semicolon form', () => {
+      expect(joinCodesArray(parseCodesString(' D, M ; D '))).toBe('D;M');
+    });
   });
 
   describe('parse/join round-trip', () => {
@@ -56,6 +64,20 @@ describe('ErrorsExplorer — Codes column helpers', () => {
 
     it('parsing then joining preserves the canonical stored form', () => {
       expect(joinCodesArray(parseCodesString(' D ; M '))).toBe('D;M');
+    });
+  });
+
+  describe('raw code display helpers', () => {
+    it('prefers raw uploaded codes when materialized attributes are empty', () => {
+      expect(getUploadedCodesValue({ attributes: '', rawCodes: 'MX,I' })).toBe('MX,I');
+    });
+
+    it('does not treat delimiter-only differences as a mismatch', () => {
+      expect(hasCodesMismatch({ attributes: 'D;M', rawCodes: 'D,M' })).toBe(false);
+    });
+
+    it('flags rows where uploaded codes contain invalid or dropped values', () => {
+      expect(hasCodesMismatch({ attributes: 'D', rawCodes: 'D,MX' })).toBe(true);
     });
   });
 });

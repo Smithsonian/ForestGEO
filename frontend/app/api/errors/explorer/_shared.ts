@@ -38,6 +38,7 @@ interface RawErrorOccurrenceRow {
   IsValidated?: boolean | null;
   MeasurementDescription?: string | null;
   Attributes?: string | null;
+  RawCodes?: string | null;
   UserDefinedFields?: string | null;
   UploadFileID?: string | null;
   UploadBatchID?: string | null;
@@ -159,6 +160,7 @@ function buildRawErrorsQuery(schema: string): string {
             ms.IsValidated,
             ms.Description AS MeasurementDescription,
             ms.Attributes,
+            cm.RawCodes,
             ms.UserDefinedFields,
             cm.UploadFileID,
             cm.UploadBatchID,
@@ -300,6 +302,7 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
         isValidated: rawRow.IsValidated ?? undefined,
         description: rawRow.MeasurementDescription ?? undefined,
         attributes: rawRow.Attributes ?? undefined,
+        rawCodes: rawRow.RawCodes ?? undefined,
         userDefinedFields: rawRow.UserDefinedFields ?? undefined,
         primaryErrorMessage: rawRow.DisplayMessage,
         errorMessages: [rawRow.DisplayMessage],
@@ -344,6 +347,8 @@ function matchesQuickSearch(row: ErrorExplorerRow, errors: ErrorDetailRecord[], 
     row.stemTag,
     row.speciesCode,
     row.quadratName,
+    row.rawCodes,
+    row.attributes,
     row.primaryErrorMessage,
     ...row.errorMessages,
     ...errors.flatMap(error => [error.message, ...error.fields])

@@ -55,6 +55,7 @@ describe('POST /api/errors/explorer/query', () => {
           IsValidated: false,
           MeasurementDescription: 'row 101',
           Attributes: null,
+          RawCodes: 'MX,I',
           UserDefinedFields: '{"treestemstate":"old tree"}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -86,6 +87,7 @@ describe('POST /api/errors/explorer/query', () => {
           IsValidated: false,
           MeasurementDescription: 'row 101',
           Attributes: null,
+          RawCodes: 'MX,I',
           UserDefinedFields: '{"treestemstate":"old tree"}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -117,6 +119,7 @@ describe('POST /api/errors/explorer/query', () => {
           IsValidated: false,
           MeasurementDescription: 'row 102',
           Attributes: null,
+          RawCodes: 'A',
           UserDefinedFields: '{"treestemstate":"old tree"}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -170,6 +173,7 @@ describe('POST /api/errors/explorer/query', () => {
     expect(body.totalRows).toBe(2);
     expect(body.rows[0]).toMatchObject({
       coreMeasurementID: 101,
+      rawCodes: 'MX,I',
       hasContradiction: true,
       contradictionType: 'duplicate_tag_stem'
     });
@@ -208,6 +212,7 @@ describe('POST /api/errors/explorer/query', () => {
           IsValidated: false,
           MeasurementDescription: 'row 101',
           Attributes: null,
+          RawCodes: 'MX,I',
           UserDefinedFields: '{"treestemstate":"old tree"}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -239,6 +244,7 @@ describe('POST /api/errors/explorer/query', () => {
           IsValidated: false,
           MeasurementDescription: 'row 102',
           Attributes: null,
+          RawCodes: 'A',
           UserDefinedFields: '{"treestemstate":"old tree"}',
           UploadFileID: 'file-1',
           UploadBatchID: 'batch-1',
@@ -292,6 +298,7 @@ describe('POST /api/errors/explorer/query', () => {
     expect(body.totalRows).toBe(2);
     expect(body.rows[0]).toMatchObject({
       coreMeasurementID: 101,
+      rawCodes: 'MX,I',
       contradictionType: 'same_batch_conflict',
       relatedMeasurementIDs: [102]
     });
