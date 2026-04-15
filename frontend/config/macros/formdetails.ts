@@ -86,6 +86,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'quadratshape', explanation: 'The shape of the quadrat', category: 'optional' }
   ],
   [FormType.measurements]: [
+    { label: 'measurementID', explanation: 'The unique measurement identifier (CoreMeasurementID) used for revision matching', category: 'optional' },
     { label: 'tag', explanation: 'Tag number on the tree in the field, should be unique within each plot.', category: 'required' },
     {
       label: 'stemtag',
