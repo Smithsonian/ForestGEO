@@ -187,9 +187,7 @@ function getCodesMismatchMessage(row?: Partial<CodesRow> | null): string {
     return '';
   }
 
-  return getMaterializedCodesValue(row)
-    ? 'Some uploaded codes were not materialized.'
-    : 'No valid codes were materialized. Check invalid codes or delimiters.';
+  return getMaterializedCodesValue(row) ? 'Some uploaded codes were not materialized.' : 'No valid codes were materialized. Check invalid codes or delimiters.';
 }
 
 function getCodesEditValue(row?: Partial<CodesRow> | null, currentValue?: string | null): string {
