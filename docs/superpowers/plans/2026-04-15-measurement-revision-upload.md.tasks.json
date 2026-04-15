@@ -1,0 +1,52 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-15-measurement-revision-upload.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Add measurementID and comments to measurement CSV export",
+      "status": "pending",
+      "description": "**Goal:** Include `measurementID` (raw CoreMeasurementID) and `comments` in the measurement CSV export so researchers have round-trip-capable files.\n\n**Files:**\n- Modify: `frontend/app/api/formdownload/[dataType]/[[...slugs]]/route.ts:199-262`\n- Modify: `frontend/config/macros/formdetails.ts:88-111`\n\n**Acceptance Criteria:**\n- [ ] Exported CSV contains `measurementID` column with raw CoreMeasurementID integer values\n- [ ] Exported CSV contains `comments` column with Description values\n- [ ] `measurementID` is the first measurement header in `TableHeadersByFormType`, so the form export writer emits it first\n- [ ] `measurementID` is accepted as an optional measurement upload header for revision files\n\n**Verify:** Start dev server, export measurements CSV, verify both columns present with correct values.\n\n```json:metadata\n{\"files\": [\"frontend/app/api/formdownload/[dataType]/[[...slugs]]/route.ts\", \"frontend/config/macros/formdetails.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"measurementID column in export\", \"comments column in export\", \"measurementID first in measurement headers\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: Enable measurement REVISIONS mode + add ReviewStates",
+      "status": "pending",
+      "description": "**Goal:** Enable the upload mode selector for measurements and add revision-specific review states to the upload flow.\n\n**Files:**\n- Modify: `frontend/config/macros/uploadsystemmacros.ts:165-189`\n- Modify: `frontend/components/uploadsystemhelpers/uploadparentmodal.tsx:19-40`\n\n**Acceptance Criteria:**\n- [ ] `REVISION_MATCH` and `REVISION_APPLY` added to `ReviewStates` and `ReviewProgress`\n- [ ] Upload modal shows mode selector for measurements\n- [ ] `getRevisionMatchLabel` returns `'measurementID'` for measurements\n\n**Verify:** Start dev server, open measurement upload modal, verify mode selector appears.\n\n```json:metadata\n{\"files\": [\"frontend/config/macros/uploadsystemmacros.ts\", \"frontend/components/uploadsystemhelpers/uploadparentmodal.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"mode selector visible for measurements\", \"REVISION_MATCH and REVISION_APPLY in ReviewStates\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Build revision match/classify API (POST /api/revisionupload)",
+      "status": "pending",
+      "description": "**Goal:** Build the API route that receives parsed revision CSV rows, matches them against existing `coremeasurements` by `measurementID`, and classifies them into matched revisions, new row candidates, and invalid rows.\n\n**Files:**\n- Create: `frontend/app/api/revisionupload/route.ts`\n\n**Acceptance Criteria:**\n- [ ] Rows with valid measurementID matching active census row in the current plot (StemGUID IS NOT NULL) -> matched\n- [ ] Rows with measurementID pointing to StemGUID IS NULL -> invalid (failed measurement)\n- [ ] Rows with measurementID found in the census but outside the current plot -> invalid (wrong plot)\n- [ ] Rows with measurementID not found in census -> invalid (not found)\n- [ ] Rows with blank measurementID + all required insert fields -> new candidate\n- [ ] Rows with blank measurementID + missing required fields -> invalid (incomplete)\n- [ ] Duplicate measurementIDs in file -> entire file rejected with error\n- [ ] Matched rows include computed diff of changed fields\n- [ ] Optional advisory conflict check against active upload sessions for same plot/census (apply re-checks authoritatively)\n\n```json:metadata\n{\"files\": [\"frontend/app/api/revisionupload/route.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"row classification by measurementID\", \"plot-scoped measurementID resolution\", \"diff computation for matched rows\", \"duplicate measurementID rejection\", \"failed measurement boundary\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Build revision apply API (POST /api/revisionupload/apply)",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Build the API route that applies direct UPDATEs for matched revision rows, routes confirmed new rows through the existing ingestion pipeline, resets validation state, and triggers the validation runner.\n\n**Files:**\n- Create: `frontend/app/api/revisionupload/apply/route.ts`\n\n**Acceptance Criteria:**\n- [ ] Matched rows: direct UPDATE on coremeasurements with non-destructive merge\n- [ ] codes updates: overwrite RawCodes + delete/re-insert cmattributes\n- [ ] comments updates: overwrite both Description and RawComments\n- [ ] Preserve original UploadFileID/UploadBatchID\n- [ ] Reset IsValidated to NULL on updated rows\n- [ ] Clear only validation-sourced measurement_error_log entries for updated rows\n- [ ] Confirmed new rows: INSERT into temporarymeasurements then CALL bulkingestionprocess\n- [ ] Reject/409 when active upload_sessions or validation_runs already own the same plot/census scope\n- [ ] Unique constraint violations surfaced as apply errors\n- [ ] Re-resolve rows at apply time within the current plot+census boundary (TOCTOU protection)\n\n```json:metadata\n{\"files\": [\"frontend/app/api/revisionupload/apply/route.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"direct UPDATE with merge semantics\", \"validation-only measurement_error_log clearing\", \"plot-scoped re-resolution\", \"apply conflict gate for upload_sessions and validation_runs\", \"IsValidated reset\", \"new row pipeline routing\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Build revision match review UI component",
+      "status": "complete",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** Build the `uploadrevisionmatch.tsx` component that displays classified revision rows for user review before applying.\n\n**Files:**\n- Create: `frontend/components/uploadsystem/segments/uploadrevisionmatch.tsx`\n\n**Acceptance Criteria:**\n- [ ] Summary counts displayed (matched with changes, matched no changes, new candidates, invalid)\n- [ ] Matched rows shown in a table with old/new value columns for changed fields\n- [ ] New row candidates shown in a table for review\n- [ ] Invalid rows shown with error reasons\n- [ ] Apply button proceeds to REVISION_APPLY state\n- [ ] Cancel button returns to START\n\n```json:metadata\n{\"files\": [\"frontend/components/uploadsystem/segments/uploadrevisionmatch.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"matched rows display\", \"new rows confirmation\", \"invalid rows display\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Build revision apply UI + wire upload parent routing",
+      "status": "pending",
+      "blockedBy": [1, 3, 4],
+      "description": "**Goal:** Build the `uploadrevisionapply.tsx` component and wire the complete revision flow into `uploadparent.tsx`.\n\n**Files:**\n- Create: `frontend/components/uploadsystem/segments/uploadrevisionapply.tsx`\n- Modify: `frontend/components/uploadsystem/uploadparent.tsx:1-330`\n\n**Acceptance Criteria:**\n- [ ] uploadparent routes REVISION_MATCH -> uploadrevisionmatch component\n- [ ] uploadparent routes REVISION_APPLY -> uploadrevisionapply component\n- [ ] In REVISIONS mode, handleInitialSubmit fully parses/stages the selected files into parsedData before entering REVISION_MATCH\n- [ ] handleRevisionMatch reads from staged parsedData, not preview-only file metadata\n- [ ] Apply component calls /api/revisionupload/apply and shows progress\n- [ ] After apply, triggers background validation and transitions to UPLOAD_AZURE\n- [ ] Full flow: START -> UPLOAD_FILES -> REVISION_MATCH -> REVISION_APPLY -> UPLOAD_AZURE -> COMPLETE\n\n```json:metadata\n{\"files\": [\"frontend/components/uploadsystem/segments/uploadrevisionapply.tsx\", \"frontend/components/uploadsystem/uploadparent.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"revision flow routing\", \"explicit revision file staging into parsedData\", \"apply progress display\", \"validation trigger\", \"end-to-end flow\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Revision upload integration tests",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** Write integration tests that verify the revision match and apply APIs against a local MySQL database.\n\n**Files:**\n- Create: `frontend/tests/integration/revision-upload.integration.test.ts`\n\n**Acceptance Criteria:**\n- [ ] Test matched row update with non-destructive merge\n- [ ] Test codes update rebuilds cmattributes\n- [ ] Test comments update writes both Description and RawComments\n- [ ] Test duplicate measurementID in file is rejected\n- [ ] Test measurementID pointing to failed row is invalid\n- [ ] Test measurementID from a different plot in the same census is invalid\n- [ ] Test measurementID not found in census is invalid\n- [ ] Test blank measurementID + full payload is new candidate\n- [ ] Test blank measurementID + sparse fields is invalid (incomplete)\n- [ ] Test IsValidated reset to NULL after update\n- [ ] Test UploadFileID/UploadBatchID preserved\n- [ ] Test only validation-sourced measurement_error_log rows are cleared on update\n- [ ] Test apply rejects when an active validation run exists for the same plot/census\n- [ ] Test apply rejects when an active upload session exists for the same plot/census\n- [ ] Test unique constraint violation is apply error\n\n```json:metadata\n{\"files\": [\"frontend/tests/integration/revision-upload.integration.test.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration\", \"acceptanceCriteria\": [\"match classification tests\", \"plot-scoped measurementID tests\", \"apply update tests\", \"locking and conflict tests\", \"edge case tests\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-15T00:00:00Z"
+}
