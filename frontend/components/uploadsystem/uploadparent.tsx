@@ -17,6 +17,8 @@ import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
+import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
+import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
@@ -60,6 +62,8 @@ function UploadParentInner(props: UploadParentProps) {
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
+  const [revisionMatchResult, setRevisionMatchResult] = useState<any>(null);
+  const [revisionConfirmNewRows, setRevisionConfirmNewRows] = useState(false);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -69,6 +73,9 @@ function UploadParentInner(props: UploadParentProps) {
   const _currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { data: session } = useSession();
+
+  const currentPlotID = _currentPlot?.plotID ?? null;
+  const currentCensusID = _currentCensus?.dateRanges?.[0]?.censusID ?? null;
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -105,6 +112,8 @@ function UploadParentInner(props: UploadParentProps) {
       fileManagement.clearFiles();
       setParsedData({});
       setIsReingestionMode(false);
+      setRevisionMatchResult(null);
+      setRevisionConfirmNewRows(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -131,6 +140,8 @@ function UploadParentInner(props: UploadParentProps) {
     fileManagement.clearFiles();
     setParsedData({});
     setIsReingestionMode(false);
+    setRevisionMatchResult(null);
+    setRevisionConfirmNewRows(false);
   }
 
   async function resetError() {
@@ -151,7 +162,65 @@ function UploadParentInner(props: UploadParentProps) {
   };
 
   async function handleInitialSubmit() {
-    uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+    if (
+      uploadState.state.uploadMode === UploadMode.REVISIONS &&
+      uploadState.state.uploadForm === FormType.measurements
+    ) {
+      uploadState.setReviewState(ReviewStates.REVISION_MATCH);
+    } else {
+      uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+    }
+  }
+
+  async function handleRevisionMatch() {
+    const allRows: FileRow[] = [];
+
+    await Promise.all(
+      fileManagement.files.map(
+        file =>
+          new Promise<void>((resolve, reject) => {
+            import('papaparse').then(({ default: Papa }) => {
+              Papa.parse<FileRow>(file, {
+                header: true,
+                skipEmptyLines: true,
+                transformHeader: (header: string) => header.trim().toLowerCase().replace(/[_\s-]/g, ''),
+                complete(results) {
+                  allRows.push(...results.data);
+                  resolve();
+                },
+                error(err: Error) {
+                  reject(err);
+                }
+              });
+            });
+          })
+      )
+    );
+
+    try {
+      const response = await fetch('/api/revisionupload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: allRows,
+          plotID: currentPlotID,
+          censusID: currentCensusID,
+          schema: currentSite?.schemaName
+        })
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(errorBody.error || 'Failed to classify revision rows');
+      }
+
+      const result = await response.json();
+      setRevisionMatchResult(result);
+    } catch (err: unknown) {
+      const errorObj = err instanceof Error ? err : new Error(String(err));
+      errorHandling.setError(errorObj);
+      uploadState.setReviewState(ReviewStates.ERRORS);
+    }
   }
 
   useEffect(() => {
@@ -161,6 +230,13 @@ function UploadParentInner(props: UploadParentProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState.setReviewState]);
+
+  useEffect(() => {
+    if (uploadState.state.reviewState === ReviewStates.REVISION_MATCH && !revisionMatchResult) {
+      handleRevisionMatch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadState.state.reviewState]);
 
   // Check if we should start with reingestion processing (only once on mount)
   useEffect(() => {
@@ -236,6 +312,37 @@ function UploadParentInner(props: UploadParentProps) {
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
+          />
+        );
+      case ReviewStates.REVISION_MATCH:
+        return (
+          <UploadRevisionMatch
+            matchedRows={revisionMatchResult?.matchedRows ?? []}
+            newRows={revisionMatchResult?.newRows ?? []}
+            invalidRows={revisionMatchResult?.invalidRows ?? []}
+            counts={revisionMatchResult?.counts ?? { matched: 0, matchedWithChanges: 0, new: 0, invalid: 0, total: 0 }}
+            schema={currentSite?.schemaName || ''}
+            plotID={currentPlotID ?? 0}
+            censusID={currentCensusID ?? 0}
+            setReviewState={uploadState.setReviewState}
+            onApply={confirmNew => {
+              setRevisionConfirmNewRows(confirmNew);
+              uploadState.setReviewState(ReviewStates.REVISION_APPLY);
+            }}
+            handleReturnToStart={handleReturnToStart}
+          />
+        );
+      case ReviewStates.REVISION_APPLY:
+        return (
+          <UploadRevisionApply
+            matchedRows={(revisionMatchResult?.matchedRows ?? [])
+              .filter((r: any) => Object.keys(r.changes).length > 0)
+              .map((r: any) => ({ coreMeasurementID: r.coreMeasurementID, csvRow: r.csvRow }))}
+            newRows={(revisionMatchResult?.newRows ?? []).map((r: any) => r.csvRow)}
+            confirmNewRows={revisionConfirmNewRows}
+            schema={currentSite?.schemaName || ''}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
           />
         );
       case ReviewStates.VALIDATE:
