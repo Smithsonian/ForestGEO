@@ -167,6 +167,8 @@ export enum ReviewStates {
   UPLOAD_FILES = 'upload_files',
   REVIEW = 'review',
   UPLOAD_SQL = 'upload_sql',
+  REVISION_MATCH = 'revision_match',
+  REVISION_APPLY = 'revision_apply',
   VALIDATE = 'validate',
   VALIDATE_ERRORS_FOUND = 'validate_errors_found',
   UPDATE = 'update_rows',
@@ -181,11 +183,13 @@ export enum ReviewProgress {
   UPLOAD_FILES = 2,
   REVIEW = 3,
   UPLOAD_SQL = 4,
-  VALIDATE = 5,
-  VALIDATE_ERRORS_FOUND = 6,
-  UPDATE = 7,
-  UPLOAD_AZURE = 8,
-  COMPLETE = 9
+  REVISION_MATCH = 5,
+  REVISION_APPLY = 6,
+  VALIDATE = 7,
+  VALIDATE_ERRORS_FOUND = 8,
+  UPDATE = 9,
+  UPLOAD_AZURE = 10,
+  COMPLETE = 11
 }
 
 // for validation error display ONLY
