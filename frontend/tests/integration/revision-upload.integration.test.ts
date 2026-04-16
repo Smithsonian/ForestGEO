@@ -13,13 +13,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import {
-  cleanupTestMeasurements,
-  insertDirectMeasurements,
-  setupTestDatabase,
-  teardownTestDatabase,
-  type TestData
-} from '../setup/local-db-setup';
+import { cleanupTestMeasurements, insertDirectMeasurements, setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 
 // ---------------------------------------------------------------------------
 // Named constants — no magic numbers or strings
@@ -44,6 +38,7 @@ const ATTRIBUTE_CODE_C = 'C';
 const ATTRIBUTE_CODE_D = 'D';
 
 const INGESTION_ERROR_SOURCE = 'ingestion';
+const VALIDATION_ERROR_SOURCE = 'validation';
 const INGESTION_DUPLICATE_ERROR_CODE = 'DUPLICATE_ENTRY';
 
 // MySQL BIT(1) columns are returned as Node.js Buffers, not numbers.
@@ -112,22 +107,24 @@ describe('Revision Upload Integration Tests', () => {
    * Each call uses a distinct SourceRowIndex to avoid the
    * ux_cm_uploadbatch_rowindex unique constraint (UploadBatchID, SourceRowIndex).
    */
-  async function insertMeasurementRow(overrides: {
-    stemGUID?: number | null;
-    censusID?: number;
-    measuredDBH?: number;
-    measuredHOM?: number;
-    measurementDate?: string;
-    description?: string | null;
-    rawCodes?: string | null;
-    rawComments?: string | null;
-    uploadFileID?: string | null;
-    uploadBatchID?: string | null;
-    isValidated?: Buffer | null;
-    isActive?: number;
-    sourceRowIndex?: number;
-  } = {}): Promise<number> {
-    const stemGUID = 'stemGUID' in overrides ? overrides.stemGUID : (await resolveDefaultStemGUID());
+  async function insertMeasurementRow(
+    overrides: {
+      stemGUID?: number | null;
+      censusID?: number;
+      measuredDBH?: number;
+      measuredHOM?: number;
+      measurementDate?: string;
+      description?: string | null;
+      rawCodes?: string | null;
+      rawComments?: string | null;
+      uploadFileID?: string | null;
+      uploadBatchID?: string | null;
+      isValidated?: Buffer | null;
+      isActive?: number;
+      sourceRowIndex?: number;
+    } = {}
+  ): Promise<number> {
+    const stemGUID = 'stemGUID' in overrides ? overrides.stemGUID : await resolveDefaultStemGUID();
     const censusID = overrides.censusID ?? testData.census[0].censusID;
     const sourceRowIndex = overrides.sourceRowIndex ?? sourceRowCounter++;
 
@@ -194,10 +191,7 @@ describe('Revision Upload Integration Tests', () => {
     }
 
     // Clean up the dummy measurement so it does not pollute the test
-    await connection.query(
-      `DELETE FROM \`${config.database}\`.coremeasurements WHERE CoreMeasurementID = ?`,
-      [coreMeasurementIDs[0]]
-    );
+    await connection.query(`DELETE FROM \`${config.database}\`.coremeasurements WHERE CoreMeasurementID = ?`, [coreMeasurementIDs[0]]);
 
     // Activate the quadrat link for the stem so classification JOIN succeeds
     await connection.query(
@@ -215,10 +209,9 @@ describe('Revision Upload Integration Tests', () => {
    * Reads a single coremeasurements row by primary key.
    */
   async function getMeasurementRow(coreMeasurementID: number): Promise<RowDataPacket> {
-    const [rows] = await connection.query<RowDataPacket[]>(
-      `SELECT * FROM \`${config.database}\`.coremeasurements WHERE CoreMeasurementID = ?`,
-      [coreMeasurementID]
-    );
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT * FROM \`${config.database}\`.coremeasurements WHERE CoreMeasurementID = ?`, [
+      coreMeasurementID
+    ]);
 
     if (rows.length === 0) {
       throw new Error(`getMeasurementRow: no row found for CoreMeasurementID=${coreMeasurementID}`);
@@ -247,10 +240,7 @@ describe('Revision Upload Integration Tests', () => {
    */
   async function insertAttributes(coreMeasurementID: number, codes: string[]): Promise<void> {
     for (const code of codes) {
-      await connection.query(
-        `INSERT IGNORE INTO \`${config.database}\`.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-        [coreMeasurementID, code]
-      );
+      await connection.query(`INSERT IGNORE INTO \`${config.database}\`.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [coreMeasurementID, code]);
     }
   }
 
@@ -258,15 +248,25 @@ describe('Revision Upload Integration Tests', () => {
    * Resolves the ErrorID for the DUPLICATE_ENTRY ingestion error seeded by
    * setupTestDatabase → seedMeasurementErrors.
    */
-  async function resolveIngestionErrorID(errorCode: string): Promise<number> {
+  async function resolveErrorID(errorSource: string, errorCode?: string): Promise<number> {
+    const params: Array<string> = [errorSource];
+    let whereClause = 'WHERE ErrorSource = ?';
+
+    if (errorCode !== undefined) {
+      whereClause += ' AND ErrorCode = ?';
+      params.push(errorCode);
+    }
+
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT ErrorID FROM \`${config.database}\`.measurement_errors
-       WHERE ErrorSource = ? AND ErrorCode = ?`,
-      [INGESTION_ERROR_SOURCE, errorCode]
+       ${whereClause}
+       ORDER BY ErrorID
+       LIMIT 1`,
+      params
     );
 
     if (rows.length === 0) {
-      throw new Error(`resolveIngestionErrorID: error code '${errorCode}' not found in measurement_errors`);
+      throw new Error(`resolveErrorID: no measurement_errors row found for source='${errorSource}'${errorCode ? ` code='${errorCode}'` : ''}`);
     }
 
     return rows[0].ErrorID;
@@ -296,6 +296,23 @@ describe('Revision Upload Integration Tests', () => {
     return Number(rows[0].count);
   }
 
+  /**
+   * Counts unresolved error_log rows for a measurement filtered by ErrorSource.
+   */
+  async function countUnresolvedErrorLogEntriesBySource(coreMeasurementID: number, errorSource: string): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS count
+       FROM \`${config.database}\`.measurement_error_log mel
+       JOIN \`${config.database}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE mel.MeasurementID = ?
+         AND mel.IsResolved = FALSE
+         AND me.ErrorSource = ?`,
+      [coreMeasurementID, errorSource]
+    );
+
+    return Number(rows[0].count);
+  }
+
   // =========================================================================
   // Classification helpers — mirror the SQL from route.ts
   // =========================================================================
@@ -305,11 +322,7 @@ describe('Revision Upload Integration Tests', () => {
    * measurement belongs to the given census AND its stem is in an active
    * quadrat that belongs to the given plot.
    */
-  async function lookupMeasurementInActiveCensus(
-    coreMeasurementID: number,
-    censusID: number,
-    plotID: number
-  ): Promise<RowDataPacket | null> {
+  async function lookupMeasurementInActiveCensus(coreMeasurementID: number, censusID: number, plotID: number): Promise<RowDataPacket | null> {
     const [rows] = await connection.query<RowDataPacket[]>(
       `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.MeasuredDBH, cm.MeasuredHOM,
               cm.MeasurementDate, cm.RawCodes, cm.Description
@@ -446,10 +459,7 @@ describe('Revision Upload Integration Tests', () => {
 
     // Rebuild cmattributes when codes were supplied — mirrors apply/route.ts
     if (updateFields.codes !== null && updateFields.codes !== undefined && updateFields.codes.trim() !== '') {
-      await connection.query(
-        `DELETE FROM \`${config.database}\`.cmattributes WHERE CoreMeasurementID = ?`,
-        [coreMeasurementID]
-      );
+      await connection.query(`DELETE FROM \`${config.database}\`.cmattributes WHERE CoreMeasurementID = ?`, [coreMeasurementID]);
 
       const parsedCodes = updateFields.codes
         .trim()
@@ -458,17 +468,18 @@ describe('Revision Upload Integration Tests', () => {
         .filter(c => c.length > 0);
 
       for (const code of parsedCodes) {
-        await connection.query(
-          `INSERT IGNORE INTO \`${config.database}\`.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-          [coreMeasurementID, code]
-        );
+        await connection.query(`INSERT IGNORE INTO \`${config.database}\`.cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [coreMeasurementID, code]);
       }
     }
 
-    // Clear unresolved error log entries — mirrors apply/route.ts
+    // Clear unresolved validation error log entries — mirrors apply/route.ts
     await connection.query(
-      `DELETE FROM \`${config.database}\`.measurement_error_log
-       WHERE MeasurementID = ? AND IsResolved = FALSE`,
+      `DELETE mel
+       FROM \`${config.database}\`.measurement_error_log mel
+       JOIN \`${config.database}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE mel.MeasurementID = ?
+         AND mel.IsResolved = FALSE
+         AND me.ErrorSource = 'validation'`,
       [coreMeasurementID]
     );
 
@@ -709,25 +720,26 @@ describe('Revision Upload Integration Tests', () => {
         dbh: String(SHARED_DBH)
       });
 
-      expect(
-        outcome,
-        'ER_DUP_ENTRY must be caught and returned as dup_entry_error, not re-thrown'
-      ).toBe('dup_entry_error');
+      expect(outcome, 'ER_DUP_ENTRY must be caught and returned as dup_entry_error, not re-thrown').toBe('dup_entry_error');
     });
 
-    it('unresolved measurement_error_log entries are deleted after a successful update', async () => {
+    it('successful updates clear unresolved validation errors but preserve ingestion error history', async () => {
       const coreMeasurementID = await insertMeasurementRow();
-      const duplicateErrorID = await resolveIngestionErrorID(INGESTION_DUPLICATE_ERROR_CODE);
+      const duplicateErrorID = await resolveErrorID(INGESTION_ERROR_SOURCE, INGESTION_DUPLICATE_ERROR_CODE);
+      const validationErrorID = await resolveErrorID(VALIDATION_ERROR_SOURCE);
       await insertUnresolvedErrorLog(coreMeasurementID, duplicateErrorID);
+      await insertUnresolvedErrorLog(coreMeasurementID, validationErrorID);
 
       const countBefore = await countUnresolvedErrorLogEntries(coreMeasurementID);
-      expect(countBefore, 'Precondition: must have one unresolved error log entry').toBe(1);
+      expect(countBefore, 'Precondition: must have one unresolved ingestion entry and one unresolved validation entry').toBe(2);
 
       const outcome = await applyMatchedRowUpdate(coreMeasurementID, { dbh: String(UPDATED_DBH) });
       expect(outcome).toBe('updated');
 
       const countAfter = await countUnresolvedErrorLogEntries(coreMeasurementID);
-      expect(countAfter, 'Unresolved error log entries must be cleared after a successful update').toBe(0);
+      expect(countAfter, 'Only ingestion error history should remain after a successful update').toBe(1);
+      expect(await countUnresolvedErrorLogEntriesBySource(coreMeasurementID, VALIDATION_ERROR_SOURCE)).toBe(0);
+      expect(await countUnresolvedErrorLogEntriesBySource(coreMeasurementID, INGESTION_ERROR_SOURCE)).toBe(1);
     });
 
     it('no-op apply (all fields blank) → skipped, database unchanged', async () => {
