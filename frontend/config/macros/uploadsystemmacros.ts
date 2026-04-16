@@ -33,6 +33,7 @@ export interface UploadStartProps {
 export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
+  uploadMode: UploadMode | undefined;
   acceptedFiles: FileWithStream[];
   dataViewActive: number;
   selectedDelimiters: Record<string, string>;
