@@ -59,6 +59,81 @@ interface ApplyResponse {
   validationPending: boolean;
 }
 
+function parsePositiveInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+}
+
+function getAffectedRowCount(result: unknown): number {
+  if (!result || typeof result !== 'object' || !('affectedRows' in result)) {
+    return 0;
+  }
+
+  const affectedRows = (result as { affectedRows?: unknown }).affectedRows;
+  return typeof affectedRows === 'number' && Number.isFinite(affectedRows) ? affectedRows : 0;
+}
+
+function normalizeMatchedRows(rawRows: ApplyMatchedRow[]): { matchedRows: ApplyMatchedRow[]; applyErrors: ApplyError[] } {
+  const matchedRows: ApplyMatchedRow[] = [];
+  const applyErrors: ApplyError[] = [];
+
+  rawRows.forEach((row, index) => {
+    const coreMeasurementID = parsePositiveInteger(row?.coreMeasurementID);
+    if (coreMeasurementID === null) {
+      applyErrors.push({
+        coreMeasurementID: 0,
+        error: `Matched row ${index + 1} has an invalid coreMeasurementID`
+      });
+      return;
+    }
+
+    matchedRows.push({
+      coreMeasurementID,
+      csvRow: row?.csvRow ?? {}
+    });
+  });
+
+  return { matchedRows, applyErrors };
+}
+
+function normalizeDuplicates(rawDuplicates: DuplicateToDelete[]): { duplicates: DuplicateToDelete[]; applyErrors: ApplyError[] } {
+  const duplicates: DuplicateToDelete[] = [];
+  const applyErrors: ApplyError[] = [];
+
+  rawDuplicates.forEach((duplicate, index) => {
+    const coreMeasurementID = parsePositiveInteger(duplicate?.coreMeasurementID);
+    const survivorCoreMeasurementID = parsePositiveInteger(duplicate?.survivorCoreMeasurementID);
+
+    if (coreMeasurementID === null || survivorCoreMeasurementID === null) {
+      applyErrors.push({
+        coreMeasurementID: coreMeasurementID ?? 0,
+        error: `Duplicate deletion request ${index + 1} must use positive integer measurement IDs`
+      });
+      return;
+    }
+
+    duplicates.push({
+      coreMeasurementID,
+      survivorCoreMeasurementID
+    });
+  });
+
+  return { duplicates, applyErrors };
+}
+
 /**
  * Normalizes a date string to YYYY-MM-DD for MySQL DATE columns.
  * If already in that format, returns as-is.
@@ -385,7 +460,16 @@ async function verifyAndDeleteDuplicate(
   const deleteResult = await connectionManager.executeQuery(deleteSQL, [duplicate.coreMeasurementID, censusID], transactionID);
 
   // Count actual rows deleted from the DB, not what the client requested
-  const rowsDeleted = (deleteResult as any).affectedRows ?? 0;
+  const rowsDeleted = getAffectedRowCount(deleteResult);
+  if (rowsDeleted > 0) {
+    // These are denormalized materialized tables, not FK-backed views.
+    const deleteMeasurementsSummarySQL = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?');
+    await connectionManager.executeQuery(deleteMeasurementsSummarySQL, [duplicate.coreMeasurementID], transactionID);
+
+    const deleteViewFullTableSQL = safeFormatQuery(schema, 'DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?');
+    await connectionManager.executeQuery(deleteViewFullTableSQL, [duplicate.coreMeasurementID], transactionID);
+  }
+
   return { deleted: rowsDeleted };
 }
 
@@ -536,10 +620,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const normalizedPlotID = parsePositiveInteger(plotID);
+  const normalizedCensusID = parsePositiveInteger(censusID);
+  if (normalizedPlotID === null || normalizedCensusID === null) {
+    return NextResponse.json({ error: 'plotID and censusID must be positive integers' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  const normalizedMatchedRows = normalizeMatchedRows(matchedRows);
+  if (normalizedMatchedRows.applyErrors.length > 0) {
+    return NextResponse.json(
+      { error: 'Matched rows failed validation', applyErrors: normalizedMatchedRows.applyErrors },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
   // Pre-flight validation of duplicate deletion requests (before opening a transaction)
-  const duplicates = Array.isArray(duplicateMeasurementIDsToDelete) ? duplicateMeasurementIDsToDelete : [];
+  const normalizedDuplicateResults = normalizeDuplicates(Array.isArray(duplicateMeasurementIDsToDelete) ? duplicateMeasurementIDsToDelete : []);
+  if (normalizedDuplicateResults.applyErrors.length > 0) {
+    return NextResponse.json(
+      { error: 'Duplicate deletion request failed validation', applyErrors: normalizedDuplicateResults.applyErrors },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  const duplicates = normalizedDuplicateResults.duplicates;
   if (duplicates.length > 0) {
-    const preflightErrors = validateDuplicateRequests(duplicates, matchedRows);
+    const preflightErrors = validateDuplicateRequests(duplicates, normalizedMatchedRows.matchedRows);
     if (preflightErrors.length > 0) {
       return NextResponse.json(
         { error: 'Duplicate deletion request failed validation', applyErrors: preflightErrors },
@@ -558,14 +664,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await ensureUploadSessionsTable(schema);
 
     const result = await connectionManager.withTransaction(async (transactionID: string) => {
-      await assertNoConflictingApplyActivity(connectionManager, schema, plotID, censusID, transactionID);
+      await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
 
       let updatedCount = 0;
       let skippedCount = 0;
       const applyErrors: ApplyError[] = [];
 
-      for (const row of matchedRows) {
-        const applyResult = await applyMatchedRowUpdate(connectionManager, schema, plotID, censusID, row, transactionID);
+      for (const row of normalizedMatchedRows.matchedRows) {
+        const applyResult = await applyMatchedRowUpdate(connectionManager, schema, normalizedPlotID, normalizedCensusID, row, transactionID);
 
         if (applyResult.result === 'updated') {
           updatedCount++;
@@ -579,7 +685,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // --- Delete verified duplicates ---
       let deletedDuplicateCount = 0;
       for (const dup of duplicates) {
-        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, censusID, plotID, transactionID);
+        const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
         deletedDuplicateCount += dupResult.deleted;
         if (dupResult.applyError) {
           applyErrors.push(dupResult.applyError);
@@ -588,7 +694,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       let insertedCount = 0;
       if (confirmNewRows && newRows.length > 0) {
-        insertedCount = await insertNewRowsThroughPipeline(connectionManager, schema, plotID, censusID, newRows, transactionID);
+        insertedCount = await insertNewRowsThroughPipeline(connectionManager, schema, normalizedPlotID, normalizedCensusID, newRows, transactionID);
       }
 
       return { updatedCount, skippedCount, insertedCount, deletedDuplicateCount, applyErrors };
