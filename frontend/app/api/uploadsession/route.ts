@@ -24,6 +24,8 @@ import {
 } from '@/config/uploadsessiontracker';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import ConnectionManager from '@/config/connectionmanager';
+import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 
 /**
  * POST - Create a new upload session
@@ -79,7 +81,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Generate idempotency key if file hash provided
     const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, plotId, censusId, fileHash, mode) : undefined;
 
-    const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey, mode);
+    const connectionManager = ConnectionManager.getInstance();
+    const session = await connectionManager.withTransaction(async transactionID => {
+      const scopeLockAcquired = await connectionManager.acquireApplicationLock(
+        buildMeasurementScopeLockName(schema, plotId, censusId),
+        transactionID,
+        MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
+      );
+
+      if (!scopeLockAcquired) {
+        throw new UploadSessionOwnershipError(
+          `Another measurement operation is in progress for Plot ${plotId}, Census ${censusId}. Please retry after it completes.`
+        );
+      }
+
+      return createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey, mode);
+    });
 
     return new NextResponse(JSON.stringify({ session }), {
       status: HTTPResponses.CREATED

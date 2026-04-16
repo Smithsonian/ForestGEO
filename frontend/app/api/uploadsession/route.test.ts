@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   ensureUploadSessionsTable: vi.fn(),
   generateUploadSessionIdempotencyKey: vi.fn(() => 'idem-1'),
   isValidSchema: vi.fn(() => true),
-  loggerError: vi.fn()
+  loggerError: vi.fn(),
+  withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
+  acquireApplicationLock: vi.fn(async () => true),
+  buildMeasurementScopeLockName: vi.fn((schema: string, plotId: number, censusId: number) => `measurement-scope:${schema}:${plotId}:${censusId}`)
 }));
 
 vi.mock('@/config/uploadsessiontracker', () => ({
@@ -41,6 +44,20 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
   isValidSchema: mocks.isValidSchema
 }));
 
+vi.mock('@/config/connectionmanager', () => ({
+  default: {
+    getInstance: () => ({
+      withTransaction: mocks.withTransaction,
+      acquireApplicationLock: mocks.acquireApplicationLock
+    })
+  }
+}));
+
+vi.mock('@/config/measurementscopelock', () => ({
+  buildMeasurementScopeLockName: mocks.buildMeasurementScopeLockName,
+  MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS: 0
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     error: mocks.loggerError
@@ -50,6 +67,7 @@ vi.mock('@/ailogger', () => ({
 describe('POST /api/uploadsession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireApplicationLock.mockResolvedValue(true);
   });
 
   it('accepts unload beacons as POST state updates', async () => {
@@ -95,6 +113,8 @@ describe('POST /api/uploadsession', () => {
     await expect(response.json()).resolves.toEqual({ session: { sessionId: 'session-2' } });
     expect(mocks.ensureUploadSessionsTable).toHaveBeenCalledWith('forestgeo_testing');
     expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-1', undefined);
+    expect(mocks.buildMeasurementScopeLockName).toHaveBeenCalledWith('forestgeo_testing', 1, 2);
+    expect(mocks.acquireApplicationLock).toHaveBeenCalledWith('measurement-scope:forestgeo_testing:1:2', 'tx-1', 0);
     expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'file.csv', 3, 'idem-1', undefined);
   });
 
@@ -120,5 +140,29 @@ describe('POST /api/uploadsession', () => {
     expect(response.status).toBe(201);
     expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason', 'spplist.csv', 1, 'idem-1', 'clean_reupload');
     expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-2', 'clean_reupload');
+  });
+
+  it('returns 409 when the measurement scope lock is unavailable', async () => {
+    mocks.acquireApplicationLock.mockResolvedValue(false);
+
+    const request = new Request('http://localhost/api/uploadsession', {
+      method: 'POST',
+      body: JSON.stringify({
+        schema: 'forestgeo_testing',
+        plotId: 1,
+        censusId: 2,
+        userId: 'mason',
+        fileId: 'file.csv',
+        totalChunks: 3
+      })
+    }) as any;
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Another measurement operation is in progress for Plot 1, Census 2. Please retry after it completes.'
+    });
+    expect(mocks.createUploadSession).not.toHaveBeenCalled();
   });
 });
