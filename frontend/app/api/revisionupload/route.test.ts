@@ -521,6 +521,227 @@ describe('POST /api/revisionupload', () => {
     });
   });
 
+  it('tolerates leading-zero differences on quadrat/tag/stemtag so spreadsheet-mangled round-trips do not produce fake ignored edits', async () => {
+    // Simulates Numbers/Excel stripping leading zeros: DB has '0101'/'10063'/'10063',
+    // CSV re-upload has '101'/'10063'/'10063'. Only quadrat was mangled; tag/stemtag
+    // happen to be digit-only too and should tolerate the same coercion. spcode is
+    // alphanumeric and MUST remain strict.
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 900,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: 'Q;L',
+            Description: 'Broken and leaning',
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'CRUD02',
+            QuadratName: '0101',
+            LocalX: 9.33,
+            LocalY: 7.39
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'spreadsheet-mangled.csv',
+            rows: [
+              {
+                stemid: '5283365',
+                tag: '10063',
+                stemtag: '10063',
+                spcode: 'CRUD02',
+                quadrat: '101',
+                lx: '9.33',
+                ly: '7.39',
+                date: '2026-03-14',
+                dbh: '44.000000',
+                hom: '1.300000',
+                comments: 'Broken and leaning',
+                codes: 'Q;L'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows[0].ignoredEdits).toBeUndefined();
+  });
+
+  it('still reports ignored edits for long digit-only tags that differ beyond JS safe integer range', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 903,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: '9007199254740993',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '9007199254740993',
+            StemTag: '10063',
+            SpeciesCode: 'CRUD02',
+            QuadratName: '0101',
+            LocalX: 9.33,
+            LocalY: 7.39
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'long-tag-edit.csv',
+            rows: [{ stemid: '5283365', tag: '9007199254740992' }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows[0].ignoredEdits).toEqual({
+      tag: { from: '9007199254740993', to: '9007199254740992' }
+    });
+  });
+
+  it('still reports a quadrat ignored edit when CSV value is genuinely different, not just leading-zero mangled', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 901,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'CRUD02',
+            QuadratName: '0101',
+            LocalX: 9.33,
+            LocalY: 7.39
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'real-quadrat-edit.csv',
+            rows: [{ stemid: '5283365', quadrat: '999' }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows[0].ignoredEdits).toEqual({
+      quadrat: { from: '0101', to: '999' }
+    });
+  });
+
+  it('keeps spcode comparison strict so alphanumeric species codes like CRUD02 vs CRUD2 are still flagged as ignored edits', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 902,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'CRUD02',
+            QuadratName: '0101',
+            LocalX: 9.33,
+            LocalY: 7.39
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'spcode-edit.csv',
+            rows: [{ stemid: '5283365', spcode: 'CRUD2' }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows[0].ignoredEdits).toEqual({
+      spcode: { from: 'CRUD02', to: 'CRUD2' }
+    });
+  });
+
   it('does not report ignoredEdits when CSV and DB values for non-updatable columns agree', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {

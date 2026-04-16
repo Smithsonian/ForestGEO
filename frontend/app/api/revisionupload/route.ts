@@ -37,8 +37,16 @@ const CSV_FIELD_TO_DB_COLUMN: Record<UpdatableField, string> = {
  * Kind of DB value we're comparing against — controls how we normalize both
  * sides before the equality check (numeric tolerance vs case-insensitive
  * string comparison).
+ *
+ * `numeric-or-string-ci` normalizes purely digit strings by stripping
+ * leading zeros before comparing them; otherwise it falls back to
+ * case-insensitive string equality. This is specifically to tolerate
+ * leading-zero stripping when a researcher opens the CSV in Numbers or
+ * Excel — those apps coerce `'0101'` to `'101'` on save, producing fake
+ * ignored-edit warnings on unchanged rows without risking numeric precision
+ * loss on long identifiers.
  */
-type IgnoredFieldCompareKind = 'numeric' | 'string-ci';
+type IgnoredFieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci';
 
 interface IgnoredFieldDescriptor {
   dbProperty: keyof ExistingMeasurementRow;
@@ -47,11 +55,11 @@ interface IgnoredFieldDescriptor {
 
 const IGNORED_FIELD_DESCRIPTORS: Record<IgnoredEditField, IgnoredFieldDescriptor> = {
   spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
-  quadrat: { dbProperty: 'QuadratName', compareKind: 'string-ci' },
+  quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
   lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
   ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
-  tag: { dbProperty: 'TreeTag', compareKind: 'string-ci' },
-  stemtag: { dbProperty: 'StemTag', compareKind: 'string-ci' }
+  tag: { dbProperty: 'TreeTag', compareKind: 'numeric-or-string-ci' },
+  stemtag: { dbProperty: 'StemTag', compareKind: 'numeric-or-string-ci' }
 };
 
 class RevisionUploadRequestError extends Error {
@@ -226,6 +234,21 @@ function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<str
  * edits will be dropped. If the CSV cell is blank/NULL, or if it matches the
  * DB value, the field is not included.
  */
+function normalizeDigitString(value: string): string | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const normalized = value.replace(/^0+/, '');
+  return normalized === '' ? '0' : normalized;
+}
+
+function areEquivalentAsDigitStrings(csvNormalized: string, dbNormalized: string): boolean {
+  const normalizedCsv = normalizeDigitString(csvNormalized);
+  const normalizedDb = normalizeDigitString(dbNormalized);
+  return normalizedCsv !== null && normalizedDb !== null && normalizedCsv === normalizedDb;
+}
+
 function computeIgnoredEdits(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
   const ignored: Record<string, { from: unknown; to: unknown }> = {};
 
@@ -244,7 +267,15 @@ function computeIgnoredEdits(csvRow: FileRow, dbRow: ExistingMeasurementRow): Re
 
     const csvNormalized = String(csvValue).trim();
     const dbNormalized = String(dbValue ?? '').trim();
-    const matches = descriptor.compareKind === 'string-ci' ? csvNormalized.toLowerCase() === dbNormalized.toLowerCase() : csvNormalized === dbNormalized;
+
+    if (descriptor.compareKind === 'numeric-or-string-ci' && areEquivalentAsDigitStrings(csvNormalized, dbNormalized)) {
+      continue;
+    }
+
+    const matches =
+      descriptor.compareKind === 'string-ci' || descriptor.compareKind === 'numeric-or-string-ci'
+        ? csvNormalized.toLowerCase() === dbNormalized.toLowerCase()
+        : csvNormalized === dbNormalized;
 
     if (!matches) {
       ignored[field] = { from: dbValue, to: csvValue };
