@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Button, CircularProgress, Stack, Typography } from '@mui/joy';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileRow } from '@/config/macros/formdetails';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
-import { RevisionApplyMatchedRow, RevisionApplyResponse } from '@/config/revisionuploadtypes';
+import { RevisionApplyMatchedRow, RevisionApplyResponse, RevisionDuplicateToDelete } from '@/config/revisionuploadtypes';
 
 const TRANSITION_DELAY_MS = 2000;
 
@@ -21,6 +21,28 @@ interface UploadRevisionApplyProps {
 
 type ApplyStatus = 'applying' | 'success' | 'error';
 
+function buildDuplicateDeletionHints(matchedRows: RevisionApplyMatchedRow[]): RevisionDuplicateToDelete[] {
+  const seenPairs = new Set<string>();
+  const duplicates: RevisionDuplicateToDelete[] = [];
+
+  for (const row of matchedRows) {
+    for (const duplicateMeasurementID of row.duplicateMeasurementIDsToDelete ?? []) {
+      const pairKey = `${duplicateMeasurementID}:${row.coreMeasurementID}`;
+      if (seenPairs.has(pairKey)) {
+        continue;
+      }
+
+      seenPairs.add(pairKey);
+      duplicates.push({
+        coreMeasurementID: duplicateMeasurementID,
+        survivorCoreMeasurementID: row.coreMeasurementID
+      });
+    }
+  }
+
+  return duplicates;
+}
+
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
   const { matchedRows, newRows, confirmNewRows, schema, setReviewState, setIsDataUnsaved } = props;
 
@@ -34,13 +56,30 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
   const [applyResult, setApplyResult] = useState<RevisionApplyResponse | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyAttempt, setApplyAttempt] = useState(0);
+  const startedAttemptsRef = useRef<Set<number>>(new Set());
+  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (transitionTimeoutRef.current !== null) {
+        clearTimeout(transitionTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (applyStatus !== 'applying') {
       return;
     }
 
+    if (startedAttemptsRef.current.has(applyAttempt)) {
+      return;
+    }
+
+    startedAttemptsRef.current.add(applyAttempt);
+
     let cancelled = false;
+    const duplicateMeasurementIDsToDelete = buildDuplicateDeletionHints(matchedRows);
 
     async function runApply() {
       try {
@@ -51,6 +90,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
             matchedRows,
             newRows,
             confirmNewRows,
+            duplicateMeasurementIDsToDelete,
             schema,
             plotID,
             censusID
@@ -72,8 +112,12 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           startValidation({ schema, plotID, censusID });
         }
 
-        setTimeout(() => {
+        if (transitionTimeoutRef.current !== null) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+        transitionTimeoutRef.current = setTimeout(() => {
           setReviewState(ReviewStates.UPLOAD_AZURE);
+          transitionTimeoutRef.current = null;
         }, TRANSITION_DELAY_MS);
       } catch (err: unknown) {
         if (cancelled) return;

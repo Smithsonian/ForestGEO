@@ -3,6 +3,8 @@ import { FileRow } from '@/config/macros/formdetails';
 export interface RevisionMatchedRow {
   csvRow: FileRow;
   coreMeasurementID: number;
+  /** Duplicate CoreMeasurementIDs that should be removed after this row survives. */
+  duplicateMeasurementIDsToDelete?: number[];
   existingValues: {
     measuredDBH: number | null;
     measuredHOM: number | null;
@@ -42,6 +44,8 @@ export interface RevisionUploadResponse {
 export interface RevisionApplyMatchedRow {
   coreMeasurementID: number;
   csvRow: FileRow;
+  /** Duplicate CoreMeasurementIDs that should be removed after this row survives. */
+  duplicateMeasurementIDsToDelete?: number[];
 }
 
 export interface RevisionDuplicateToDelete {

@@ -26,6 +26,8 @@ import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
+import { normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
+import { EMPTY_REVISION_MATCH_COUNTS, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -62,7 +64,7 @@ function UploadParentInner(props: UploadParentProps) {
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
-  const [revisionMatchResult, setRevisionMatchResult] = useState<any>(null);
+  const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
   const [revisionConfirmNewRows, setRevisionConfirmNewRows] = useState(false);
 
   // Track if we've already initialized reingestion to prevent re-triggering
@@ -161,41 +163,57 @@ function UploadParentInner(props: UploadParentProps) {
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
+  async function parseRevisionFiles(): Promise<FileCollectionRowSet> {
+    const { default: Papa } = await import('papaparse');
+
+    const parsedFiles = await Promise.all(
+      fileManagement.files.map(
+        file =>
+          new Promise<[string, Record<string, FileRow>]>((resolve, reject) => {
+            Papa.parse<FileRow>(file, {
+              delimiter: selectedDelimiters[file.name] || undefined,
+              header: true,
+              skipEmptyLines: true,
+              transformHeader: normalizeRevisionHeader,
+              complete(results) {
+                const fileRows: Record<string, FileRow> = {};
+                results.data.forEach((row, index) => {
+                  fileRows[`row-${index}`] = row;
+                });
+                resolve([file.name, fileRows]);
+              },
+              error(err: Error) {
+                reject(err);
+              }
+            });
+          })
+      )
+    );
+
+    return Object.fromEntries(parsedFiles);
+  }
+
   async function handleInitialSubmit() {
-    if (
-      uploadState.state.uploadMode === UploadMode.REVISIONS &&
-      uploadState.state.uploadForm === FormType.measurements
-    ) {
-      uploadState.setReviewState(ReviewStates.REVISION_MATCH);
+    if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
+      try {
+        const stagedParsedData = await parseRevisionFiles();
+        setParsedData(stagedParsedData);
+        setRevisionMatchResult(null);
+        setRevisionConfirmNewRows(false);
+        uploadState.setReviewState(ReviewStates.REVISION_MATCH);
+      } catch (err: unknown) {
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        setParsedData({});
+        errorHandling.setError(errorObj);
+        uploadState.setReviewState(ReviewStates.ERRORS);
+      }
     } else {
       uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
     }
   }
 
   async function handleRevisionMatch() {
-    const allRows: FileRow[] = [];
-
-    await Promise.all(
-      fileManagement.files.map(
-        file =>
-          new Promise<void>((resolve, reject) => {
-            import('papaparse').then(({ default: Papa }) => {
-              Papa.parse<FileRow>(file, {
-                header: true,
-                skipEmptyLines: true,
-                transformHeader: (header: string) => header.trim().toLowerCase().replace(/[_\s-]/g, ''),
-                complete(results) {
-                  allRows.push(...results.data);
-                  resolve();
-                },
-                error(err: Error) {
-                  reject(err);
-                }
-              });
-            });
-          })
-      )
-    );
+    const allRows: FileRow[] = Object.values(parsedData).flatMap(fileRows => Object.values(fileRows));
 
     try {
       const response = await fetch('/api/revisionupload', {
@@ -214,7 +232,7 @@ function UploadParentInner(props: UploadParentProps) {
         throw new Error(errorBody.error || 'Failed to classify revision rows');
       }
 
-      const result = await response.json();
+      const result: RevisionUploadResponse = await response.json();
       setRevisionMatchResult(result);
     } catch (err: unknown) {
       const errorObj = err instanceof Error ? err : new Error(String(err));
@@ -232,11 +250,11 @@ function UploadParentInner(props: UploadParentProps) {
   }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState.setReviewState]);
 
   useEffect(() => {
-    if (uploadState.state.reviewState === ReviewStates.REVISION_MATCH && !revisionMatchResult) {
-      handleRevisionMatch();
+    if (uploadState.state.reviewState === ReviewStates.REVISION_MATCH && !revisionMatchResult && Object.keys(parsedData).length > 0) {
+      void handleRevisionMatch();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadState.state.reviewState]);
+  }, [parsedData, revisionMatchResult, uploadState.state.reviewState]);
 
   // Check if we should start with reingestion processing (only once on mount)
   useEffect(() => {
@@ -274,6 +292,7 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadParseFiles
             uploadForm={uploadState.state.uploadForm}
+            uploadMode={uploadState.state.uploadMode}
             acceptedFiles={fileManagement.files}
             dataViewActive={uploadState.state.dataViewActive}
             setDataViewActive={uploadState.setDataViewActive}
@@ -320,7 +339,7 @@ function UploadParentInner(props: UploadParentProps) {
             matchedRows={revisionMatchResult?.matchedRows ?? []}
             newRows={revisionMatchResult?.newRows ?? []}
             invalidRows={revisionMatchResult?.invalidRows ?? []}
-            counts={revisionMatchResult?.counts ?? { matched: 0, matchedWithChanges: 0, new: 0, invalid: 0, total: 0 }}
+            counts={revisionMatchResult?.counts ?? EMPTY_REVISION_MATCH_COUNTS}
             schema={currentSite?.schemaName || ''}
             plotID={currentPlotID ?? 0}
             censusID={currentCensusID ?? 0}
@@ -336,9 +355,13 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadRevisionApply
             matchedRows={(revisionMatchResult?.matchedRows ?? [])
-              .filter((r: any) => Object.keys(r.changes).length > 0)
-              .map((r: any) => ({ coreMeasurementID: r.coreMeasurementID, csvRow: r.csvRow }))}
-            newRows={(revisionMatchResult?.newRows ?? []).map((r: any) => r.csvRow)}
+              .filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0)
+              .map(row => ({
+                coreMeasurementID: row.coreMeasurementID,
+                csvRow: row.csvRow,
+                duplicateMeasurementIDsToDelete: row.duplicateMeasurementIDsToDelete ?? []
+              }))}
+            newRows={(revisionMatchResult?.newRows ?? []).map(row => row.csvRow)}
             confirmNewRows={revisionConfirmNewRows}
             schema={currentSite?.schemaName || ''}
             setReviewState={uploadState.setReviewState}
