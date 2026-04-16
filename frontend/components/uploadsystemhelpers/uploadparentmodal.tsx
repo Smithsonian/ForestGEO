@@ -27,7 +27,7 @@ function getRevisionMatchLabel(formType: FormType): string {
     case FormType.quadrats:
       return 'QuadratName';
     case FormType.measurements:
-      return 'measurementID';
+      return 'StemGUID or TreeTag + StemTag';
     default:
       return 'matching key';
   }

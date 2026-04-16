@@ -21,10 +21,11 @@ import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompac
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { RequiredTableHeadersByFormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { UploadMode } from '@/config/uploadmodes';
 
 export interface FileValidationStatus {
   fileName: string;
@@ -35,6 +36,7 @@ export interface FileValidationStatus {
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
   const {
     uploadForm,
+    uploadMode,
     acceptedFiles,
     dataViewActive,
     setDataViewActive,
@@ -105,10 +107,26 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     return acceptedFiles.some(file => !fileValidationStatuses[file.name]);
   }, [acceptedFiles, fileValidationStatuses]);
 
-  const expectedHeaders = useMemo(() => {
+  const headerGuideHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
+    if (uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS) {
+      return TableHeadersByFormType.measurements.filter(header => header.label !== 'errors').map(header => header.label);
+    }
     return RequiredTableHeadersByFormType[uploadForm]?.map(header => header.label);
-  }, [uploadForm]);
+  }, [uploadForm, uploadMode]);
+
+  const validationHeaders = useMemo(() => {
+    if (!uploadForm) return undefined;
+    if (uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS) {
+      return undefined;
+    }
+    return RequiredTableHeadersByFormType[uploadForm]?.map(header => header.label);
+  }, [uploadForm, uploadMode]);
+
+  const headerGuideLabel =
+    uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS
+      ? 'Allowed canonical headers for revision uploads (edited app exports with aliases like StemGUID, MeasuredDBH, and QuadratName are also accepted):'
+      : "Required headers (order doesn't matter):";
 
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', maxHeight: '90vh', overflow: 'hidden' }}>
@@ -132,10 +150,10 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             <Card variant="soft" color="primary" sx={{ mt: 2 }}>
               <CardContent>
                 <Typography level="body-sm" sx={{ mb: 1 }}>
-                  Required headers (order doesn't matter):
+                  {headerGuideLabel}
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                  {expectedHeaders?.map((header, index) => (
+                  {headerGuideHeaders?.map((header, index) => (
                     <Chip key={index} size="sm" variant="outlined">
                       {header}
                     </Chip>
@@ -173,7 +191,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                     <Alert color="danger" variant="soft" startDecorator={<ErrorOutlineIcon />} sx={{ textAlign: 'left' }}>
                       <Box>
                         <Typography level="title-sm" color="danger">
-                          Missing Required Columns
+                          File Validation Issues
                         </Typography>
                         {allValidationIssues.map(({ fileName, issues }) => (
                           <Box key={fileName} sx={{ mt: 1 }}>
@@ -238,7 +256,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 acceptedFiles={acceptedFiles}
                 dataViewActive={dataViewActive}
                 setDataViewActive={setDataViewActive}
-                expectedHeaders={expectedHeaders}
+                expectedHeaders={headerGuideHeaders}
+                validationHeaders={validationHeaders}
                 onDelimiterChange={handleDelimiterChange}
                 selectedDelimiters={selectedDelimiters}
                 onRemoveFile={handleRemoveFile}

@@ -13,6 +13,42 @@ Add a `REVISIONS` upload mode for measurements, following the same pattern alrea
 
 ## Design Decisions
 
+### Supported Input Formats
+
+Measurement revision upload must accept both of these app-generated CSV surfaces after user edits:
+
+1. **Canonical form-download exports** using short-form headers like `stemID`, `tag`, `stemtag`, `spcode`, `quadrat`, `lx`, `ly`, `dbh`, `hom`, `date`, `codes`, `comments`.
+2. **View Data / datagrid exports** using display headers like `StemGUID`, `TreeTag`, `StemTag`, `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`, `MeasuredDBH`, `MeasuredHOM`, `MeasurementDate`, `Description`, `Attributes`, and `RawCodes`.
+
+Both formats are normalized to the same canonical short-form keys before matching and diffing.
+
+| Accepted Header | Canonical Key |
+|---|---|
+| `StemGUID`, `stemID`, `stemid` | `stemid` |
+| `TreeTag`, `tag` | `tag` |
+| `StemTag`, `stemtag` | `stemtag` |
+| `SpeciesCode`, `spcode` | `spcode` |
+| `QuadratName`, `quadrat` | `quadrat` |
+| `StemLocalX`, `LocalX`, `lx` | `lx` |
+| `StemLocalY`, `LocalY`, `ly` | `ly` |
+| `MeasuredDBH`, `dbh` | `dbh` |
+| `MeasuredHOM`, `hom` | `hom` |
+| `MeasurementDate`, `date` | `date` |
+| `Description`, `Comments`, `comments` | `comments` |
+| `codes` | `codes` |
+| `RawCodes` | `rawcodes` → canonicalized to `codes` |
+| `Attributes` | `attributes` → canonicalized to `codes` if no higher-priority code column exists |
+
+When multiple code-bearing columns are present in one row, precedence is:
+
+1. `codes`
+2. `RawCodes`
+3. `Attributes`
+
+This avoids header-collision ambiguity in datagrid exports that contain both `Attributes` and `RawCodes`.
+
+Literal `NULL` strings from app exports are treated as blank cells during revision parsing.
+
 ### Row Matching
 
 The system uses a two-tier matching strategy, scoped to the active census:
@@ -64,7 +100,6 @@ Parse & validate headers (reuse uploadparsefiles)
 Match rows against existing coremeasurements (new API route)
   |
   +-- Matched rows --> Direct UPDATE on coremeasurements
-  |                    (+ stems/trees if tag/stemtag/spcode/quadrat/lx/ly changed)
   |                    --> Run validations on updated rows
   |
   +-- Unmatched rows --> Show review table to user
@@ -79,7 +114,7 @@ Match rows against existing coremeasurements (new API route)
 
 In revision mode, column requirements are relaxed compared to a fresh upload:
 
-- **Required:** At least one match key -- either `stemID`, or both `tag` and `stemtag`
+- **Required:** At least one match key -- either `stemID`/`StemGUID`, or both `tag`/`TreeTag` and `stemtag`/`StemTag`
 - **Optional:** All other columns (`spcode`, `quadrat`, `lx`, `ly`, `dbh`, `hom`, `date`, `codes`, `comments`). Only columns present with non-empty values trigger updates.
 
 ### Updatable Fields
@@ -93,14 +128,8 @@ When a matched row is updated, the following fields can be revised:
 | `date` | `MeasurementDate` | `coremeasurements` |
 | `codes` | `cmattributes` join table | `cmattributes` (delete + re-insert) |
 | `comments` | `Description` | `coremeasurements` |
-| `spcode` | `SpeciesID` (via species lookup) | `trees` |
-| `quadrat` | `QuadratID` (via quadrat lookup) | `stems` |
-| `lx` | `LocalX` | `stems` |
-| `ly` | `LocalY` | `stems` |
-| `tag` | `TreeTag` | `trees` |
-| `stemtag` | `StemTag` | `stems` |
 
-Note: `tag` and `stemtag` are updatable only when matching via `stemID`. When matching via `tag` + `stemtag`, those columns are consumed by the match and cannot also be updated.
+Phase 1 is intentionally limited to row-local measurement fields. `spcode`, `quadrat`, `lx`, `ly`, `tag`, and `stemtag` may still appear in revision files because they are needed for matching and new-row creation, but they are not updated on matched measurements in this phase.
 
 ### API Route
 
@@ -115,9 +144,10 @@ Request body:
 - `schema`: site schema name
 
 Response (phase 1 -- matching):
-- `matchedRows`: array of `{ csvRow, existingMeasurement, changes }` -- rows that matched with their diffs
-- `unmatchedRows`: array of CSV rows that didn't match any existing measurement
-- `matchStrategy`: `"stemID"` or `"tag_stemtag"` -- which key was used
+- `matchedRows`: array of `{ csvRow, coreMeasurementID, duplicateMeasurementIDsToDelete?, existingValues, changes }`
+- `newRows`: array of unmatched CSV rows that can be inserted through the existing ingestion pipeline
+- `invalidRows`: array of `{ csvRow, csvIndex, reason }` rows that could not be matched or staged safely
+- Matching strategy is chosen per file (`stemID`/`StemGUID` first, then `tag` + `stemtag`)
 
 After the user reviews unmatched rows and confirms:
 
@@ -125,68 +155,75 @@ After the user reviews unmatched rows and confirms:
 
 Request body:
 - `matchedRows`: the matched rows to update
-- `confirmedNewRows`: unmatched rows the user approved for creation
+- `newRows`: unmatched rows the user approved for creation
+- `duplicateMeasurementIDsToDelete`: duplicate measurements to delete after a survivor row is chosen
 - `schema`, `plotID`, `censusID`
 
 Response:
 - `updatedCount`: number of rows updated
 - `insertedCount`: number of new rows created (via bulkingestionprocess)
 - `skippedCount`: rows skipped (no changes detected)
-- `validationErrors`: any validation errors found on updated rows
+- `deletedDuplicateCount`: duplicate rows removed from the census
+- `applyErrors`: any row-level apply errors
 
 ### UI Flow
 
-The upload flow in `uploadparent.tsx` already uses `ReviewStates` to manage the multi-step wizard. Revision mode adds two new states:
+The upload flow in `uploadparent.tsx` already uses `ReviewStates` to manage the multi-step wizard, but revision mode is not just "two extra screens." It has to integrate with the modern measurement upload pipeline:
 
-1. **`REVISION_MATCH`** -- After file parsing (`UPLOAD_FILES`), sends parsed rows to `/api/revisionupload` for matching. Shows a summary: "X rows matched, Y rows are new." Displays unmatched rows in a table for review with confirm/skip controls.
+1. **`START` / measurement modal** -- Measurement revision mode must be explicitly selectable from the existing measurement upload entry point.
 
-2. **`REVISION_APPLY`** -- After user confirms, calls `/api/revisionupload/apply`. Shows progress, then transitions to `VALIDATE` (existing state) to run validations on updated rows.
+2. **`UPLOAD_FILES`** -- Revision files must be parsed and staged into an in-memory row set before matching. This step cannot assume that the standard measurement chunk-upload path has already produced reusable parsed rows.
 
-The mode selector in `UploadStart` already shows the upload mode. For measurements with `REVISIONS` mode selected, the flow becomes:
+3. **`REVISION_MATCH`** -- Sends the staged parsed rows to `/api/revisionupload` for classification. Shows a summary of matched rows, unchanged rows, new-row candidates, and invalid rows.
+
+4. **`REVISION_APPLY`** -- Calls `/api/revisionupload/apply` to update matched rows directly and optionally route confirmed new rows through the standard ingestion pipeline. This step must participate in the same plot+census conflict protections used by uploads and validation runs.
+
+5. **Post-apply validation / refresh** -- Successful apply does not end at a local success screen. Updated rows must enter the existing whole-census background validation flow, and the derived scoped views (`measurementssummary`, `viewfulltable`) must refresh for the affected plot+census after validation completes.
+
+For measurements with `REVISIONS` mode selected, the user-visible flow becomes:
 
 ```
-START -> UPLOAD_FILES -> REVISION_MATCH -> REVISION_APPLY -> VALIDATE -> COMPLETE
+START -> UPLOAD_FILES (parse + stage) -> REVISION_MATCH -> REVISION_APPLY -> background validation -> COMPLETE
 ```
 
-vs. the existing flow:
-
-```
-START -> UPLOAD_FILES -> UPLOAD_SQL -> VALIDATE -> ... -> COMPLETE
-```
+The implementation still reuses the surrounding upload shell, but it must account for parse staging, upload-session ownership/idempotency, conflict locking, and derived-view refreshes rather than only adding two review states and two routes.
 
 ### Component Changes
 
 | Component | Change |
 |-----------|--------|
-| `uploadparent.tsx` | Add routing for `REVISION_MATCH` and `REVISION_APPLY` states when `uploadMode === REVISIONS` and `uploadForm === measurements` |
-| `uploadstart.tsx` | No changes needed -- already displays upload mode |
+| `uploadparent.tsx` | Add revision-mode routing plus explicit parse staging of revision files into an in-memory row set before `REVISION_MATCH` |
+| `uploadstart.tsx` / measurement modal entry | Ensure measurement revision mode is exposed from the existing upload entry flow |
 | `uploadsystemmacros.ts` | Add `REVISION_MATCH` and `REVISION_APPLY` to `ReviewStates` enum |
-| `formdetails.ts` | No changes needed -- existing header definitions are sufficient |
+| `formdetails.ts` / form export | Ensure the canonical revision template/export includes `stemID` plus the Phase 1 revision columns |
+| `measurementscommons.tsx` datagrid export | Treat edited View Data exports as a first-class supported revision input surface |
 | New: `uploadrevisionmatch.tsx` | Matching results display, unmatched rows table, confirm/skip UI |
-| New: `uploadrevisionapply.tsx` | Apply updates, show progress, transition to validation |
-| New: `/api/revisionupload/route.ts` | Row matching logic |
-| New: `/api/revisionupload/apply/route.ts` | UPDATE execution + new row pipeline routing |
+| New: `uploadrevisionapply.tsx` | Apply updates, show progress, handle conflicts/errors, then hand off to background validation |
+| New: `/api/revisionupload/route.ts` | Row matching/classification logic over the staged parsed data |
+| New: `/api/revisionupload/apply/route.ts` | Direct UPDATE execution for matched rows, routing of confirmed new rows through the standard ingestion path, and conflict checks against active uploads/validations |
+| Existing upload-session / validation infrastructure | Reuse existing session ownership, idempotency, locking, and scoped refresh behavior rather than building a separate apply path outside those protections |
 
 ## Testing
 
 ### Integration Tests
 
 - Upload a revision CSV with `stemID` -- verify matched rows are updated, unmatched rows flagged
+- Upload an edited View Data export with headers like `StemGUID`, `MeasuredDBH`, and `QuadratName` -- verify it is normalized and matched correctly
 - Upload a revision CSV without `stemID` -- verify fallback to `tag` + `stemtag` matching
 - Upload with only some columns populated -- verify non-empty merge (blank cells don't overwrite)
+- Upload a View Data export containing both `Attributes` and `RawCodes` -- verify `RawCodes` wins when both are present
 - Upload with extra/unknown columns -- verify they are silently ignored
 - Upload with all rows matching -- verify no new-row confirmation prompt
 - Upload with some unmatched rows -- verify review table appears, confirm creates new rows
 - Upload with some unmatched rows -- verify rejecting skips them
 - Verify validations run on updated rows and errors appear in `measurement_error_log`
 - Verify `codes` column updates correctly rebuild `cmattributes` associations
-- Verify `spcode` update changes the tree's `SpeciesID` via species lookup
-- Verify `quadrat` update changes the stem's `QuadratID` via quadrat lookup
+- Verify duplicate census measurements for the same stem resolve to one survivor plus deletion of extras
 
 ### Edge Cases
 
 - CSV where every row is unmatched (effectively a new upload through revision mode)
 - CSV where every row matches but no values changed (all skipped)
-- Duplicate match keys in the CSV (should error, like species dedup check)
+- Duplicate match keys in the CSV (last row wins silently per file)
 - `stemID` column present but all values empty (should fall back to `tag` + `stemtag`)
-- Row matches by `stemID` but `tag`/`stemtag` in CSV differ from DB (update the tag/stemtag)
+- Row exported from View Data contains literal `NULL` placeholders -- parser should treat them as blank values

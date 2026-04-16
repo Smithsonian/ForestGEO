@@ -26,7 +26,7 @@ import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
-import { normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
+import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 
 export interface CMIDRow {
@@ -178,7 +178,7 @@ function UploadParentInner(props: UploadParentProps) {
               complete(results) {
                 const fileRows: Record<string, FileRow> = {};
                 results.data.forEach((row, index) => {
-                  fileRows[`row-${index}`] = row;
+                  fileRows[`row-${index}`] = canonicalizeRevisionRow(row);
                 });
                 resolve([file.name, fileRows]);
               },
@@ -213,14 +213,17 @@ function UploadParentInner(props: UploadParentProps) {
   }
 
   async function handleRevisionMatch() {
-    const allRows: FileRow[] = Object.values(parsedData).flatMap(fileRows => Object.values(fileRows));
+    const files = Object.entries(parsedData).map(([fileName, fileRows]) => ({
+      fileName,
+      rows: Object.values(fileRows)
+    }));
 
     try {
       const response = await fetch('/api/revisionupload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rows: allRows,
+          files,
           plotID: currentPlotID,
           censusID: currentCensusID,
           schema: currentSite?.schemaName
