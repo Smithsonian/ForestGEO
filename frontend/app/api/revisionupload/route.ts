@@ -11,10 +11,18 @@ export const runtime = 'nodejs';
 
 const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 const REQUIRED_INSERT_FIELDS = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'] as const;
+/**
+ * Fields that the CSV may contain and that appear in the canonical header
+ * alias table, but that revision upload does NOT write back in Phase 1.
+ * Edits on these fields against matched rows are surfaced to the user as
+ * ignored edits so they are not silently dropped.
+ */
+const IGNORED_EDIT_FIELDS = ['spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
 const LOOKUP_CHUNK_SIZE = 1000;
 const TAG_STEMTAG_LOOKUP_CHUNK_SIZE = 250;
 
 type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
+type IgnoredEditField = (typeof IGNORED_EDIT_FIELDS)[number];
 type MatchStrategy = 'stemid' | 'tag_stemtag';
 
 const CSV_FIELD_TO_DB_COLUMN: Record<UpdatableField, string> = {
@@ -23,6 +31,27 @@ const CSV_FIELD_TO_DB_COLUMN: Record<UpdatableField, string> = {
   date: 'MeasurementDate',
   codes: 'RawCodes',
   comments: 'Description'
+};
+
+/**
+ * Kind of DB value we're comparing against — controls how we normalize both
+ * sides before the equality check (numeric tolerance vs case-insensitive
+ * string comparison).
+ */
+type IgnoredFieldCompareKind = 'numeric' | 'string-ci';
+
+interface IgnoredFieldDescriptor {
+  dbProperty: keyof ExistingMeasurementRow;
+  compareKind: IgnoredFieldCompareKind;
+}
+
+const IGNORED_FIELD_DESCRIPTORS: Record<IgnoredEditField, IgnoredFieldDescriptor> = {
+  spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
+  quadrat: { dbProperty: 'QuadratName', compareKind: 'string-ci' },
+  lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
+  ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
+  tag: { dbProperty: 'TreeTag', compareKind: 'string-ci' },
+  stemtag: { dbProperty: 'StemTag', compareKind: 'string-ci' }
 };
 
 class RevisionUploadRequestError extends Error {
@@ -49,6 +78,10 @@ interface ExistingMeasurementRow {
   PlotID: number | null;
   TreeTag: string | null;
   StemTag: string | null;
+  SpeciesCode: string | null;
+  QuadratName: string | null;
+  LocalX: number | string | null;
+  LocalY: number | string | null;
 }
 
 interface RevisionUploadFileRequest {
@@ -131,7 +164,10 @@ function getDerivedDbTagStemKey(row: ExistingMeasurementRow): string | null {
 function normalizeDateToString(value: Date | string | null): string | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   return String(value).slice(0, 10);
@@ -144,12 +180,18 @@ function areEquivalentNumericValues(csvValue: string, dbValue: unknown): boolean
   return Number.isFinite(parsedCsvValue) && Number.isFinite(parsedDbValue) && parsedCsvValue === parsedDbValue;
 }
 
+function isBlankOrNullPlaceholder(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  const trimmed = String(value).trim();
+  return trimmed === '' || trimmed.toUpperCase() === 'NULL';
+}
+
 function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
 
   for (const field of UPDATABLE_FIELDS) {
     const csvValue = csvRow[field];
-    if (csvValue === undefined || csvValue === null || String(csvValue).trim() === '') {
+    if (isBlankOrNullPlaceholder(csvValue)) {
       continue;
     }
 
@@ -177,6 +219,41 @@ function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<str
   return changes;
 }
 
+/**
+ * Detects edits on CSV columns that revision upload does not write back in
+ * Phase 1 (spcode, quadrat, lx, ly, tag, stemtag). Returns a map of the
+ * detected CSV-vs-DB differences so the UI can warn the user that those
+ * edits will be dropped. If the CSV cell is blank/NULL, or if it matches the
+ * DB value, the field is not included.
+ */
+function computeIgnoredEdits(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
+  const ignored: Record<string, { from: unknown; to: unknown }> = {};
+
+  for (const field of IGNORED_EDIT_FIELDS) {
+    const csvValue = csvRow[field];
+    if (isBlankOrNullPlaceholder(csvValue)) {
+      continue;
+    }
+
+    const descriptor = IGNORED_FIELD_DESCRIPTORS[field];
+    const dbValue = dbRow[descriptor.dbProperty];
+
+    if (descriptor.compareKind === 'numeric' && areEquivalentNumericValues(String(csvValue).trim(), dbValue)) {
+      continue;
+    }
+
+    const csvNormalized = String(csvValue).trim();
+    const dbNormalized = String(dbValue ?? '').trim();
+    const matches = descriptor.compareKind === 'string-ci' ? csvNormalized.toLowerCase() === dbNormalized.toLowerCase() : csvNormalized === dbNormalized;
+
+    if (!matches) {
+      ignored[field] = { from: dbValue, to: csvValue };
+    }
+  }
+
+  return ignored;
+}
+
 function detectMatchStrategy(rows: IndexedFileRow[], fileName: string): MatchStrategy {
   if (rows.length === 0) {
     throw new RevisionUploadRequestError(`Revision file "${fileName}" is empty and cannot be matched`);
@@ -198,8 +275,10 @@ function detectMatchStrategy(rows: IndexedFileRow[], fileName: string): MatchStr
 }
 
 function buildResolutionCandidates(rows: IndexedFileRow[], strategy: MatchStrategy): { candidates: ResolutionCandidate[]; invalidRows: RevisionInvalidRow[] } {
-  const survivors = new Map<string, ResolutionCandidate>();
+  const firstSeen = new Map<string, ResolutionCandidate>();
+  const duplicateKeys = new Set<string>();
   const invalidRows: RevisionInvalidRow[] = [];
+  const acceptedRows: ResolutionCandidate[] = [];
 
   for (const row of rows) {
     if (strategy === 'stemid') {
@@ -214,11 +293,17 @@ function buildResolutionCandidates(rows: IndexedFileRow[], strategy: MatchStrate
         continue;
       }
 
-      survivors.set(String(parsedStemID), {
+      const candidate: ResolutionCandidate = {
         ...row,
         key: String(parsedStemID),
         stemID: parsedStemID
-      });
+      };
+      acceptedRows.push(candidate);
+      if (firstSeen.has(candidate.key)) {
+        duplicateKeys.add(candidate.key);
+      } else {
+        firstSeen.set(candidate.key, candidate);
+      }
       continue;
     }
 
@@ -232,18 +317,46 @@ function buildResolutionCandidates(rows: IndexedFileRow[], strategy: MatchStrate
       continue;
     }
 
-    survivors.set(key, {
+    const candidate: ResolutionCandidate = {
       ...row,
       key,
       tag: normalizeTagStemKeyPart(row.csvRow['tag']) ?? undefined,
       stemtag: normalizeTagStemKeyPart(row.csvRow['stemtag']) ?? undefined
-    });
+    };
+    acceptedRows.push(candidate);
+    if (firstSeen.has(candidate.key)) {
+      duplicateKeys.add(candidate.key);
+    } else {
+      firstSeen.set(candidate.key, candidate);
+    }
+  }
+
+  const candidates: ResolutionCandidate[] = [];
+  for (const candidate of acceptedRows) {
+    if (duplicateKeys.has(candidate.key)) {
+      invalidRows.push({
+        csvRow: candidate.csvRow,
+        csvIndex: candidate.csvIndex,
+        reason: buildDuplicateKeyReason(strategy, candidate)
+      });
+      continue;
+    }
+
+    candidates.push(candidate);
   }
 
   return {
-    candidates: Array.from(survivors.values()).sort((left, right) => left.csvIndex - right.csvIndex),
+    candidates: candidates.sort((left, right) => left.csvIndex - right.csvIndex),
     invalidRows
   };
+}
+
+function buildDuplicateKeyReason(strategy: MatchStrategy, candidate: ResolutionCandidate): string {
+  if (strategy === 'stemid') {
+    return `duplicate stemid ${candidate.stemID} appears in multiple rows of the same file; each stemid must appear at most once`;
+  }
+
+  return `duplicate tag+stemtag "${candidate.tag}/${candidate.stemtag}" appears in multiple rows of the same file; each tag+stemtag must appear at most once`;
 }
 
 function groupRowsByKey(rows: ExistingMeasurementRow[], strategy: MatchStrategy): Map<string, ExistingMeasurementRow[]> {
@@ -264,14 +377,7 @@ function groupRowsByKey(rows: ExistingMeasurementRow[], strategy: MatchStrategy)
 }
 
 function isResolvableMeasurement(row: ExistingMeasurementRow, plotID: number): boolean {
-  return (
-    row.IsActive === 1 &&
-    row.StemGUID !== null &&
-    row.StemIsActive === 1 &&
-    row.TreeIsActive === 1 &&
-    row.QuadratIsActive === 1 &&
-    row.PlotID === plotID
-  );
+  return row.IsActive === 1 && row.StemGUID !== null && row.StemIsActive === 1 && row.TreeIsActive === 1 && row.QuadratIsActive === 1 && row.PlotID === plotID;
 }
 
 function buildExistingValues(row: ExistingMeasurementRow): RevisionMatchedRow['existingValues'] {
@@ -303,11 +409,13 @@ async function loadMeasurementsByStemID(
       `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.MeasuredDBH, cm.MeasuredHOM,
               cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
               st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
-              q.PlotID, t.TreeTag, st.StemTag
+              q.PlotID, t.TreeTag, st.StemTag,
+              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY
        FROM ??.coremeasurements cm
        LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
        LEFT JOIN ??.trees t ON t.TreeID = st.TreeID
        LEFT JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
+       LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
        WHERE cm.CensusID = ?
          AND cm.StemGUID IN (${placeholders})`
     );
@@ -342,11 +450,13 @@ async function loadMeasurementsByTagStemTag(
       `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.MeasuredDBH, cm.MeasuredHOM,
               cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
               st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
-              q.PlotID, t.TreeTag, st.StemTag
+              q.PlotID, t.TreeTag, st.StemTag,
+              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY
        FROM ??.coremeasurements cm
        LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
        LEFT JOIN ??.trees t ON t.TreeID = st.TreeID
        LEFT JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
+       LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
        WHERE cm.CensusID = ?
          AND (${conditions})`
     );
@@ -443,12 +553,14 @@ async function classifyFileRows(
         .map(row => row.CoreMeasurementID)
         .sort((left, right) => left - right);
 
+      const ignoredEdits = computeIgnoredEdits(candidate.csvRow, survivor);
       matchedRows.push({
         csvRow: candidate.csvRow,
         coreMeasurementID: survivor.CoreMeasurementID,
         duplicateMeasurementIDsToDelete,
         existingValues: buildExistingValues(survivor),
-        changes: computeDiff(candidate.csvRow, survivor)
+        changes: computeDiff(candidate.csvRow, survivor),
+        ...(Object.keys(ignoredEdits).length > 0 ? { ignoredEdits } : {})
       });
       continue;
     }
@@ -458,13 +570,17 @@ async function classifyFileRows(
       if (missingFields.length === 0) {
         newRows.push({
           csvRow: candidate.csvRow,
-          csvIndex: candidate.csvIndex
+          csvIndex: candidate.csvIndex,
+          reason: strategy === 'stemid' ? 'stemid-not-found' : 'no-match-key-in-db'
         });
       } else {
         invalidRows.push({
           csvRow: candidate.csvRow,
           csvIndex: candidate.csvIndex,
-          reason: `missing required fields for new row: ${missingFields.join(', ')}`
+          reason:
+            strategy === 'stemid'
+              ? `stemid ${candidate.stemID} not found in target census; also missing required fields for new row: ${missingFields.join(', ')}`
+              : `missing required fields for new row: ${missingFields.join(', ')}`
         });
       }
       continue;

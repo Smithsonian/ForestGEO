@@ -25,18 +25,35 @@ describe('normalizeRevisionHeader', () => {
 });
 
 describe('canonicalizeRevisionRow', () => {
-  it('converts app export NULL placeholders to null', () => {
+  it('converts app export NULL placeholders to null across all columns so unedited exports round-trip without fake diffs', () => {
     expect(
       canonicalizeRevisionRow({
         stemid: '5283365',
         dbh: 'NULL',
-        comments: 'NULL'
+        hom: 'NULL',
+        date: 'NULL',
+        lx: 'NULL',
+        ly: 'NULL',
+        comments: 'NULL',
+        codes: 'NULL',
+        spcode: 'NULL',
+        quadrat: 'NULL',
+        tag: 'NULL',
+        stemtag: 'NULL'
       })
     ).toEqual({
       stemid: '5283365',
       dbh: null,
+      hom: null,
+      date: null,
+      lx: null,
+      ly: null,
       comments: null,
-      codes: null
+      codes: null,
+      spcode: null,
+      quadrat: null,
+      tag: null,
+      stemtag: null
     });
   });
 

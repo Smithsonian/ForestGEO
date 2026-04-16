@@ -70,7 +70,11 @@ describe('POST /api/revisionupload', () => {
             QuadratIsActive: 1,
             PlotID: 1,
             TreeTag: '10063',
-            StemTag: '10063'
+            StemTag: '10063',
+            SpeciesCode: 'AAAAAA',
+            QuadratName: '101',
+            LocalX: 9.33,
+            LocalY: 1111
           },
           {
             CoreMeasurementID: 401,
@@ -88,7 +92,11 @@ describe('POST /api/revisionupload', () => {
             QuadratIsActive: 1,
             PlotID: 1,
             TreeTag: '10063',
-            StemTag: '10063'
+            StemTag: '10063',
+            SpeciesCode: 'AAAAAA',
+            QuadratName: '101',
+            LocalX: 9.33,
+            LocalY: 1111
           }
         ];
       }
@@ -187,7 +195,11 @@ describe('POST /api/revisionupload', () => {
             QuadratIsActive: 1,
             PlotID: 1,
             TreeTag: 'TREE-7',
-            StemTag: '2'
+            StemTag: '2',
+            SpeciesCode: 'AAAAAA',
+            QuadratName: '101',
+            LocalX: 1.5,
+            LocalY: 2.5
           }
         ];
       }
@@ -223,6 +235,354 @@ describe('POST /api/revisionupload', () => {
         }
       }
     });
+  });
+
+  it('flags duplicate stemid rows within a single file as invalid instead of silently collapsing them', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'duplicates.csv',
+            rows: [
+              { stemid: '100', tag: 't', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '10.0', date: '2026-04-01' },
+              { stemid: '100', tag: 't', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '11.0', date: '2026-04-02' },
+              { stemid: '200', tag: 't2', stemtag: 's', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '12.0', date: '2026-04-03' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows[0].reason).toMatch(/duplicate stemid 100/);
+    expect(body.invalidRows[1].reason).toMatch(/duplicate stemid 100/);
+    expect(body.invalidRows.map((row: { csvIndex: number }) => row.csvIndex)).toEqual([0, 1]);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].csvRow.stemid).toBe('200');
+  });
+
+  it('flags duplicate tag+stemtag rows within a single file as invalid', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'duplicate-tags.csv',
+            rows: [
+              { tag: 'TREE-7', stemtag: '2', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '10.0', date: '2026-04-01' },
+              { tag: 'tree-7', stemtag: '2', spcode: 'quas', quadrat: 'q', lx: '1', ly: '1', dbh: '11.0', date: '2026-04-02' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.invalidRows).toHaveLength(2);
+    expect(body.invalidRows[0].reason).toMatch(/duplicate tag\+stemtag/);
+    expect(body.newRows).toHaveLength(0);
+  });
+
+  it('routes unmatched stemid rows to newRows with a stemid-not-found reason', async () => {
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'unmatched-stemid.csv',
+            rows: [
+              {
+                stemid: '9999999',
+                tag: 'NEW-TREE',
+                stemtag: '1',
+                spcode: 'quas',
+                quadrat: 'q',
+                lx: '1.5',
+                ly: '2.5',
+                dbh: '12.3',
+                date: '2026-04-14'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.matchedRows).toHaveLength(0);
+    expect(body.invalidRows).toHaveLength(0);
+    expect(body.newRows).toHaveLength(1);
+    expect(body.newRows[0].reason).toBe('stemid-not-found');
+    expect(body.newRows[0].csvRow.stemid).toBe('9999999');
+  });
+
+  it('does not report fake changes when the CSV cell is a literal "NULL" placeholder and the DB value is null', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 600,
+            StemGUID: 123,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T',
+            RawStemTag: 'S',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T',
+            StemTag: 'S',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'roundtrip.csv',
+            rows: [
+              {
+                stemid: '123',
+                dbh: '12.5',
+                hom: '1.3',
+                date: '2026-03-14',
+                codes: 'NULL',
+                comments: 'NULL'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].changes).toEqual({});
+  });
+
+  it('renders MeasurementDate returned as a Date object using local calendar components, not UTC', async () => {
+    // Construct a local Date that lives on 2026-03-14 locally but is 2026-03-15 in UTC
+    // when the local offset is negative (e.g. Americas). The comparison should still
+    // see 2026-03-14 because the CSV author edited a yyyy-mm-dd string.
+    const localDate = new Date(2026, 2, 14, 23, 30, 0); // month is 0-indexed
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 500,
+            StemGUID: 999,
+            IsActive: 1,
+            MeasuredDBH: 10.0,
+            MeasuredHOM: 1.0,
+            MeasurementDate: localDate,
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T',
+            RawStemTag: 'S',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T',
+            StemTag: 'S',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'date-tz.csv',
+            rows: [{ stemid: '999', date: '2026-03-14' }]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].existingValues.measurementDate).toBe('2026-03-14');
+    expect(body.matchedRows[0].changes).toEqual({});
+  });
+
+  it('surfaces edits to non-updatable columns (spcode, ly) as ignoredEdits rather than silently dropping them', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 700,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: 'Q;L',
+            Description: 'Broken and leaning',
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'SLOATE',
+            QuadratName: '101',
+            LocalX: 9.33,
+            LocalY: 2.4
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'ignored-edits.csv',
+            rows: [
+              {
+                stemid: '5283365',
+                tag: '10063',
+                stemtag: '10063',
+                spcode: 'AAAAAA',
+                quadrat: '101',
+                lx: '9.330000',
+                ly: '1111',
+                date: '2026-03-14',
+                dbh: '44.000000',
+                hom: '1.300000',
+                comments: 'Broken and leaning',
+                codes: 'Q;L'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].changes).toEqual({});
+    expect(body.matchedRows[0].ignoredEdits).toEqual({
+      spcode: { from: 'SLOATE', to: 'AAAAAA' },
+      ly: { from: 2.4, to: '1111' }
+    });
+  });
+
+  it('does not report ignoredEdits when CSV and DB values for non-updatable columns agree', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 800,
+            StemGUID: 5283365,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: 'Q;L',
+            Description: 'Broken and leaning',
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'AAAAAA',
+            QuadratName: '101',
+            LocalX: 9.33,
+            LocalY: 1111
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'clean.csv',
+            rows: [
+              {
+                stemid: '5283365',
+                tag: '10063',
+                stemtag: '10063',
+                spcode: 'AAAAAA',
+                quadrat: '101',
+                lx: '9.330000',
+                ly: '1111.000000',
+                date: '2026-03-14',
+                dbh: '44.000000',
+                hom: '1.300000',
+                comments: 'Broken and leaning',
+                codes: 'Q;L'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.matchedRows[0].ignoredEdits).toBeUndefined();
   });
 
   it('rejects files that do not contain stemid values or tag + stemtag headers', async () => {

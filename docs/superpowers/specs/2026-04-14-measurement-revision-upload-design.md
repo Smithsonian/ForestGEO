@@ -47,7 +47,7 @@ When multiple code-bearing columns are present in one row, precedence is:
 
 This avoids header-collision ambiguity in datagrid exports that contain both `Attributes` and `RawCodes`.
 
-Literal `NULL` strings from app exports are treated as blank cells during revision parsing.
+Literal `NULL` strings from app exports are treated as blank cells during revision parsing on every column. This is important for diff fidelity: View Data exports render SQL `NULL` as the string `"NULL"` for both numeric and text columns, so without this normalization every unedited null `codes` or `comments` cell would surface as a fake "blank → NULL" change when the CSV round-trips to the revision upload. The `computeDiff` logic on the server also treats `"NULL"` as blank as a defense-in-depth measure in case a caller sends unsanitized rows.
 
 ### Row Matching
 
@@ -224,6 +224,6 @@ The implementation still reuses the surrounding upload shell, but it must accoun
 
 - CSV where every row is unmatched (effectively a new upload through revision mode)
 - CSV where every row matches but no values changed (all skipped)
-- Duplicate match keys in the CSV (last row wins silently per file)
+- Duplicate match keys in the CSV (all occurrences of the duplicate key are marked invalid so the user can reconcile them before re-uploading)
 - `stemID` column present but all values empty (should fall back to `tag` + `stemtag`)
 - Row exported from View Data contains literal `NULL` placeholders -- parser should treat them as blank values

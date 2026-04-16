@@ -59,7 +59,13 @@ function pickPreferredCodesValue(row: FileRow): string | null {
 /**
  * Normalizes revision upload headers into canonical short-form keys.
  *
- * Exported app CSVs and canonical revision templates are both supported.
+ * This is header aliasing, not format detection. The alias table happens to
+ * contain both View Data export column names (e.g. `StemGUID`, `MeasuredDBH`)
+ * and canonical revision template names (e.g. `stemid`, `dbh`), so the same
+ * normalizer handles either input seamlessly without first classifying which
+ * format the CSV came from. Whether a file is rejected for missing keys is a
+ * server-side concern handled by `/api/revisionupload`, not by this helper.
+ *
  * Unknown headers are left as normalized lowercase keys so they can pass
  * through the parser and be ignored later by revision diff logic.
  */

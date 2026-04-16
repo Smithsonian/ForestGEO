@@ -13,11 +13,32 @@ export interface RevisionMatchedRow {
     description: string | null;
   };
   changes: Record<string, { from: unknown; to: unknown }>;
+  /**
+   * Edits detected on columns that are present in the revision CSV but not
+   * updatable through revision upload in Phase 1 (e.g. spcode, lx, ly,
+   * quadrat, tag, stemtag). These are surfaced in the UI so the user knows
+   * their edits were dropped rather than silently applied.
+   */
+  ignoredEdits?: Record<string, { from: unknown; to: unknown }>;
 }
+
+export type RevisionNewRowReason = 'no-match-key-in-db' | 'stemid-not-found';
 
 export interface RevisionNewRowCandidate {
   csvRow: FileRow;
   csvIndex: number;
+  /**
+   * Why this row is being inserted as new.
+   *
+   * `stemid-not-found` means the user supplied a StemGUID intending to update
+   * an existing measurement, but the StemGUID did not match any measurement
+   * in the target census. The uploaded StemGUID is ignored on insert and a
+   * brand new tree/stem is created through the standard ingestion pipeline.
+   *
+   * `no-match-key-in-db` means the user matched by tag/stemtag and no
+   * existing measurement was found — intent was already "create new".
+   */
+  reason: RevisionNewRowReason;
 }
 
 export interface RevisionInvalidRow {
