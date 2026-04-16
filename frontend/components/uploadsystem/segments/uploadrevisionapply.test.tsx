@@ -134,4 +134,36 @@ describe('UploadRevisionApply', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
+
+  it('reports duplicate cleanup separately from field updates on success', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        updatedCount: 0,
+        skippedCount: 1,
+        insertedCount: 0,
+        deletedDuplicateCount: 2,
+        applyErrors: [],
+        validationPending: true
+      })
+    });
+
+    renderComponent({
+      matchedRows: [
+        {
+          coreMeasurementID: 101,
+          csvRow: {},
+          duplicateMeasurementIDsToDelete: [55, 56]
+        }
+      ]
+    });
+
+    await screen.findByText('Revisions Applied');
+    expect(screen.getByText('2 duplicate(s) deleted')).toBeInTheDocument();
+    expect(screen.getByText('1 matched row(s) required no field updates')).toBeInTheDocument();
+    expect(
+      screen.getByText('Duplicate cleanup can still use a matched survivor row even when its field values were unchanged.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('1 row(s) skipped (no changes)')).not.toBeInTheDocument();
+  });
 });

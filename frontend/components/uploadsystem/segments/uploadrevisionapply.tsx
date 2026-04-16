@@ -20,6 +20,7 @@ interface UploadRevisionApplyProps {
 }
 
 type ApplyStatus = 'applying' | 'success' | 'error';
+const UPDATABLE_REVISION_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 
 function buildDuplicateDeletionHints(matchedRows: RevisionApplyMatchedRow[]): RevisionDuplicateToDelete[] {
   const seenPairs = new Set<string>();
@@ -43,6 +44,13 @@ function buildDuplicateDeletionHints(matchedRows: RevisionApplyMatchedRow[]): Re
   return duplicates;
 }
 
+function hasRevisionFieldValues(csvRow: FileRow): boolean {
+  return UPDATABLE_REVISION_FIELDS.some(field => {
+    const value = csvRow[field];
+    return value !== null && value !== undefined && String(value).trim() !== '';
+  });
+}
+
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
   const { matchedRows, newRows, confirmNewRows, schema, setReviewState, setIsDataUnsaved } = props;
 
@@ -58,6 +66,20 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
   const [applyAttempt, setApplyAttempt] = useState(0);
   const startedAttemptsRef = useRef<Set<number>>(new Set());
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasDuplicateCleanupOnlyRows = matchedRows.some(
+    row => (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0 && !hasRevisionFieldValues(row.csvRow)
+  );
+  const requestPayloadRef = useRef({
+    matchedRows,
+    newRows,
+    confirmNewRows
+  });
+
+  requestPayloadRef.current = {
+    matchedRows,
+    newRows,
+    confirmNewRows
+  };
 
   useEffect(() => {
     return () => {
@@ -79,7 +101,8 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     startedAttemptsRef.current.add(applyAttempt);
 
     let cancelled = false;
-    const duplicateMeasurementIDsToDelete = buildDuplicateDeletionHints(matchedRows);
+    const currentRequestPayload = requestPayloadRef.current;
+    const duplicateMeasurementIDsToDelete = buildDuplicateDeletionHints(currentRequestPayload.matchedRows);
 
     async function runApply() {
       try {
@@ -87,9 +110,9 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            matchedRows,
-            newRows,
-            confirmNewRows,
+            matchedRows: currentRequestPayload.matchedRows,
+            newRows: currentRequestPayload.newRows,
+            confirmNewRows: currentRequestPayload.confirmNewRows,
             duplicateMeasurementIDsToDelete,
             schema,
             plotID,
@@ -132,7 +155,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     return () => {
       cancelled = true;
     };
-  }, [applyAttempt, applyStatus, censusID, confirmNewRows, matchedRows, newRows, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
+  }, [applyAttempt, applyStatus, censusID, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
 
   function retryApply() {
     setApplyResult(null);
@@ -186,7 +209,12 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           {applyResult.insertedCount > 0 && <Typography level="body-md">{applyResult.insertedCount} new measurement(s) inserted</Typography>}
           {applyResult.skippedCount > 0 && (
             <Typography level="body-md" color="neutral">
-              {applyResult.skippedCount} row(s) skipped (no changes)
+              {applyResult.skippedCount} matched row(s) required no field updates
+            </Typography>
+          )}
+          {applyResult.deletedDuplicateCount > 0 && hasDuplicateCleanupOnlyRows && (
+            <Typography level="body-sm" color="neutral">
+              Duplicate cleanup can still use a matched survivor row even when its field values were unchanged.
             </Typography>
           )}
           {applyResult.applyErrors.length > 0 && (
