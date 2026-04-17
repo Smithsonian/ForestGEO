@@ -129,7 +129,7 @@ if [[ -n "$DB_PASSWORD" ]]; then
 fi
 
 run_sql() {
-    mysql "${MYSQL_BASE_ARGS[@]}" "$SCHEMA" -e "$1"
+    mysql "${MYSQL_BASE_ARGS[@]}" "${@:2}" "$SCHEMA" -e "$1"
 }
 
 run_sql_file() {
