@@ -66,11 +66,11 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     getMapperSpy.mockReturnValue({ mapData: mapDataSpy });
   });
 
-  it('returns 400 if slugs are missing or fewer than 5', async () => {
+  it('returns 400 if slugs are missing or fewer than 3', async () => {
     const res1 = await GET({} as any, makeProps('species', undefined));
     expect(res1.status).toBe(HTTPResponses.INVALID_REQUEST);
 
-    const res2 = await GET({} as any, makeProps('species', ['myschema', '0', '25', '101']));
+    const res2 = await GET({} as any, makeProps('species', ['myschema', '0']));
     expect(res2.status).toBe(HTTPResponses.INVALID_REQUEST);
   });
 
@@ -108,7 +108,7 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(body.totalCount).toBe(42);
     expect(String(body.finishedQuery)).toMatch(/FORMATTED_SQL:/);
     expect(String(body.finishedQuery)).toMatch(/FROM myschema\.unifiedchangelog/i);
-    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,3,25,25\]/);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,7,3,25,25\]/);
 
     expect(getMapperSpy).toHaveBeenCalledWith('unifiedchangelog');
     expect(mapDataSpy).toHaveBeenCalled();
@@ -158,6 +158,21 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel/i);
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[9,77,100,50\]/);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('personnel: falls back to census-agnostic query when the census slug is invalid', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    exec.mockResolvedValueOnce([{ PersonnelID: 1 }]).mockResolvedValueOnce([{ totalRows: 1 }]);
+
+    const res = await GET({} as any, makeProps('personnel', ['myschema', '2', '50', '77', 'undefined']));
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+
+    expect(String(body.finishedQuery)).toMatch(/FROM myschema\.personnel p/i);
+    expect(String(body.finishedQuery)).not.toMatch(/CensusActive/);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[100,50\]/);
   });
 
   it('returns 400 for unknown dataType', async () => {

@@ -22,7 +22,7 @@ import { v4 as uuidv4 } from 'uuid';
 const dbConfig = {
   host: process.env.AZURE_SQL_SERVER || 'forestgeo-mysqldataserver.mysql.database.azure.com',
   user: process.env.AZURE_SQL_USER || 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD || 'P@ssw0rd',
+  password: process.env.AZURE_SQL_PASSWORD,
   port: parseInt(process.env.AZURE_SQL_PORT || '3306'),
   database: process.env.AZURE_SQL_SCHEMA || 'forestgeo_testing',
   multipleStatements: true
@@ -176,17 +176,21 @@ class IngestionMonitor {
   }
 
   /**
-   * Track failed validations
+   * Track failed validations (unresolved ingestion errors in coremeasurements with StemGUID IS NULL)
    */
   async trackFailedValidations(): Promise<number> {
     const countQuery = `
-      SELECT COUNT(*) as count
-      FROM failedmeasurements
-      WHERE PlotID IN (
-        SELECT DISTINCT PlotID FROM temporarymeasurements
-        WHERE FileID = ? AND BatchID = ?
-      )
-      AND Date >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+      SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+      FROM coremeasurements cm
+      JOIN measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+      JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
+      WHERE cm.StemGUID IS NULL
+        AND mel.IsResolved = FALSE
+        AND me.ErrorSource = 'ingestion'
+        AND cm.CensusID IN (
+          SELECT DISTINCT CensusID FROM temporarymeasurements
+          WHERE FileID = ? AND BatchID = ?
+        )
     `;
 
     const count = await this.trackStage('Failed Validations', countQuery.replace('?', `'${this.report.fileID}'`).replace('?', `'${this.report.batchID}'`));

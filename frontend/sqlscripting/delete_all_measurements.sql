@@ -6,9 +6,9 @@ USE forestgeo_testing;
 -- Start transaction for safety
 START TRANSACTION;
 
--- 1. Delete validation errors
-DELETE FROM cmverrors;
-SELECT 'Deleted validation errors' as Step, ROW_COUNT() as RowsAffected;
+-- 1. Delete measurement error log (validation + ingestion errors)
+DELETE FROM measurement_error_log;
+SELECT 'Deleted measurement error log rows' as Step, ROW_COUNT() as RowsAffected;
 
 -- 2. Delete coremeasurement attributes junction table
 DELETE FROM cmattributes;

@@ -2,7 +2,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar, Typography } from '@mui/joy';
@@ -17,6 +17,8 @@ import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 import ailogger from '@/ailogger';
+import { useRouter } from 'next/navigation';
+import { VisibleFilter } from '@/config/datagridhelpers';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -45,11 +47,24 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   errors: ''
 };
 
-export default function MeasurementsSummaryViewDataGrid() {
+interface MeasurementsSummaryViewDataGridProps {
+  autoOpenFailedMeasurements?: boolean;
+  failedMeasurementsCloseRedirectHref?: string;
+  initialVisibleFilters?: VisibleFilter[];
+  showToolbarActions?: boolean;
+}
+
+export default function MeasurementsSummaryViewDataGrid({
+  autoOpenFailedMeasurements = false,
+  failedMeasurementsCloseRedirectHref,
+  initialVisibleFilters,
+  showToolbarActions = true
+}: MeasurementsSummaryViewDataGridProps) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { setLoading } = useLoading();
+  const router = useRouter();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
@@ -73,13 +88,25 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const hasAutoOpenedFailedMeasurementsRef = useRef(false);
 
   useEffect(() => {
     // Guard: only call if FSM is open AND schemaName is defined
-    if (openFSM && currentSite?.schemaName) {
-      fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) }).catch(ailogger.error);
+    if (openFSM && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
+      fetch(`/api/validatefailed/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges[0].censusID}`, { method: 'GET' }).catch(
+        ailogger.error
+      );
     }
-  }, [openFSM, currentSite?.schemaName]);
+  }, [openFSM, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]);
+
+  useEffect(() => {
+    if (!autoOpenFailedMeasurements || hasAutoOpenedFailedMeasurementsRef.current) {
+      return;
+    }
+
+    hasAutoOpenedFailedMeasurementsRef.current = true;
+    setOpenFSM(true);
+  }, [autoOpenFailedMeasurements]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -109,10 +136,19 @@ export default function MeasurementsSummaryViewDataGrid() {
   async function reloadMSV() {
     try {
       setLoading(true, 'Refreshing Measurements View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      const body =
+        currentPlot?.plotID != null && currentCensus?.dateRanges?.[0]?.censusID != null
+          ? JSON.stringify({
+              plotID: currentPlot.plotID,
+              censusID: currentCensus.dateRanges[0].censusID
+            })
+          : undefined;
+      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body
+      });
       if (!response.ok) throw new Error('Measurements View Refresh failure');
-      setLoading(true, 'Processing data...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       ailogger.error(e);
     } finally {
@@ -120,6 +156,19 @@ export default function MeasurementsSummaryViewDataGrid() {
       setRefresh(true);
     }
   }
+
+  const handleCloseFailedMeasurementsModal = async () => {
+    if (dataReingested) {
+      await reloadMSV();
+      setDataReingested(false);
+    }
+
+    setOpenFSM(false);
+
+    if (failedMeasurementsCloseRedirectHref) {
+      router.replace(failedMeasurementsCloseRedirectHref);
+    }
+  };
 
   return (
     <>
@@ -133,16 +182,14 @@ export default function MeasurementsSummaryViewDataGrid() {
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
-          if (uploadCompleted) {
+          const wasCompleted = uploadCompleted;
+          setIsUploadModalOpen(false);
+          setIsReingesting(false);
+          setUploadCompleted(false);
+          if (wasCompleted) {
             reloadMSV().then(() => {
-              setIsUploadModalOpen(false);
-              setIsReingesting(false);
-              setUploadCompleted(false);
               setOpenAlert(true);
             });
-          } else {
-            setIsUploadModalOpen(false);
-            setIsReingesting(false);
           }
         }}
         formType={FormType.measurements}
@@ -168,25 +215,14 @@ export default function MeasurementsSummaryViewDataGrid() {
       <FailedMeasurementsModal
         open={openFSM}
         setReingested={setDataReingested}
-        handleCloseModal={async () => {
-          if (dataReingested) {
-            reloadMSV().then(() => {
-              setOpenFSM(false);
-              setDataReingested(false);
-            });
-          } else {
-            setOpenFSM(false);
-          }
-        }}
-        onTriggerReingestion={() => {
-          // Open upload modal in reingestion mode after failed measurements modal closes
-          setIsReingesting(true);
-          setIsUploadModalOpen(true);
-        }}
+        handleCloseModal={handleCloseFailedMeasurementsModal}
+        autoCloseWhenEmpty={!autoOpenFailedMeasurements}
       />
       <MeasurementsCommons
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}
+        initialVisibleFilters={initialVisibleFilters}
+        showToolbarActions={showToolbarActions}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}
@@ -214,7 +250,6 @@ export default function MeasurementsSummaryViewDataGrid() {
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
           { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
         ]}
-        failedTrigger={() => setOpenFSM(true)}
       />
       <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
         <Snackbar

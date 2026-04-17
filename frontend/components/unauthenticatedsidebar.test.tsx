@@ -39,11 +39,11 @@ describe('UnauthenticatedSidebar - Functional Tests', () => {
       expect(nav).toBeInTheDocument();
     });
 
-    it('MUST have banner landmark for branding', () => {
+    it('MUST expose the application logo as an accessible image landmark', () => {
       render(<UnauthenticatedSidebar />);
 
-      const banner = screen.getByRole('banner', { name: /application name/i });
-      expect(banner).toBeInTheDocument();
+      const logo = screen.getByRole('img', { name: /forestgeo application logo/i });
+      expect(logo).toBeInTheDocument();
     });
 
     it('MUST have region landmark for authentication controls', () => {
@@ -69,11 +69,11 @@ describe('UnauthenticatedSidebar - Functional Tests', () => {
       expect(branding).toBeInTheDocument();
     });
 
-    it('MUST render branding within banner landmark', () => {
+    it('MUST render branding within the logo region', () => {
       render(<UnauthenticatedSidebar />);
 
-      const banner = screen.getByRole('banner', { name: /application name/i });
-      const branding = within(banner).getByText('ForestGEO');
+      const logo = screen.getByRole('img', { name: /forestgeo application logo/i });
+      const branding = within(logo).getByText('ForestGEO');
       expect(branding).toBeInTheDocument();
     });
 
@@ -232,11 +232,11 @@ describe('UnauthenticatedSidebar - Functional Tests', () => {
       expect(nav).toHaveAttribute('aria-label', 'Main navigation');
     });
 
-    it('MUST have descriptive aria-label for application name banner', () => {
+    it('MUST have descriptive aria-label for application logo', () => {
       render(<UnauthenticatedSidebar />);
 
-      const banner = screen.getByRole('banner');
-      expect(banner).toHaveAttribute('aria-label', 'Application name');
+      const logo = screen.getByRole('img');
+      expect(logo).toHaveAttribute('aria-label', 'ForestGEO application logo');
     });
 
     it('MUST have descriptive aria-label for user actions nav', () => {
@@ -333,7 +333,7 @@ describe('UnauthenticatedSidebar - Functional Tests', () => {
 
       // Should have all major landmarks
       expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
-      expect(screen.getByRole('banner', { name: 'Application name' })).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'ForestGEO application logo' })).toBeInTheDocument();
       expect(screen.getByRole('region', { name: 'Authentication controls' })).toBeInTheDocument();
     });
 

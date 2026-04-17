@@ -52,6 +52,29 @@ import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
 
+const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  let strValue = String(value);
+  if (options?.isDate) {
+    const parsedDate = moment(strValue);
+    if (parsedDate.isValid()) {
+      strValue = parsedDate.format('YYYY-MM-DD');
+    }
+  }
+  const needsFormulaEscape =
+    strValue.startsWith('=') || strValue.startsWith('+') || strValue.startsWith('-') || strValue.startsWith('@') || strValue.startsWith('\t');
+  const safeValue = needsFormulaEscape ? `'${strValue}` : strValue;
+  if (safeValue.includes(',') || safeValue.includes('"') || safeValue.includes('\n')) {
+    return `"${safeValue.replace(/"/g, '""')}"`;
+  }
+  return safeValue;
+};
+
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
   fetchPaginatedData: () => Promise<void>;
@@ -123,8 +146,26 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const internalApiRef = useGridApiRef();
   const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
+  const PAGE_CACHE_TTL_MS = 30_000;
+  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+  const skipNextProcessRowUpdateRef = useRef(false);
+  const clearPageCache = useCallback(() => {
+    pageCacheRef.current.clear();
+  }, []);
+
   const fetchPaginatedData = useCallback(
     async (pageToFetch: number) => {
+      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
+      const cached = pageCacheRef.current.get(cacheKey);
+      const now = Date.now();
+
+      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
+        setRows(cached.rows);
+        setRowCount(cached.totalCount);
+        if (onDataLoaded) onDataLoaded(cached.rows);
+        return;
+      }
+
       setLoading(true);
       let paginatedQuery =
         (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
@@ -157,19 +198,20 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               ? JSON.stringify({ filterModel })
               : undefined
         });
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(errorBody.message || `Server returned ${response.status}`);
+        }
         const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Error fetching data');
         setRows(data.output);
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
+        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
 
         // Notify parent component that data has been loaded
         if (onDataLoaded) {
           onDataLoaded(data.output);
         }
-
-        // Note: handleAddNewRow will be triggered via processRowUpdate
-        // Removed direct call to avoid circular dependency
       } catch (error: unknown) {
         ailogger.error('Error fetching data:', error instanceof Error ? error : new Error(String(error)));
         setSnackbar({ children: 'Error fetching data', severity: 'error' });
@@ -193,8 +235,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   );
 
   const handleRefresh = useCallback(async () => {
+    clearPageCache();
     await fetchPaginatedData(paginationModel.page);
-  }, [paginationModel.page, fetchPaginatedData]);
+  }, [clearPageCache, paginationModel.page, fetchPaginatedData]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
@@ -311,23 +354,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.attributes)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             aCSVRows += values.join(',') + '\n';
           });
           const aBlob = new Blob([aCSVRows], {
@@ -356,23 +383,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.quadrats)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             qCSVRows += values.join(',') + '\n';
           });
           const qBlob = new Blob([qCSVRows], {
@@ -401,23 +412,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.personnel)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             pCSVRows += values.join(',') + '\n';
           });
           const pBlob = new Blob([pCSVRows], {
@@ -447,23 +442,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             const values = getTableHeaders(FormType.species)
               .map(rowHeader => rowHeader.label)
               .map(header => row[header])
-              .map(value => {
-                if (value === undefined || value === null || value === '') {
-                  return null;
-                }
-                if (typeof value === 'number') {
-                  return value;
-                }
-                if (typeof value === 'string') {
-                  const parsedValue = parseFloat(value);
-                  if (!isNaN(parsedValue)) {
-                    return parsedValue;
-                  }
-                  const escapedValue = value.replace(/"/g, '""');
-                  return `"${escapedValue}"`;
-                }
-                return String(value);
-              });
+              .map(value => sanitizeCsvValue(value));
             sCSVRows += values.join(',') + '\n';
           });
           const sBlob = new Blob([sCSVRows], {
@@ -479,6 +458,54 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           break;
         case 'viewfulltable':
           await fetchFullData();
+          break;
+        case 'failedmeasurements':
+          const fmResponse = await fetch(
+            `/api/formdownload/failedmeasurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges?.[0]?.censusID ?? 0}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filterModel })
+            }
+          );
+          if (!fmResponse.ok) throw new Error(`Failed to download failed measurements: ${fmResponse.status}`);
+          const fmData = await fmResponse.json();
+          const fmHeaders = [
+            'failedmeasurementid',
+            'fileid',
+            'batchid',
+            'tag',
+            'stemtag',
+            'spcode',
+            'quadrat',
+            'lx',
+            'ly',
+            'dbh',
+            'hom',
+            'date',
+            'codes',
+            'currentFailureReasons',
+            'originalFailureReasons',
+            'failureReasons',
+            'lastValidatedAt'
+          ];
+          let fmCSVRows = fmHeaders.join(',') + '\n';
+          fmData.forEach((row: Record<string, unknown>) => {
+            const values = fmHeaders.map(header => {
+              return sanitizeCsvValue(row[header], { isDate: header === 'date' });
+            });
+            fmCSVRows += values.join(',') + '\n';
+          });
+          const fmBlob = new Blob([fmCSVRows], {
+            type: 'text/csv;charset=utf-8;'
+          });
+          const fmURL = URL.createObjectURL(fmBlob);
+          const fmLink = document.createElement('a');
+          fmLink.href = fmURL;
+          fmLink.download = `failedmeasurements_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+          document.body.appendChild(fmLink);
+          fmLink.click();
+          document.body.removeChild(fmLink);
           break;
       }
     } catch (error: any) {
@@ -555,6 +582,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (oldRow.isNew) {
           setIsNewRowAdded(false);
           setShouldAddRowAfterFetch(false);
+          clearPageCache();
           await fetchPaginatedData(paginationModel.page);
         }
 
@@ -567,7 +595,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setLoading(false);
       }
     },
-    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
+    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, clearPageCache]
   );
 
   const performSaveAction = useCallback(
@@ -576,6 +604,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       setLoading(true);
       try {
+        // Confirmation-driven saves already persist via updateRow below. When the
+        // row mode flips back to view, MUI will invoke processRowUpdate; skip the
+        // next invocation so the row is not patched a second time.
+        skipNextProcessRowUpdateRef.current = true;
         setRowModesModel(prevModel => ({
           ...prevModel,
           [id]: { mode: GridRowModes.View }
@@ -606,6 +638,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       setLoading(false);
+      clearPageCache();
       await fetchPaginatedData(paginationModel.page);
     },
     [
@@ -619,6 +652,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       paginationModel,
       triggerRefresh,
       setLoading,
+      clearPageCache,
       fetchPaginatedData,
       updateRow,
       onDataUpdate
@@ -666,6 +700,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
+          clearPageCache();
           await fetchPaginatedData(paginationModel.page);
         }
       } catch (error: unknown) {
@@ -678,7 +713,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setLoading(false);
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, fetchPaginatedData]
+    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, clearPageCache, fetchPaginatedData]
   );
 
   const handleConfirmAction = useCallback(
@@ -723,8 +758,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (!updatedRowModesModel[id] || updatedRowModesModel[id].mode === undefined) {
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
-
-      localApiRef.current?.stopRowEditMode({ id, ignoreModifications: true });
 
       const oldRow = rows.find(row => String(row.id) === String(id));
 
@@ -810,6 +843,11 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      if (skipNextProcessRowUpdateRef.current) {
+        skipNextProcessRowUpdateRef.current = false;
+        return newRow;
+      }
+
       if (newRow?.isNew && !newRow?.id) {
         return oldRow;
       }
@@ -1066,9 +1104,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     }
   };
 
+  // Grid types under "Stem & Plot Details" that don't require a census selection
+  const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
+  const requiresCensus = !censusIndependentGridTypes.includes(gridType);
+
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
-  // Only require site/plot/census context for site-specific data grids
-  if (!adminEmail && (!currentSite || !currentPlot || !currentCensus)) {
+  // Census-independent grids only need site + plot; others need all three
+  if (!adminEmail && (!currentSite || !currentPlot || (requiresCensus && !currentCensus))) {
     redirect('/dashboard');
   } else {
     return (
@@ -1127,6 +1169,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             }}
             loading={refresh || loading}
             paginationMode="server"
+            filterMode="server"
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
             rowCount={rowCount}

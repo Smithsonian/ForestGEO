@@ -8,10 +8,13 @@ import ailogger from '@/ailogger';
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
-  personnel: false,
   species: false,
   quadrats: false
 };
+
+// Validity types that can be checked with just site + plot (no census required)
+const CENSUS_INDEPENDENT_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'quadrats'];
+const ALL_VALIDITY_TYPES: (keyof UnifiedValidityFlags)[] = CENSUS_INDEPENDENT_VALIDITY_TYPES;
 
 const DataValidityContext = createContext<{
   validity: UnifiedValidityFlags;
@@ -27,7 +30,6 @@ const DataValidityContext = createContext<{
 
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
-  const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
 
   const ApiWrapper = useApiWrapper();
 
@@ -35,119 +37,114 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  // Use ref to track debounce timeout to avoid recreating debounced function
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Extract primitive values for stable effect dependencies
+  const schemaName = currentSite?.schemaName;
+  const plotID = currentPlot?.plotID;
+  const plotCensusNumber = currentCensus?.plotCensusNumber;
+
+  // Counter to force re-checks from external triggers (triggerRefresh / recheckValidityIfNeeded)
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
     setValidityState(prev => ({ ...prev, [type]: value }));
   }, []);
 
-  const checkDataValidity = useCallback(
-    async (types: (keyof UnifiedValidityFlags)[]) => {
-      if (!currentSite || !currentPlot || !currentCensus) return;
+  // Keep validation logic in a ref so the effect always calls the latest version
+  // without needing it as a dependency (prevents effect re-runs from callback recreation)
+  const runValidationRef = useRef<(types: (keyof UnifiedValidityFlags)[], signal?: AbortSignal) => Promise<void>>(undefined);
+  runValidationRef.current = async (types, signal) => {
+    if (!schemaName || !plotID) return;
 
-      try {
-        const results = await Promise.all(
-          types.map(async type => {
-            const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
-            try {
-              const response = await ApiWrapper.get(url, {
-                loadingMessage: `Validating ${type}...`,
-                category: 'api',
-                showErrorAlert: false, // Don't show alert for 412 - we handle it gracefully
-                acceptedStatuses: [412] // 412 means no data exists, which is a valid state for validation
-              });
-              // 200 = data exists, 412 = no data exists (both are valid states)
-              // For validation purposes, having no failed measurements (412) is actually good
-              const isValid = response.status === 200 || response.status === 412;
-              return { type, isValid };
-            } catch (error: any) {
-              ailogger.error(error);
-              return { type, isValid: false };
-            }
-          })
-        );
+    try {
+      const results = await Promise.all(
+        types.map(async type => {
+          if (signal?.aborted) return { type, isValid: false };
 
+          const url =
+            plotCensusNumber != null
+              ? `/api/cmprevalidation/${type}/${schemaName}/${plotID}/${plotCensusNumber}`
+              : `/api/cmprevalidation/${type}/${schemaName}/${plotID}`;
+          try {
+            const response = await ApiWrapper.get(url, {
+              loadingMessage: `Validating ${type}...`,
+              category: 'api',
+              showErrorAlert: false,
+              acceptedStatuses: [412]
+            });
+            // 200 = data exists, 412 = no data exists (both are valid states)
+            const isValid = response.status === 200 || response.status === 412;
+            return { type, isValid };
+          } catch (error: any) {
+            ailogger.error(error);
+            return { type, isValid: false };
+          }
+        })
+      );
+
+      if (!signal?.aborted) {
         results.forEach(({ type, isValid }) => {
           setValidity(type, isValid);
         });
-      } catch (error: any) {
-        ailogger.error(error);
       }
-    },
-    [currentSite, currentPlot, currentCensus, setValidity, ApiWrapper]
-  );
+    } catch (error: any) {
+      ailogger.error(error);
+    }
+  };
 
-  // Stable function that doesn't depend on validity state directly
-  const recheckValidityIfNeeded = useCallback(async () => {
-    // Use functional state update to get current validity without depending on it
-    setValidityState(currentValidity => {
-      const hasInvalidFlags = Object.values(currentValidity).some(flag => !flag);
+  // Primary effect: run validation when context primitives change or refresh is requested.
+  // Uses only primitive deps + counter so it cannot be starved by unstable object references.
+  useEffect(() => {
+    if (!schemaName || !plotID) return;
 
-      if (hasInvalidFlags || refreshNeeded) {
-        const typesToRefresh = Object.entries(currentValidity)
-          .filter(([_, value]) => !value)
-          .map(([key]) => key as keyof UnifiedValidityFlags);
+    // Reset validity before re-checking
+    setValidityState(initialValidityState);
 
-        // Execute async validation in microtask to avoid state update during render
-        Promise.resolve().then(() => {
-          checkDataValidity(typesToRefresh);
-          setRefreshNeeded(false);
-        });
-      }
+    const abortController = new AbortController();
+    const timer = setTimeout(() => {
+      runValidationRef.current?.(ALL_VALIDITY_TYPES, abortController.signal);
+    }, 300);
 
-      return currentValidity; // Return unchanged state
-    });
-  }, [checkDataValidity, refreshNeeded]);
+    return () => {
+      abortController.abort();
+      clearTimeout(timer);
+    };
+  }, [schemaName, plotID, plotCensusNumber, refreshCounter]);
 
-  // Stable triggerRefresh that uses functional updates
+  // Safety net: if all flags are still false 5s after contexts are available, retry once.
+  // Catches edge cases where the initial check silently failed (HMR, network blip, etc.)
+  useEffect(() => {
+    if (!schemaName || !plotID) return;
+
+    const safetyTimer = setTimeout(() => {
+      setValidityState(current => {
+        const allFalse = Object.values(current).every(v => !v);
+        if (allFalse) {
+          setRefreshCounter(c => c + 1);
+        }
+        return current;
+      });
+    }, 5000);
+
+    return () => clearTimeout(safetyTimer);
+  }, [schemaName, plotID, plotCensusNumber]);
+
+  // External trigger for consumers (sidebar upload-complete, etc.)
   const triggerRefresh = useCallback((types?: (keyof UnifiedValidityFlags)[]) => {
-    setValidityState(prev => {
-      if (types) {
+    if (types) {
+      setValidityState(prev => {
         const updates = types.reduce((acc, type) => ({ ...acc, [type]: false }), {});
         return { ...prev, ...updates };
-      } else {
-        return Object.keys(prev).reduce((acc, key) => ({ ...acc, [key]: false }), {} as UnifiedValidityFlags);
-      }
-    });
-    setRefreshNeeded(true);
+      });
+    } else {
+      setValidityState(initialValidityState);
+    }
+    setRefreshCounter(c => c + 1);
   }, []);
 
-  // Effect with stable debouncing using ref
-  useEffect(() => {
-    if (refreshNeeded) {
-      // Clear existing timeout
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
+  const recheckValidityIfNeeded = useCallback(async () => {
+    setRefreshCounter(c => c + 1);
+  }, []);
 
-      // Set new timeout
-      debounceTimeoutRef.current = setTimeout(() => {
-        recheckValidityIfNeeded();
-      }, 300);
-    }
-
-    // Cleanup on unmount
-    return () => {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
-    };
-  }, [refreshNeeded, recheckValidityIfNeeded]);
-
-  // Stable initial trigger - only runs once per site/plot/census change
-  const initialTriggerRef = useRef<string>('');
-  useEffect(() => {
-    if (currentSite && currentPlot && currentCensus) {
-      const key = `${currentSite.schemaName}-${currentPlot.plotID}-${currentCensus.plotCensusNumber}`;
-      if (initialTriggerRef.current !== key) {
-        initialTriggerRef.current = key;
-        triggerRefresh();
-      }
-    }
-  }, [currentSite, currentPlot, currentCensus, triggerRefresh]);
-
-  // Memoize context value to prevent unnecessary re-renders of consumers
   const contextValue = useMemo(
     () => ({ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }),
     [validity, setValidity, triggerRefresh, recheckValidityIfNeeded]

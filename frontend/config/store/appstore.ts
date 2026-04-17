@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import { useShallow } from 'zustand/react/shallow';
 import { Plot, Quadrat, Site, PlotRDS, QuadratRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { UnifiedValidityFlags } from '@/config/macros';
@@ -42,6 +43,12 @@ interface AppState {
   // ===== Data Validity =====
   validity: UnifiedValidityFlags;
 
+  // ===== Background Validation =====
+  validationRunID: number | null;
+  validationStatus: 'idle' | 'running' | 'completed' | 'failed';
+  validationProgress: { completed: number; total: number; current: string | null };
+  validationErrors: string[];
+
   // ===== UI State =====
   isPulsing: boolean;
 
@@ -73,6 +80,12 @@ interface AppState {
   updateValidity: (flags: Partial<UnifiedValidityFlags>) => void;
   triggerValidityRefresh: (types?: (keyof UnifiedValidityFlags)[]) => void;
 
+  // ===== Background Validation Actions =====
+  startValidationRun: (runID: number | null, totalSteps: number) => void;
+  updateValidationProgress: (update: { completed?: number; total?: number; current?: string | null; errors?: string[] }) => void;
+  completeValidationRun: (status: 'completed' | 'failed', errors?: string[]) => void;
+  clearValidationRun: () => void;
+
   // ===== UI Actions =====
   setPulsing: (isPulsing: boolean) => void;
   triggerPulse: () => void;
@@ -91,7 +104,6 @@ interface AppState {
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
-  personnel: false,
   species: false,
   quadrats: false
 };
@@ -117,6 +129,12 @@ const initialState = {
 
   // Data Validity
   validity: initialValidityState,
+
+  // Background Validation
+  validationRunID: null,
+  validationStatus: 'idle' as const,
+  validationProgress: { completed: 0, total: 0, current: null },
+  validationErrors: [] as string[],
 
   // UI State
   isPulsing: false,
@@ -266,6 +284,56 @@ export const useAppStore = create<AppState>()(
           }
         },
 
+        // ===== Background Validation Actions =====
+        startValidationRun: (runID, totalSteps) =>
+          set(
+            {
+              validationRunID: runID,
+              validationStatus: 'running',
+              validationProgress: { completed: 0, total: totalSteps, current: null },
+              validationErrors: []
+            },
+            false,
+            'startValidationRun'
+          ),
+
+        updateValidationProgress: update =>
+          set(
+            state => ({
+              validationProgress: {
+                completed: update.completed ?? state.validationProgress.completed,
+                total: update.total ?? state.validationProgress.total,
+                current: update.current !== undefined ? update.current : state.validationProgress.current
+              },
+              validationErrors: update.errors ?? state.validationErrors
+            }),
+            false,
+            'updateValidationProgress'
+          ),
+
+        completeValidationRun: (status, errors) =>
+          set(
+            state => ({
+              validationStatus: status,
+              validationProgress: { ...state.validationProgress, current: null },
+              validationErrors: errors ?? state.validationErrors
+            }),
+            false,
+            'completeValidationRun'
+          ),
+
+        clearValidationRun: () =>
+          set(
+            {
+              validationRunID: null,
+              validationStatus: 'idle',
+              validationProgress: { completed: 0, total: 0, current: null },
+              validationErrors: []
+            },
+            false,
+            'clearValidationRun'
+          ),
+
         // ===== UI Actions =====
         setPulsing: isPulsing => set({ isPulsing }, false, 'setPulsing'),
 
@@ -321,13 +389,15 @@ export const useAppStore = create<AppState>()(
  * Hook to get only loading state (prevents unnecessary re-renders)
  */
 export const useLoadingState = () =>
-  useAppStore(state => ({
-    isLoading: state.isLoading,
-    loadingMessage: state.loadingMessage,
-    setLoading: state.setLoading,
-    startOperation: state.startOperation,
-    endOperation: state.endOperation
-  }));
+  useAppStore(
+    useShallow(state => ({
+      isLoading: state.isLoading,
+      loadingMessage: state.loadingMessage,
+      setLoading: state.setLoading,
+      startOperation: state.startOperation,
+      endOperation: state.endOperation
+    }))
+  );
 
 /**
  * Hook to get current site (only re-renders when site changes)
@@ -353,12 +423,14 @@ export const useCurrentQuadrat = () => useAppStore(state => state.currentQuadrat
  * Hook to get all current selections at once
  */
 export const useCurrentSelections = () =>
-  useAppStore(state => ({
-    site: state.currentSite,
-    plot: state.currentPlot,
-    census: state.currentCensus,
-    quadrat: state.currentQuadrat
-  }));
+  useAppStore(
+    useShallow(state => ({
+      site: state.currentSite,
+      plot: state.currentPlot,
+      census: state.currentCensus,
+      quadrat: state.currentQuadrat
+    }))
+  );
 
 /**
  * Hook to get site list
@@ -384,22 +456,26 @@ export const useQuadratList = () => useAppStore(state => state.quadratList);
  * Hook to get validity flags
  */
 export const useValidity = () =>
-  useAppStore(state => ({
-    validity: state.validity,
-    setValidity: state.setValidity,
-    updateValidity: state.updateValidity,
-    triggerValidityRefresh: state.triggerValidityRefresh
-  }));
+  useAppStore(
+    useShallow(state => ({
+      validity: state.validity,
+      setValidity: state.setValidity,
+      updateValidity: state.updateValidity,
+      triggerValidityRefresh: state.triggerValidityRefresh
+    }))
+  );
 
 /**
  * Hook to get UI state (pulsing animations, etc.)
  */
 export const useUIState = () =>
-  useAppStore(state => ({
-    isPulsing: state.isPulsing,
-    setPulsing: state.setPulsing,
-    triggerPulse: state.triggerPulse
-  }));
+  useAppStore(
+    useShallow(state => ({
+      isPulsing: state.isPulsing,
+      setPulsing: state.setPulsing,
+      triggerPulse: state.triggerPulse
+    }))
+  );
 
 /**
  * Hook to check if the store has been hydrated from localStorage
@@ -407,3 +483,20 @@ export const useUIState = () =>
  * until the store has finished hydrating
  */
 export const useHasHydrated = () => useAppStore(state => state.hasHydrated);
+
+/**
+ * Hook to get background validation state
+ */
+export const useBackgroundValidationState = () =>
+  useAppStore(
+    useShallow(state => ({
+      runID: state.validationRunID,
+      status: state.validationStatus,
+      progress: state.validationProgress,
+      errors: state.validationErrors,
+      startValidationRun: state.startValidationRun,
+      updateValidationProgress: state.updateValidationProgress,
+      completeValidationRun: state.completeValidationRun,
+      clearValidationRun: state.clearValidationRun
+    }))
+  );

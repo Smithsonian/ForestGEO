@@ -170,12 +170,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 <Stack spacing={2}>
                   {/* Validation Error Alert */}
                   {allValidationIssues.length > 0 && (
-                    <Alert
-                      color="danger"
-                      variant="soft"
-                      startDecorator={<ErrorOutlineIcon />}
-                      sx={{ textAlign: 'left' }}
-                    >
+                    <Alert color="danger" variant="soft" startDecorator={<ErrorOutlineIcon />} sx={{ textAlign: 'left' }}>
                       <Box>
                         <Typography level="title-sm" color="danger">
                           Missing Required Columns

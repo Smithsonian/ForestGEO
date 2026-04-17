@@ -29,20 +29,20 @@ const NewValidationRow: React.FC<NewValidationRowProps> = ({ validation, onValid
   const { isMountedRef } = useIsMounted();
 
   // Default validation query template following corequeries.sql patterns
-  const defaultTemplate = `INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+  const defaultTemplate = `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
          JOIN census c ON cm.CensusID = c.CensusID AND c.IsActive = TRUE
          -- Add additional JOINs as needed for your validation logic
-         LEFT JOIN cmverrors e ON e.CoreMeasurementID = cm.CoreMeasurementID
-                                  AND e.ValidationErrorID = @validationProcedureID
+         LEFT JOIN measurement_error_log e ON e.MeasurementID = cm.CoreMeasurementID
+                                  AND e.ErrorID = (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1)
 WHERE cm.IsValidated IS NULL
   AND cm.IsActive = TRUE
-  AND e.CoreMeasurementID IS NULL
+  AND e.MeasurementID IS NULL
   AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
   AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID)
   -- Add your specific validation conditions here
-  ;`;
+  ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;`;
 
   const handleUseTemplate = () => {
     onValidationChange('definition', defaultTemplate);

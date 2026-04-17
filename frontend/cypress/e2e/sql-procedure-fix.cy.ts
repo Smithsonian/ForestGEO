@@ -81,7 +81,7 @@ describe('SQL Stored Procedure Error 1093 Fix', () => {
 
       // Verify error handling is preserved
       expect(content).to.include('DECLARE EXIT HANDLER FOR SQLEXCEPTION');
-      expect(content).to.include('INSERT IGNORE INTO failedmeasurements');
+      expect(content).to.include('INSERT IGNORE INTO coremeasurements');
     });
   });
 });

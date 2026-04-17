@@ -6,12 +6,16 @@ import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
+import { Session } from 'next-auth';
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-// Valid table types that can be cleared
+// Valid table types that can be cleared.
+// Note: 'failedmeasurements' is a logical routing key — the handler uses custom SQL
+// against coremeasurements + measurement_error_log, NOT a physical table.
 const VALID_TABLE_TYPES = {
   failedmeasurements: 'failedmeasurements',
   temporarymeasurements: 'temporarymeasurements'
@@ -19,17 +23,53 @@ const VALID_TABLE_TYPES = {
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
 
+function getAdminAuthErrorResponse(session: Session | null, method: 'GET' | 'DELETE'): NextResponse | null {
+  if (!session?.user) {
+    ailogger.warn(`Unauthorized admin clear ${method} attempt - no session`);
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  }
+
+  if (!['global', 'db admin'].includes(session.user.userStatus)) {
+    ailogger.warn(`Forbidden admin clear ${method} attempt by role: ${session.user.userStatus}`);
+    return new NextResponse(JSON.stringify({ error: 'Forbidden - admin access required' }), { status: 403 });
+  }
+
+  return null;
+}
+
+function buildFailedMeasurementsScopeWhereClause(schema: string) {
+  return `c.PlotID = ?
+           AND c.PlotCensusNumber = (
+             SELECT selected_census.PlotCensusNumber
+             FROM ${schema}.census selected_census
+             WHERE selected_census.CensusID = ?
+               AND selected_census.PlotID = ?
+             LIMIT 1
+           )
+           AND cm.StemGUID IS NULL
+           AND EXISTS (
+             SELECT 1
+             FROM ${schema}.measurement_error_log mel
+             JOIN ${schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = cm.CoreMeasurementID
+               AND me.ErrorSource = ?
+           )`;
+}
+
+function buildFailedMeasurementsScopeParams(plotID: number | string, censusID: number | string) {
+  return [plotID, censusID, plotID, INGESTION_ERROR_SOURCE];
+}
+
 export async function DELETE(
   request: NextRequest,
   props: {
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  // Authentication check - admin operations require authenticated user
   const session = await auth();
-  if (!session?.user) {
-    ailogger.warn('Unauthorized admin clear DELETE attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  const authError = getAdminAuthErrorResponse(session, 'DELETE');
+  if (authError) {
+    return authError;
   }
 
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
@@ -84,8 +124,6 @@ export async function DELETE(
     censusID = values.censusID!;
   }
 
-  const tableName = VALID_TABLE_TYPES[tableType as TableType];
-
   // Validate schema to prevent SQL injection
   try {
     validateSchemaOrThrow(schema);
@@ -94,18 +132,40 @@ export async function DELETE(
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // Construct safe SQL queries with validated and escaped identifiers
-  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-  const deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-
   const connectionManager = ConnectionManager.getInstance();
   let transactionID = '';
 
   try {
     transactionID = await connectionManager.beginTransaction();
 
+    let countSQL = '';
+    let countParams: any[] = [];
+    let deleteSQL = '';
+    let deleteParams: any[] = [];
+
+    if (tableType === 'failedmeasurements') {
+      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
+      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
+
+      deleteSQL = `DELETE cm
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      deleteParams = buildFailedMeasurementsScopeParams(plotID, censusID);
+    } else {
+      const tableName = VALID_TABLE_TYPES[tableType as TableType];
+      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      deleteSQL = format('DELETE FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      countParams = [plotID, censusID];
+      deleteParams = [plotID, censusID];
+    }
+
     // First, get count of records that will be deleted for confirmation
-    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID], transactionID);
+    const countResult = await connectionManager.executeQuery(countSQL, countParams, transactionID);
     const totalRecords = countResult[0]?.total || 0;
 
     if (totalRecords === 0) {
@@ -120,7 +180,7 @@ export async function DELETE(
     }
 
     // Delete all records for this plot/census from the specified table
-    await connectionManager.executeQuery(deleteSQL, [plotID, censusID], transactionID);
+    await connectionManager.executeQuery(deleteSQL, deleteParams, transactionID);
 
     await connectionManager.commitTransaction(transactionID);
 
@@ -163,11 +223,10 @@ export async function GET(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  // Authentication check - admin operations require authenticated user
   const session = await auth();
-  if (!session?.user) {
-    ailogger.warn('Unauthorized admin clear GET attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
+  const authError = getAdminAuthErrorResponse(session, 'GET');
+  if (authError) {
+    return authError;
   }
 
   const { tableType, schema, plotID, censusID } = await props.params;
@@ -187,8 +246,6 @@ export async function GET(
     );
   }
 
-  const tableName = VALID_TABLE_TYPES[tableType as TableType];
-
   // Validate schema to prevent SQL injection
   try {
     validateSchemaOrThrow(schema);
@@ -197,14 +254,27 @@ export async function GET(
     return new NextResponse(JSON.stringify({ error: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  // Construct safe SQL query with validated and escaped identifiers
-  const countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
-
   const connectionManager = ConnectionManager.getInstance();
 
   try {
+    let countSQL = '';
+    let countParams: any[] = [];
+
+    if (tableType === 'failedmeasurements') {
+      // Schema is validated above via validateSchemaOrThrow — safe to interpolate as identifier
+      countSQL = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as total
+         FROM ${schema}.coremeasurements cm
+         JOIN ${schema}.census c ON c.CensusID = cm.CensusID
+         WHERE ${buildFailedMeasurementsScopeWhereClause(schema)}`;
+      countParams = buildFailedMeasurementsScopeParams(plotID, censusID);
+    } else {
+      const tableName = VALID_TABLE_TYPES[tableType as TableType];
+      countSQL = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', [schema, tableName]);
+      countParams = [plotID, censusID];
+    }
+
     // Get count of records for this plot/census from the specified table
-    const countResult = await connectionManager.executeQuery(countSQL, [plotID, censusID]);
+    const countResult = await connectionManager.executeQuery(countSQL, countParams);
 
     return new NextResponse(
       JSON.stringify({

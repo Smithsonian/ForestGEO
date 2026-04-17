@@ -3,7 +3,9 @@ truncate attributes;
 truncate census;
 truncate censusactivepersonnel;
 truncate cmattributes;
-truncate cmverrors;
+truncate measurement_error_log;
+-- NOTE: measurement_errors is a seed/config table — do NOT truncate it.
+-- Truncating it breaks FK constraints in measurement_error_log on next insert.
 truncate coremeasurements;
 truncate family;
 truncate genus;
@@ -21,7 +23,7 @@ truncate specimens;
 truncate stems;
 truncate trees;
 truncate temporarymeasurements;
-truncate failedmeasurements;
+truncate upload_errors;
 truncate unifiedchangelog;
 truncate uploadintegrityalerts;
 truncate uploadmetrics;

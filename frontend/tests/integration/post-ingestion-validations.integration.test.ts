@@ -94,10 +94,13 @@ describe('Post-Ingestion Validation Tests', () => {
 
       expect(rows.length).toBeGreaterThan(0);
 
-      const enabledValidations = rows.filter((r) => r.IsEnabled);
+      const enabledValidations = rows.filter(r => r.IsEnabled);
       expect(enabledValidations.length).toBeGreaterThanOrEqual(10);
 
-      log.debug('Loaded validations:', rows.map((r) => `${r.ValidationID}: ${r.ProcedureName}`));
+      log.debug(
+        'Loaded validations:',
+        rows.map(r => `${r.ValidationID}: ${r.ProcedureName}`)
+      );
     });
 
     it('should successfully run all enabled validations', async () => {
@@ -145,11 +148,7 @@ describe('Post-Ingestion Validation Tests', () => {
         }
       ]);
 
-      const validationRan = await runValidationForTest(
-        connection,
-        VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX,
-        { censusID: census2.censusID, plotID }
-      );
+      const validationRan = await runValidationForTest(connection, VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX, { censusID: census2.censusID, plotID });
 
       expect(validationRan).toBe(true);
 
@@ -160,9 +159,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX);
 
-      log.debug(
-        `ValidationID ${VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX}: Detected ${expectedGrowth}mm growth (threshold: ${DBH_GROWTH_THRESHOLD_MM}mm)`
-      );
+      log.debug(`ValidationID ${VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX}: Detected ${expectedGrowth}mm growth (threshold: ${DBH_GROWTH_THRESHOLD_MM}mm)`);
     });
 
     it('should NOT flag normal DBH growth under 65mm', async () => {
@@ -294,6 +291,46 @@ describe('Post-Ingestion Validation Tests', () => {
       // 65.1mm SHOULD trigger - just over threshold
       expect(errors.length).toBeGreaterThan(0);
     });
+
+    it('should NOT flag growth when the current measurement also has a dead status code', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const inserted = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+        {
+          treeTag: 'GROWTHDEAD01',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 6.0,
+          y: 6.0,
+          census1DBH: 100,
+          census2DBH: 200,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await connection.query('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)', [inserted.census2MeasurementIDs[0], 'D']);
+
+      await runValidationForTest(connection, VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX, {
+        censusID: census2.censusID,
+        plotID
+      });
+
+      const errors = await getValidationErrors(connection, {
+        validationID: VALIDATION_IDS.DBH_GROWTH_EXCEEDS_MAX,
+        treeTag: 'GROWTHDEAD01'
+      });
+
+      expect(errors.length).toBe(0);
+    });
   });
 
   describe('ValidationID 2: DBH Shrinkage Exceeds Maximum', () => {
@@ -326,11 +363,7 @@ describe('Post-Ingestion Validation Tests', () => {
         }
       ]);
 
-      const validationRan = await runValidationForTest(
-        connection,
-        VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX,
-        { censusID: census2.censusID, plotID }
-      );
+      const validationRan = await runValidationForTest(connection, VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX, { censusID: census2.censusID, plotID });
 
       expect(validationRan).toBe(true);
 
@@ -479,6 +512,46 @@ describe('Post-Ingestion Validation Tests', () => {
 
       // 5.1% SHOULD trigger - just over threshold
       expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('should NOT flag shrinkage when the previous-census measurement has a dead status code', async () => {
+      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
+      const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
+
+      if (!speciesCode || !quadratName) {
+        throw new Error('Test setup failed: missing species or quadrat data');
+      }
+
+      const inserted = await insertCrossCensusMeasurements(connection, testData, census1.censusID, census2.censusID, [
+        {
+          treeTag: 'SHRINKDEAD01',
+          stemTag: 'S001',
+          speciesCode,
+          quadratName,
+          x: 14.0,
+          y: 14.0,
+          census1DBH: 200,
+          census2DBH: 100,
+          hom: 1.3,
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
+          codes: 'A'
+        }
+      ]);
+
+      await connection.query('INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)', [inserted.census1MeasurementIDs[0], 'D']);
+
+      await runValidationForTest(connection, VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX, {
+        censusID: census2.censusID,
+        plotID
+      });
+
+      const errors = await getValidationErrors(connection, {
+        validationID: VALIDATION_IDS.DBH_SHRINKAGE_EXCEEDS_MAX,
+        treeTag: 'SHRINKDEAD01'
+      });
+
+      expect(errors.length).toBe(0);
     });
   });
 
@@ -739,9 +812,7 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.ABNORMALLY_HIGH_DBH);
 
-      log.debug(
-        `ValidationID ${VALIDATION_IDS.ABNORMALLY_HIGH_DBH}: Detected DBH=${extremeDBH}mm (threshold: ${ABSOLUTE_MAX_DBH_MM}mm)`
-      );
+      log.debug(`ValidationID ${VALIDATION_IDS.ABNORMALLY_HIGH_DBH}: Detected DBH=${extremeDBH}mm (threshold: ${ABSOLUTE_MAX_DBH_MM}mm)`);
     });
 
     it('should NOT flag DBH under 3500mm absolute maximum', async () => {
@@ -952,10 +1023,10 @@ describe('Post-Ingestion Validation Tests', () => {
 
       // Get the original quadrat
       const duplicateQuadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
-      const [origQuadratRows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-        [duplicateQuadratName, plotID]
-      );
+      const [origQuadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        duplicateQuadratName,
+        plotID
+      ]);
       const origQuadratID = origQuadratRows[0].QuadratID;
 
       // Create a SECOND quadrat with the SAME name but different ID
@@ -964,23 +1035,16 @@ describe('Post-Ingestion Validation Tests', () => {
          VALUES (?, ?, 100, 100, 20, 20, 400, 'square', 1)`,
         [plotID, duplicateQuadratName]
       );
-      const [newQuadratRows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE PlotID = ? AND StartX = 100 AND StartY = 100',
-        [plotID]
-      );
+      const [newQuadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE PlotID = ? AND StartX = 100 AND StartY = 100', [
+        plotID
+      ]);
       const newQuadratID = newQuadratRows[0].QuadratID;
 
-      const [speciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [speciesCode]
-      );
+      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [speciesCode]);
       const speciesID = speciesRows[0].SpeciesID;
 
       // Create measurement in ORIGINAL quadrat (needed for validation to detect duplicate names)
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DUPQUAD01', speciesID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPQUAD01', speciesID, census1.censusID]);
       const [tree1Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree1ID = tree1Rows[0].TreeID;
 
@@ -997,10 +1061,7 @@ describe('Post-Ingestion Validation Tests', () => {
       );
 
       // Create measurement in DUPLICATE quadrat (same name, different QuadratID)
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DUPQUAD02', speciesID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPQUAD02', speciesID, census1.censusID]);
       const [tree2Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree2ID = tree2Rows[0].TreeID;
 
@@ -1030,7 +1091,9 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES);
 
-      log.debug(`ValidationID ${VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES}: Detected duplicate quadrat name '${duplicateQuadratName}' (QuadratIDs: ${origQuadratID}, ${newQuadratID})`);
+      log.debug(
+        `ValidationID ${VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES}: Detected duplicate quadrat name '${duplicateQuadratName}' (QuadratIDs: ${origQuadratID}, ${newQuadratID})`
+      );
     });
 
     it('should NOT flag measurements when all quadrat names are unique', async () => {
@@ -1084,29 +1147,20 @@ describe('Post-Ingestion Validation Tests', () => {
         throw new Error('Test setup failed: need at least 2 species and 1 quadrat');
       }
 
-      const [quadratRows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-        [quadratName, plotID]
-      );
+      const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        quadratName,
+        plotID
+      ]);
       const quadratID = quadratRows[0].QuadratID;
 
-      const [species1Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [species1Code]
-      );
+      const [species1Rows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [species1Code]);
       const species1ID = species1Rows[0].SpeciesID;
 
-      const [species2Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [species2Code]
-      );
+      const [species2Rows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [species2Code]);
       const species2ID = species2Rows[0].SpeciesID;
 
       // Create first tree with TreeTag='DUPTAG01', species1
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DUPTAG01', species1ID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPTAG01', species1ID, census1.censusID]);
       const [tree1Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree1ID = tree1Rows[0].TreeID;
 
@@ -1127,10 +1181,7 @@ describe('Post-Ingestion Validation Tests', () => {
       );
 
       // Create second tree with SAME TreeTag='DUPTAG01' but different species (allowed by unique constraint)
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DUPTAG01', species2ID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPTAG01', species2ID, census1.censusID]);
       const [tree2Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree2ID = tree2Rows[0].TreeID;
 
@@ -1164,7 +1215,9 @@ describe('Post-Ingestion Validation Tests', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS);
 
-      log.debug(`ValidationID ${VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS}: Detected duplicate TreeTag='DUPTAG01' + StemTag='S001' (species: ${species1Code}, ${species2Code})`);
+      log.debug(
+        `ValidationID ${VALIDATION_IDS.DUPLICATE_TREE_STEM_TAGS}: Detected duplicate TreeTag='DUPTAG01' + StemTag='S001' (species: ${species1Code}, ${species2Code})`
+      );
     });
 
     it('should NOT flag when TreeTag+StemTag combinations are unique', async () => {
@@ -1228,29 +1281,20 @@ describe('Post-Ingestion Validation Tests', () => {
         throw new Error('Test setup failed: need at least 2 species and 1 quadrat');
       }
 
-      const [quadratRows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-        [quadratName, plotID]
-      );
+      const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        quadratName,
+        plotID
+      ]);
       const quadratID = quadratRows[0].QuadratID;
 
-      const [species1Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [species1Code]
-      );
+      const [species1Rows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [species1Code]);
       const species1ID = species1Rows[0].SpeciesID;
 
-      const [species2Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [species2Code]
-      );
+      const [species2Rows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [species2Code]);
       const species2ID = species2Rows[0].SpeciesID;
 
       // Create first tree with species1
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DIFFSP01', species1ID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DIFFSP01', species1ID, census1.censusID]);
       const [tree1Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree1ID = tree1Rows[0].TreeID;
 
@@ -1271,10 +1315,7 @@ describe('Post-Ingestion Validation Tests', () => {
       );
 
       // Create second tree with SAME TreeTag but DIFFERENT species
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['DIFFSP01', species2ID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DIFFSP01', species2ID, census1.censusID]);
       const [tree2Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const tree2ID = tree2Rows[0].TreeID;
 
@@ -1360,29 +1401,23 @@ describe('Post-Ingestion Validation Tests', () => {
         throw new Error('Test setup failed: need species and at least 2 quadrats');
       }
 
-      const [quadrat1Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-        [quadrat1Name, plotID]
-      );
+      const [quadrat1Rows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        quadrat1Name,
+        plotID
+      ]);
       const quadrat1ID = quadrat1Rows[0].QuadratID;
 
-      const [quadrat2Rows] = await connection.query<RowDataPacket[]>(
-        'SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?',
-        [quadrat2Name, plotID]
-      );
+      const [quadrat2Rows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+        quadrat2Name,
+        plotID
+      ]);
       const quadrat2ID = quadrat2Rows[0].QuadratID;
 
-      const [speciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [speciesCode]
-      );
+      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [speciesCode]);
       const speciesID = speciesRows[0].SpeciesID;
 
       // Create one tree
-      await connection.query(
-        'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)',
-        ['CROSSQUAD01', speciesID, census1.censusID]
-      );
+      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['CROSSQUAD01', speciesID, census1.censusID]);
       const [treeRows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
       const treeID = treeRows[0].TreeID;
 

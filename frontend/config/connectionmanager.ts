@@ -4,7 +4,7 @@ import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
-import { patchConnectionManager } from '@/lib/connectionlogger';
+import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
 import ailogger from '@/ailogger';
 
 /**
@@ -23,9 +23,14 @@ interface MySQLError extends Error {
  * Returns the first schema found, or null if none
  */
 function extractSchemaFromQuery(query: string): string | null {
-  // Match patterns like: FROM schema.table, JOIN schema.table, INTO schema.table, UPDATE schema.table
+  // Match patterns like: FROM schema.table, JOIN schema.table, INTO schema.table,
+  // UPDATE schema.table, CALL schema.procedure
   // Also handles backtick-quoted identifiers
-  const schemaPatterns = [/(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.\w+/i, /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.`?\w+`?/i];
+  const schemaPatterns = [
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.\w+/i,
+    /(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+`?(\w+)`?\.`?\w+`?/i,
+    /CALL\s+`?(\w+)`?\.`?\w+`?/i
+  ];
 
   for (const pattern of schemaPatterns) {
     const match = query.match(pattern);
@@ -225,9 +230,15 @@ class ConnectionManager {
     try {
       await connection.commit();
       ailogger.info(chalk.green(`Transaction committed: ${transactionId} (thread: ${(connection as PoolConnectionWithThreadId).threadId})`));
+
+      // Flush buffered changelog entries now that the transaction is committed
+      flushTransactionChangelog(transactionId);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error committing transaction: ${getErrorMessage(error)}`), errorObj);
+
+      // Discard changelog entries if commit itself failed
+      discardTransactionChangelog(transactionId);
       throw error;
     } finally {
       // Clean up application locks before releasing connection
@@ -272,6 +283,9 @@ class ConnectionManager {
       ailogger.error(chalk.red(`Error rolling back transaction: ${getErrorMessage(error)}`), errorObj);
       throw error;
     } finally {
+      // Discard any buffered changelog entries — the transaction was rolled back
+      discardTransactionChangelog(transactionId);
+
       // Clean up application locks before releasing connection
       await this.cleanupApplicationLocks(transactionId);
       connection.release();
@@ -392,8 +406,14 @@ class ConnectionManager {
       }, timeoutMs);
     });
 
+    // Capture the fn promise so we can handle its rejection if a timeout fires.
+    // Without this, the orphaned fn promise produces an unhandled rejection that
+    // can crash the Node.js process when it eventually fails (e.g. "No connection
+    // found for transaction" after the connection was released by rollback).
+    const fnPromise = fn(transactionId!);
+
     try {
-      const result = (await Promise.race([fn(transactionId!), timeoutPromise])) as T;
+      const result = (await Promise.race([fnPromise, timeoutPromise])) as T;
       // success path
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
@@ -422,9 +442,22 @@ class ConnectionManager {
       } catch (rbErr: unknown) {
         ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
+
+      // After rollback, the fn callback may still be in-flight. Its subsequent
+      // executeQuery calls will fail with "No connection found" because the
+      // connection was released during rollback. Swallow that eventual rejection
+      // to prevent an unhandled promise rejection crash.
+      fnPromise.catch((fnErr: unknown) => {
+        ailogger.warn(`Post-rollback callback error for transaction ${transactionId!} (expected): ${getErrorMessage(fnErr)}`);
+      });
+
       this.transactionMeta.delete(transactionId!);
       throw err;
     }
+  }
+
+  public hasActiveTransactions(): boolean {
+    return this.transactionConnections.size > 0;
   }
 
   public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {

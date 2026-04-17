@@ -7,6 +7,24 @@ import ailogger from '@/ailogger';
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+export async function POST(request: NextRequest) {
+  try {
+    const { schema, plotID, censusID } = await request.json();
+    if (!schema) throw new Error('no schema variable provided!');
+
+    await updateValidatedRows(schema, { p_CensusID: censusID ?? null, p_PlotID: plotID ?? null });
+    return new NextResponse(JSON.stringify({}), {
+      status: HTTPResponses.OK
+    });
+  } catch (error: any) {
+    ailogger.error('Error in update operation:', error.message);
+    return new NextResponse(JSON.stringify({ error: error.message }), {
+      status: HTTPResponses.INTERNAL_SERVER_ERROR
+    });
+  }
+}
+
+/** @deprecated Use POST instead. Kept for backward compatibility with old validation path. */
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');

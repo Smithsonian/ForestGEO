@@ -214,7 +214,7 @@ describe('Query Formatting Edge Cases', () => {
   });
 
   it('should handle DELETE statements', () => {
-    const result = safeFormatQuery('forestgeo', 'DELETE FROM ??.failedmeasurements WHERE PlotID = ?');
+    const result = safeFormatQuery('forestgeo', 'DELETE FROM ??.coremeasurements WHERE PlotID = ?');
     expect(result).toContain('DELETE FROM');
     expect(result).toContain('`forestgeo`');
   });
@@ -230,23 +230,23 @@ describe('Endpoint-Specific Security Tests', () => {
   describe('Reingest Endpoint Security', () => {
     it('should validate schema parameter', () => {
       expect(() => {
-        safeFormatQuery('malicious', 'SELECT COUNT(*) as total FROM ??.failedmeasurements');
+        safeFormatQuery('malicious', 'SELECT COUNT(*) as total FROM ??.coremeasurements');
       }).toThrow();
     });
 
     it('should format moveFailedToTemporary queries safely', () => {
-      const countSQL = safeFormatQuery('forestgeo', 'SELECT COUNT(*) as total FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-      expect(countSQL).toContain('`forestgeo`.failedmeasurements');
+      const countSQL = safeFormatQuery('forestgeo', 'SELECT COUNT(*) as total FROM ??.coremeasurements WHERE PlotID = ? AND CensusID = ?');
+      expect(countSQL).toContain('`forestgeo`.coremeasurements');
     });
 
     it('should format INSERT with JOIN safely', () => {
       // safeFormatQuery uses formatWithSchema which counts ?? placeholders
       // and fills each with the schema name
-      const insertSQL = safeFormatQuery('forestgeo', "INSERT IGNORE INTO ??.temporarymeasurements SELECT 'file' AS FileID, fm.* FROM ??.failedmeasurements fm");
+      const insertSQL = safeFormatQuery('forestgeo', "INSERT IGNORE INTO ??.temporarymeasurements SELECT 'file' AS FileID, fm.* FROM ??.coremeasurements fm");
       const matches = insertSQL.match(/`forestgeo`/g);
       expect(matches).toHaveLength(2);
       expect(insertSQL).toContain('`forestgeo`.temporarymeasurements');
-      expect(insertSQL).toContain('`forestgeo`.failedmeasurements');
+      expect(insertSQL).toContain('`forestgeo`.coremeasurements');
     });
   });
 
@@ -254,9 +254,9 @@ describe('Endpoint-Specific Security Tests', () => {
     it('should format queries with table name identifier', () => {
       // Simulating the format call with both schema and table name
       const { format } = require('mysql2/promise');
-      const result = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', ['forestgeo', 'failedmeasurements']);
+      const result = format('SELECT COUNT(*) as total FROM ??.?? WHERE PlotID = ? AND CensusID = ?', ['forestgeo', 'coremeasurements']);
       expect(result).toContain('`forestgeo`');
-      expect(result).toContain('`failedmeasurements`');
+      expect(result).toContain('`coremeasurements`');
     });
   });
 

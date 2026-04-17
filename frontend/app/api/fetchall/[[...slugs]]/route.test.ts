@@ -1,6 +1,7 @@
 // app/api/fetchall/[[...slugs]]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
+import { validateContextualValues } from '@/lib/contextvalidation';
 // ========== Import route AFTER mocks ==========
 import { GET } from './route';
 import ConnectionManager from '@/config/connectionmanager'; // ========== Helpers ==========
@@ -153,7 +154,7 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('stems: uses stored plotID/census from cookies and returns mapped results', async () => {
+  it('stems: prefers stored plotID/census from cookies and returns mapped results', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ StemGUID: 1 }, { StemGUID: 2 }]);
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
@@ -178,6 +179,31 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
 
     expect(getMapperSpy).toHaveBeenCalledWith('stems');
     expect(mapDataSpy).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('stems: falls back to slug plotID and plot census number when cookie-backed census context is missing', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ StemGUID: 10 }]);
+    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    vi.mocked(validateContextualValues).mockResolvedValueOnce({
+      success: true,
+      values: {
+        schema: 'myschema',
+        plotID: undefined,
+        censusID: undefined
+      }
+    } as any);
+
+    const req = makeRequest('myschema');
+    const res = await GET(req, makeProps(['stems', '22', '4']));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.json()).toEqual([{ StemGUID: 10, mapped: true }]);
+
+    const [_sql, params] = exec.mock.calls[0];
+    expect(params).toEqual([22, 4]);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -230,13 +256,9 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(params).toEqual([7, 42]); // storedPCN, storedPlotID
   });
 
-  it('census: runs UPDATE then SELECT by stored PlotID; maps results', async () => {
+  it('census: uses a read-only aggregate query by stored PlotID; maps results', async () => {
     const cm = (ConnectionManager as any).getInstance();
-    const exec = vi.spyOn(cm, 'executeQuery');
-    // First call: UPDATE (no rows asserted)
-    exec.mockResolvedValueOnce(undefined as any);
-    // Second call: SELECT
-    exec.mockResolvedValueOnce([{ CensusID: 11, StartDate: '2024-01-01', EndDate: '2024-12-31' }]);
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CensusID: 11, StartDate: '2024-01-01', EndDate: '2024-12-31' }]);
 
     const req = makeRequest('myschema');
     const res = await GET(req, makeProps(['census', '0', '0']));
@@ -245,12 +267,14 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     const body = await res.json();
     expect(body).toEqual([{ CensusID: 11, StartDate: '2024-01-01', EndDate: '2024-12-31', mapped: true }]);
 
-    expect(exec).toHaveBeenCalledTimes(2);
-    const [sql1] = exec.mock.calls[0];
-    const [sql2, params2] = exec.mock.calls[1];
-    expect(String(sql1)).toMatch(/^UPDATE myschema\.census c/i);
-    expect(String(sql2)).toMatch(/^SELECT \* FROM myschema\.census WHERE PlotID = \?/i);
-    expect(params2).toEqual([42]);
+    expect(exec).toHaveBeenCalledTimes(1);
+    const [sql, params] = exec.mock.calls[0];
+    expect(String(sql)).toMatch(/^SELECT c\.CensusID,/i);
+    expect(String(sql)).toMatch(/LEFT JOIN \(/i);
+    expect(String(sql)).toMatch(/FROM myschema\.coremeasurements cm/i);
+    expect(String(sql)).toMatch(/WHERE c1\.PlotID = \?/i);
+    expect(String(sql)).toMatch(/WHERE c\.PlotID = \?/i);
+    expect(params).toEqual([42, 42]);
   });
 
   it('default branch: generic SELECT * FROM schema.table; maps results', async () => {

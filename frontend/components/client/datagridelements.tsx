@@ -54,7 +54,7 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { CallSplit, ErrorOutline, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
+import { CallSplit, Forest, Grass, MoreVert, RuleOutlined, UnfoldLess, UnfoldMore, Warning } from '@mui/icons-material';
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -71,6 +71,7 @@ declare module '@mui/x-data-grid' {
     handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
     handleExportAll?: () => Promise<void>;
     handleExportCSV?: () => Promise<void>;
+    showToolbarActions?: boolean;
     hidingEmptyColumns?: boolean;
     handleToggleHideEmptyColumns?: (checked: boolean) => void;
     handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
@@ -92,7 +93,6 @@ declare module '@mui/x-data-grid' {
     nrControls?: RowControl;
     hidingEmpty?: boolean;
     setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
-    failedControls?: { trigger: () => void; count: number };
   }
 }
 
@@ -109,6 +109,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     handleExport,
     handleExportAll,
     handleExportCSV,
+    showToolbarActions = true,
     handleQuickFilterChange,
     filterModel,
     dynamicButtons = [],
@@ -125,11 +126,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     msControls = defaultControl,
     nrControls = defaultControl,
     hidingEmpty,
-    setHidingEmpty,
-    failedControls = {
-      trigger: () => {},
-      count: 0
-    }
+    setHidingEmpty
   } = props;
 
   // Hooks must be called before any early returns
@@ -328,37 +325,18 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
             </Button>
             {gridType === 'measurements' && (
               <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
-                <Tooltip
-                  title={
-                    failedControls.count > 0 && errorControls.count > 0
-                      ? `Invalid: ${errorControls.count + failedControls.count} (${failedControls.count} unsubmitted, ${errorControls.count} validation errors)`
-                      : failedControls.count > 0
-                      ? `Invalid: ${failedControls.count} (unsubmitted - missing required data)`
-                      : `Invalid: ${errorControls.count} (validation errors)`
-                  }
-                >
-                  <Badge badgeContent={errorControls.count + failedControls.count} size={'sm'}>
+                <Tooltip title={`Invalid: ${errorControls.count} (rows with unresolved errors)`}>
+                  <Badge badgeContent={errorControls.count} size={'sm'}>
                     <IconButton
-                      disabled={!errorControls.count && !failedControls.count}
+                      disabled={!errorControls.count}
                       variant="soft"
-                      color={errorControls.show || failedControls.count > 0 ? 'danger' : 'neutral'}
-                      onClick={() => {
-                        if (failedControls.count > 0) {
-                          failedControls.trigger();
-                        } else {
-                          errorControls.toggle(!errorControls.show);
-                        }
-                      }}
-                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count + failedControls.count})`}
+                      color={errorControls.show ? 'danger' : 'neutral'}
+                      onClick={() => errorControls.toggle(!errorControls.show)}
+                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
                       aria-pressed={errorControls.show}
                       data-testid="filter-errors"
-                      sx={{
-                        '& svg': {
-                          color: failedControls.count > 0 ? 'error.main' : errorControls.count > 0 ? 'warning.main' : 'inherit'
-                        }
-                      }}
                     >
-                      {failedControls.count > 0 ? <ErrorOutline /> : <Warning />}
+                      <Warning />
                     </IconButton>
                   </Badge>
                 </Tooltip>
@@ -377,16 +355,15 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </IconButton>
                   </Badge>
                 </Tooltip>
-                <Tooltip
-                  title={`Pending: (${pendingControls.count}) - Always Shown\nPending rows must remain visible to prevent edited measurements from disappearing during validation`}
-                >
+                <Tooltip title={`Pending: (${pendingControls.count})`}>
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
                     <IconButton
-                      variant="solid"
-                      color={'primary'}
-                      sx={{ cursor: 'default', pointerEvents: 'none' }}
-                      aria-label={`Pending measurements (${pendingControls.count}) - always visible to preserve edited measurements during validation`}
-                      aria-pressed={true}
+                      variant="soft"
+                      disabled={!pendingControls.count}
+                      color={pendingControls.show ? 'primary' : 'neutral'}
+                      onClick={() => pendingControls.toggle(!pendingControls.show)}
+                      aria-label={`${pendingControls.show ? 'Hide' : 'Show'} pending measurements (${pendingControls.count})`}
+                      aria-pressed={pendingControls.show}
                       data-testid="filter-pending"
                     >
                       <ScheduleIcon />
@@ -441,109 +418,113 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </Stack>
             )}
           </Box>
-          <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-          {/* Right section - action buttons */}
-          <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            {/* Manual Entry Form - icon only with tooltip */}
-            {dynamicButtons
-              .filter((button: any) => button.label === 'Manual Entry Form')
-              .map((button: any, index: number) => (
-                <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
-                  <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
-                    {button.icon}
-                  </IconButton>
-                </Tooltip>
-              ))}
-            {/* Upload - keep as button with text */}
-            {dynamicButtons
-              .filter((button: any) => button.label === 'Upload')
-              .map((button: any, index: number) => (
-                <Tooltip key={index} title={button.tooltip} placement="top" arrow>
-                  <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
-                    {button.label}
-                  </Button>
-                </Tooltip>
-              ))}
-            {/* Export as CSV button */}
-            {hasAnyExport && (
-              <Tooltip title="Export as CSV" placement="top" arrow>
-                <IconButton
-                  onClick={async () => {
-                    if (handleExport) {
-                      setOpenExportModal(true);
-                    } else if (handleExportCSV) {
-                      await handleExportCSV();
-                    } else {
-                      await handleExportAll!();
-                    }
-                  }}
-                  variant="soft"
-                  color="primary"
-                  aria-label="Export as CSV"
-                >
-                  <CloudDownloadIcon />
-                </IconButton>
-              </Tooltip>
-            )}
-            {/* Show/Hide empty columns button */}
-            {setHidingEmpty && (
-              <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
-                <IconButton
-                  onClick={() => setHidingEmpty(!hidingEmpty)}
-                  variant="soft"
-                  color="primary"
-                  aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
-                >
-                  {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
-                </IconButton>
-              </Tooltip>
-            )}
-            {/* Kebab menu for additional actions */}
-            <Dropdown>
-              <Tooltip title="More actions" placement="top" arrow>
-                <MenuButton
-                  slots={{ root: Button }}
-                  slotProps={{
-                    root: {
-                      variant: 'soft',
-                      color: 'primary',
-                      size: 'sm',
-                      'aria-label': 'More actions',
-                      startDecorator: <MoreVert />
-                    }
-                  }}
-                >
-                  More
-                </MenuButton>
-              </Tooltip>
-              <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
-                {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+          {showToolbarActions && (
+            <>
+              <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+              {/* Right section - action buttons */}
+              <Stack direction="row" spacing={1} sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                {/* Manual Entry Form - icon only with tooltip */}
                 {dynamicButtons
-                  .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
-                  .map(
-                    (button: any, index: number) =>
-                      button.tooltip && (
-                        <MenuItem key={index} onClick={button.onClick}>
-                          <ListItemDecorator>{button.icon}</ListItemDecorator>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                            <Typography level="body-sm">{button.label}</Typography>
-                            <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
-                              {button.tooltip}
-                            </Typography>
-                          </Box>
-                          {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
-                        </MenuItem>
-                      )
-                  )}
-                {validationMenu && (
-                  <Box>
-                    <Divider />
-                    {validationMenu}
-                  </Box>
+                  .filter((button: any) => button.label === 'Manual Entry Form')
+                  .map((button: any, index: number) => (
+                    <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
+                      <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
+                        {button.icon}
+                      </IconButton>
+                    </Tooltip>
+                  ))}
+                {/* Upload - keep as button with text */}
+                {dynamicButtons
+                  .filter((button: any) => button.label === 'Upload')
+                  .map((button: any, index: number) => (
+                    <Tooltip key={index} title={button.tooltip} placement="top" arrow>
+                      <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
+                        {button.label}
+                      </Button>
+                    </Tooltip>
+                  ))}
+                {/* Export as CSV button */}
+                {hasAnyExport && (
+                  <Tooltip title="Export as CSV" placement="top" arrow>
+                    <IconButton
+                      onClick={async () => {
+                        if (handleExport) {
+                          setOpenExportModal(true);
+                        } else if (handleExportCSV) {
+                          await handleExportCSV();
+                        } else {
+                          await handleExportAll!();
+                        }
+                      }}
+                      variant="soft"
+                      color="primary"
+                      aria-label="Export as CSV"
+                    >
+                      <CloudDownloadIcon />
+                    </IconButton>
+                  </Tooltip>
                 )}
-              </Menu>
-            </Dropdown>
-          </Stack>
+                {/* Show/Hide empty columns button */}
+                {setHidingEmpty && (
+                  <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
+                    <IconButton
+                      onClick={() => setHidingEmpty(!hidingEmpty)}
+                      variant="soft"
+                      color="primary"
+                      aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
+                    >
+                      {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {/* Kebab menu for additional actions */}
+                <Dropdown>
+                  <Tooltip title="More actions" placement="top" arrow>
+                    <MenuButton
+                      slots={{ root: Button }}
+                      slotProps={{
+                        root: {
+                          variant: 'soft',
+                          color: 'primary',
+                          size: 'sm',
+                          'aria-label': 'More actions',
+                          startDecorator: <MoreVert />
+                        }
+                      }}
+                    >
+                      More
+                    </MenuButton>
+                  </Tooltip>
+                  <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
+                    {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+                    {dynamicButtons
+                      .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
+                      .map(
+                        (button: any, index: number) =>
+                          button.tooltip && (
+                            <MenuItem key={index} onClick={button.onClick}>
+                              <ListItemDecorator>{button.icon}</ListItemDecorator>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                <Typography level="body-sm">{button.label}</Typography>
+                                <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
+                                  {button.tooltip}
+                                </Typography>
+                              </Box>
+                              {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
+                            </MenuItem>
+                          )
+                      )}
+                    {validationMenu && (
+                      <Box>
+                        <Divider />
+                        {validationMenu}
+                      </Box>
+                    )}
+                  </Menu>
+                </Dropdown>
+              </Stack>
+            </>
+          )}
         </Box>
         {handleExport && (
           <Modal

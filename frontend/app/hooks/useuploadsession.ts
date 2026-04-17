@@ -35,7 +35,8 @@ export interface UseUploadSessionReturn {
   sessionId: string | null;
   session: UploadSessionState;
   isSessionActive: boolean;
-  createSession: (fileId: string, totalChunks?: number, fileHash?: string) => Promise<string | null>;
+  getCurrentSessionId: () => string | null;
+  createSession: (fileId: string, totalChunks?: number, fileHash?: string, mode?: string) => Promise<string | null>;
   updateProgress: (updates: { uploadedChunks?: number; processedBatches?: number; totalBatches?: number; state?: string }) => Promise<void>;
   updateState: (state: string, errorMessage?: string) => Promise<void>;
   completeSession: () => Promise<void>;
@@ -66,10 +67,22 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
   const MAX_HEARTBEAT_FAILURES = 3;
 
   /**
+   * Stop heartbeat interval
+   */
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+      ailogger.info('[useUploadSession] Stopped heartbeat interval');
+    }
+  }, []);
+
+  /**
    * Send heartbeat to server
    */
   const sendHeartbeat = useCallback(async (): Promise<boolean> => {
-    if (!sessionIdRef.current) return false;
+    // Skip heartbeat if session is already cleared (completed/abandoned/unmounting)
+    if (!sessionIdRef.current || !isMountedRef.current) return false;
 
     try {
       const response = await fetch('/api/uploadsession', {
@@ -87,24 +100,28 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
         return true;
       }
 
-      // Session not found or expired
+      // A 404 means the server no longer recognizes this session. Clear it
+      // immediately so the uploader cannot keep reusing a dead session ID.
       if (response.status === 404) {
         ailogger.warn('[useUploadSession] Session expired or not found');
-        consecutiveHeartbeatFailures.current++;
-        if (consecutiveHeartbeatFailures.current >= MAX_HEARTBEAT_FAILURES) {
-          if (isMountedRef.current) {
-            setSession(prev => ({ ...prev, isActive: false, error: 'Session expired' }));
-          }
-          onSessionExpired?.();
+        consecutiveHeartbeatFailures.current = MAX_HEARTBEAT_FAILURES;
+        stopHeartbeat();
+        sessionIdRef.current = null;
+        if (isMountedRef.current) {
+          setSession(prev => ({ ...prev, sessionId: null, isActive: false, error: 'Session expired' }));
         }
+        onSessionExpired?.();
         return false;
       }
 
       consecutiveHeartbeatFailures.current++;
       return false;
     } catch (error: unknown) {
+      // Ignore errors when component is unmounting (aborted requests)
+      if (!isMountedRef.current) return false;
+
       consecutiveHeartbeatFailures.current++;
-      ailogger.error('[useUploadSession] Heartbeat failed:', error instanceof Error ? error : new Error(String(error)));
+      ailogger.warn('[useUploadSession] Heartbeat failed:', error instanceof Error ? error : new Error(String(error)));
       onHeartbeatFailed?.(error instanceof Error ? error : new Error(String(error)));
 
       if (consecutiveHeartbeatFailures.current >= MAX_HEARTBEAT_FAILURES) {
@@ -115,7 +132,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       }
       return false;
     }
-  }, [schema, onSessionExpired, onHeartbeatFailed]);
+  }, [schema, onSessionExpired, onHeartbeatFailed, stopHeartbeat]);
 
   /**
    * Start heartbeat interval
@@ -133,21 +150,10 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
   }, [heartbeatInterval, sendHeartbeat]);
 
   /**
-   * Stop heartbeat interval
-   */
-  const stopHeartbeat = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-      ailogger.info('[useUploadSession] Stopped heartbeat interval');
-    }
-  }, []);
-
-  /**
    * Create a new upload session
    */
   const createSession = useCallback(
-    async (fileId: string, totalChunks: number = 0, fileHash?: string): Promise<string | null> => {
+    async (fileId: string, totalChunks: number = 0, fileHash?: string, mode?: string): Promise<string | null> => {
       try {
         const response = await fetch('/api/uploadsession', {
           method: 'POST',
@@ -159,7 +165,8 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
             userId,
             fileId,
             totalChunks,
-            fileHash
+            fileHash,
+            mode
           })
         });
 
@@ -245,7 +252,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
       if (!sessionIdRef.current) return;
 
       try {
-        await fetch('/api/uploadsession', {
+        const response = await fetch('/api/uploadsession', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -256,6 +263,11 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
             errorMessage
           })
         });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || `Failed to update upload session state to ${state}`);
+        }
 
         if (isMountedRef.current) {
           setSession(prev => ({ ...prev, state, error: errorMessage || prev.error }));
@@ -271,7 +283,12 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
           }
         }
       } catch (error: unknown) {
-        ailogger.error('[useUploadSession] Failed to update state:', error instanceof Error ? error : new Error(String(error)));
+        const err = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('[useUploadSession] Failed to update state:', err);
+        if (isMountedRef.current) {
+          setSession(prev => ({ ...prev, error: err.message }));
+        }
+        throw err;
       }
     },
     [schema, stopHeartbeat]
@@ -328,6 +345,10 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
     return !!sessionIdRef.current && session.isActive && !session.error;
   }, [session.isActive, session.error]);
 
+  const getCurrentSessionId = useCallback((): string | null => {
+    return sessionIdRef.current;
+  }, []);
+
   /**
    * Handle page visibility change (pause/resume heartbeat)
    */
@@ -368,7 +389,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
             state: 'abandoned',
             errorMessage: 'User closed browser during upload'
           });
-          navigator.sendBeacon('/api/uploadsession', data);
+          navigator.sendBeacon('/api/uploadsession', new Blob([data], { type: 'application/json' }));
         }
       }
     };
@@ -389,18 +410,16 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
 
       // Mark session as abandoned if still active
       if (sessionIdRef.current) {
-        // Fire-and-forget cleanup
-        fetch('/api/uploadsession', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schema,
-            sessionId: sessionIdRef.current,
-            action: 'updateState',
-            state: 'abandoned',
-            errorMessage: 'Component unmounted during upload'
-          }),
-          keepalive: true // Ensure request completes even after page unload
+        const sessionId = sessionIdRef.current;
+        // Clear the ref first so any stale async work from an unmounted uploader
+        // cannot keep reusing a session that is being torn down.
+        sessionIdRef.current = null;
+        // Fire-and-forget cleanup. This is especially important during development,
+        // where Fast Refresh can unmount the uploader mid-file and otherwise leave
+        // partial temporary rows behind for the next retry.
+        fetch(`/api/uploadsession?schema=${schema}&sessionId=${sessionId}&cleanup=true`, {
+          method: 'DELETE',
+          keepalive: true
         }).catch(() => {
           // Ignore errors on cleanup
         });
@@ -412,6 +431,7 @@ export function useUploadSession(options: UseUploadSessionOptions): UseUploadSes
     sessionId: session.sessionId,
     session,
     isSessionActive: session.isActive,
+    getCurrentSessionId,
     createSession,
     updateProgress,
     updateState,

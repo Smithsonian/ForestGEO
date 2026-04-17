@@ -48,6 +48,7 @@ export interface CensusesOverviewProps {
   isLoading?: boolean;
   onCensusDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
   onAddCensus?: () => void;
+  onSelectCensus?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
 
 function CensusCardSkeleton() {
@@ -146,9 +147,10 @@ interface CensusCardProps {
   census: OrgCensusRDS | CensusWithStats;
   index: number;
   onDelete?: (census: OrgCensusRDS | CensusWithStats) => void;
+  onSelect?: (census: OrgCensusRDS | CensusWithStats) => void;
 }
 
-function CensusCard({ census, index, onDelete }: CensusCardProps) {
+function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
   const gradient = CENSUS_GRADIENTS[index % CENSUS_GRADIENTS.length];
   const status = getCensusStatus(census.dateRanges);
   const duration = calculateDuration(census.dateRanges);
@@ -171,10 +173,24 @@ function CensusCard({ census, index, onDelete }: CensusCardProps) {
       : null;
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
       component="article"
       variant="solid"
-      aria-label={`Census ${census.plotCensusNumber}. Status: ${statusConfig[status].label}. ${formatDateRange(census.dateRanges)}.${census.description ? ` Description: ${census.description}.` : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Census ${census.plotCensusNumber}. Status: ${statusConfig[status].label}. ${formatDateRange(census.dateRanges)}.${census.description ? ` Description: ${census.description}.` : ''}${onSelect ? ' Click to select.' : ''}`}
+      onClick={onSelect ? () => onSelect(census) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(census);
+              }
+            }
+          : undefined
+      }
       sx={{
         background: gradient,
         color: 'white',
@@ -182,6 +198,14 @@ function CensusCard({ census, index, onDelete }: CensusCardProps) {
         position: 'relative',
         overflow: 'hidden',
         border: 'none',
+        ...(onSelect && {
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
+          }
+        }),
 
         // Decorative overlay
         '&::before': {
@@ -487,7 +511,15 @@ const gridStyles = {
   margin: 0
 };
 
-export default function CensusesOverview({ censuses, plotName, siteName, isLoading = false, onCensusDelete, onAddCensus }: CensusesOverviewProps) {
+export default function CensusesOverview({
+  censuses,
+  plotName,
+  siteName,
+  isLoading = false,
+  onCensusDelete,
+  onAddCensus,
+  onSelectCensus
+}: CensusesOverviewProps) {
   if (isLoading) {
     return (
       <Box component="section" aria-label="Loading censuses" aria-busy="true" sx={gridStyles}>
@@ -574,7 +606,7 @@ export default function CensusesOverview({ censuses, plotName, siteName, isLoadi
       <Box component="ul" sx={gridStyles}>
         {sortedCensuses.map((census, index) => (
           <Box component="li" key={census.plotCensusNumber ?? index}>
-            <CensusCard census={census} index={index} onDelete={onCensusDelete} />
+            <CensusCard census={census} index={index} onDelete={onCensusDelete} onSelect={onSelectCensus} />
           </Box>
         ))}
       </Box>

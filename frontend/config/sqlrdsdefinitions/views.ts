@@ -63,6 +63,7 @@ export interface MeasurementsSummaryRDS {
   isValidated?: boolean;
   description?: string;
   attributes?: string;
+  rawCodes?: string;
   userDefinedFields?: string;
   errors?: string;
 }
@@ -169,6 +170,7 @@ export interface ViewFullTableRDS {
   familyID?: number;
   family?: string;
   attributes?: string;
+  rawCodes?: string;
   userDefinedFields?: string;
 }
 

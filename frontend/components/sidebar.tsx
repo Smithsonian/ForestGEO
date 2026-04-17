@@ -27,10 +27,11 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
+import { Plot, Site, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, CheckCircle, Cancel, Clear } from '@mui/icons-material';
 import CensusDeletionModal from '@/components/client/modals/censusdeletionmodal';
+import ValidationStatusBadge from '@/components/client/validationstatusbadge';
 import ailogger from '@/ailogger';
 
 export interface SimpleTogglerProps {
@@ -77,7 +78,6 @@ function MenuRenderToggle(
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -96,7 +96,7 @@ function MenuRenderToggle(
           color="danger"
           variant={isParentDataIncomplete ? 'solid' : 'soft'}
           badgeContent={isParentDataIncomplete ? '!' : undefined}
-          invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
+          invisible={!isParentDataIncomplete || !currentSite || !currentPlot}
           aria-label={isParentDataIncomplete ? 'Warning: Some subsections have missing data' : undefined}
         >
           <Icon />
@@ -261,7 +261,7 @@ export default function Sidebar(props: SidebarProps) {
         setCensusToDelete(null);
         setManualReset(true);
       } catch (error: any) {
-        ailogger.error('Failed to delete census:', error);
+        ailogger.error(`Failed to delete census: ${error?.message ?? error}`, error instanceof Error ? error : undefined);
       } finally {
         setLoading(false);
         setIsDeletingCensus(false);
@@ -616,27 +616,19 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
   const renderSiteOptions = () => {
+    const isGlobalUser = session?.user?.userStatus === 'global';
+    const sortByName = (a: SitesRDS, b: SitesRDS) => {
+      const nameA = a.siteName?.toLowerCase() ?? '';
+      const nameB = b.siteName?.toLowerCase() ?? '';
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return 0;
+    };
     const allowedSites = Array.isArray(siteListContext)
-      ? siteListContext
-          .filter(site => session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort((a, b) => {
-            const nameA = a.siteName?.toLowerCase() ?? '';
-            const nameB = b.siteName?.toLowerCase() ?? '';
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
-          })
+      ? siteListContext.filter(site => isGlobalUser || session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort(sortByName)
       : [];
     const otherSites = Array.isArray(siteListContext)
-      ? siteListContext
-          .filter(site => !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
-          .sort((a, b) => {
-            const nameA = a.siteName?.toLowerCase() ?? '';
-            const nameB = b.siteName?.toLowerCase() ?? '';
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
-          })
+      ? siteListContext.filter(site => !isGlobalUser && !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort(sortByName)
       : [];
 
     return (
@@ -724,11 +716,12 @@ export default function Sidebar(props: SidebarProps) {
       // Check for sub-links
       switch (linkHref) {
         case '/summary':
+        case '/errors':
           return !isAllValiditiesTrue;
         case '/subquadrats':
           return !validity['quadrats'];
         case '/quadratpersonnel':
-          return !(validity['quadrats'] && validity['personnel']);
+          return !validity['quadrats'];
         default:
           const dataKey = validityMapping[linkHref];
           return dataKey !== undefined && !validity[dataKey];
@@ -741,7 +734,7 @@ export default function Sidebar(props: SidebarProps) {
         case '/subquadrats':
           return !validity['quadrats'];
         case '/quadratpersonnel':
-          return !(validity['quadrats'] && validity['personnel']);
+          return !validity['quadrats'];
         default:
           return false;
       }
@@ -907,6 +900,15 @@ export default function Sidebar(props: SidebarProps) {
                           </Tooltip>
                         )}
                       </Box>
+                      {currentCensus && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                          <ValidationStatusBadge
+                            schema={currentSite?.schemaName}
+                            plotID={currentPlot?.plotID}
+                            censusID={currentCensus?.dateRanges?.[0]?.censusID}
+                          />
+                        </Box>
+                      )}
                       <Divider orientation="horizontal" sx={{ marginTop: 2 }} />
                     </>
                   )}
@@ -946,6 +948,7 @@ export default function Sidebar(props: SidebarProps) {
                       if (isDataIncomplete) {
                         switch (href) {
                           case '/summary':
+                          case '/errors':
                             return 'Missing supporting data!';
                           case '/subquadrats':
                             return 'Subquadrats cannot be viewed until quadrats are valid.';
@@ -963,24 +966,69 @@ export default function Sidebar(props: SidebarProps) {
                       switch (href) {
                         case '/measurementshub':
                         case '/summary':
+                        case '/errors':
                           return !isAllValiditiesTrue;
                         case '/subquadrats':
                           return !validity['quadrats'];
                         case '/quadratpersonnel':
-                          return !(validity['quadrats'] && validity['personnel']);
+                          return !validity['quadrats'];
                         default:
                           return false;
                       }
                     };
 
                     if (item.expanded.length === 0) {
-                      const isLinkDisabled = getDisabledState(item.href);
-                      const isDataIncomplete = shouldApplyTooltip(item);
+                      const isDashboard = item.href === '/dashboard';
+                      const isLinkDisabled = isDashboard ? false : getDisabledState(item.href);
+                      const isDataIncomplete = isDashboard ? false : shouldApplyTooltip(item);
+
+                      const handleDashboardClick = async () => {
+                        await handleCensusSelection(undefined);
+                        router.push('/dashboard');
+                        setTimeout(() => {
+                          const mainContent = document.getElementById('main-content');
+                          if (mainContent) {
+                            mainContent.focus();
+                            mainContent.scrollIntoView();
+                          }
+                        }, 100);
+                      };
+
+                      const handleNavClick = () => {
+                        if (!isLinkDisabled) {
+                          router.push(item.href);
+                          setTimeout(() => {
+                            const mainContent = document.getElementById('main-content');
+                            if (mainContent) {
+                              mainContent.focus();
+                              mainContent.scrollIntoView();
+                            }
+                          }, 100);
+                        }
+                      };
+
+                      // Dashboard button is always visible, other non-expanding items require site+plot
+                      const transitionIn = isDashboard ? true : currentSite !== undefined && currentPlot !== undefined;
 
                       return (
-                        <TransitionComponent key={item.href} in={currentSite !== undefined && currentPlot !== undefined} direction="down">
+                        <TransitionComponent key={item.href} in={transitionIn} direction="down">
                           <ListItem data-testid={`navigate-list-item-nonexpanding-${item.label}`}>
-                            {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                            {isDashboard ? (
+                              <Box sx={{ display: 'flex', flex: 1 }} data-testid={'dashboard-nav-wrapper'}>
+                                <ListItemButton
+                                  selected={pathname === item.href && !currentCensus}
+                                  data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
+                                  sx={{ flex: 1, width: '100%' }}
+                                  color={pathname === item.href && !currentCensus ? 'primary' : undefined}
+                                  onClick={handleDashboardClick}
+                                >
+                                  <Icon />
+                                  <ListItemContent>
+                                    <Typography level={'title-sm'}>{item.label}</Typography>
+                                  </ListItemContent>
+                                </ListItemButton>
+                              </Box>
+                            ) : currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
@@ -989,19 +1037,7 @@ export default function Sidebar(props: SidebarProps) {
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
                                     color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={() => {
-                                      if (!isLinkDisabled) {
-                                        router.push(item.href);
-                                        // Move focus to main content after navigation
-                                        setTimeout(() => {
-                                          const mainContent = document.getElementById('main-content');
-                                          if (mainContent) {
-                                            mainContent.focus();
-                                            mainContent.scrollIntoView();
-                                          }
-                                        }, 100);
-                                      }
-                                    }}
+                                    onClick={handleNavClick}
                                   >
                                     <Badge
                                       color="danger"
@@ -1025,19 +1061,7 @@ export default function Sidebar(props: SidebarProps) {
                                   sx={{ flex: 1, width: '100%' }}
                                   disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
                                   color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={() => {
-                                    if (!isLinkDisabled) {
-                                      router.push(item.href);
-                                      // Move focus to main content after navigation
-                                      setTimeout(() => {
-                                        const mainContent = document.getElementById('main-content');
-                                        if (mainContent) {
-                                          mainContent.focus();
-                                          mainContent.scrollIntoView();
-                                        }
-                                      }, 100);
-                                    }
-                                  }}
+                                  onClick={handleNavClick}
                                 >
                                   <Icon />
                                   <ListItemContent>
@@ -1062,7 +1086,7 @@ export default function Sidebar(props: SidebarProps) {
                               renderToggle={MenuRenderToggle(
                                 {
                                   plotSelectionRequired: currentPlot === undefined,
-                                  censusSelectionRequired: currentCensus === undefined,
+                                  censusSelectionRequired: item.href !== '/fixeddatainput' && currentCensus === undefined,
                                   pathname: pathname ?? '',
                                   isParentDataIncomplete: isParentDataIncomplete
                                 },
@@ -1075,13 +1099,16 @@ export default function Sidebar(props: SidebarProps) {
                               <List size={'md'}>
                                 {item.expanded.map((link, _subIndex) => {
                                   const SubIcon = link.icon;
+                                  const isMeasurementsViewLink = link.href === '/summary' || link.href === '/errors';
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
-                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
+                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (isMeasurementsViewLink && !isAllValiditiesTrue));
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} direction="down">
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
-                                        {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                                        {currentSite !== undefined &&
+                                        currentPlot !== undefined &&
+                                        (item.href === '/fixeddatainput' || currentCensus !== undefined) ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
@@ -1125,18 +1152,18 @@ export default function Sidebar(props: SidebarProps) {
                                                 }}
                                               >
                                                 <Badge
-                                                  color={link.href === '/summary' ? 'warning' : 'danger'}
+                                                  color={isMeasurementsViewLink ? 'warning' : 'danger'}
                                                   variant={
-                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'
+                                                    isMeasurementsViewLink ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'
                                                   }
                                                   badgeContent={
-                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
+                                                    isMeasurementsViewLink ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
                                                   }
-                                                  invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
+                                                  invisible={isMeasurementsViewLink ? isAllValiditiesTrue : !isDataIncomplete}
                                                   aria-label={
-                                                    link.href === '/summary'
+                                                    isMeasurementsViewLink
                                                       ? !isAllValiditiesTrue
-                                                        ? 'Warning: Summary contains incomplete data sections'
+                                                        ? 'Warning: Measurements views contain incomplete data sections'
                                                         : undefined
                                                       : isDataIncomplete
                                                         ? 'Error: Missing required data for this section'
@@ -1157,7 +1184,9 @@ export default function Sidebar(props: SidebarProps) {
                                               sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}
                                               color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
+                                              disabled={
+                                                currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
+                                              }
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);

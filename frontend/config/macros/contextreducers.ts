@@ -9,14 +9,15 @@ export type EnhancedDispatch<T> = (payload: Record<string, T | undefined>) => Pr
 
 export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, actionType: string): EnhancedDispatch<T> {
   return async (payload: Record<string, T | undefined>) => {
-    if (payload[actionType] !== undefined) {
-      if (actionType === 'site') await submitCookie('schema', (payload[actionType] as unknown as Site)?.schemaName ?? '');
-      else if (actionType === 'plot') await submitCookie('plotID', (payload[actionType] as unknown as Plot)?.plotID?.toString() ?? '');
-      else if (actionType === 'census')
-        await submitCookie('censusID', (payload[actionType] as unknown as OrgCensus)?.dateRanges?.[0]?.censusID?.toString() ?? '');
-      else if (actionType === 'quadrat') await submitCookie('quadratID', (payload[actionType] as unknown as QuadratRDS)?.quadratID?.toString() ?? '');
-      else if (actionType === 'censusList') await submitCookie('censusList', JSON.stringify(payload[actionType] as unknown as OrgCensus[]));
-    }
+    const selection = payload[actionType];
+
+    if (actionType === 'site') await submitCookie('schema', (selection as unknown as Site | undefined)?.schemaName ?? '');
+    else if (actionType === 'plot') await submitCookie('plotID', (selection as unknown as Plot | undefined)?.plotID?.toString() ?? '');
+    else if (actionType === 'census')
+      await submitCookie('censusID', (selection as unknown as OrgCensus | undefined)?.dateRanges?.[0]?.censusID?.toString() ?? '');
+    else if (actionType === 'quadrat') await submitCookie('quadratID', (selection as unknown as QuadratRDS | undefined)?.quadratID?.toString() ?? '');
+    else if (actionType === 'censusList') await submitCookie('censusList', JSON.stringify((selection as unknown as OrgCensus[] | undefined) ?? []));
+
     dispatch({ type: actionType, payload });
   };
 }

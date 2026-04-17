@@ -14,6 +14,8 @@
 import { PoolConnection } from 'mysql2/promise';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
+import ConnectionManager from './connectionmanager';
+import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';
 
 /**
  * Upload session states
@@ -50,6 +52,10 @@ export interface UploadSession {
   updatedAt: Date;
   errorMessage?: string;
   idempotencyKey?: string;
+  // The UploadMode the client selected for this session (e.g. 'clean_reupload' or 'revisions').
+  // Persisted so historical sessions can be audited; nullable because legacy rows
+  // and non-mode-bearing upload paths won't supply it.
+  mode?: string;
 }
 
 /**
@@ -62,6 +68,172 @@ export const SESSION_TIMEOUTS = {
   PROCESSING_TIMEOUT: 900000, // 15 minutes max for processing phase
   CLEANUP_GRACE_PERIOD: 300000 // 5 minutes grace before cleanup
 };
+
+export const ACTIVE_UPLOAD_SESSION_STATES = [
+  UploadSessionState.INITIALIZED,
+  UploadSessionState.UPLOADING,
+  UploadSessionState.UPLOADED,
+  UploadSessionState.PROCESSING,
+  UploadSessionState.COLLAPSING
+] as const;
+
+const ACTIVE_UPLOAD_SESSION_STATE_LIST = ACTIVE_UPLOAD_SESSION_STATES.map(state => `'${state}'`).join(', ');
+const ACTIVE_SCOPE_KEY_INDEX_NAME = 'uq_upload_sessions_active_scope';
+const ACTIVE_SCOPE_KEY_COLUMN_NAME = 'active_scope_key';
+const UPLOAD_SESSION_SELECT_COLUMNS = `
+  session_id, schema_name, plot_id, census_id, user_id, state, file_id,
+  total_chunks, uploaded_chunks, processed_batches, total_batches,
+  last_heartbeat, created_at, updated_at, error_message, idempotency_key, mode
+`;
+
+export class UploadSessionOwnershipError extends Error {
+  status: number;
+
+  constructor(message: string, status: number = 409) {
+    super(message);
+    this.name = 'UploadSessionOwnershipError';
+    this.status = status;
+  }
+}
+
+export interface RequireUploadSessionOwnershipOptions {
+  schema: string;
+  sessionId: string | null | undefined;
+  censusId: number;
+  plotId?: number;
+  allowedStates: readonly UploadSessionState[];
+  contextLabel: string;
+}
+
+function isUploadSessionActiveState(state: UploadSessionState): boolean {
+  return (ACTIVE_UPLOAD_SESSION_STATES as readonly UploadSessionState[]).includes(state);
+}
+
+export function isUploadSessionStale(session: Pick<UploadSession, 'lastHeartbeat' | 'state'>): boolean {
+  if (!isUploadSessionActiveState(session.state)) {
+    return false;
+  }
+
+  return Date.now() - new Date(session.lastHeartbeat).getTime() >= SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT;
+}
+
+function getStaleSessionReason(contextLabel: string): string {
+  return `Upload session expired before ${contextLabel} - heartbeat timeout`;
+}
+
+function isActiveScopeDuplicateKeyError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const mysqlError = error as Error & { code?: string; errno?: number; sqlMessage?: string };
+  return (
+    mysqlError.code === 'ER_DUP_ENTRY' &&
+    (error.message.includes(ACTIVE_SCOPE_KEY_INDEX_NAME) || mysqlError.sqlMessage?.includes(ACTIVE_SCOPE_KEY_INDEX_NAME) === true)
+  );
+}
+
+async function hasColumn(conn: PoolConnection, schema: string, table: string, column: string): Promise<boolean> {
+  const results = await runQuery(
+    conn,
+    `
+      SELECT COUNT(*) AS count
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+    `,
+    [schema, table, column]
+  );
+  return Array.isArray(results) && Number((results[0] as { count?: number }).count ?? 0) > 0;
+}
+
+async function hasIndex(conn: PoolConnection, schema: string, table: string, indexName: string): Promise<boolean> {
+  const results = await runQuery(
+    conn,
+    `
+      SELECT COUNT(*) AS count
+      FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = ?
+        AND INDEX_NAME = ?
+    `,
+    [schema, table, indexName]
+  );
+  return Array.isArray(results) && Number((results[0] as { count?: number }).count ?? 0) > 0;
+}
+
+async function abandonDuplicateActiveScopeSessions(conn: PoolConnection, schema: string): Promise<void> {
+  await runQuery(
+    conn,
+    `
+      WITH ranked_sessions AS (
+        SELECT
+          session_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY schema_name, plot_id, census_id
+            ORDER BY last_heartbeat DESC, updated_at DESC, created_at DESC, session_id DESC
+          ) AS row_num
+        FROM ${schema}.upload_sessions
+        WHERE state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
+      )
+      UPDATE ${schema}.upload_sessions target
+      INNER JOIN ranked_sessions ranked
+        ON ranked.session_id = target.session_id
+      SET target.state = '${UploadSessionState.ABANDONED}',
+          target.error_message = CONCAT_WS(' | ', NULLIF(target.error_message, ''), 'Superseded while enforcing active scope lock')
+      WHERE ranked.row_num > 1
+    `
+  );
+}
+
+// Cache which schemas have already had the scope lock verified in this process lifetime.
+// This avoids running information_schema queries and potential DDL on every session creation.
+const verifiedScopeLockSchemas = new Set<string>();
+
+async function ensureUploadSessionScopeLock(conn: PoolConnection, schema: string): Promise<void> {
+  if (verifiedScopeLockSchemas.has(schema)) {
+    return;
+  }
+
+  const hasActiveScopeKey = await hasColumn(conn, schema, 'upload_sessions', ACTIVE_SCOPE_KEY_COLUMN_NAME);
+  if (!hasActiveScopeKey) {
+    await runQuery(
+      conn,
+      `
+        ALTER TABLE ${schema}.upload_sessions
+        ADD COLUMN ${ACTIVE_SCOPE_KEY_COLUMN_NAME} VARCHAR(255)
+        GENERATED ALWAYS AS (
+          CASE
+            WHEN state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST}) THEN CONCAT_WS('#', schema_name, plot_id, census_id)
+            ELSE NULL
+          END
+        ) STORED
+      `
+    );
+  }
+
+  await abandonDuplicateActiveScopeSessions(conn, schema);
+
+  const hasActiveScopeIndex = await hasIndex(conn, schema, 'upload_sessions', ACTIVE_SCOPE_KEY_INDEX_NAME);
+  if (!hasActiveScopeIndex) {
+    await runQuery(conn, `ALTER TABLE ${schema}.upload_sessions ADD UNIQUE INDEX ${ACTIVE_SCOPE_KEY_INDEX_NAME} (${ACTIVE_SCOPE_KEY_COLUMN_NAME})`);
+  }
+
+  verifiedScopeLockSchemas.add(schema);
+}
+
+async function abandonStaleSessionsForScope(schema: string, plotId: number, censusId: number, contextLabel: string): Promise<void> {
+  const activeSessions = await findActiveSessionsForPlotCensus(schema, plotId, censusId);
+  for (const activeSession of activeSessions) {
+    if (!isUploadSessionStale(activeSession)) {
+      continue;
+    }
+
+    ailogger.warn(`[UploadSessionTracker] Marking stale session ${activeSession.sessionId} as abandoned before ${contextLabel}`);
+    await updateSessionState(schema, activeSession.sessionId, UploadSessionState.ABANDONED, getStaleSessionReason(contextLabel));
+  }
+}
 
 /**
  * Generate a unique session ID
@@ -77,6 +249,24 @@ export function generateSessionId(): string {
  */
 export function generateIdempotencyKey(schema: string, plotId: number, censusId: number, fileHash: string): string {
   return `${schema}_${plotId}_${censusId}_${fileHash}`;
+}
+
+export function generateUploadSessionIdempotencyKey(schema: string, plotId: number, censusId: number, fileHash: string, mode?: string): string {
+  return [schema, plotId, censusId, fileHash, mode || 'mode:unspecified'].join('#');
+}
+
+function buildCreateUploadSessionInsertValues(
+  sessionId: string,
+  schema: string,
+  plotId: number,
+  censusId: number,
+  userId: string,
+  fileId: string,
+  totalChunks: number,
+  idempotencyKey?: string,
+  mode?: string
+): (string | number | null)[] {
+  return [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null, mode || null];
 }
 
 /**
@@ -101,10 +291,19 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       error_message TEXT,
       idempotency_key VARCHAR(255),
+      mode VARCHAR(32),
+      active_scope_key VARCHAR(255)
+        GENERATED ALWAYS AS (
+          CASE
+            WHEN state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST}) THEN CONCAT_WS('#', schema_name, plot_id, census_id)
+            ELSE NULL
+          END
+        ) STORED,
       INDEX idx_state (state),
       INDEX idx_heartbeat (last_heartbeat),
       INDEX idx_plot_census (plot_id, census_id),
-      INDEX idx_idempotency (idempotency_key)
+      INDEX idx_idempotency (idempotency_key),
+      UNIQUE INDEX ${ACTIVE_SCOPE_KEY_INDEX_NAME} (${ACTIVE_SCOPE_KEY_COLUMN_NAME})
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `;
 
@@ -112,6 +311,7 @@ export async function ensureUploadSessionsTable(schema: string): Promise<void> {
   try {
     conn = await getConn();
     await runQuery(conn, createTableSQL);
+    await ensureUploadSessionScopeLock(conn, schema);
     ailogger.info(`[UploadSessionTracker] Ensured upload_sessions table exists in ${schema}`);
   } catch (error: unknown) {
     ailogger.error('[UploadSessionTracker] Failed to create upload_sessions table:', error instanceof Error ? error : new Error(String(error)));
@@ -131,7 +331,8 @@ export async function createUploadSession(
   userId: string,
   fileId: string,
   totalChunks: number,
-  idempotencyKey?: string
+  idempotencyKey?: string,
+  mode?: string
 ): Promise<UploadSession> {
   const sessionId = generateSessionId();
 
@@ -146,9 +347,11 @@ export async function createUploadSession(
       }
       // If session is in progress, return it to allow resume
       if (
+        existing.state === UploadSessionState.INITIALIZED ||
         existing.state === UploadSessionState.UPLOADING ||
         existing.state === UploadSessionState.UPLOADED ||
-        existing.state === UploadSessionState.PROCESSING
+        existing.state === UploadSessionState.PROCESSING ||
+        existing.state === UploadSessionState.COLLAPSING
       ) {
         ailogger.info(`[UploadSessionTracker] Returning existing in-progress session for idempotency key: ${idempotencyKey}`);
         return existing;
@@ -158,34 +361,26 @@ export async function createUploadSession(
     }
   }
 
-  // Check for any active sessions for the same plot/census
-  const activeSessions = await findActiveSessionsForPlotCensus(schema, plotId, censusId);
-  if (activeSessions.length > 0) {
-    const activeSession = activeSessions[0];
-    // Check if session is truly active (has recent heartbeat)
-    const heartbeatAge = Date.now() - new Date(activeSession.lastHeartbeat).getTime();
-    if (heartbeatAge < SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT) {
-      throw new Error(`Another upload is in progress for Plot ${plotId}, Census ${censusId}. Session: ${activeSession.sessionId}`);
-    } else {
-      // Session appears stale, mark as abandoned
-      ailogger.warn(`[UploadSessionTracker] Marking stale session ${activeSession.sessionId} as abandoned`);
-      await updateSessionState(schema, activeSession.sessionId, UploadSessionState.ABANDONED, 'Stale session detected - no heartbeat');
-    }
-  }
+  await abandonStaleSessionsForScope(schema, plotId, censusId, `session creation for plot ${plotId}, census ${censusId}`);
 
   const insertSQL = `
     INSERT INTO ${schema}.upload_sessions (
       session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-      total_chunks, uploaded_chunks, idempotency_key
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      total_chunks, uploaded_chunks, idempotency_key, mode
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `;
 
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    await runQuery(conn, insertSQL, [sessionId, schema, plotId, censusId, userId, UploadSessionState.INITIALIZED, fileId, totalChunks, idempotencyKey || null]);
+    await ensureUploadSessionScopeLock(conn, schema);
+    await runQuery(
+      conn,
+      insertSQL,
+      buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode)
+    );
 
-    ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}`);
+    ailogger.info(`[UploadSessionTracker] Created session ${sessionId} for plot ${plotId}, census ${censusId}${mode ? ` (mode: ${mode})` : ''}`);
 
     return {
       sessionId,
@@ -202,8 +397,62 @@ export async function createUploadSession(
       lastHeartbeat: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      idempotencyKey
+      idempotencyKey,
+      mode
     };
+  } catch (error: unknown) {
+    if (isActiveScopeDuplicateKeyError(error)) {
+      const activeSessions = await findActiveSessionsForPlotCensus(schema, plotId, censusId);
+      const activeSession = activeSessions[0];
+
+      if (activeSession) {
+        if (idempotencyKey && activeSession.idempotencyKey === idempotencyKey) {
+          ailogger.info(`[UploadSessionTracker] Returning existing active session ${activeSession.sessionId} for idempotency key: ${idempotencyKey}`);
+          return activeSession;
+        }
+
+        if (isUploadSessionStale(activeSession)) {
+          if (!conn) {
+            throw error;
+          }
+          await updateSessionState(
+            schema,
+            activeSession.sessionId,
+            UploadSessionState.ABANDONED,
+            getStaleSessionReason(`session creation retry for plot ${plotId}, census ${censusId}`)
+          );
+          await runQuery(
+            conn,
+            insertSQL,
+            buildCreateUploadSessionInsertValues(sessionId, schema, plotId, censusId, userId, fileId, totalChunks, idempotencyKey, mode)
+          );
+
+          ailogger.info(`[UploadSessionTracker] Created session ${sessionId} after reclaiming stale scope lock for plot ${plotId}, census ${censusId}`);
+          return {
+            sessionId,
+            schema,
+            plotId,
+            censusId,
+            userId,
+            state: UploadSessionState.INITIALIZED,
+            fileId,
+            totalChunks,
+            uploadedChunks: 0,
+            processedBatches: 0,
+            totalBatches: 0,
+            lastHeartbeat: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            idempotencyKey,
+            mode
+          };
+        }
+
+        throw new UploadSessionOwnershipError(`Another upload is in progress for Plot ${plotId}, Census ${censusId}. Session: ${activeSession.sessionId}`);
+      }
+    }
+
+    throw error;
   } finally {
     if (conn) conn.release();
   }
@@ -300,9 +549,7 @@ export async function sendHeartbeat(schema: string, sessionId: string): Promise<
  */
 export async function getSession(schema: string, sessionId: string): Promise<UploadSession | null> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE session_id = ?
   `;
@@ -325,9 +572,7 @@ export async function getSession(schema: string, sessionId: string): Promise<Upl
  */
 export async function findSessionByIdempotencyKey(schema: string, idempotencyKey: string): Promise<UploadSession | null> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE idempotency_key = ?
     ORDER BY created_at DESC
@@ -351,12 +596,10 @@ export async function findSessionByIdempotencyKey(schema: string, idempotencyKey
  */
 export async function findActiveSessionsForPlotCensus(schema: string, plotId: number, censusId: number): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
-    WHERE plot_id = ? AND census_id = ? AND state IN ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing')
-    ORDER BY created_at DESC
+    WHERE plot_id = ? AND census_id = ? AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
+    ORDER BY last_heartbeat DESC, updated_at DESC, created_at DESC
   `;
 
   let conn: PoolConnection | null = null;
@@ -376,9 +619,7 @@ export async function findActiveSessionsForPlotCensus(schema: string, plotId: nu
  */
 export async function findStaleSessions(schema: string): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE state IN ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing')
       AND last_heartbeat < DATE_SUB(NOW(), INTERVAL ? SECOND)
@@ -404,9 +645,7 @@ export async function findStaleSessions(schema: string): Promise<UploadSession[]
  */
 export async function findAbandonedSessionsNeedingCleanup(schema: string): Promise<UploadSession[]> {
   const selectSQL = `
-    SELECT session_id, schema_name, plot_id, census_id, user_id, state, file_id,
-           total_chunks, uploaded_chunks, processed_batches, total_batches,
-           last_heartbeat, created_at, updated_at, error_message, idempotency_key
+    SELECT ${UPLOAD_SESSION_SELECT_COLUMNS}
     FROM ${schema}.upload_sessions
     WHERE state = 'abandoned'
       AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)
@@ -431,47 +670,126 @@ export async function findAbandonedSessionsNeedingCleanup(schema: string): Promi
  * Clean up orphaned data for a session
  */
 export async function cleanupOrphanedData(schema: string, session: UploadSession): Promise<{ temporaryDeleted: number; failedDeleted: number }> {
-  let conn: PoolConnection | null = null;
+  const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | null = null;
   let temporaryDeleted = 0;
   let failedDeleted = 0;
+  let cleanupNote = 'Cleanup: deleted 0 temp rows';
 
   try {
-    conn = await getConn();
+    transactionID = await connectionManager.beginTransaction();
 
-    // Start transaction for cleanup
-    await runQuery(conn, 'START TRANSACTION');
-
-    // Delete from temporarymeasurements
+    // Move orphaned temporarymeasurements that belong to THIS session.
+    // Scoping by SessionID (rather than PlotID/CensusID) avoids a TOCTOU race
+    // where a newer session's rows could be swept up between the overlap check
+    // and the move. Rows with NULL SessionID (pre-migration) fall back to the
+    // broader PlotID/CensusID scope, but only when no other active session owns
+    // that scope.
     if (session.fileId) {
-      const deleteTempSQL = `DELETE FROM ${schema}.temporarymeasurements WHERE FileID = ?`;
-      const tempResult = await runQuery(conn, deleteTempSQL, [session.fileId]);
-      temporaryDeleted = (tempResult as any).affectedRows || 0;
-    }
+      const selectSessionBatchSQL = `
+        SELECT DISTINCT FileID, BatchID
+        FROM ${schema}.temporarymeasurements
+        WHERE SessionID = ?
+        ORDER BY FileID, BatchID
+      `;
+      const sessionBatchRows = await connectionManager.executeQuery(selectSessionBatchSQL, [session.sessionId], transactionID ?? undefined);
+      const sessionBatches = Array.isArray(sessionBatchRows)
+        ? sessionBatchRows
+            .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
+            .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
+        : [];
 
-    // Note: We don't automatically delete from failedmeasurements as those might be
-    // legitimate failures the user wants to review. We only clean up temporary data.
+      for (const { fileId, batchId } of sessionBatches) {
+        const movedRows = await moveTemporaryBatchToFailedMeasurements(
+          connectionManager,
+          schema,
+          fileId,
+          batchId,
+          `Upload session ${session.sessionId} cleaned up after abandonment`,
+          transactionID ?? undefined
+        );
+        temporaryDeleted += movedRows;
+        failedDeleted += movedRows;
+      }
+
+      // Fallback: clean up pre-migration rows (SessionID IS NULL) that belong
+      // to this scope, but only if no other active session currently owns it.
+      const nullSessionBatchSQL = `
+        SELECT DISTINCT FileID, BatchID
+        FROM ${schema}.temporarymeasurements
+        WHERE SessionID IS NULL
+          AND PlotID = ?
+          AND CensusID = ?
+        ORDER BY FileID, BatchID
+      `;
+      const nullSessionRows = await connectionManager.executeQuery(nullSessionBatchSQL, [session.plotId, session.censusId], transactionID ?? undefined);
+      const nullSessionBatches = Array.isArray(nullSessionRows)
+        ? nullSessionRows
+            .map((row: any) => ({ fileId: row.FileID as string | null, batchId: row.BatchID as string | null }))
+            .filter((row): row is { fileId: string; batchId: string } => Boolean(row.fileId) && Boolean(row.batchId))
+        : [];
+
+      if (nullSessionBatches.length > 0) {
+        const overlappingActiveSessionsSQL = `
+          SELECT session_id
+          FROM ${schema}.upload_sessions
+          WHERE plot_id = ?
+            AND census_id = ?
+            AND session_id <> ?
+            AND state IN (${ACTIVE_UPLOAD_SESSION_STATE_LIST})
+            AND last_heartbeat >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `;
+        const heartbeatTimeoutSeconds = Math.floor(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
+        const overlappingSessions = await connectionManager.executeQuery(
+          overlappingActiveSessionsSQL,
+          [session.plotId, session.censusId, session.sessionId, heartbeatTimeoutSeconds],
+          transactionID ?? undefined
+        );
+
+        if (Array.isArray(overlappingSessions) && overlappingSessions.length > 0) {
+          const newerSessionId = (overlappingSessions[0] as { session_id?: string }).session_id ?? 'unknown';
+          ailogger.warn(
+            `[UploadSessionTracker] Skipping NULL-SessionID cleanup for session ${session.sessionId} because active session ${newerSessionId} still owns plot ${session.plotId}, census ${session.censusId}`
+          );
+        } else {
+          for (const { fileId, batchId } of nullSessionBatches) {
+            const movedRows = await moveTemporaryBatchToFailedMeasurements(
+              connectionManager,
+              schema,
+              fileId,
+              batchId,
+              `Upload session ${session.sessionId} cleaned up after abandonment (pre-migration rows)`,
+              transactionID ?? undefined
+            );
+            temporaryDeleted += movedRows;
+            failedDeleted += movedRows;
+          }
+        }
+      }
+
+      cleanupNote = failedDeleted > 0 ? `Cleanup: moved ${failedDeleted} temp rows to unresolved failures` : `Cleanup: deleted ${temporaryDeleted} temp rows`;
+    }
 
     // Mark session as cleaned up
     const updateSQL = `
       UPDATE ${schema}.upload_sessions
-      SET state = 'cleaned_up', error_message = CONCAT(COALESCE(error_message, ''), ' | Cleanup: deleted ', ?, ' temp rows')
+      SET state = 'cleaned_up', error_message = CONCAT(COALESCE(error_message, ''), ' | ', ?)
       WHERE session_id = ?
     `;
-    await runQuery(conn, updateSQL, [temporaryDeleted, session.sessionId]);
-
-    await runQuery(conn, 'COMMIT');
+    await connectionManager.executeQuery(updateSQL, [cleanupNote, session.sessionId], transactionID ?? undefined);
+    await connectionManager.commitTransaction(transactionID!);
 
     ailogger.info(`[UploadSessionTracker] Cleaned up session ${session.sessionId}: ${temporaryDeleted} temporary rows deleted`);
 
     return { temporaryDeleted, failedDeleted };
   } catch (error: unknown) {
-    if (conn) {
-      await runQuery(conn, 'ROLLBACK').catch(() => {});
+    if (transactionID) {
+      await connectionManager.rollbackTransaction(transactionID);
     }
     ailogger.error(`[UploadSessionTracker] Failed to cleanup session ${session.sessionId}:`, error instanceof Error ? error : new Error(String(error)));
     throw error;
-  } finally {
-    if (conn) conn.release();
   }
 }
 
@@ -566,6 +884,41 @@ function mapRowToSession(row: any): UploadSession {
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     errorMessage: row.error_message,
-    idempotencyKey: row.idempotency_key
+    idempotencyKey: row.idempotency_key,
+    mode: row.mode ?? undefined
   };
+}
+
+export async function requireUploadSessionOwnership(options: RequireUploadSessionOwnershipOptions): Promise<UploadSession> {
+  const { schema, sessionId, censusId, plotId, allowedStates, contextLabel } = options;
+
+  if (!sessionId) {
+    throw new UploadSessionOwnershipError(`Upload session is required for ${contextLabel}`);
+  }
+
+  const session = await getSession(schema, sessionId);
+  if (!session) {
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} was not found for ${contextLabel}`);
+  }
+
+  if (plotId !== undefined && session.plotId !== plotId) {
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} does not own plot ${plotId} for ${contextLabel} (session plot: ${session.plotId})`);
+  }
+
+  if (session.censusId !== censusId) {
+    throw new UploadSessionOwnershipError(
+      `Upload session ${sessionId} does not own census ${censusId} for ${contextLabel} (session census: ${session.censusId})`
+    );
+  }
+
+  if (isUploadSessionStale(session)) {
+    await updateSessionState(schema, session.sessionId, UploadSessionState.ABANDONED, getStaleSessionReason(contextLabel));
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} expired before ${contextLabel}`);
+  }
+
+  if (!allowedStates.includes(session.state)) {
+    throw new UploadSessionOwnershipError(`Upload session ${sessionId} is in state ${session.state}, not one of: ${allowedStates.join(', ')}`);
+  }
+
+  return session;
 }

@@ -4,6 +4,12 @@ import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsyste
 import ValidationCore, { ValidationResult } from '@/components/client/validationcore';
 import ailogger from '@/ailogger';
 
+/**
+ * @deprecated The upload flow now triggers background validation via ValidationRunner
+ * (see uploadfiresql.tsx / uploadreingestion.tsx). This component is only still
+ * mounted by uploadparent.tsx for the VALIDATE review state and multilinemodal.tsx.
+ * Migrate those callers to useBackgroundValidation before removing.
+ */
 const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, isReingestion = false }) => {
   const handleValidationComplete = useCallback(
     (result: ValidationResult) => {

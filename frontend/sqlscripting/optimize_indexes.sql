@@ -92,7 +92,8 @@ ANALYZE TABLE quadrats;
 ANALYZE TABLE species;
 ANALYZE TABLE attributes;
 ANALYZE TABLE cmattributes;
-ANALYZE TABLE failedmeasurements;
+ANALYZE TABLE measurement_errors;
+ANALYZE TABLE measurement_error_log;
 
 -- =====================================================================================
 -- 7. SHOW FINAL INDEX STATUS

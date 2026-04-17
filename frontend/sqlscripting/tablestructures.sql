@@ -1,3 +1,7 @@
+-- Ensure consistent charset across all tables to prevent collation mismatch errors
+-- (e.g., when SP sets collation_connection = 'utf8mb4_0900_ai_ci' but tables use utf8mb3).
+ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
 create table if not exists attributes
 (
     Code        varchar(10)                                                                                     not null,
@@ -22,46 +26,40 @@ create index idx_attributes_description
 create index idx_attributes_status
     on attributes (Status);
 
-create table if not exists failedmeasurements
+create index idx_attributes_code_active
+    on attributes (Code, IsActive);
+
+-- failedmeasurements table removed: failures now stored in coremeasurements (StemGUID=NULL)
+-- with error details in measurement_error_log + measurement_errors tables.
+
+create table if not exists upload_errors
 (
-    FailedMeasurementID int auto_increment
+    UploadErrorID  int auto_increment
         primary key,
-    FileID              varchar(255)   null comment 'Source file name from upload',
-    BatchID             varchar(36)    null comment 'Batch identifier for this upload chunk',
-    PlotID              int            null,
-    CensusID            int            null,
-    Tag                 varchar(20)    null,
-    StemTag             varchar(10)    null,
-    SpCode              varchar(25)    null,
-    Quadrat             varchar(255)   null,
-    X                   decimal(12, 6) null,
-    Y                   decimal(12, 6) null,
-    DBH                 decimal(12, 6) null,
-    HOM                 decimal(12, 6) null,
-    Date                date           null,
-    Codes               varchar(255)   null,
-    Comments            varchar(255)   null,
-    FailureReasons      text           null,
-    hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
-                                                      `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`,
-                                                      `Codes`))) stored invisible,
-    constraint unique_required_hash
-        unique (hash_id)
+    FileID         varchar(255)                        null,
+    BatchID        varchar(36)                         null,
+    PlotID         int                                 null,
+    CensusID       int                                 null,
+    RowNumber      int                                 null,
+    ErrorType      varchar(100)                        null,
+    ErrorMessage   text                                null,
+    RawRow         json                                null,
+    CreatedAt      datetime default CURRENT_TIMESTAMP  null
 );
 
-create index idx_upload_session
-    on failedmeasurements (FileID, BatchID) comment 'Index for upload session queries';
+create index idx_upload_errors_file_batch
+    on upload_errors (FileID, BatchID);
 
-create index idx_plot_census_upload
-    on failedmeasurements (PlotID, CensusID, FileID, BatchID) comment 'Composite index for verification queries';
+create index idx_upload_errors_plot_census
+    on upload_errors (PlotID, CensusID);
 
 create table if not exists measurementssummary
 (
     CoreMeasurementID int              not null,
-    StemGUID          int              not null,
-    TreeID            int              not null,
-    SpeciesID         int              not null,
-    QuadratID         int              not null,
+    StemGUID          int              null,
+    TreeID            int              null,
+    SpeciesID         int              null,
+    QuadratID         int              null,
     PlotID            int              not null,
     CensusID          int              not null,
     SpeciesName       varchar(64)      null,
@@ -72,15 +70,16 @@ create table if not exists measurementssummary
     StemLocalX        decimal(12, 6)   null,
     StemLocalY        decimal(12, 6)   null,
     QuadratName       varchar(255)     null,
-    MeasurementDate   date             not null,
+    MeasurementDate   date             null,
     MeasuredDBH       decimal(12, 6)   null,
     MeasuredHOM       decimal(12, 6)   null,
     IsValidated       bit default b'0' null,
     Description       varchar(255)     null,
     Attributes        varchar(255)     null,
+    RawCodes          varchar(255)     null,
     UserDefinedFields json             null,
     Errors            text             null,
-    primary key (CoreMeasurementID, StemGUID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
+    primary key (CoreMeasurementID)
 );
 
 create index idx_attributes
@@ -168,7 +167,9 @@ create table if not exists plots
     DefaultCoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
     DefaultAreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' not null,
     DefaultDBHUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'mm' not null,
-    DefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null
+    DefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
+    constraint uq_plots_plotname
+        unique (PlotName)
 );
 
 create table if not exists census
@@ -184,7 +185,9 @@ create table if not exists census
     DeletedAt        datetime             null,
     constraint Census_Plots_PlotID_fk
         foreign key (PlotID) references plots (PlotID)
-            on delete cascade
+            on delete cascade,
+    constraint uq_census_plot_number
+        unique (PlotID, PlotCensusNumber)
 );
 
 create index idx_description
@@ -195,6 +198,9 @@ create index idx_enddate
 
 create index idx_plotcensusnumber
     on census (PlotCensusNumber);
+
+create index idx_census_plot_pcn_active
+    on census (PlotID, PlotCensusNumber, IsActive);
 
 create index idx_plotid
     on census (PlotID);
@@ -307,6 +313,8 @@ create table if not exists quadrats
         unique (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive),
     constraint uq_quadrats_full
         unique (unique_sig),
+    constraint uq_quadrats_active_name
+        unique (PlotID, QuadratName, IsActive),
     constraint Quadrats_Plots_FK
         foreign key (PlotID) references plots (PlotID)
             on delete cascade
@@ -326,6 +334,12 @@ create index idx_plotid
 
 create index idx_quadratname
     on quadrats (QuadratName);
+
+create index idx_quadrats_name_active
+    on quadrats (QuadratName, IsActive);
+
+create index idx_quadrats_plot_name_active
+    on quadrats (PlotID, QuadratName, IsActive);
 
 create index idx_quadratshape
     on quadrats (QuadratShape);
@@ -437,8 +451,10 @@ create table if not exists personnel
                                            coalesce(`IsActive`, _utf8mb4''))) stored invisible,
     constraint personnel_FirstName_LastName_RoleID__uindex
         unique (FirstName, LastName, IsActive),
-    constraint uq_personnel_full
-        unique (unique_sig),
+    -- uq_personnel_full (unique_sig) intentionally removed in migration 45 because
+    -- it was the same full-signature anti-pattern that produced the species and
+    -- quadrats fan-out bugs. The named (FirstName, LastName, IsActive) constraint
+    -- above is the real semantic key.
     constraint personnel_roles_RoleID_fk
         foreign key (RoleID) references roles (RoleID)
             on delete cascade
@@ -487,9 +503,10 @@ create table if not exists sitespecificvalidations
     Criteria            varchar(255)     null,
     Definition          text             null,
     ChangelogDefinition text             null,
-    IsEnabled           bit default b'1' not null
-)
-    charset = utf8mb3;
+    IsEnabled           bit default b'1' not null,
+    constraint uq_sitespecificvalidations_procedurename
+        unique (ProcedureName)
+);
 
 create table if not exists species
 (
@@ -518,6 +535,8 @@ create table if not exists species
                                                    coalesce(`Description`, _utf8mb4''))) stored invisible,
     constraint uq_species_sig
         unique (unique_sig),
+    constraint uq_species_active_code
+        unique (SpeciesCode, IsActive),
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID)
             on delete cascade,
@@ -546,6 +565,9 @@ create index idx_speciesauthority
 
 create index idx_speciescode
     on species (SpeciesCode);
+
+create index idx_species_code_active
+    on species (SpeciesCode, IsActive);
 
 create index idx_speciesname
     on species (SpeciesName);
@@ -600,6 +622,7 @@ create table if not exists temporarymeasurements
         primary key,
     FileID          varchar(36)                         null,
     BatchID         varchar(36)                         not null,
+    SessionID       varchar(64)                         null,
     PlotID          int                                 null,
     CensusID        int                                 null,
     TreeTag         varchar(20)                         null,
@@ -628,38 +651,17 @@ create index idx_tmpm_file_batch_census
 create index ingest_temporarymeasurements_FBPC_index
     on temporarymeasurements (FileID, BatchID, PlotID, CensusID);
 
-create index ingest_temporarymeasurements_batchID_index
-    on temporarymeasurements (BatchID);
-
-create index temporarymeasurements_Codes_index
-    on temporarymeasurements (Codes);
-
-create index temporarymeasurements_DBH_HOM_MeasurementDate_index
-    on temporarymeasurements (DBH, HOM, MeasurementDate);
-
-create index temporarymeasurements_FileID_BatchID_index
-    on temporarymeasurements (FileID, BatchID);
-
-create index temporarymeasurements_FileID_index
-    on temporarymeasurements (FileID);
+create index idx_tmpm_plot_census_file_batch
+    on temporarymeasurements (PlotID, CensusID, FileID, BatchID);
 
 create index temporarymeasurements_QuadratName_index
     on temporarymeasurements (QuadratName);
 
-create index temporarymeasurements_StemTag_LocalX_LocalY_index
-    on temporarymeasurements (StemTag, LocalX, LocalY);
-
-create index temporarymeasurements_StemTag_index
-    on temporarymeasurements (StemTag);
-
 create index temporarymeasurements_TreeTag_SpeciesCode_index
     on temporarymeasurements (TreeTag, SpeciesCode);
 
-create index temporarymeasurements_TreeTag_index
-    on temporarymeasurements (TreeTag);
-
-create index temporarymeasurements_id_index
-    on temporarymeasurements (id);
+create index idx_tmpm_session
+    on temporarymeasurements (SessionID);
 
 create table if not exists trees
 (
@@ -688,7 +690,7 @@ create table if not exists stems
     QuadratID       int                  null,
     CensusID        int                  null,
     StemCrossID     int                  null,
-    StemTag         varchar(10)          null,
+    StemTag         varchar(10)          default '' not null,
     LocalX          decimal(12, 6)       null,
     LocalY          decimal(12, 6)       null,
     Moved           bit                  null,
@@ -722,6 +724,17 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(12, 6)          null,
     Description       varchar(255)            null,
     UserDefinedFields json                    null,
+    UploadFileID      varchar(255)            null,
+    UploadBatchID     varchar(36)             null,
+    RawTreeTag        varchar(20)             null,
+    RawStemTag        varchar(10)             null,
+    RawSpCode         varchar(25)             null,
+    RawQuadrat        varchar(255)            null,
+    RawX              decimal(12, 6)          null,
+    RawY              decimal(12, 6)          null,
+    RawCodes          varchar(255)            null,
+    RawComments       varchar(255)            null,
+    SourceRowIndex    int                     null,
     IsActive          tinyint(1) default 1    not null,
     DeletedAt         datetime                null,
     constraint ux_measure_unique
@@ -751,21 +764,7 @@ create table if not exists cmattributes
             on delete cascade
 );
 
-create table if not exists cmverrors
-(
-    CMVErrorID        int auto_increment
-        primary key,
-    CoreMeasurementID int null,
-    ValidationErrorID int null,
-    constraint unique_cmverrors_cm_valerror
-        unique (CoreMeasurementID, ValidationErrorID),
-    constraint cmverrors_coremeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
-            on delete cascade,
-    constraint cmverrors_sitespecificvalidations_ValidationID_fk
-        foreign key (ValidationErrorID) references sitespecificvalidations (ValidationID)
-            on delete cascade
-);
+-- cmverrors table removed: replaced by measurement_errors + measurement_error_log tables.
 
 create index idx_censusid
     on coremeasurements (CensusID);
@@ -793,6 +792,102 @@ create index idx_stemid
 
 create index ix_cm_cid_date_dbh_hom
     on coremeasurements (CensusID, MeasurementDate, MeasuredDBH, MeasuredHOM);
+
+create index idx_cm_uploadbatch_census
+    on coremeasurements (UploadBatchID, CensusID);
+
+create index idx_cm_census_active
+    on coremeasurements (CensusID, IsActive);
+
+create index idx_cm_census_validated_stem
+    on coremeasurements (CensusID, IsValidated, IsActive, StemGUID);
+
+create index idx_cm_stemguid_active
+    on coremeasurements (StemGUID, IsActive);
+
+create index idx_cm_uploadfile_census_stem
+    on coremeasurements (UploadFileID, CensusID, StemGUID);
+
+create index idx_cm_uploadfile_batch_census_stem
+    on coremeasurements (UploadFileID, UploadBatchID, CensusID, StemGUID);
+
+create index idx_cm_unresolved_lookup
+    on coremeasurements (StemGUID, CensusID, UploadBatchID);
+
+create unique index ux_cm_uploadbatch_rowindex
+    on coremeasurements (UploadBatchID, SourceRowIndex);
+
+create table if not exists measurement_errors
+(
+    ErrorID      int auto_increment
+        primary key,
+    ErrorSource  enum ('ingestion', 'validation') not null,
+    ErrorCode    varchar(50)                      null,
+    ErrorMessage text                             not null,
+    constraint uq_measurement_error_source_code
+        unique (ErrorSource, ErrorCode)
+);
+
+insert ignore into measurement_errors (ErrorSource, ErrorCode, ErrorMessage)
+values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag'),
+       ('ingestion', 'MISSING_FIELD_STEMTAG', 'Missing required field: StemTag'),
+       ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
+       ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
+       ('ingestion', 'MISSING_FIELD_DATE', 'Missing required field: MeasurementDate'),
+       ('ingestion', 'INVALID_QUADRAT', 'Invalid quadrat reference'),
+       ('ingestion', 'INVALID_SPECIES', 'Invalid species reference'),
+       ('ingestion', 'AMBIGUOUS_QUADRAT', 'Quadrat name resolves to multiple active quadrats in the same plot'),
+       ('ingestion', 'AMBIGUOUS_SPECIES', 'Species code resolves to multiple active species records'),
+       ('ingestion', 'QUADRAT_MISMATCH', 'Quadrat mismatch across censuses'),
+       ('ingestion', 'COORDINATE_DRIFT', 'Coordinate drift exceeds allowed threshold'),
+       ('ingestion', 'DUPLICATE_ENTRY', 'Duplicate measurement row detected'),
+       ('ingestion', 'DUPLICATE_TAG_STEMTAG', 'Duplicate TreeTag/StemTag within upload batch'),
+       ('ingestion', 'NEGATIVE_DBH', 'DBH must be non-negative'),
+       ('ingestion', 'NEGATIVE_HOM', 'HOM must be non-negative'),
+       ('ingestion', 'INVALID_COORDINATE', 'Coordinate value is negative'),
+       ('ingestion', 'FIELD_TOO_LONG', 'One or more fields exceed column length limits'),
+       ('ingestion', 'MISSING_MEASUREMENT_DATA', 'Missing measurement data'),
+       ('ingestion', 'AMBIGUOUS_PREVIOUS_MATCH', 'Ambiguous previous census match'),
+       ('ingestion', 'MISSING_CENSUS_FOR_TREE', 'Tree insert blocked by missing census'),
+       ('ingestion', 'MISSING_SPECIES_FOR_TREE', 'Tree insert blocked by missing species'),
+       ('ingestion', 'TREE_RESOLUTION_FAILED', 'Tree resolution failed after tree materialization'),
+       ('ingestion', 'STEM_TREE_RESOLUTION_FAILED', 'Stem resolution failed because no active tree matched'),
+       ('ingestion', 'STEM_RESOLUTION_FAILED', 'Stem resolution failed after stem materialization'),
+       ('ingestion', 'MEASUREMENT_INSERT_SKIPPED', 'Measurement insert skipped during core materialization'),
+       ('ingestion', 'DUPLICATE_TAG_CONFLICT', 'Conflicting duplicate TreeTag/StemTag rows detected in upload batch'),
+       ('ingestion', 'DUPLICATE_TAG_CONFLICT_EXISTING', 'Conflicting TreeTag/StemTag matches existing census measurement'),
+       ('ingestion', 'SQL_EXCEPTION', 'Ingestion SQL exception'),
+       ('validation', '14', 'Invalid attribute code'),
+       ('validation', '20', 'Species mismatch from previous census'),
+       ('validation', '21', 'Same-batch species conflict');
+
+create table if not exists measurement_error_log
+(
+    MeasurementID int                               not null,
+    ErrorID       int                               not null,
+    CreatedAt     datetime default CURRENT_TIMESTAMP null,
+    IsResolved    tinyint(1) default 0             not null,
+    ResolvedAt    datetime                          null,
+    primary key (MeasurementID, ErrorID),
+    constraint measurement_error_log_coremeasurements_fk
+        foreign key (MeasurementID) references coremeasurements (CoreMeasurementID)
+            on delete cascade,
+    constraint measurement_error_log_errors_fk
+        foreign key (ErrorID) references measurement_errors (ErrorID)
+            on delete restrict
+);
+
+create index idx_measurement_error_log_errorid
+    on measurement_error_log (ErrorID);
+
+create index idx_measurement_error_log_resolved
+    on measurement_error_log (IsResolved, CreatedAt);
+
+create index idx_mel_measurement_error_resolved
+    on measurement_error_log (MeasurementID, ErrorID, IsResolved);
+
+create index idx_me_error_source
+    on measurement_errors (ErrorID, ErrorSource);
 
 create table if not exists specimens
 (
@@ -838,6 +933,9 @@ create index idx_stemdescription
 create index idx_stemnumber
     on stems (StemCrossID);
 
+create index idx_stems_census_crossid
+    on stems (CensusID, StemCrossID);
+
 create index idx_stems_stemtag_quadratid
     on stems (StemTag, QuadratID);
 
@@ -847,6 +945,15 @@ create index idx_stemtag
 create index idx_treeid
     on stems (TreeID);
 
+create index idx_stems_tag_tree_census_active
+    on stems (StemTag, TreeID, CensusID, IsActive);
+
+create index idx_stems_tree_quadrat_census_active
+    on stems (TreeID, QuadratID, CensusID, IsActive);
+
+create index idx_stems_census_tree_tag_active
+    on stems (CensusID, TreeID, StemTag, IsActive);
+
 create index ix_stems_treeid_stemtag_quadratid
     on stems (TreeID, StemTag, QuadratID);
 
@@ -855,6 +962,15 @@ create index idx_speciesid
 
 create index trees_TreeTag_index
     on trees (TreeTag);
+
+create index idx_trees_tag_census_active
+    on trees (TreeTag, CensusID, IsActive);
+
+create index idx_trees_census_tag_active
+    on trees (CensusID, TreeTag, IsActive);
+
+create index idx_trees_tag_species_census_active
+    on trees (TreeTag, SpeciesID, CensusID, IsActive);
 
 create table if not exists unifiedchangelog
 (
@@ -965,6 +1081,7 @@ create table if not exists viewfulltable
     FamilyID                   int                                                                 null,
     Family                     varchar(32)                                                         null,
     Attributes                 varchar(255)                                                        null,
+    RawCodes                   varchar(255)                                                        null,
     UserDefinedFields          json                                                                null
 );
 
@@ -989,7 +1106,12 @@ create table if not exists upload_sessions
     created_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null,
     updated_at        timestamp                                                                                                                   default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP,
     error_message     text                                                                                                                                       null,
-    idempotency_key   varchar(255)                                                                                                                               null
+    idempotency_key   varchar(255)                                                                                                                               null,
+    mode              varchar(32)                                                                                                                                null,
+    active_scope_key  varchar(255) as (case
+                                           when (`state` in ('initialized', 'uploading', 'uploaded', 'processing', 'collapsing'))
+                                               then concat_ws('#', `schema_name`, `plot_id`, `census_id`)
+                                           else null end) stored
 );
 
 create index idx_state
@@ -1003,6 +1125,9 @@ create index idx_plot_census
 
 create index idx_idempotency
     on upload_sessions (idempotency_key);
+
+create unique index uq_upload_sessions_active_scope
+    on upload_sessions (active_scope_key);
 
 create table if not exists uploadintegrityalerts
 (
@@ -1071,7 +1196,8 @@ create table if not exists uploadmetrics
     startTime                  datetime                                             not null,
     endTime                    datetime                                             null,
     createdAt                  datetime                                             default CURRENT_TIMESTAMP null,
-    constraint uploadId unique (uploadId)
+    constraint uq_uploadmetrics_uploadid
+        unique (uploadId)
 );
 
 create index idx_uploadmetrics_fileid
@@ -1089,6 +1215,28 @@ create index idx_uploadmetrics_censusid
 create index idx_uploadmetrics_status
     on uploadmetrics (status);
 
+-- =====================================================================================
+-- Validation Runs (background validation tracking)
+-- =====================================================================================
+
+create table if not exists validation_runs
+(
+    RunID          int auto_increment primary key,
+    PlotID         int                                                      not null,
+    CensusID       int                                                      not null,
+    Status         enum ('running', 'completed', 'failed', 'cancelled')     not null default 'running',
+    TotalSteps     int                                                      not null default 0,
+    CompletedSteps int                                                      not null default 0,
+    FailedSteps    int                                                      not null default 0,
+    CurrentStep    varchar(100)                                             null,
+    ErrorMessages  json                                                     null,
+    StartedAt      datetime                                                 default CURRENT_TIMESTAMP not null,
+    CompletedAt    datetime                                                 null
+);
+
+create index idx_validation_runs_active
+    on validation_runs (PlotID, CensusID, Status);
+
 create index idx_uploadmetrics_dataloss
     on uploadmetrics (dataLossDetected);
 
@@ -1098,3 +1246,27 @@ create index idx_uploadmetrics_starttime
 create index idx_uploadmetrics_batch_census_status
     on uploadmetrics (batchID, censusID, status) comment 'Composite index for idempotency check in bulkingestionprocess';
 
+-- =====================================================================================
+-- Views
+-- =====================================================================================
+
+-- Surfaces upload batches where rows were truly lost (unaccounted for after ingestion).
+-- Validation failures are NOT data loss — they are stored in coremeasurements with StemGUID=NULL.
+-- This view only returns rows when sourceRecords > processedRecords + failedRecords.
+CREATE OR REPLACE VIEW uploaddatalossreport AS
+SELECT
+    um.fileID           AS FileID,
+    um.batchID          AS BatchID,
+    um.plotID           AS PlotID,
+    um.censusID         AS CensusID,
+    um.sourceRecords    AS SourceRecords,
+    um.processedRecords AS ProcessedRecords,
+    um.failedRecords    AS FailedRecords,
+    um.missingRecords   AS MissingRecords,
+    um.status           AS Status,
+    um.errorMessage     AS ErrorMessage,
+    um.startTime        AS StartTime,
+    um.endTime          AS EndTime
+FROM uploadmetrics um
+WHERE um.status IN ('completed', 'failed')
+  AND um.missingRecords > 0;

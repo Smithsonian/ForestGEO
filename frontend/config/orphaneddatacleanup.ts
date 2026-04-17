@@ -54,12 +54,21 @@ export async function getOrphanedDataStats(schema: string, plotId?: number, cens
     const fileIdResults = await runQuery(conn, fileIdQuery, tempCountParams);
     const orphanedFileIds = Array.isArray(fileIdResults) ? fileIdResults.map((r: any) => r.FileID).filter(Boolean) : [];
 
-    // Count failed measurements
-    let failedCountQuery = `SELECT COUNT(*) as count FROM ${schema}.failedmeasurements`;
+    // Count unresolved ingestion errors stored in coremeasurements.
+    let failedCountQuery = `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+                            FROM ${schema}.coremeasurements cm
+                                   JOIN ${schema}.measurement_error_log mel
+                                        ON mel.MeasurementID = cm.CoreMeasurementID
+                                   JOIN ${schema}.measurement_errors me
+                                        ON me.ErrorID = mel.ErrorID
+                            WHERE cm.StemGUID IS NULL
+                              AND mel.IsResolved = FALSE
+                              AND me.ErrorSource = 'ingestion'`;
     if (plotId && censusId) {
-      failedCountQuery += ` WHERE PlotID = ? AND CensusID = ?`;
+      failedCountQuery += ` AND cm.CensusID = ?`;
     }
-    const failedResults = await runQuery(conn, failedCountQuery, tempCountParams);
+    const failedParams = plotId && censusId ? [censusId] : [];
+    const failedResults = await runQuery(conn, failedCountQuery, failedParams);
     const failedCount = Array.isArray(failedResults) && failedResults.length > 0 ? failedResults[0].count : 0;
 
     return {

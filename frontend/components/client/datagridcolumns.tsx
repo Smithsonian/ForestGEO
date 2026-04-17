@@ -242,6 +242,38 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     type: 'string',
     editable: true,
     filterable: false
+  },
+  {
+    field: 'currentFailureReasons',
+    headerName: 'Current Reasons',
+    flex: 2,
+    type: 'string',
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'description',
+    headerName: 'Detailed Reason',
+    flex: 3,
+    type: 'string',
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'originalFailureReasons',
+    headerName: 'Original Reasons',
+    flex: 2,
+    type: 'string',
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'lastValidatedAt',
+    headerName: 'Last Validated',
+    flex: 1,
+    type: 'dateTime',
+    editable: false,
+    filterable: false
   }
 ]);
 

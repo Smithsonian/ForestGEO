@@ -283,7 +283,7 @@ describe('NewValidationRow - Functional Tests', () => {
       const templateButton = screen.getByRole('button', { name: /use template/i });
       await user.click(templateButton);
 
-      expect(mockOnValidationChange).toHaveBeenCalledWith('definition', expect.stringContaining('INSERT INTO cmverrors'));
+      expect(mockOnValidationChange).toHaveBeenCalledWith('definition', expect.stringContaining('INSERT INTO measurement_error_log'));
       expect(mockOnValidationChange).toHaveBeenCalledWith('definition', expect.stringContaining('@validationProcedureID'));
     });
 

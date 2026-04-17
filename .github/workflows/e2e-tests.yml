@@ -1,0 +1,77 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    environment: development_temp
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Create .env for E2E testing
+        run: |
+          cat > frontend/.env <<'ENVEOF'
+          AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+          AUTH_URL=http://localhost:3000
+          AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }}
+          AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }}
+          AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }}
+          AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }}
+          AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }}
+          AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }}
+          AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }}
+          NEXT_PUBLIC_E2E_TESTING=true
+          NODE_ENV=development
+          PORT=3000
+          ENVEOF
+
+      - name: Install dependencies
+        run: cd frontend && npm install
+
+      - name: Install Cypress binary
+        run: cd frontend && npx cypress install
+
+      - name: Run E2E tests
+        uses: cypress-io/github-action@v6
+        with:
+          working-directory: frontend
+          start: npx next dev --turbo
+          wait-on: 'http://localhost:3000'
+          wait-on-timeout: 120
+          browser: chrome
+          headed: false
+          spec: cypress/e2e/census-creation.cy.ts
+        env:
+          NEXT_PUBLIC_E2E_TESTING: 'true'
+
+      - name: Upload Cypress screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cypress-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 7
+
+      - name: Upload Cypress videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cypress-videos
+          path: frontend/cypress/videos
+          retention-days: 7
+          if-no-files-found: ignore

@@ -5,7 +5,7 @@ import path from 'path';
 const dbConfig = {
   host: process.env.AZURE_SQL_SERVER || 'forestgeo-mysqldataserver.mysql.database.azure.com',
   user: process.env.AZURE_SQL_USER || 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD || 'P@ssw0rd',
+  password: process.env.AZURE_SQL_PASSWORD,
   database: process.env.AZURE_SQL_SCHEMA || 'forestgeo_testing',
   port: parseInt(process.env.AZURE_SQL_PORT || '3306'),
   multipleStatements: true

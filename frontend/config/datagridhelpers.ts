@@ -156,6 +156,7 @@ export interface EditToolbarCustomProps {
   handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
   handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
+  showToolbarActions?: boolean;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
@@ -254,6 +255,8 @@ export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridCo
 export interface MeasurementsCommonsProps {
   gridType: string;
   gridColumns: GridColDef[];
+  initialVisibleFilters?: VisibleFilter[];
+  showToolbarActions?: boolean;
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;
   rowCount: number;
@@ -272,7 +275,6 @@ export interface MeasurementsCommonsProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   dynamicButtons: DynamicButton[];
-  failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
 }
@@ -289,7 +291,37 @@ export const failureErrorMapping: Record<string, string[]> = {
   'Missing Codes and DBH': ['codes', 'dbh'],
   'Missing Codes and HOM': ['codes', 'hom'],
   'Missing Date': ['date'],
-  'Invalid Codes': ['codes']
+  'Invalid Codes': ['codes'],
+  'Missing required field: TreeTag': ['tag'],
+  'Missing required field: StemTag': ['stemTag'],
+  'Missing required field: SpeciesCode': ['spCode'],
+  'Missing required field: QuadratName': ['quadrat'],
+  'Missing required field: MeasurementDate': ['date'],
+  'TreeTag exceeds maximum length': ['tag'],
+  'StemTag exceeds maximum length': ['stemTag'],
+  'SpeciesCode exceeds maximum length': ['spCode'],
+  'Comments exceed maximum length': ['description'],
+  'Codes exceed maximum length': ['codes'],
+  'Invalid DBH': ['dbh'],
+  'Invalid HOM': ['hom'],
+  'Invalid LocalX': ['x'],
+  'Invalid LocalY': ['y'],
+  'Missing measurement data': ['dbh', 'hom', 'codes'],
+  'Invalid quadrat name': ['quadrat'],
+  'Invalid quadrat reference': ['quadrat'],
+  'Invalid species code': ['spCode'],
+  'Invalid species reference': ['spCode'],
+  'Duplicate entry': ['tag', 'stemTag', 'quadrat', 'date'],
+  'Duplicate measurement row detected': ['tag', 'stemTag', 'quadrat', 'date'],
+  'Quadrat mismatch': ['quadrat'],
+  'Quadrat mismatch across censuses': ['quadrat'],
+  'Coordinate drift': ['x', 'y'],
+  'Coordinate drift exceeds allowed threshold': ['x', 'y'],
+  'Coordinate value is negative': ['x', 'y'],
+  'DBH must be non-negative': ['dbh'],
+  'HOM must be non-negative': ['hom'],
+  'SQL Exception': ['tag'],
+  'Ingestion SQL exception': ['tag']
 };
 
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {

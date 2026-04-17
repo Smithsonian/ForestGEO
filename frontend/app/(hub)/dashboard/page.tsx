@@ -9,8 +9,15 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, useOrgCensusListContext, useOrgCensusListDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import {
+  useOrgCensusContext,
+  useOrgCensusDispatch,
+  useOrgCensusListContext,
+  useOrgCensusListDispatch,
+  usePlotContext,
+  useSiteContext
+} from '@/app/contexts/compat-hooks';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
@@ -63,6 +70,7 @@ export default function DashboardPage() {
   const currentCensus = useOrgCensusContext();
   const censusListContext = useOrgCensusListContext();
   const censusListDispatch = useOrgCensusListDispatch();
+  const censusDispatch = useOrgCensusDispatch();
   const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
@@ -102,7 +110,7 @@ export default function DashboardPage() {
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
 
   // Census creation state
-  const [isCreatingCensus, setIsCreatingCensus] = useState(false);
+  const isCreatingCensusRef = useRef(false);
 
   // Track loading state and last loaded key to prevent duplicate requests
   const loadingRef = useRef<boolean>(false);
@@ -190,7 +198,7 @@ export default function DashboardPage() {
       setError(errorMessage);
       ailogger.error('Aggregated dashboard metrics error:', e);
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID]);
 
   const loadChangelogHistory = useCallback(async () => {
     if (!currentSite || !currentPlot || !currentCensus) {
@@ -245,7 +253,7 @@ export default function DashboardPage() {
         setIsLoading(false);
       }
     }
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   // Memoized event handlers to prevent unnecessary re-renders
   const handleFeedbackKeyDown = useCallback(
@@ -295,12 +303,25 @@ export default function DashboardPage() {
       const censusArray = Array.isArray(censusRDSLoad) ? censusRDSLoad : [];
       const updatedCensusList = await createAndUpdateCensusList(censusArray);
       if (censusListDispatch) await censusListDispatch({ censusList: updatedCensusList });
+
+      if (censusDispatch && currentCensus) {
+        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, updatedCensusList);
+        await censusDispatch({ census: reconciledCensus });
+      }
+
       console.log('Census list refreshed successfully');
     } catch (error) {
       console.error('Failed to refresh census list:', error);
       ailogger.error('Failed to refresh census list', error instanceof Error ? error : undefined);
     }
-  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, censusListDispatch]);
+  }, [
+    currentSite?.schemaName,
+    currentPlot?.plotID,
+    currentCensus?.dateRanges?.[0]?.censusID,
+    currentCensus?.plotCensusNumber,
+    censusDispatch,
+    censusListDispatch
+  ]);
 
   // Census handlers
   const handleCensusDelete = useCallback((census: CensusWithStats | OrgCensusRDS) => {
@@ -362,7 +383,7 @@ export default function DashboardPage() {
   const handleAddCensus = useCallback(async () => {
     console.log('handleAddCensus called');
 
-    if (isCreatingCensus) {
+    if (isCreatingCensusRef.current) {
       console.log('Census creation already in progress, ignoring click');
       return;
     }
@@ -387,9 +408,9 @@ export default function DashboardPage() {
       return;
     }
 
-    setIsCreatingCensus(true);
+    isCreatingCensusRef.current = true;
     setError(null);
-    setLoading(true, 'Creating new census...');
+    setLoading(true, 'Creating new census...', undefined, 'processing');
     const startTime = Date.now();
 
     try {
@@ -417,11 +438,10 @@ export default function DashboardPage() {
       if (sourceCensusID !== undefined && sourceCensusID !== null) {
         await Promise.all(
           ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
-            await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ incoming: {} })
-            });
+            const rolloverResponse = await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${sourceCensusID}/${newCensusID}`);
+            if (!rolloverResponse.ok) {
+              throw new Error(`Failed to rollover ${key}: ${rolloverResponse.status}`);
+            }
           })
         );
       } else {
@@ -444,9 +464,11 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
       // Debounce: prevent rapid successive clicks
-      censusCreationTimerRef.current = setTimeout(() => setIsCreatingCensus(false), 1000);
+      censusCreationTimerRef.current = setTimeout(() => {
+        isCreatingCensusRef.current = false;
+      }, 1000);
     }
-  }, [isCreatingCensus, currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
+  }, [currentCensus, censusListContext, currentSite, currentPlot, refreshCensusList, setLoading]);
 
   // Handle manual reset after successful plot edit
   useEffect(() => {
@@ -625,7 +647,7 @@ export default function DashboardPage() {
                 Available Censuses
               </Typography>
               <Typography level="body-md" color="neutral">
-                Use the sidebar to select a census from {currentPlot.plotName}
+                Select a census from {currentPlot.plotName} to view its data
               </Typography>
             </Box>
           </Stack>
@@ -636,6 +658,12 @@ export default function DashboardPage() {
             isLoading={false}
             onCensusDelete={handleCensusDelete}
             onAddCensus={handleAddCensus}
+            onSelectCensus={census => {
+              if (censusDispatch) {
+                const orgCensus = censusListContext?.find(c => c?.plotCensusNumber === census.plotCensusNumber);
+                censusDispatch({ census: orgCensus });
+              }
+            }}
           />
         </Box>
       ) : !hasData && !isLoading ? (
@@ -654,8 +682,6 @@ export default function DashboardPage() {
                 router.push('/fixeddatainput/quadrats');
               } else if (!validity.attributes) {
                 router.push('/fixeddatainput/attributes');
-              } else if (!validity.personnel) {
-                router.push('/fixeddatainput/personnel');
               } else {
                 // All prerequisites met, go to measurement upload
                 router.push('/measurementshub/summary');

@@ -4,6 +4,7 @@ import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsde
 import ConnectionManager from '@/config/connectionmanager';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { ensureMeasurementErrorDefinition, VALIDATION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // need to try integrating this into validation system:
 
@@ -269,8 +270,126 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 //   }
 // };
 
-function isDeadlockError(error: any) {
-  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;
+function isRetryableValidationLockError(error: any) {
+  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213 || error?.code === 'ER_LOCK_WAIT_TIMEOUT' || error?.errno === 1205;
+}
+
+function isRetryableValidationConnectionError(error: any) {
+  const message = String(error?.message ?? '');
+
+  return (
+    error?.code === 'ECONNRESET' ||
+    error?.code === 'PROTOCOL_CONNECTION_LOST' ||
+    error?.code === 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR' ||
+    error?.code === 'ER_CONNECTION_KILLED' ||
+    error?.errno === 1927 ||
+    error?.errno === 2013 ||
+    message.includes('Connection lost') ||
+    message.includes('server has gone away') ||
+    message.includes('server closed the connection') ||
+    message.includes('Connection was killed')
+  );
+}
+
+function isRetryableValidationExecutionError(error: any) {
+  return isRetryableValidationLockError(error) || isRetryableValidationConnectionError(error);
+}
+
+type ValidationExecutionParams = {
+  p_CensusID?: number | null;
+  p_PlotID?: number | null;
+};
+
+type CombinedDBHValidationResult = {
+  success: boolean;
+  ranGrowth: boolean;
+  ranShrinkage: boolean;
+  error?: string;
+};
+
+type CombinedCrossCensusLocationValidationResult = {
+  success: boolean;
+  ranQuadratMismatch: boolean;
+  ranCoordinateDrift: boolean;
+  error?: string;
+};
+
+function mysqlBoolToBoolean(value: any): boolean {
+  if (Buffer.isBuffer(value)) return value[0] === 1;
+  return Boolean(value);
+}
+
+async function prepareValidationRun(
+  connectionManager: ConnectionManager,
+  schema: string,
+  validationProcedureID: number,
+  validationProcedureName: string,
+  transactionID: string,
+  params: ValidationExecutionParams
+): Promise<void> {
+  // Ensure error definition exists OUTSIDE the transaction (auto-commit) so
+  // the INSERT ON DUPLICATE KEY UPDATE lock is released immediately rather
+  // than being held for the duration of the potentially long-running
+  // validation stored procedure.  This prevents lock-wait timeouts when
+  // multiple validations run in parallel.
+  await ensureMeasurementErrorDefinition(
+    connectionManager,
+    schema,
+    VALIDATION_ERROR_SOURCE,
+    String(validationProcedureID),
+    `Validation ${validationProcedureName}`
+  );
+
+  const cleanupQuery = `
+    DELETE cme FROM ${schema}.measurement_error_log cme
+    JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
+    JOIN ${schema}.coremeasurements cm ON cme.MeasurementID = cm.CoreMeasurementID
+    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    WHERE me.ErrorSource = ?
+      AND me.ErrorCode = ?
+      AND cm.IsValidated IS NULL
+      AND cm.IsActive = TRUE
+      AND (? IS NULL OR cm.CensusID = ?)
+      AND (? IS NULL OR c.PlotID = ?)
+  `;
+  const censusID = params.p_CensusID ?? null;
+  const plotID = params.p_PlotID ?? null;
+  await connectionManager.executeQuery(
+    cleanupQuery,
+    [VALIDATION_ERROR_SOURCE, String(validationProcedureID), censusID, censusID, plotID, plotID],
+    transactionID
+  );
+
+  ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
+}
+
+function formatValidationQuery(schema: string, cursorQuery: string, validationProcedureID: number, params: ValidationExecutionParams): string {
+  return cursorQuery
+    .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
+    .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
+    .replace(/@validationProcedureID/g, validationProcedureID.toString())
+    .replace(/\bCALL\s+(?![\w]*\.)(\w+)\s*\(/gi, `CALL ${schema}.$1(`)
+    .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+    .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`)
+    .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)
+    .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
+    .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
+    .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
+    .replace(
+      /insert\s+into\s+cmverrors\s*\(\s*CoreMeasurementID\s*,\s*ValidationErrorID\s*\)/gi,
+      `INSERT INTO ${schema}.measurement_error_log (MeasurementID, ErrorID)`
+    )
+    .replace(/(?<!\w\.)cmverrors\b/gi, `${schema}.measurement_error_log`)
+    .replace(/\be\.CoreMeasurementID\b/gi, 'e.MeasurementID')
+    .replace(/\be\.ValidationErrorID\b/gi, 'e.ErrorID')
+    .replace(/(?<!\w\.)species\b/g, `${schema}.species`)
+    .replace(/(?<!\w\.)genus\b/g, `${schema}.genus`)
+    .replace(/(?<!\w\.)family\b/g, `${schema}.family`)
+    .replace(/(?<!\w\.)plots\b/g, `${schema}.plots`)
+    .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
+    .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
+    .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
+    .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 }
 
 // Generalized runValidation function
@@ -279,10 +398,7 @@ export async function runValidation(
   validationProcedureName: string,
   schema: string,
   cursorQuery: string,
-  params: {
-    p_CensusID?: number | null;
-    p_PlotID?: number | null;
-  } = {}
+  params: ValidationExecutionParams = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
@@ -296,57 +412,25 @@ export async function runValidation(
       attempt++;
       transactionID = await connectionManager.beginTransaction();
 
-      // STEP 1: Clear stale validation errors for this specific validation
-      // This removes errors from previous runs where the underlying data may have been fixed.
-      // Only clears errors for measurements that are being re-validated (IsValidated IS NULL)
-      // and scoped to the current census/plot if provided.
-      const cleanupQuery = `
-        DELETE cme FROM ${schema}.cmverrors cme
-        JOIN ${schema}.coremeasurements cm ON cme.CoreMeasurementID = cm.CoreMeasurementID
-        JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-        WHERE cme.ValidationErrorID = ?
-          AND cm.IsValidated IS NULL
-          AND cm.IsActive = TRUE
-          AND (? IS NULL OR cm.CensusID = ?)
-          AND (? IS NULL OR c.PlotID = ?)
-      `;
-      const censusID = params.p_CensusID ?? null;
-      const plotID = params.p_PlotID ?? null;
-      await connectionManager.executeQuery(cleanupQuery, [validationProcedureID, censusID, censusID, plotID, plotID]);
-
-      ailogger.info(`[${validationProcedureName}] Cleared stale errors before re-validation`);
+      await prepareValidationRun(connectionManager, schema, validationProcedureID, validationProcedureName, transactionID, params);
 
       // STEP 2: Dynamically replace SQL variables with actual TypeScript input values
-      // Use negative lookbehind to prevent replacing already schema-prefixed table names
-      // Process longer table names first to avoid substring issues
-      const formattedCursorQuery = cursorQuery
-        .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
-        .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        .replace(/@validationProcedureID/g, validationProcedureID.toString())
-        .replace(/(?<!\w\.)cmattributes\b/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-        .replace(/(?<!\w\.)specieslimits\b/g, `${schema}.specieslimits`) // Process BEFORE species
-        .replace(/(?<!\w\.)coremeasurements\b/g, `${schema}.coremeasurements`)
-        .replace(/(?<!\w\.)stems\b/g, `${schema}.stems`)
-        .replace(/(?<!\w\.)trees\b/g, `${schema}.trees`)
-        .replace(/(?<!\w\.)quadrats\b/g, `${schema}.quadrats`)
-        .replace(/(?<!\w\.)cmverrors\b/g, `${schema}.cmverrors`)
-        .replace(/(?<!\w\.)species\b/g, `${schema}.species`) // Process AFTER specieslimits
-        .replace(/(?<!\w\.)genus\b/g, `${schema}.genus`)
-        .replace(/(?<!\w\.)family\b/g, `${schema}.family`)
-        .replace(/(?<!\w\.)plots\b/g, `${schema}.plots`)
-        .replace(/(?<!\w\.)census\b/g, `${schema}.census`)
-        .replace(/(?<!\w\.)personnel\b/g, `${schema}.personnel`)
-        .replace(/(?<!\w\.)attributes\b/g, `${schema}.attributes`)
-        .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
+      const formattedCursorQuery = formatValidationQuery(schema, cursorQuery, validationProcedureID, params);
 
       // STEP 3: Execute the validation query to insert new errors
-      await connectionManager.executeQuery(formattedCursorQuery);
+      const finalCursorQuery =
+        /insert\s+into\s+.*measurement_error_log/gi.test(formattedCursorQuery) && !/on\s+duplicate\s+key/gi.test(formattedCursorQuery)
+          ? formattedCursorQuery.replace(/;?\s*$/, ' ON DUPLICATE KEY UPDATE IsResolved = FALSE, ResolvedAt = NULL;')
+          : formattedCursorQuery;
+
+      await connectionManager.executeQuery(finalCursorQuery, [], transactionID);
       await connectionManager.commitTransaction(transactionID ?? '');
       return true;
     } catch (e: any) {
-      if (isDeadlockError(e)) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
         if (attempt >= MAX_ATTEMPTS) {
-          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent deadlocks`);
+          ailogger.error(`Validation failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
           try {
             await connectionManager.rollbackTransaction(transactionID);
           } catch (rollbackError: any) {
@@ -355,7 +439,7 @@ export async function runValidation(
           return false;
         }
 
-        ailogger.info(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
+        ailogger.info(`Validation attempt ${attempt}: ${retryReason} encountered (error code: ${e.code || e.errno || 'n/a'}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -365,6 +449,7 @@ export async function runValidation(
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 5000); // Exponential backoff capped at 5 seconds
       } else {
+        ailogger.error(`Validation ${validationProcedureName} (ID ${validationProcedureID}) failed with non-deadlock error:`, e.message, e.code);
         try {
           await connectionManager.rollbackTransaction(transactionID);
         } catch (rollbackError: any) {
@@ -378,6 +463,237 @@ export async function runValidation(
   // If we exit the loop without success, max retries exceeded
   ailogger.error(`Validation failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
   return false;
+}
+
+export async function runCombinedDBHValidations(schema: string, params: ValidationExecutionParams = {}): Promise<CombinedDBHValidationResult> {
+  const connectionManager = ConnectionManager.getInstance();
+  let attempt = 0;
+  let delay = 100;
+  const MAX_ATTEMPTS = 10;
+
+  while (attempt < MAX_ATTEMPTS) {
+    let transactionID = '';
+
+    try {
+      attempt++;
+      transactionID = await connectionManager.beginTransaction();
+
+      const validationRows = await connectionManager.executeQuery(
+        `
+          SELECT ValidationID, ProcedureName, IsEnabled
+          FROM ${schema}.sitespecificvalidations
+          WHERE ValidationID IN (1, 2)
+        `,
+        [],
+        transactionID
+      );
+
+      const growthValidation = validationRows.find((row: any) => Number(row.ValidationID) === 1);
+      const shrinkageValidation = validationRows.find((row: any) => Number(row.ValidationID) === 2);
+
+      const ranGrowth = mysqlBoolToBoolean(growthValidation?.IsEnabled);
+      const ranShrinkage = mysqlBoolToBoolean(shrinkageValidation?.IsEnabled);
+
+      if (ranGrowth) {
+        await prepareValidationRun(connectionManager, schema, 1, growthValidation?.ProcedureName ?? 'ValidateDBHGrowthExceedsMax', transactionID, params);
+      }
+
+      if (ranShrinkage) {
+        await prepareValidationRun(connectionManager, schema, 2, shrinkageValidation?.ProcedureName ?? 'ValidateDBHShrinkageExceedsMax', transactionID, params);
+      }
+
+      if (ranGrowth || ranShrinkage) {
+        await connectionManager.executeQuery(
+          `CALL ${schema}.RunSharedDBHChangeValidations(?, ?, ?, ?)`,
+          [params.p_CensusID ?? null, params.p_PlotID ?? null, ranGrowth ? 1 : 0, ranShrinkage ? 1 : 0],
+          transactionID
+        );
+      }
+
+      await connectionManager.commitTransaction(transactionID);
+      return { success: true, ranGrowth, ranShrinkage };
+    } catch (e: any) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
+        if (attempt >= MAX_ATTEMPTS) {
+          ailogger.error(`Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`);
+          const finalError = `Combined DBH validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`;
+          try {
+            await connectionManager.rollbackTransaction(transactionID);
+          } catch (rollbackError: any) {
+            ailogger.error('Rollback error:', rollbackError);
+          }
+          return {
+            success: false,
+            ranGrowth: false,
+            ranShrinkage: false,
+            error: finalError
+          };
+        }
+
+        ailogger.info(`Combined DBH validation attempt ${attempt}: ${retryReason} encountered. Retrying after ${delay}ms...`);
+        try {
+          await connectionManager.rollbackTransaction(transactionID);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 5000);
+      } else {
+        ailogger.error(`Combined DBH validations failed with non-deadlock error:`, e.message, e.code);
+        try {
+          await connectionManager.rollbackTransaction(transactionID);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
+        }
+        return { success: false, ranGrowth: false, ranShrinkage: false, error: e.message };
+      }
+    }
+  }
+
+  ailogger.error(`Combined DBH validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
+  return {
+    success: false,
+    ranGrowth: false,
+    ranShrinkage: false,
+    error: `Combined DBH validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`
+  };
+}
+
+export async function runCombinedCrossCensusLocationValidations(
+  schema: string,
+  params: ValidationExecutionParams = {}
+): Promise<CombinedCrossCensusLocationValidationResult> {
+  const connectionManager = ConnectionManager.getInstance();
+  let attempt = 0;
+  let delay = 100;
+  const MAX_ATTEMPTS = 10;
+
+  while (attempt < MAX_ATTEMPTS) {
+    let transactionID = '';
+
+    try {
+      attempt++;
+      transactionID = await connectionManager.beginTransaction();
+
+      const validationRows = await connectionManager.executeQuery(
+        `
+          SELECT ValidationID, ProcedureName, IsEnabled
+          FROM ${schema}.sitespecificvalidations
+          WHERE ValidationID IN (17, 18)
+        `,
+        [],
+        transactionID
+      );
+
+      const quadratMismatchValidation = validationRows.find((row: any) => Number(row.ValidationID) === 17);
+      const coordinateDriftValidation = validationRows.find((row: any) => Number(row.ValidationID) === 18);
+
+      const ranQuadratMismatch = mysqlBoolToBoolean(quadratMismatchValidation?.IsEnabled);
+      const ranCoordinateDrift = mysqlBoolToBoolean(coordinateDriftValidation?.IsEnabled);
+
+      if (ranQuadratMismatch) {
+        await prepareValidationRun(
+          connectionManager,
+          schema,
+          17,
+          quadratMismatchValidation?.ProcedureName ?? 'ValidateQuadratMismatchAcrossCensuses',
+          transactionID,
+          params
+        );
+      }
+
+      if (ranCoordinateDrift) {
+        await prepareValidationRun(
+          connectionManager,
+          schema,
+          18,
+          coordinateDriftValidation?.ProcedureName ?? 'ValidateCoordinateDriftAcrossCensuses',
+          transactionID,
+          params
+        );
+      }
+
+      if (ranQuadratMismatch || ranCoordinateDrift) {
+        // Keep the database-side timeout below the route/client timeouts so
+        // long-running comparisons fail cleanly with a SQL error rather than
+        // a dropped HTTP request. Large cross-census comparisons can exceed
+        // 10 minutes on 200K+ row datasets.
+        const CROSS_CENSUS_TIMEOUT_MS = 24 * 60 * 1000;
+        await connectionManager.executeQuery(`SET SESSION MAX_EXECUTION_TIME = ${CROSS_CENSUS_TIMEOUT_MS}`, [], transactionID);
+
+        try {
+          await connectionManager.executeQuery(
+            `CALL ${schema}.RunSharedCrossCensusLocationValidations(?, ?, ?, ?)`,
+            [params.p_CensusID ?? null, params.p_PlotID ?? null, ranQuadratMismatch ? 1 : 0, ranCoordinateDrift ? 1 : 0],
+            transactionID
+          );
+        } finally {
+          // Always reset MAX_EXECUTION_TIME so it doesn't leak to other queries
+          // that reuse this pooled connection after rollback.
+          try {
+            await connectionManager.executeQuery('SET SESSION MAX_EXECUTION_TIME = 0', [], transactionID);
+          } catch {
+            // Connection may already be dead after a timeout — swallow safely.
+          }
+        }
+      }
+
+      await connectionManager.commitTransaction(transactionID);
+      return { success: true, ranQuadratMismatch, ranCoordinateDrift };
+    } catch (e: any) {
+      if (isRetryableValidationExecutionError(e)) {
+        const retryReason = isRetryableValidationConnectionError(e) ? 'retryable connection error' : 'retryable lock error';
+        if (attempt >= MAX_ATTEMPTS) {
+          ailogger.error(
+            `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`
+          );
+          const finalError = `Combined cross-census location validations failed after ${MAX_ATTEMPTS} attempts due to persistent ${retryReason.replace('retryable ', '')}s`;
+          try {
+            await connectionManager.rollbackTransaction(transactionID);
+          } catch (rollbackError: any) {
+            ailogger.error('Rollback error:', rollbackError);
+          }
+          return {
+            success: false,
+            ranQuadratMismatch: false,
+            ranCoordinateDrift: false,
+            error: finalError
+          };
+        }
+
+        ailogger.info(`Combined cross-census location validation attempt ${attempt}: ${retryReason} encountered. Retrying after ${delay}ms...`);
+        try {
+          await connectionManager.rollbackTransaction(transactionID);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 5000);
+      } else {
+        ailogger.error(`Combined cross-census location validations failed with non-deadlock error:`, e.message, e.code);
+        try {
+          await connectionManager.rollbackTransaction(transactionID);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
+        }
+        return {
+          success: false,
+          ranQuadratMismatch: false,
+          ranCoordinateDrift: false,
+          error: e.message
+        };
+      }
+    }
+  }
+
+  ailogger.error(`Combined cross-census location validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`);
+  return {
+    success: false,
+    ranQuadratMismatch: false,
+    ranCoordinateDrift: false,
+    error: `Combined cross-census location validations failed: max retry limit (${MAX_ATTEMPTS}) exceeded`
+  };
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
@@ -394,8 +710,11 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
   SET cm.IsValidated = CASE
     WHEN NOT EXISTS (
       SELECT 1
-      FROM ${schema}.cmverrors cme
-      WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+      FROM ${schema}.measurement_error_log cme
+      JOIN ${schema}.measurement_errors me ON me.ErrorID = cme.ErrorID
+      WHERE cme.MeasurementID = cm.CoreMeasurementID
+        AND cme.IsResolved = FALSE
+        AND me.ErrorSource = 'validation'
     ) THEN TRUE
     ELSE FALSE
   END

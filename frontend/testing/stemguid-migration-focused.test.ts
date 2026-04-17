@@ -453,7 +453,7 @@ describe('StemGUID Migration - Focused Edge Case Validation', () => {
         'CREATE TABLE stems (StemGUID int auto_increment primary key, ...)',
         'ALTER TABLE coremeasurements ADD FOREIGN KEY (StemGUID) REFERENCES stems(StemGUID)',
         'CREATE VIEW measurementssummary AS SELECT st.StemGUID, cm.CoreMeasurementID FROM stems st JOIN coremeasurements cm ON st.StemGUID = cm.StemGUID',
-        'INSERT INTO cmverrors SELECT cm.CoreMeasurementID FROM coremeasurements cm WHERE cm.StemGUID IN (SELECT StemGUID FROM problem_stems)'
+        'INSERT INTO measurement_error_log SELECT cm.CoreMeasurementID FROM coremeasurements cm WHERE cm.StemGUID IN (SELECT StemGUID FROM problem_stems)'
       ];
 
       criticalOperations.forEach(operation => {

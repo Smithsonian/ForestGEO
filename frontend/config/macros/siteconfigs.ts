@@ -11,6 +11,8 @@ import HistoryIcon from '@mui/icons-material/History';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import HomeIcon from '@mui/icons-material/Home';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -40,7 +42,6 @@ type ValidityMapping = Record<string, DataValidityKey>;
 
 export const validityMapping: ValidityMapping = {
   '/attributes': 'attributes',
-  '/personnel': 'personnel',
   '/alltaxonomies': 'species',
   '/quadrats': 'quadrats'
 };
@@ -92,10 +93,22 @@ export const siteConfigNav: SiteConfigProps[] = [
     icon: DataObjectIcon,
     expanded: [
       {
+        label: 'Census Overview',
+        href: '/censusoverview',
+        tip: 'Return to census selection',
+        icon: HomeIcon
+      },
+      {
         label: 'View Data',
         href: '/summary',
         tip: '',
         icon: VisibilityIcon
+      },
+      {
+        label: 'View Errors',
+        href: '/errors',
+        tip: 'review failed measurements',
+        icon: ErrorOutlineIcon
       },
       {
         label: 'Post-Census Statistics',
@@ -137,6 +150,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Dashboard';
     case '/measurementshub/summary':
       return 'View Data';
+    case '/measurementshub/errors':
+      return 'View Errors';
     case '/measurementshub/postvalidation':
       return 'Post-Census Statistics';
     case '/measurementshub/recentchanges':

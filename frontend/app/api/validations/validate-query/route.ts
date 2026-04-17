@@ -36,8 +36,12 @@ export async function POST(request: NextRequest) {
 
     // Basic syntax validation - try to explain the query without executing it
     try {
-      const explainQuery = `EXPLAIN ${query}`;
-      await connectionManager.executeQuery(explainQuery);
+      if (isStoredProcedureCall(query)) {
+        await validateStoredProcedureCall(connectionManager, schema, query, validationResult);
+      } else {
+        const explainQuery = `EXPLAIN ${query}`;
+        await connectionManager.executeQuery(explainQuery);
+      }
     } catch (error: any) {
       validationResult.isValid = false;
 
@@ -203,19 +207,26 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
   const queryUpper = query.toUpperCase();
   const queryLower = query.toLowerCase();
 
-  // Check for required INSERT INTO cmverrors structure
-  if (!queryUpper.includes('INSERT INTO CMVERRORS')) {
-    validationResult.errors.push('Validation queries must INSERT INTO cmverrors table');
+  if (isStoredProcedureCall(query)) {
+    if (!query.includes('@p_PlotID') || !query.includes('@p_CensusID')) {
+      validationResult.warnings.push('Stored-procedure validation calls should include @p_PlotID and @p_CensusID arguments for proper plot/census filtering');
+    }
+    return;
   }
 
-  // Check for required CoreMeasurementID and ValidationErrorID columns
-  if (!queryUpper.includes('COREMEASUREMENTID') || !queryUpper.includes('VALIDATIONERRORID')) {
-    validationResult.errors.push('Query must select CoreMeasurementID and ValidationErrorID columns');
+  // Check for required INSERT INTO measurement_error_log structure.
+  if (!queryUpper.includes('INSERT INTO MEASUREMENT_ERROR_LOG')) {
+    validationResult.errors.push('Validation queries must INSERT INTO measurement_error_log table');
   }
 
-  // Check for required @validationProcedureID parameter
+  // Check for required MeasurementID and ErrorID columns.
+  if (!queryUpper.includes('MEASUREMENTID') || !queryUpper.includes('ERRORID')) {
+    validationResult.errors.push('Query must select MeasurementID and ErrorID columns');
+  }
+
+  // Check for required @validationProcedureID parameter (used to resolve ErrorID).
   if (!query.includes('@validationProcedureID')) {
-    validationResult.errors.push('Query must use @validationProcedureID as ValidationErrorID value');
+    validationResult.errors.push('Query must use @validationProcedureID to resolve validation ErrorID');
   }
 
   // Check for required plot and census parameters
@@ -233,9 +244,9 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
     validationResult.warnings.push('Query should include IsActive filters on relevant tables');
   }
 
-  // Check for duplicate prevention pattern
-  if (!queryLower.includes('left join cmverrors e') || !queryLower.includes('e.coremeasurementid is null')) {
-    validationResult.warnings.push('Query should include LEFT JOIN cmverrors with e.CoreMeasurementID IS NULL to prevent duplicate error records');
+  // Check for duplicate prevention pattern.
+  if (!queryLower.includes('left join measurement_error_log e') || !queryLower.includes('e.measurementid is null')) {
+    validationResult.warnings.push('Query should include LEFT JOIN measurement_error_log with e.MeasurementID IS NULL to prevent duplicate error records');
   }
 
   // Check for proper census join pattern
@@ -246,5 +257,69 @@ function validateCorePatterns(query: string, validationResult: ValidationRespons
   // Check for DISTINCT usage
   if (!queryUpper.includes('SELECT DISTINCT')) {
     validationResult.warnings.push('Consider using SELECT DISTINCT to avoid duplicate error records');
+  }
+}
+
+function isStoredProcedureCall(query: string): boolean {
+  return /^\s*CALL\s+/i.test(query);
+}
+
+interface StoredProcedureReference {
+  schemaName: string | null;
+  procedureName: string;
+}
+
+function extractStoredProcedureReference(query: string): StoredProcedureReference | null {
+  const match = query.match(/^\s*CALL\s+(?:(`?[A-Za-z0-9_]+`?)\s*\.\s*)?(`?[A-Za-z0-9_]+`?)\s*\(/i);
+  if (!match) {
+    return null;
+  }
+
+  const schemaName = match[1] ? match[1].replace(/`/g, '') : null;
+  const procedureName = match[2]?.replace(/`/g, '');
+  if (!procedureName) {
+    return null;
+  }
+
+  return { schemaName, procedureName };
+}
+
+async function validateStoredProcedureCall(
+  connectionManager: ConnectionManager,
+  schema: string,
+  query: string,
+  validationResult: ValidationResponse
+): Promise<void> {
+  const procedureReference = extractStoredProcedureReference(query);
+
+  if (!procedureReference) {
+    validationResult.isValid = false;
+    validationResult.errors.push('Stored procedure calls must use the form CALL ProcedureName(...) or CALL schema.ProcedureName(...)');
+    return;
+  }
+
+  const routineSchema = procedureReference.schemaName ?? schema;
+
+  if (procedureReference.schemaName && procedureReference.schemaName.toLowerCase() !== schema.toLowerCase()) {
+    validationResult.isValid = false;
+    validationResult.errors.push(`Stored procedure call targets schema '${procedureReference.schemaName}', but the selected schema is '${schema}'`);
+    return;
+  }
+
+  const routines = await connectionManager.executeQuery(
+    `
+      SELECT ROUTINE_NAME
+      FROM INFORMATION_SCHEMA.ROUTINES
+      WHERE ROUTINE_SCHEMA = ?
+        AND ROUTINE_TYPE = 'PROCEDURE'
+        AND ROUTINE_NAME = ?
+      LIMIT 1
+    `,
+    [routineSchema, procedureReference.procedureName]
+  );
+
+  if (routines.length === 0) {
+    validationResult.isValid = false;
+    validationResult.errors.push(`Stored procedure '${procedureReference.procedureName}' does not exist in schema '${routineSchema}'`);
   }
 }

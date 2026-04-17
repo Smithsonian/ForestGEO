@@ -22,16 +22,16 @@ export default defineConfig({
     include: ['tests/integration/**/*.test.ts'],
 
     // Extended timeouts for database operations
-    testTimeout: 60000,    // 60 seconds per test
-    hookTimeout: 90000,    // 90 seconds for beforeAll/afterAll (DB setup)
+    testTimeout: 60000, // 60 seconds per test
+    hookTimeout: 90000, // 90 seconds for beforeAll/afterAll (DB setup)
     teardownTimeout: 30000, // 30 seconds for cleanup
 
     // Run tests sequentially to avoid database conflicts
     pool: 'forks',
     poolOptions: {
       forks: {
-        singleFork: true,   // Run all tests in single process
-        isolate: false      // Share database connection between tests
+        singleFork: true, // Run all tests in single process
+        isolate: false // Share database connection between tests
       }
     },
 

@@ -89,6 +89,18 @@ export class OrgCensusToCensusResultMapper {
   }
 }
 
+export function reconcileCurrentCensusSelection(currentCensus: OrgCensus, censusList: OrgCensusRDS[]): OrgCensusRDS | undefined {
+  if (!currentCensus) return undefined;
+
+  const persistedCensusID = currentCensus.dateRanges?.[0]?.censusID;
+  if (persistedCensusID) {
+    const exactMatch = censusList.find(census => census.dateRanges?.some(dateRange => dateRange.censusID === persistedCensusID));
+    if (exactMatch) return exactMatch;
+  }
+
+  return censusList.find(census => census.plotCensusNumber === currentCensus.plotCensusNumber);
+}
+
 // Helper function
 export async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<OrgCensusRDS[]> {
   const orgCensusMapper = new OrgCensusToCensusResultMapper();

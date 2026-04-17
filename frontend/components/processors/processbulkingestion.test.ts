@@ -11,23 +11,31 @@
  * @see /components/processors/processbulkingestion.tsx
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { processBulkIngestionCollapser } from './processbulkingestion';
+import { processBulkIngestionCollapser, processBulkIngestionProcessor, TemporaryMeasurement } from './processbulkingestion';
 import ConnectionManager from '@/config/connectionmanager';
+import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
 // Mock dependencies
 vi.mock('@/config/connectionmanager');
 vi.mock('@/config/utils/sqlsecurity', () => ({
   safeFormatQuery: vi.fn((schema, query) => query.replace(/\?\?/g, schema))
 }));
-vi.mock('@/config/utils', () => ({
-  createError: vi.fn((message: string, error?: any) => {
-    const err = new Error(message);
-    if (error) {
-      Object.assign(err, error);
-    }
-    return err;
-  })
+vi.mock('@/config/measurementerrors', () => ({
+  insertIngestionFailureRows: vi.fn(async () => undefined)
 }));
+vi.mock('@/config/utils', async importOriginal => {
+  const actual = (await importOriginal()) as object;
+  return {
+    ...actual,
+    createError: vi.fn((message: string, error?: any) => {
+      const err = new Error(message);
+      if (error) {
+        Object.assign(err, error);
+      }
+      return err;
+    })
+  };
+});
 
 describe('processBulkIngestionCollapser', () => {
   let mockConnectionManager: any;
@@ -72,14 +80,17 @@ describe('processBulkIngestionCollapser', () => {
         .mockResolvedValueOnce([]) // No orphaned trees
         .mockResolvedValueOnce([]) // UPDATE MeasuredDBH
         .mockResolvedValueOnce([]) // UPDATE MeasuredHOM
-        .mockResolvedValueOnce([]) // DELETE duplicates (StemGUID)
+        .mockResolvedValueOnce([{ PlotID: 1 }]) // SELECT PlotID
+        .mockResolvedValueOnce([{ count: 0 }]) // COUNT StemGUID+Date dups
+        .mockResolvedValueOnce([]) // DELETE duplicates (StemGUID+Date)
+        .mockResolvedValueOnce([{ count: 0 }]) // COUNT TreeTag+StemTag dups
         .mockResolvedValueOnce([]) // DELETE duplicates (TreeTag+StemTag)
         .mockResolvedValueOnce([]); // DELETE validation errors
 
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
-      // Should only call 6 queries (no orphaned trees UPDATE)
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(6);
+      // Should call 9 queries (no orphaned trees UPDATE)
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(9);
 
       // Verify no UPDATE for orphaned trees was called
       const calls = mockConnectionManager.executeQuery.mock.calls;
@@ -187,7 +198,7 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const deleteQuery = calls.find((call: any) => call[0].includes('StemGUID') && call[0].includes('MeasurementDate'));
+      const deleteQuery = calls.find((call: any) => call[0].includes('DELETE') && call[0].includes('StemGUID') && call[0].includes('MeasurementDate'));
 
       // Verify it deletes cm1 when cm1.ID > cm2.ID (keeps the older record)
       expect(deleteQuery[0]).toMatch(/DELETE cm1/);
@@ -259,7 +270,7 @@ describe('processBulkIngestionCollapser', () => {
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
       const clearErrorsQuery = calls.find(
-        (call: any) => call[0].includes('DELETE') && call[0].includes('cmverrors') && call[0].includes('ValidationErrorID = 5')
+        (call: any) => call[0].includes('DELETE') && call[0].includes('measurement_error_log') && call[0].includes("me.ErrorCode = '5'")
       );
 
       expect(clearErrorsQuery).toBeDefined();
@@ -272,11 +283,11 @@ describe('processBulkIngestionCollapser', () => {
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const clearErrorsQuery = calls.find((call: any) => call[0].includes('cmverrors') && call[0].includes('still_duplicates'));
+      const clearErrorsQuery = calls.find((call: any) => call[0].includes('measurement_error_log') && call[0].includes('still_duplicates'));
 
       // Verify it uses LEFT JOIN to find records that are NO LONGER duplicates
       expect(clearErrorsQuery[0]).toMatch(/LEFT\s+JOIN.*AS\s+still_duplicates/is);
-      expect(clearErrorsQuery[0]).toMatch(/WHERE.*e\.ValidationErrorID\s*=\s*5/is);
+      expect(clearErrorsQuery[0]).toMatch(/WHERE.*me\.ErrorCode\s*=\s*'5'/is);
       expect(clearErrorsQuery[0]).toMatch(/AND.*still_duplicates\.CoreMeasurementID\s+IS\s+NULL/is);
     });
 
@@ -294,16 +305,16 @@ describe('processBulkIngestionCollapser', () => {
       expect(clearErrorsQuery[0]).toMatch(/HAVING count\(distinct cm3\.CoreMeasurementID\) > 1/);
     });
 
-    it('should only clear ValidationErrorID 5 (duplicate tree/stem tag)', async () => {
+    it("should only clear validation error code '5' (duplicate tree/stem tag)", async () => {
       mockConnectionManager.executeQuery.mockResolvedValue([]);
 
       await processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 100);
 
       const calls = mockConnectionManager.executeQuery.mock.calls;
-      const clearErrorsQuery = calls.find((call: any) => call[0].includes('cmverrors'));
+      const clearErrorsQuery = calls.find((call: any) => call[0].includes('measurement_error_log'));
 
-      expect(clearErrorsQuery[0]).toMatch(/ValidationErrorID = 5/);
-      expect(clearErrorsQuery[0]).not.toMatch(/ValidationErrorID != 5/);
+      expect(clearErrorsQuery[0]).toMatch(/me\.ErrorCode = '5'/);
+      expect(clearErrorsQuery[0]).not.toMatch(/me\.ErrorCode != '5'/);
     });
   });
 
@@ -324,14 +335,23 @@ describe('processBulkIngestionCollapser', () => {
       // 3. UPDATE MeasuredHOM
       expect(calls[2][0]).toMatch(/UPDATE.*MeasuredHOM/i);
 
-      // 4. DELETE duplicates (StemGUID)
-      expect(calls[3][0]).toMatch(/DELETE.*StemGUID.*MeasurementDate/is);
+      // 4. SELECT PlotID for alert logging
+      expect(calls[3][0]).toMatch(/SELECT PlotID FROM.*census/i);
 
-      // 5. DELETE duplicates (TreeTag+StemTag)
-      expect(calls[4][0]).toMatch(/DELETE.*TreeTag.*StemTag/is);
+      // 5. COUNT StemGUID+MeasurementDate duplicates
+      expect(calls[4][0]).toMatch(/SELECT COUNT.*StemGUID.*MeasurementDate/is);
 
-      // 6. DELETE validation errors
-      expect(calls[5][0]).toMatch(/DELETE.*cmverrors/is);
+      // 6. DELETE duplicates (StemGUID+MeasurementDate)
+      expect(calls[5][0]).toMatch(/DELETE.*StemGUID.*MeasurementDate/is);
+
+      // 7. COUNT TreeTag+StemTag duplicates
+      expect(calls[6][0]).toMatch(/SELECT COUNT.*TreeTag.*StemTag/is);
+
+      // 8. DELETE duplicates (TreeTag+StemTag)
+      expect(calls[7][0]).toMatch(/DELETE.*TreeTag.*StemTag/is);
+
+      // 9. DELETE validation errors
+      expect(calls[8][0]).toMatch(/DELETE.*measurement_error_log/is);
     });
   });
 
@@ -426,8 +446,211 @@ describe('processBulkIngestionCollapser', () => {
         processBulkIngestionCollapser(mockConnectionManager, 'forestgeo_test', 300)
       ]);
 
-      // Each call should have executed 6 queries
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(18);
+      // Each call executes 9 queries (no orphaned trees, no dups found)
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledTimes(27);
     });
+  });
+});
+
+describe('processBulkIngestionProcessor - false duplicate spot-check', () => {
+  let mockConnectionManager: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionManager = {
+      executeQuery: vi.fn(() => Promise.resolve([]))
+    };
+  });
+
+  it('should NOT flag rows with same TreeTag/StemTag but different DBH and Date as duplicates', async () => {
+    // Two measurements for the same tree/stem but different measurement dates and DBH values.
+    // This is a legitimate scenario (e.g. re-measurement in same upload batch with corrected data,
+    // or two distinct measurement events). They must NOT be flagged as duplicates.
+    const measurements: TemporaryMeasurement[] = [
+      {
+        id: 1,
+        FileID: 'test.csv',
+        BatchID: 'batch-1',
+        PlotID: 1,
+        CensusID: 10,
+        TreeTag: 'T100',
+        StemTag: 'S1',
+        SpeciesCode: 'queral',
+        QuadratName: 'Q0101',
+        LocalX: 5.0,
+        LocalY: 10.0,
+        DBH: 15.5,
+        HOM: 1.3,
+        MeasurementDate: new Date('2024-01-15'),
+        Codes: '',
+        Comments: ''
+      },
+      {
+        id: 2,
+        FileID: 'test.csv',
+        BatchID: 'batch-1',
+        PlotID: 1,
+        CensusID: 10,
+        TreeTag: 'T100',
+        StemTag: 'S1',
+        SpeciesCode: 'queral',
+        QuadratName: 'Q0101',
+        LocalX: 5.0,
+        LocalY: 10.0,
+        DBH: 18.2, // Different DBH
+        HOM: 1.3,
+        MeasurementDate: new Date('2024-06-20'), // Different date
+        Codes: '',
+        Comments: ''
+      }
+    ];
+
+    // Mock DB calls in order for 2 valid measurements:
+    // For each measurement: validateQuadrat (1) + validateSpecies (1) = 2 per row = 4 total
+    // Then categorizeMeasurements: oldTree (1) + multiStem (1) per row = 2 per row = 4 total
+    // Then processTreeInsertions: species lookup (1) + bulk upsert (1) = 2
+    // Then processStemInsertions: tree lookup (1) + quadrat lookup (1) + bulk upsert (1) + cleanup (1) = 4
+    // Then processCoreMeasurementInsertions: stem lookup (1) + bulk upsert (1) + cleanup (1) = 3
+    // Then processCMAttributeInsertions: cm lookup (1) = 1
+    // Total: 4 + 4 + 2 + 4 + 3 + 1 = 18
+
+    mockConnectionManager.executeQuery
+      // validateQuadrat (row 1) - found
+      .mockResolvedValueOnce([{ count: 1 }])
+      // validateSpecies (row 1) - found
+      .mockResolvedValueOnce([{ count: 1 }])
+      // validateQuadrat (row 2) - found
+      .mockResolvedValueOnce([{ count: 1 }])
+      // validateSpecies (row 2) - found
+      .mockResolvedValueOnce([{ count: 1 }])
+      // categorizeMeasurements - oldTree check (row 1) - not old
+      .mockResolvedValueOnce([])
+      // categorizeMeasurements - multiStem check (row 1) - not multi
+      .mockResolvedValueOnce([])
+      // categorizeMeasurements - oldTree check (row 2) - not old
+      .mockResolvedValueOnce([])
+      // categorizeMeasurements - multiStem check (row 2) - not multi
+      .mockResolvedValueOnce([])
+      // processTreeInsertions - species lookup
+      .mockResolvedValueOnce([{ SpeciesCode: 'queral', SpeciesID: 42 }])
+      // processTreeInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processStemInsertions - tree lookup
+      .mockResolvedValueOnce([{ TreeTag: 'T100', TreeID: 1 }])
+      // processStemInsertions - quadrat lookup
+      .mockResolvedValueOnce([{ QuadratName: 'Q0101', QuadratID: 5 }])
+      // processStemInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processStemInsertions - cleanup
+      .mockResolvedValueOnce([])
+      // processCoreMeasurementInsertions - stem lookup
+      .mockResolvedValueOnce([{ StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }])
+      // processCoreMeasurementInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processCoreMeasurementInsertions - cleanup
+      .mockResolvedValueOnce([])
+      // processCMAttributeInsertions - cm lookup
+      .mockResolvedValueOnce([]);
+
+    await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
+
+    // KEY ASSERTION: insertFailedMeasurements should NOT have been called.
+    // If the dedup key matched on TreeTag+StemTag alone, row 2 would be flagged.
+    // Since the key includes DBH and Date, both rows pass through.
+    const failedInsertCalls = mockConnectionManager.executeQuery.mock.calls.filter(
+      (call: any) => typeof call[0] === 'string' && call[0].includes('measurement_error_log')
+    );
+    expect(failedInsertCalls).toHaveLength(0);
+  });
+
+  it('should correctly flag exact duplicate rows as duplicates', async () => {
+    // Two measurements that are truly identical — same TreeTag, StemTag, DBH, Date, everything.
+    // The second one should be flagged as a duplicate.
+    const measurements: TemporaryMeasurement[] = [
+      {
+        id: 1,
+        FileID: 'test.csv',
+        BatchID: 'batch-1',
+        PlotID: 1,
+        CensusID: 10,
+        TreeTag: 'T100',
+        StemTag: 'S1',
+        SpeciesCode: 'queral',
+        QuadratName: 'Q0101',
+        LocalX: 5.0,
+        LocalY: 10.0,
+        DBH: 15.5,
+        HOM: 1.3,
+        MeasurementDate: new Date('2024-01-15'),
+        Codes: '',
+        Comments: ''
+      },
+      {
+        id: 2,
+        FileID: 'test.csv',
+        BatchID: 'batch-1',
+        PlotID: 1,
+        CensusID: 10,
+        TreeTag: 'T100',
+        StemTag: 'S1',
+        SpeciesCode: 'queral',
+        QuadratName: 'Q0101',
+        LocalX: 5.0,
+        LocalY: 10.0,
+        DBH: 15.5, // Same DBH
+        HOM: 1.3,
+        MeasurementDate: new Date('2024-01-15'), // Same date
+        Codes: '',
+        Comments: ''
+      }
+    ];
+
+    // The duplicate is routed through insertIngestionFailureRows, then only
+    // the deduped valid measurement continues through the pipeline.
+    mockConnectionManager.executeQuery
+      // validateQuadrat (row 1 only — row 2 was deduped)
+      .mockResolvedValueOnce([{ count: 1 }])
+      // validateSpecies (row 1)
+      .mockResolvedValueOnce([{ count: 1 }])
+      // categorizeMeasurements - oldTree check (row 1)
+      .mockResolvedValueOnce([])
+      // categorizeMeasurements - multiStem check (row 1)
+      .mockResolvedValueOnce([])
+      // processTreeInsertions - species lookup
+      .mockResolvedValueOnce([{ SpeciesCode: 'queral', SpeciesID: 42 }])
+      // processTreeInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processStemInsertions - tree lookup
+      .mockResolvedValueOnce([{ TreeTag: 'T100', TreeID: 1 }])
+      // processStemInsertions - quadrat lookup
+      .mockResolvedValueOnce([{ QuadratName: 'Q0101', QuadratID: 5 }])
+      // processStemInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processStemInsertions - cleanup
+      .mockResolvedValueOnce([])
+      // processCoreMeasurementInsertions - stem lookup
+      .mockResolvedValueOnce([{ StemGUID: 'guid-1', StemTag: 'S1', TreeTag: 'T100', QuadratName: 'Q0101' }])
+      // processCoreMeasurementInsertions - bulk upsert
+      .mockResolvedValueOnce([])
+      // processCoreMeasurementInsertions - cleanup
+      .mockResolvedValueOnce([])
+      // processCMAttributeInsertions - cm lookup
+      .mockResolvedValueOnce([]);
+
+    await processBulkIngestionProcessor(mockConnectionManager as any, 'forestgeo_test', 'test.csv', 'batch-1', measurements);
+
+    expect(insertIngestionFailureRows).toHaveBeenCalledTimes(1);
+    expect(insertIngestionFailureRows).toHaveBeenCalledWith(
+      mockConnectionManager,
+      'forestgeo_test',
+      expect.arrayContaining([
+        expect.objectContaining({
+          tag: 'T100',
+          stemTag: 'S1',
+          fileID: 'test.csv',
+          batchID: 'batch-1'
+        })
+      ])
+    );
   });
 });

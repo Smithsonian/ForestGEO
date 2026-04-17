@@ -1,11 +1,12 @@
 import * as moment from 'moment';
 import { buildBulkUpsertQuery, createError } from '@/config/utils';
 import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { CMAttributesResult, CoreMeasurementsResult, FailedMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
+import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialBulkProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { IngestionFailureRowInput, insertIngestionFailureRows } from '@/config/measurementerrors';
 
 export interface TemporaryMeasurement {
   id: number;
@@ -76,6 +77,22 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredDBH = NULL WHERE MeasuredDBH = 0`));
     await connectionManager.executeQuery(safeFormatQuery(schema, `UPDATE ??.coremeasurements SET MeasuredHOM = NULL WHERE MeasuredHOM = 0`));
 
+    // Get PlotID for alert logging
+    const plotResult = await connectionManager.executeQuery(`SELECT PlotID FROM ${schema}.census WHERE CensusID = ? LIMIT 1`, [censusID]);
+    const plotID = plotResult?.[0]?.PlotID || 0;
+
+    // Count duplicates BEFORE deletion (StemGUID + MeasurementDate duplicates)
+    const countStemDateDuplicates = `
+      SELECT COUNT(*) as count FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.coremeasurements cm2
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND cm1.StemGUID = cm2.StemGUID
+        AND cm1.MeasurementDate = cm2.MeasurementDate
+        AND cm1.CensusID = ?
+    `;
+    const stemDateDupResult = await connectionManager.executeQuery(countStemDateDuplicates, [censusID]);
+    const stemDateDupCount = stemDateDupResult?.[0]?.count || 0;
+
     // Remove duplicates based on StemGUID and MeasurementDate
     const removeStemDateDuplicates = `
       DELETE cm1
@@ -87,6 +104,40 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
         AND cm1.CensusID = ?
     `;
     await connectionManager.executeQuery(removeStemDateDuplicates, [censusID]);
+
+    // Log StemGUID+Date deduplication if any rows were removed
+    if (stemDateDupCount > 0) {
+      ailogger.info(`[Collapser] Removed ${stemDateDupCount} duplicate rows (same StemGUID+MeasurementDate)`, {
+        context: 'processBulkIngestionCollapser',
+        censusID,
+        deduplicationCount: stemDateDupCount
+      });
+
+      await connectionManager.executeQuery(
+        `INSERT INTO ${schema}.uploadintegrityalerts
+         (plotID, censusID, type, message, severity, failedRecords)
+         VALUES (?, ?, 'COLLAPSER_DEDUPLICATION', ?, 'info', ?)`,
+        [plotID, censusID, `Removed ${stemDateDupCount} duplicate rows (same StemGUID+MeasurementDate)`, stemDateDupCount]
+      );
+    }
+
+    // Count duplicates BEFORE deletion (TreeTag + StemTag duplicates)
+    const countTreeStemTagDuplicates = `
+      SELECT COUNT(*) as count FROM ${schema}.coremeasurements cm1
+      INNER JOIN ${schema}.stems s1 ON cm1.StemGUID = s1.StemGUID
+      INNER JOIN ${schema}.trees t1 ON s1.TreeID = t1.TreeID AND s1.CensusID = t1.CensusID
+      INNER JOIN ${schema}.coremeasurements cm2 ON cm2.CensusID = cm1.CensusID
+      INNER JOIN ${schema}.stems s2 ON cm2.StemGUID = s2.StemGUID
+      INNER JOIN ${schema}.trees t2 ON s2.TreeID = t2.TreeID AND s2.CensusID = t2.CensusID
+      WHERE cm1.CoreMeasurementID > cm2.CoreMeasurementID
+        AND t1.TreeTag = t2.TreeTag
+        AND s1.StemTag = s2.StemTag
+        AND cm1.CensusID = ?
+        AND t1.CensusID = ?
+        AND s1.CensusID = ?
+    `;
+    const treeStemTagDupResult = await connectionManager.executeQuery(countTreeStemTagDuplicates, [censusID, censusID, censusID]);
+    const treeStemTagDupCount = treeStemTagDupResult?.[0]?.count || 0;
 
     // Remove duplicates based on TreeTag/StemTag combinations within the same census
     const removeTreeStemTagDuplicates = `
@@ -106,12 +157,29 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
     `;
     await connectionManager.executeQuery(removeTreeStemTagDuplicates, [censusID, censusID, censusID]);
 
+    // Log TreeTag+StemTag deduplication if any rows were removed
+    if (treeStemTagDupCount > 0) {
+      ailogger.info(`[Collapser] Removed ${treeStemTagDupCount} duplicate rows (same TreeTag+StemTag in census)`, {
+        context: 'processBulkIngestionCollapser',
+        censusID,
+        deduplicationCount: treeStemTagDupCount
+      });
+
+      await connectionManager.executeQuery(
+        `INSERT INTO ${schema}.uploadintegrityalerts
+         (plotID, censusID, type, message, severity, failedRecords)
+         VALUES (?, ?, 'COLLAPSER_DEDUPLICATION', ?, 'info', ?)`,
+        [plotID, censusID, `Removed ${treeStemTagDupCount} duplicate rows (same TreeTag+StemTag in census)`, treeStemTagDupCount]
+      );
+    }
+
     // Clear duplicate validation errors after deduplication (ValidationID 5 is the duplicate tree/stem tag validation)
     // FIXED: Now checks for actual duplicate coremeasurements, not duplicate stems/trees entries
     const clearDuplicateValidationErrors = `
       DELETE e
-      FROM ${schema}.cmverrors e
-      INNER JOIN ${schema}.coremeasurements cm ON e.CoreMeasurementID = cm.CoreMeasurementID
+      FROM ${schema}.measurement_error_log e
+      INNER JOIN ${schema}.measurement_errors me ON e.ErrorID = me.ErrorID
+      INNER JOIN ${schema}.coremeasurements cm ON e.MeasurementID = cm.CoreMeasurementID
       LEFT JOIN (
         SELECT cm2.CoreMeasurementID
         FROM ${schema}.coremeasurements cm2
@@ -131,8 +199,9 @@ export async function processBulkIngestionCollapser(connectionManager: Connectio
                        AND t.TreeTag = duplicates.TreeTag
                        AND s.StemTag = duplicates.StemTag
         WHERE cm2.CensusID = ?
-      ) AS still_duplicates ON e.CoreMeasurementID = still_duplicates.CoreMeasurementID
-      WHERE e.ValidationErrorID = 5
+      ) AS still_duplicates ON e.MeasurementID = still_duplicates.CoreMeasurementID
+      WHERE me.ErrorSource = 'validation'
+        AND me.ErrorCode = '5'
         AND cm.CensusID = ?
         AND still_duplicates.CoreMeasurementID IS NULL
     `;
@@ -164,23 +233,71 @@ export async function processBulkIngestionProcessor(
       throw new Error('CensusID missing from first measurement');
     }
 
-    // Step 1: Initial duplicate filter - remove exact duplicates
-    const uniqueMeasurements = temporaryMeasurements.filter(
-      (measurement, index, array) =>
-        index ===
-        array.findIndex(
-          m =>
-            m.TreeTag === measurement.TreeTag &&
-            m.StemTag === measurement.StemTag &&
-            m.SpeciesCode === measurement.SpeciesCode &&
-            m.QuadratName === measurement.QuadratName
-        )
-    );
+    // Step 1: Initial duplicate filter - remove exact duplicates WITH LOGGING
+    // Track duplicates explicitly for auditing instead of silently dropping them
+    const uniqueMeasurements: TemporaryMeasurement[] = [];
+    const duplicateMeasurements: TemporaryMeasurement[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const measurement of temporaryMeasurements) {
+      const measurementDate = measurement.MeasurementDate ? moment.utc(measurement.MeasurementDate).format('YYYY-MM-DD') : '1900-01-01';
+      const key = [
+        measurement.TreeTag,
+        measurement.StemTag || '',
+        measurement.SpeciesCode,
+        measurement.QuadratName,
+        measurement.LocalX ?? 'null',
+        measurement.LocalY ?? 'null',
+        measurement.DBH ?? 0,
+        measurement.HOM ?? 0,
+        measurementDate
+      ].join('|');
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueMeasurements.push(measurement);
+      } else {
+        duplicateMeasurements.push(measurement);
+      }
+    }
+
+    // Log duplicate rows as unresolved ingestion errors for auditing.
+    if (duplicateMeasurements.length > 0) {
+      ailogger.info(
+        `[Deduplication] Removed ${duplicateMeasurements.length} duplicate rows (same TreeTag/StemTag/SpeciesCode/QuadratName/DBH/HOM/Date/LocalX/LocalY)`,
+        {
+          context: 'processBulkIngestion',
+          fileID,
+          batchID,
+          duplicateCount: duplicateMeasurements.length
+        }
+      );
+
+      const duplicateFailures: IngestionFailureRowInput[] = duplicateMeasurements.map(m => ({
+        fileID: fileID,
+        batchID: batchID,
+        plotID: m.PlotID,
+        censusID: m.CensusID,
+        tag: m.TreeTag || '',
+        stemTag: m.StemTag || '',
+        spCode: m.SpeciesCode,
+        quadrat: m.QuadratName,
+        x: m.LocalX ?? null,
+        y: m.LocalY ?? -1,
+        dbh: m.DBH ?? -1,
+        hom: m.HOM ?? -1,
+        date: m.MeasurementDate,
+        codes: m.Codes || '',
+        comments: m.Comments || '',
+        failureReason: 'DUPLICATE_IN_BATCH: Same TreeTag/StemTag/SpeciesCode/QuadratName/DBH/HOM/Date/LocalX/LocalY as earlier row in batch'
+      }));
+
+      await insertFailedMeasurements(connectionManager, schema, duplicateFailures);
+    }
 
     // Step 2: Create filter_validity table (replicating stored procedure logic)
     const filteredMeasurements: FilteredMeasurement[] = [];
     const validMeasurements: FilteredMeasurement[] = [];
-    const failedMeasurements: FailedMeasurementsResult[] = [];
+    const failedMeasurements: IngestionFailureRowInput[] = [];
 
     for (const measurement of uniqueMeasurements) {
       // Validate quadrat and species joins
@@ -191,19 +308,21 @@ export async function processBulkIngestionProcessor(
       if (!measurement.TreeTag || !hasValidQuadrat || !hasValidSpecies || !measurement.MeasurementDate) {
         // Add to failed measurements (Condition 2 from stored procedure)
         failedMeasurements.push({
-          PlotID: measurement.PlotID,
-          CensusID: measurement.CensusID,
-          Tag: measurement.TreeTag || '',
-          StemTag: measurement.StemTag || '',
-          SpCode: measurement.SpeciesCode,
-          Quadrat: measurement.QuadratName,
-          X: measurement.LocalX || -1,
-          Y: measurement.LocalY || -1,
-          DBH: measurement.DBH || -1,
-          HOM: measurement.HOM || -1,
-          Date: measurement.MeasurementDate,
-          Codes: measurement.Codes || '',
-          Description: measurement.Comments || ''
+          plotID: measurement.PlotID,
+          censusID: measurement.CensusID,
+          tag: measurement.TreeTag || '',
+          stemTag: measurement.StemTag || '',
+          spCode: measurement.SpeciesCode,
+          quadrat: measurement.QuadratName,
+          x: measurement.LocalX ?? null,
+          y: measurement.LocalY || -1,
+          dbh: measurement.DBH || -1,
+          hom: measurement.HOM || -1,
+          date: measurement.MeasurementDate,
+          codes: measurement.Codes || '',
+          comments: measurement.Comments || '',
+          fileID,
+          batchID
         });
         continue;
       }
@@ -227,8 +346,8 @@ export async function processBulkIngestionProcessor(
       const filteredMeasurement: FilteredMeasurement = {
         ...measurement,
         StemTag: measurement.StemTag || '',
-        LocalX: measurement.LocalX || 0,
-        LocalY: measurement.LocalY || 0,
+        LocalX: measurement.LocalX,
+        LocalY: measurement.LocalY,
         DBH: dbh,
         HOM: hom,
         Valid: isValid,
@@ -243,19 +362,21 @@ export async function processBulkIngestionProcessor(
       } else {
         // Add to failed measurements (Condition 1 from stored procedure)
         failedMeasurements.push({
-          PlotID: measurement.PlotID,
-          CensusID: measurement.CensusID,
-          Tag: measurement.TreeTag,
-          StemTag: measurement.StemTag || '',
-          SpCode: measurement.SpeciesCode,
-          Quadrat: measurement.QuadratName,
-          X: measurement.LocalX || 0,
-          Y: measurement.LocalY || 0,
-          DBH: dbh,
-          HOM: hom,
-          Date: measurement.MeasurementDate,
-          Codes: measurement.Codes || '',
-          Description: measurement.Comments || ''
+          plotID: measurement.PlotID,
+          censusID: measurement.CensusID,
+          tag: measurement.TreeTag,
+          stemTag: measurement.StemTag || '',
+          spCode: measurement.SpeciesCode,
+          quadrat: measurement.QuadratName,
+          x: measurement.LocalX ?? null,
+          y: measurement.LocalY ?? null,
+          dbh: dbh,
+          hom: hom,
+          date: measurement.MeasurementDate,
+          codes: measurement.Codes || '',
+          comments: measurement.Comments || '',
+          fileID,
+          batchID
         });
       }
     }
@@ -355,9 +476,8 @@ async function validateAttributeCodes(connectionManager: ConnectionManager, sche
   return result?.[0]?.invalid || 0;
 }
 
-async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: FailedMeasurementsResult[]): Promise<void> {
-  const { sql, params } = buildBulkUpsertQuery(schema, 'failedmeasurements', failedMeasurements, 'FailedMeasurementID');
-  await connectionManager.executeQuery(sql, params);
+async function insertFailedMeasurements(connectionManager: ConnectionManager, schema: string, failedMeasurements: IngestionFailureRowInput[]): Promise<void> {
+  await insertIngestionFailureRows(connectionManager, schema, failedMeasurements);
 }
 
 /**
@@ -483,8 +603,8 @@ async function processStemInsertions(
     CensusID: currentCensusID,
     StemCrossID: -1,
     StemTag: ts.StemTag || '',
-    LocalX: ts.LocalX ?? -1,
-    LocalY: ts.LocalY ?? -1,
+    LocalX: ts.LocalX ?? null,
+    LocalY: ts.LocalY ?? null,
     Moved: false,
     StemDescription: '',
     IsActive: true // ADDED: Missing IsActive field
@@ -494,13 +614,11 @@ async function processStemInsertions(
     const { sql, params } = buildBulkUpsertQuery(schema, 'stems', stemData, 'StemGUID');
     await connectionManager.executeQuery(sql, params);
 
-    // Clean up null values
+    // Clean up sentinel values
     await connectionManager.executeQuery(
       `
-      UPDATE ${schema}.stems 
+      UPDATE ${schema}.stems
       SET StemTag = NULLIF(StemTag, ' '),
-          LocalX = NULLIF(LocalX, -1),
-          LocalY = NULLIF(LocalY, -1),
           StemDescription = NULLIF(StemDescription, ' ')
       WHERE CensusID = ?
     `,

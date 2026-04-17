@@ -23,6 +23,7 @@ import { useFileManagement } from '@/app/hooks/usefilemanagement';
 import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
+import { UploadMode } from '@/config/uploadmodes';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -40,16 +41,17 @@ export interface DetailedCMIDRow extends CMIDRow {
 interface UploadParentProps {
   onReset: () => void;
   overrideUploadForm?: FormType;
+  overrideUploadMode?: UploadMode;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
 
 function UploadParentInner(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, skipToProcessing, onUploadComplete } = props;
+  const { onReset, overrideUploadForm, overrideUploadMode, skipToProcessing, onUploadComplete } = props;
 
   // Custom hooks for state management
   const fileManagement = useFileManagement();
-  const uploadState = useUploadState(overrideUploadForm, skipToProcessing);
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode);
   const errorHandling = useErrorHandling();
 
   // Remaining local state (not managed by custom hooks)
@@ -183,7 +185,9 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadStart
             uploadForm={uploadState.state.uploadForm}
+            uploadMode={uploadState.state.uploadMode}
             setUploadForm={uploadState.setUploadForm}
+            setUploadMode={uploadState.setUploadMode}
             setExpectedHeaders={() => {}} // Deprecated - no longer needed
             setReviewState={uploadState.setReviewState}
             personnelRecording={uploadState.state.personnelRecording}
@@ -221,6 +225,7 @@ function UploadParentInner(props: UploadParentProps) {
             personnelRecording={uploadState.state.personnelRecording}
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
+            uploadMode={uploadState.state.uploadMode}
             parsedData={parsedData}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
@@ -292,19 +297,6 @@ function UploadParentInner(props: UploadParentProps) {
           handleCloseModal={async () => {
             ailogger.info('Closing failed measurements modal');
             setShowFailedMeasurementsModal(false);
-          }}
-          onTriggerReingestion={() => {
-            ailogger.info('Triggering reingestion from failed measurements modal');
-            setShowFailedMeasurementsModal(false);
-
-            // Clear files from original upload so UploadReingestion component renders
-            fileManagement.clearFiles();
-            setParsedData({});
-
-            // Set reingestion mode and start upload cycle
-            setIsReingestionMode(true);
-            uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
-            ailogger.info('Starting upload cycle to process temporarymeasurements after bulk reingestion');
           }}
         />
         <Box

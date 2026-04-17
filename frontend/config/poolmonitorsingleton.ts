@@ -25,7 +25,7 @@ const sqlConfig: PoolOptions = {
     rejectUnauthorized: false // Required for Azure SQL
   },
   // Additional production-specific settings
-  charset: 'utf8mb4',
+  charset: 'utf8mb4_0900_ai_ci',
   timezone: 'Z' // Use UTC timezone
 };
 

@@ -29,8 +29,8 @@ describe('Validations Management Interface', () => {
     procedureName: 'TestValidation',
     description: 'Test validation for E2E',
     criteria: 'DBH > 0',
-    definition: `INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+    definition: `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
 JOIN census c ON cm.CensusID = c.CensusID AND c.IsActive = TRUE
 WHERE cm.IsValidated IS NULL
@@ -48,8 +48,8 @@ WHERE cm.IsValidated IS NULL
     { table_name: 'census', column_name: 'CensusID' },
     { table_name: 'census', column_name: 'PlotID' },
     { table_name: 'census', column_name: 'IsActive' },
-    { table_name: 'cmverrors', column_name: 'CoreMeasurementID' },
-    { table_name: 'cmverrors', column_name: 'ValidationErrorID' }
+    { table_name: 'measurement_error_log', column_name: 'MeasurementID' },
+    { table_name: 'measurement_error_log', column_name: 'ErrorID' }
   ];
 
   beforeEach(() => {
@@ -241,7 +241,7 @@ WHERE cm.IsValidated IS NULL
       cy.contains('button', 'Use Template').click();
 
       // Verify template is loaded in editor
-      cy.contains('INSERT INTO cmverrors').should('be.visible');
+      cy.contains('INSERT INTO measurement_error_log').should('be.visible');
       cy.contains('@validationProcedureID').should('be.visible');
       cy.contains('Template loaded successfully').should('be.visible');
 
@@ -272,8 +272,8 @@ WHERE cm.IsValidated IS NULL
         procedureName: 'E2E_Test_Validation',
         description: 'E2E test validation',
         criteria: 'Test criteria',
-        definition: `INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-SELECT DISTINCT cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
+        definition: `INSERT INTO measurement_error_log (MeasurementID, ErrorID)
+SELECT DISTINCT cm.CoreMeasurementID, (SELECT me2.ErrorID FROM measurement_errors me2 WHERE me2.ErrorSource = 'validation' AND me2.ErrorCode = CAST(@validationProcedureID AS CHAR) LIMIT 1) as ErrorID
 FROM coremeasurements cm
 WHERE cm.IsValidated IS NULL;`
       };
@@ -377,7 +377,7 @@ WHERE cm.IsValidated IS NULL;`
       cy.get('.cm-editor').should('be.visible');
 
       // Verify full query is visible
-      cy.contains('INSERT INTO cmverrors').should('be.visible');
+      cy.contains('INSERT INTO measurement_error_log').should('be.visible');
       cy.contains('@validationProcedureID').should('be.visible');
 
       cy.log('✅ Validation expands correctly');

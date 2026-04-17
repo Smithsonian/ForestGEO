@@ -21,18 +21,17 @@ vi.mock('@/ailogger', () => ({
 describe('FailedMeasurementsModal', () => {
   const mockSetReingested = vi.fn();
   const mockHandleCloseModal = vi.fn();
-  const mockOnTriggerReingestion = vi.fn();
 
   const defaultProps = {
     open: true,
     setReingested: mockSetReingested,
-    handleCloseModal: mockHandleCloseModal,
-    onTriggerReingestion: mockOnTriggerReingestion
+    handleCloseModal: mockHandleCloseModal
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     global.fetch = vi.fn();
+    mockHandleCloseModal.mockResolvedValue(undefined);
   });
 
   describe('Bug Fix: Modal close should NOT trigger view reset', () => {
@@ -140,6 +139,12 @@ describe('FailedMeasurementsModal', () => {
     it('should set reingested flag when Reingest All Rows is executed', async () => {
       const user = userEvent.setup();
 
+      // Provide a fallback response in case an additional count refresh occurs.
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ recordCount: 0 })
+      });
+
       // Mock successful reingest
       (global.fetch as any)
         .mockResolvedValueOnce({
@@ -170,6 +175,10 @@ describe('FailedMeasurementsModal', () => {
       expect(reingestButton).not.toBeDisabled();
       await user.click(reingestButton);
 
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/reingest/testschema/1/1'), { method: 'GET' });
+      });
+
       // Wait for the reingestion process to complete
       await waitFor(
         () => {
@@ -179,7 +188,6 @@ describe('FailedMeasurementsModal', () => {
       );
 
       expect(mockHandleCloseModal).toHaveBeenCalled();
-      expect(mockOnTriggerReingestion).toHaveBeenCalled();
     });
   });
 
@@ -212,6 +220,28 @@ describe('FailedMeasurementsModal', () => {
         expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/admin/clear/failedmeasurements/testschema/1/1'), { method: 'GET' });
         expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/admin/clear/temporarymeasurements/testschema/1/1'), { method: 'GET' });
       });
+    });
+
+    it('does not auto-close on an empty initial load when autoCloseWhenEmpty is disabled', async () => {
+      (global.fetch as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 0 })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ recordCount: 0 })
+        });
+
+      render(<FailedMeasurementsModal {...defaultProps} autoCloseWhenEmpty={false} />);
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mockHandleCloseModal).not.toHaveBeenCalled();
+      expect(mockSetReingested).not.toHaveBeenCalledWith(true);
+      expect(screen.getByText('Failed Measurements')).toBeInTheDocument();
     });
   });
 });

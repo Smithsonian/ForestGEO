@@ -61,8 +61,14 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 360000; // 360 seconds
-  const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
+  // Must exceed the longest MySQL MAX_EXECUTION_TIME (cross-census validations
+  // use 10 min).  Set to 11 min so the MySQL-level timeout fires first with a
+  // proper error instead of this generic JS-level rejection.
+  const QUERY_TIMEOUT_MS = 660000; // 660 seconds (11 minutes)
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timer = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('Query execution timed out')), QUERY_TIMEOUT_MS);
+  });
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
@@ -71,11 +77,12 @@ export async function runQuery(connection: PoolConnection, query: string, params
       const [rows] = await Promise.race([connection.query(query, params), timer]);
       return rows;
     } else {
-      const [rows, _fields] = await Promise.race([connection.execute(query, params), timer]);
+      // mysql2's execute() uses prepared statements which don't support
+      // bulk INSERT ... VALUES ? with nested arrays. Use query() for those.
+      const hasBulkValues = params?.some(p => Array.isArray(p) && p.length > 0 && Array.isArray(p[0]));
+      const method = hasBulkValues ? connection.query.bind(connection) : connection.execute.bind(connection);
+      const [rows, _fields] = await Promise.race([method(query, params), timer]);
 
-      if (query.trim().startsWith('INSERT') || query.trim().startsWith('UPDATE') || query.trim().startsWith('DELETE')) {
-        return rows;
-      }
       return rows;
     }
   } catch (error: any) {
@@ -83,6 +90,7 @@ export async function runQuery(connection: PoolConnection, query: string, params
     ailogger.error(chalk.red('Error message:', error.message));
     throw error;
   } finally {
+    clearTimeout(timeoutHandle);
     getPoolMonitorInstance().signalActivity();
   }
 }

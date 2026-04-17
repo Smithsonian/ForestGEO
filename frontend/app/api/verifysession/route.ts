@@ -3,16 +3,21 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
+function buildBatchPrefixPredicate(columnRef: string): string {
+  return `(${columnRef} = ? OR ${columnRef} LIKE CONCAT(?, '__sub%'))`;
+}
+
 /**
  * Session-Based Upload Verification Endpoint
  *
  * Verifies data for a specific upload session (FileID and optional BatchID)
- * Returns precise per-upload counts to verify: input_rows = coremeasurements + failedmeasurements
+ * Returns precise per-upload counts to verify: input_rows = coremeasurements + unresolved ingestion errors
  *
  * Query Parameters:
  * - schema (required): Database schema
@@ -24,7 +29,7 @@ export const runtime = 'nodejs';
  * Returns:
  * {
  *   processedCount: number,      // Rows in coremeasurements
- *   failedCount: number,          // Rows in failedmeasurements
+ *   failedCount: number,          // Rows with unresolved ingestion errors
  *   totalAccounted: number,       // processedCount + failedCount
  *   fileID: string | null,
  *   batchID: string | null,
@@ -53,52 +58,156 @@ export async function GET(request: NextRequest) {
   const scope = batchID ? 'batch' : fileID ? 'file' : 'all';
 
   // Build queries based on scope
-  let processedSQL: string, failedSQL: string;
-  let processedParams: any[], failedParams: any[];
+  let processedSQL: string, failedSQL: string, remainingSQL: string;
+  let processedParams: any[], failedParams: any[], remainingParams: any[];
+  let legacyProbeSQL: string | null = null;
+  let legacyProbeParams: any[] = [];
+  let legacyProcessedSQL: string | null = null;
+  let legacyProcessedParams: any[] = [];
 
   try {
     if (scope === 'batch') {
-      // Query specific batch using JSON_EXTRACT on coremeasurements.UserDefinedFields
+      // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID') = ?`
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID = ?
+         AND ${buildBatchPrefixPredicate('cm.UploadBatchID')}`
       );
-      processedParams = [plotID, censusID, fileID, batchID];
+      processedParams = [plotID, censusID, fileID, batchID, batchID];
+      legacyProbeSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND (cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL)`
+      );
+      legacyProbeParams = [plotID, censusID];
+      legacyProcessedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND (cm.UploadFileID IS NULL OR cm.UploadBatchID IS NULL)
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.batchID')) = ?`
+      );
+      legacyProcessedParams = [plotID, censusID, fileID, batchID];
 
       failedSQL = safeFormatQuery(
         schema,
-        'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ? AND BatchID = ?'
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.UploadFileID = ?
+           AND ${buildBatchPrefixPredicate('cm.UploadBatchID')}
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
       );
-      failedParams = [plotID, censusID, fileID, batchID];
+      failedParams = [plotID, censusID, fileID, batchID, batchID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.temporarymeasurements tm
+         WHERE tm.PlotID = ?
+           AND tm.CensusID = ?
+           AND tm.FileID = ?
+           AND ${buildBatchPrefixPredicate('tm.BatchID')}`
+      );
+      remainingParams = [plotID, censusID, fileID, batchID, batchID];
     } else if (scope === 'file') {
-      // Query all batches for a specific file
+      // Fast path: use direct upload tracking columns written by the current ingest pipeline.
       processedSQL = safeFormatQuery(
         schema,
         `SELECT COUNT(*) as count FROM ??.coremeasurements cm
          JOIN ??.census c ON cm.CensusID = c.CensusID
          WHERE c.PlotID = ?
          AND cm.CensusID = ?
-         AND JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID') = ?`
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID = ?`
       );
       processedParams = [plotID, censusID, fileID];
+      legacyProbeSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID IS NULL`
+      );
+      legacyProbeParams = [plotID, censusID];
+      legacyProcessedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         WHERE c.PlotID = ?
+         AND cm.CensusID = ?
+         AND cm.StemGUID IS NOT NULL
+         AND cm.UploadFileID IS NULL
+         AND JSON_UNQUOTE(JSON_EXTRACT(cm.UserDefinedFields, '$.uploadSession.fileID')) = ?`
+      );
+      legacyProcessedParams = [plotID, censusID, fileID];
 
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ? AND FileID = ?');
-      failedParams = [plotID, censusID, fileID];
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.UploadFileID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
+      failedParams = [plotID, censusID, fileID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) as count FROM ??.temporarymeasurements tm
+         WHERE tm.PlotID = ?
+           AND tm.CensusID = ?
+           AND tm.FileID = ?`
+      );
+      remainingParams = [plotID, censusID, fileID];
     } else {
       // Query all files for this plot/census (cumulative total)
       processedSQL = safeFormatQuery(
         schema,
-        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ?'
+        'SELECT COUNT(*) as count FROM ??.coremeasurements cm JOIN ??.census c ON cm.CensusID = c.CensusID WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.StemGUID IS NOT NULL'
       );
       processedParams = [plotID, censusID];
 
-      failedSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.failedmeasurements WHERE PlotID = ? AND CensusID = ?');
-      failedParams = [plotID, censusID];
+      failedSQL = safeFormatQuery(
+        schema,
+        `SELECT COUNT(DISTINCT cm.CoreMeasurementID) as count
+         FROM ??.coremeasurements cm
+         JOIN ??.census c ON cm.CensusID = c.CensusID
+         JOIN ??.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE c.PlotID = ?
+           AND cm.CensusID = ?
+           AND cm.StemGUID IS NULL
+           AND mel.IsResolved = FALSE
+           AND me.ErrorSource = ?`
+      );
+      failedParams = [plotID, censusID, INGESTION_ERROR_SOURCE];
+      remainingSQL = safeFormatQuery(schema, 'SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE PlotID = ? AND CensusID = ?');
+      remainingParams = [plotID, censusID];
     }
   } catch (error: any) {
     ailogger.error(`Invalid schema in verifysession: ${schema}`);
@@ -111,25 +220,49 @@ export async function GET(request: NextRequest) {
     // Execute queries
     const processedResult = await connectionManager.executeQuery(processedSQL, processedParams);
     const failedResult = await connectionManager.executeQuery(failedSQL, failedParams);
+    const remainingResult = await connectionManager.executeQuery(remainingSQL, remainingParams);
 
-    const processedCount = processedResult[0]?.count || 0;
+    const processedDirectCount = processedResult[0]?.count || 0;
+    let processedLegacyCount = 0;
+    if (legacyProbeSQL && legacyProcessedSQL) {
+      const legacyProbeResult = await connectionManager.executeQuery(legacyProbeSQL, legacyProbeParams);
+      const legacyCandidateCount = legacyProbeResult[0]?.count || 0;
+      if (legacyCandidateCount > 0) {
+        const legacyProcessedResult = await connectionManager.executeQuery(legacyProcessedSQL, legacyProcessedParams);
+        processedLegacyCount = legacyProcessedResult[0]?.count || 0;
+      }
+    }
+
+    const processedCount = processedDirectCount + processedLegacyCount;
     const failedCount = failedResult[0]?.count || 0;
+    const remainingCount = remainingResult[0]?.count || 0;
     const totalAccounted = processedCount + failedCount;
+    const legacyRowsDetected = processedLegacyCount > 0;
+    const mixedMetadataState = processedDirectCount > 0 && processedLegacyCount > 0;
+
+    if (legacyRowsDetected) {
+      ailogger.warn(
+        `Session verification [${scope}] counted ${processedLegacyCount} legacy uploadSession JSON row(s) for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}`
+      );
+    }
 
     ailogger.info(
-      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} in failedmeasurements. Total: ${totalAccounted}`
+      `Session verification [${scope}] for Plot ${plotID}, Census ${censusID}${fileID ? `, FileID ${fileID}` : ''}${batchID ? `, BatchID ${batchID}` : ''}: ${processedCount} in coremeasurements, ${failedCount} unresolved ingestion-error rows. Total: ${totalAccounted}`
     );
 
     return new NextResponse(
       JSON.stringify({
         processedCount,
         failedCount,
+        remainingCount,
         totalAccounted,
         plotID,
         censusID,
         fileID: fileID || null,
         batchID: batchID || null,
-        scope
+        scope,
+        legacyRowsDetected,
+        mixedMetadataState
       }),
       { status: HTTPResponses.OK }
     );
@@ -141,9 +274,12 @@ export async function GET(request: NextRequest) {
         details: error.message,
         processedCount: 0,
         failedCount: 0,
+        remainingCount: 0,
         totalAccounted: 0
       }),
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
+  } finally {
+    await connectionManager.closeConnection();
   }
 }

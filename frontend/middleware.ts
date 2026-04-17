@@ -24,8 +24,7 @@ export default auth(async function middleware(request: NextRequest) {
   // E2E TESTING BYPASS
   // When running Cypress E2E tests, skip authentication middleware
   // This allows E2E tests to mock authentication client-side with cy.intercept()
-  // ⚠️ SECURITY: This env var must NEVER be set in production
-  if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true') {
+  if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production') {
     console.log('[E2E MODE] Middleware auth bypass active');
     return NextResponse.next();
   }

@@ -17,7 +17,7 @@ import * as path from 'path';
 const dbConfig = {
   host: process.env.AZURE_SQL_SERVER || 'forestgeo-mysqldataserver.mysql.database.azure.com',
   user: process.env.AZURE_SQL_USER || 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD || 'P@ssw0rd',
+  password: process.env.AZURE_SQL_PASSWORD,
   port: parseInt(process.env.AZURE_SQL_PORT || '3306'),
   database: process.env.AZURE_SQL_SCHEMA || 'forestgeo_testing',
   multipleStatements: true // Allow running multiple SQL statements
@@ -123,7 +123,19 @@ async function checkDatabase() {
 
     // Check other required tables
     console.log('🔍 Checking other required tables...');
-    const requiredTables = ['plots', 'census', 'quadrats', 'species', 'trees', 'stems', 'coremeasurements', 'cmattributes', 'attributes', 'cmverrors'];
+    const requiredTables = [
+      'plots',
+      'census',
+      'quadrats',
+      'species',
+      'trees',
+      'stems',
+      'coremeasurements',
+      'cmattributes',
+      'attributes',
+      'measurement_error_log',
+      'measurement_errors'
+    ];
 
     const [existingTables] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT TABLE_NAME

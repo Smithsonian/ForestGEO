@@ -8,12 +8,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { FormType } from '@/config/macros/formdetails';
 import { useAppStore } from '@/config/store/appstore';
+import { withTimeout } from '@/components/uploadsystemhelpers/withtimeout';
 import ailogger from '@/ailogger';
 
 type LoadStatus = 'pending' | 'success' | 'warning' | 'error' | 'skipped';
+const CLEANUP_TIMEOUT_MS = 5000;
+const REFRESH_TIMEOUT_MS = 15000;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { handleCloseUploadModal, uploadForm } = props;
@@ -26,8 +29,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
   const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
-
-  const hasRunRef = useRef(false);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -43,6 +44,53 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   // Zustand store setters to keep store in sync with context
   const setCensusListStore = useAppStore(state => state.setCensusList);
   const setCensusStore = useAppStore(state => state.setCensus);
+
+  const cleanupTemporaryMeasurements = useCallback(
+    async (signal: AbortSignal) => {
+      if (uploadForm !== FormType.measurements || !currentSite?.schemaName || !currentPlot?.plotID || !currentCensus?.dateRanges?.[0]?.censusID) {
+        return;
+      }
+
+      setProgressText(prev => ({ ...prev, census: 'Cleaning up temporary staging data...' }));
+
+      const cleanupAbortController = new AbortController();
+      const abortCleanup = () => cleanupAbortController.abort();
+
+      signal.addEventListener('abort', abortCleanup, { once: true });
+
+      try {
+        const cleanupRequest = fetch(`/api/query`, {
+          body: JSON.stringify({
+            query: `delete from ${currentSite.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+            params: [currentPlot.plotID, currentCensus.dateRanges[0].censusID],
+            format: true
+          }),
+          method: 'POST',
+          signal: cleanupAbortController.signal
+        });
+
+        const cleanupResponse = await withTimeout(cleanupRequest, CLEANUP_TIMEOUT_MS, () => cleanupAbortController.abort());
+
+        if (!cleanupResponse.ok) {
+          const errorBody = await cleanupResponse.json().catch(() => ({}));
+          ailogger.warn('Temporary measurements cleanup returned a non-OK response:', errorBody);
+        }
+      } catch (error: unknown) {
+        const isAbortError = error instanceof Error && error.name === 'AbortError';
+        if (!signal.aborted) {
+          ailogger.warn(
+            isAbortError
+              ? `[UploadComplete] Temporary measurements cleanup timed out after ${CLEANUP_TIMEOUT_MS}ms; continuing with application refresh.`
+              : '[UploadComplete] Temporary measurements cleanup failed; continuing with application refresh.',
+            error instanceof Error ? error : new Error(String(error))
+          );
+        }
+      } finally {
+        signal.removeEventListener('abort', abortCleanup);
+      }
+    },
+    [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, uploadForm]
+  );
 
   const loadCensusData = useCallback(async () => {
     // Only refresh census data for measurements uploads
@@ -63,21 +111,34 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, census: 10 }));
       setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-      const response = await fetch(
-        `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+      const response = await withTimeout(
+        fetch(`/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`),
+        REFRESH_TIMEOUT_MS
       );
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        ailogger.warn(`Census fetch returned ${response.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, census: 100 }));
+        setProgressText(prev => ({ ...prev, census: `Census refresh failed (server returned ${response.status}).` }));
+        setLoadStatus(prev => ({ ...prev, census: 'warning' }));
+        return;
+      }
+
       const censusRDSLoad = await response.json();
 
       // Validate that we received an array before processing
       if (!Array.isArray(censusRDSLoad)) {
         ailogger.warn('Census data response is not an array:', censusRDSLoad);
         setProgress(prev => ({ ...prev, census: 100 }));
-        setProgressText(prev => ({ ...prev, census: 'Census refresh failed (invalid server response).' }));
+        setProgressText(prev => ({ ...prev, census: 'Census refresh failed (unexpected response format).' }));
         setLoadStatus(prev => ({ ...prev, census: 'warning' }));
         return;
       }
 
+      setProgress(prev => ({ ...prev, census: 60 }));
       setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
       const censusList = await createAndUpdateCensusList(censusRDSLoad);
 
@@ -87,10 +148,16 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }
       setCensusListStore(censusList); // Also update Zustand store
 
-      const existingCensus = censusList.find(census => census.dateRanges?.[0]?.censusID === currentCensus?.dateRanges?.[0]?.censusID);
-      if (existingCensus) {
-        await censusDispatch({ census: existingCensus });
-        setCensusStore(existingCensus); // Also update Zustand store
+      setProgress(prev => ({ ...prev, census: 85 }));
+      if (currentCensus) {
+        const reconciledCensus = reconcileCurrentCensusSelection(currentCensus, censusList);
+        if (reconciledCensus) {
+          await censusDispatch({ census: reconciledCensus });
+          setCensusStore(reconciledCensus); // Also update Zustand store
+        } else {
+          await censusDispatch({ census: undefined });
+          setCensusStore(undefined);
+        }
       }
       setProgress(prev => ({ ...prev, census: 100 }));
       setProgressText(prev => ({ ...prev, census: 'Census data refreshed.' }));
@@ -99,8 +166,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       ailogger.error('Error loading census data:', error instanceof Error ? error : new Error(String(error)));
       // Mark as complete even on error to prevent hanging
       setProgress(prev => ({ ...prev, census: 100 }));
-      setProgressText(prev => ({ ...prev, census: 'Census refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, census: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, census: isTimeout ? 'Census refresh timed out.' : 'Census refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, census: isTimeout ? 'warning' : 'error' }));
     }
   }, [
     uploadForm,
@@ -123,8 +191,19 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, plots: 10 }));
       setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
-      const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+      const plotsResponse = await withTimeout(fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`), REFRESH_TIMEOUT_MS);
+
+      if (!plotsResponse.ok) {
+        const errorBody = await plotsResponse.json().catch(() => ({}));
+        ailogger.warn(`Plots fetch returned ${plotsResponse.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, plots: 100 }));
+        setProgressText(prev => ({ ...prev, plots: `Plots refresh failed (server returned ${plotsResponse.status}).` }));
+        setLoadStatus(prev => ({ ...prev, plots: 'warning' }));
+        return;
+      }
+
       const plotsData = await plotsResponse.json();
 
       if (!plotsData || !Array.isArray(plotsData)) {
@@ -135,6 +214,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         return;
       }
 
+      setProgress(prev => ({ ...prev, plots: 70 }));
       setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
       if (plotListDispatch) {
         await plotListDispatch({ plotList: plotsData });
@@ -145,8 +225,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     } catch (error: unknown) {
       ailogger.error('Error loading plots data:', error instanceof Error ? error : new Error(String(error)));
       setProgress(prev => ({ ...prev, plots: 100 }));
-      setProgressText(prev => ({ ...prev, plots: 'Plots refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, plots: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, plots: isTimeout ? 'Plots refresh timed out.' : 'Plots refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, plots: isTimeout ? 'warning' : 'error' }));
     }
   }, [currentSite, plotListDispatch]);
 
@@ -159,10 +240,22 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     }
 
     try {
+      setProgress(prev => ({ ...prev, quadrats: 10 }));
       setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
-      const quadratsResponse = await fetch(
-        `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
+      const quadratsResponse = await withTimeout(
+        fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`),
+        REFRESH_TIMEOUT_MS
       );
+
+      if (!quadratsResponse.ok) {
+        const errorBody = await quadratsResponse.json().catch(() => ({}));
+        ailogger.warn(`Quadrats fetch returned ${quadratsResponse.status}:`, errorBody);
+        setProgress(prev => ({ ...prev, quadrats: 100 }));
+        setProgressText(prev => ({ ...prev, quadrats: `Quadrats refresh failed (server returned ${quadratsResponse.status}).` }));
+        setLoadStatus(prev => ({ ...prev, quadrats: 'warning' }));
+        return;
+      }
+
       const quadratsData = await quadratsResponse.json();
 
       if (!quadratsData || !Array.isArray(quadratsData)) {
@@ -173,6 +266,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         return;
       }
 
+      setProgress(prev => ({ ...prev, quadrats: 70 }));
       setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
       if (quadratListDispatch) {
         await quadratListDispatch({ quadratList: quadratsData });
@@ -183,39 +277,56 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     } catch (error: unknown) {
       ailogger.error('Error loading quadrats data:', error instanceof Error ? error : new Error(String(error)));
       setProgress(prev => ({ ...prev, quadrats: 100 }));
-      setProgressText(prev => ({ ...prev, quadrats: 'Quadrats refresh failed (error).' }));
-      setLoadStatus(prev => ({ ...prev, quadrats: 'error' }));
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      setProgressText(prev => ({ ...prev, quadrats: isTimeout ? 'Quadrats refresh timed out.' : 'Quadrats refresh failed (error).' }));
+      setLoadStatus(prev => ({ ...prev, quadrats: isTimeout ? 'warning' : 'error' }));
     }
   }, [currentPlot, currentCensus, currentSite?.schemaName, quadratListDispatch]);
 
+  // Run post-upload refresh exactly once on mount.
+  // loadCensusData mutates currentCensus (via censusDispatch), so including
+  // currentCensus?.dateRanges in deps caused an infinite loop: effect runs →
+  // census dispatch updates context → dateRanges changes → effect re-runs.
+  const hasRunRef = useRef(false);
   useEffect(() => {
     if (hasRunRef.current) return;
     hasRunRef.current = true;
 
+    const abortController = new AbortController();
+
+    setProgress({ census: 0, plots: 0, quadrats: 0 });
+    setAllLoadsCompleted(false);
+
     const runAsyncTasks = async () => {
       try {
-        if (uploadForm === FormType.measurements && currentSite?.schemaName && currentPlot?.plotID && currentCensus?.dateRanges?.[0]?.censusID) {
-          // Clean up temporary measurements table
-          await fetch(`/api/query`, {
-            body: JSON.stringify({
-              query: `delete from ${currentSite.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-              params: [currentPlot.plotID, currentCensus.dateRanges?.[0]?.censusID],
-              format: true
-            }),
-            method: 'POST'
-          });
-          // Run failed measurements review procedure
-          await fetch(`/api/query`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite.schemaName}.reviewfailed();`) });
+        setProgress(prev => ({ ...prev, census: 5 }));
+        void cleanupTemporaryMeasurements(abortController.signal).catch((error: unknown) => {
+          if (!abortController.signal.aborted) {
+            ailogger.error('[UploadComplete] Unexpected cleanup error:', error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        if (abortController.signal.aborted) return;
+        try {
+          triggerRefresh();
+        } catch (error: unknown) {
+          ailogger.error('[UploadComplete] Failed to trigger validity refresh:', error instanceof Error ? error : new Error(String(error)));
         }
-        triggerRefresh();
-        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
-        setAllLoadsCompleted(true);
+        await Promise.allSettled([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
+        if (!abortController.signal.aborted) {
+          setAllLoadsCompleted(true);
+        }
       } catch (error: any) {
-        ailogger.error(error);
+        if (error?.name !== 'AbortError') {
+          ailogger.error(error);
+        }
       }
     };
     runAsyncTasks().catch(ailogger.error);
-  }, [currentCensus?.dateRanges, currentPlot?.plotID, currentSite?.schemaName, loadCensusData, loadPlotsData, loadQuadratsData, triggerRefresh, uploadForm]);
+
+    return () => abortController.abort();
+
+    // loadCensusData updates currentCensus context which would re-trigger this effect
+  }, []);
 
   // Calculate overall progress as average of the three data loads
   const overallProgress = (progress.census + progress.plots + progress.quadrats) / 3;
@@ -305,12 +416,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
           {/* Show warning alert if any refreshes failed */}
           {hasIssues && (
-            <Alert
-              color="warning"
-              variant="soft"
-              startDecorator={<WarningIcon />}
-              sx={{ width: '100%', textAlign: 'left' }}
-            >
+            <Alert color="warning" variant="soft" startDecorator={<WarningIcon />} sx={{ width: '100%', textAlign: 'left' }}>
               <Box>
                 <Typography level="title-sm" color="warning">
                   Data Refresh Issues
@@ -336,13 +442,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               Any rows with errors have been moved to the failed measurements table for review.
             </Typography>
           )}
-          <Button
-            variant="solid"
-            color={hasIssues ? 'warning' : 'success'}
-            size="lg"
-            onClick={() => setOpenUploadConfirmModal(true)}
-            sx={{ mt: 2 }}
-          >
+          <Button variant="solid" color={hasIssues ? 'warning' : 'success'} size="lg" onClick={() => setOpenUploadConfirmModal(true)} sx={{ mt: 2 }}>
             Close
           </Button>
         </Stack>

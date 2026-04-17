@@ -19,7 +19,8 @@ import {
   runSessionCleanup,
   ensureUploadSessionsTable,
   UploadSessionState,
-  generateIdempotencyKey
+  generateUploadSessionIdempotencyKey,
+  UploadSessionOwnershipError
 } from '@/config/uploadsessiontracker';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
@@ -40,9 +41,9 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = await request.json();
-    const { schema, plotId, censusId, userId, fileId, totalChunks, fileHash } = body;
+    const { schema } = body;
 
-    if (!schema || !plotId || !censusId || !userId || !fileId) {
+    if (!schema) {
       return new NextResponse(JSON.stringify({ error: 'Missing required parameters' }), {
         status: HTTPResponses.BAD_REQUEST
       });
@@ -56,13 +57,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // `navigator.sendBeacon()` can only POST, so accept unload state updates here.
+    if (body.action === 'updateState' && body.sessionId && body.state) {
+      await updateSessionState(schema, body.sessionId, body.state as UploadSessionState, body.errorMessage);
+      return new NextResponse(JSON.stringify({ success: true }), {
+        status: HTTPResponses.OK
+      });
+    }
+
+    const { plotId, censusId, userId, fileId, totalChunks, fileHash, mode } = body;
+
+    if (!plotId || !censusId || !userId || !fileId) {
+      return new NextResponse(JSON.stringify({ error: 'Missing required parameters' }), {
+        status: HTTPResponses.BAD_REQUEST
+      });
+    }
+
     // Ensure table exists
     await ensureUploadSessionsTable(schema);
 
     // Generate idempotency key if file hash provided
-    const idempotencyKey = fileHash ? generateIdempotencyKey(schema, plotId, censusId, fileHash) : undefined;
+    const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, plotId, censusId, fileHash, mode) : undefined;
 
-    const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey);
+    const session = await createUploadSession(schema, plotId, censusId, userId, fileId, totalChunks || 0, idempotencyKey, mode);
 
     return new NextResponse(JSON.stringify({ session }), {
       status: HTTPResponses.CREATED
@@ -71,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ailogger.error('[UploadSession API] POST error:', error);
 
     // Check for concurrent upload error
-    if (error.message?.includes('Another upload is in progress')) {
+    if (error instanceof UploadSessionOwnershipError || error.message?.includes('Another upload is in progress')) {
       return new NextResponse(JSON.stringify({ error: error.message }), {
         status: HTTPResponses.CONFLICT
       });

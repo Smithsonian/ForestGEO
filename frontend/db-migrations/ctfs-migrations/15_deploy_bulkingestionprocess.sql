@@ -32,6 +32,8 @@ BEGIN
     DECLARE vBatchRowCount INT DEFAULT 0;
     DECLARE vDataLossCount INT DEFAULT 0;
     DECLARE vProcessedCount INT DEFAULT 0;
+    -- Fixed-width opaque id avoids overflow when long file names are combined
+    -- with generated sub-batch ids.
     DECLARE vUploadId VARCHAR(50);
     -- FIX: Declare collation-safe variables to prevent collation mismatch errors
     -- when client connection uses different collation than database tables
@@ -46,7 +48,20 @@ BEGIN
                 vErrorCode = MYSQL_ERRNO;
 
             SET vBatchFailed = TRUE;
-            SET vUploadId = CONCAT(vFileID, '-', vBatchID);
+            SET vUploadId = LEFT(
+                SHA2(
+                    CONCAT_WS(
+                        '#',
+                        DATABASE(),
+                        COALESCE(vCurrentPlotID, 0),
+                        COALESCE(vCurrentCensusID, 0),
+                        COALESCE(vFileID, ''),
+                        COALESCE(vBatchID, '')
+                    ),
+                    256
+                ),
+                40
+            );
 
             -- Log to uploadmetrics
             INSERT IGNORE INTO uploadmetrics (
@@ -82,11 +97,13 @@ BEGIN
 
             -- Move all batch to failedmeasurements
             INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                                   Date, Codes, Comments, FailureReasons)
+                                                   Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
             SELECT vFileID, vBatchID, PlotID, CensusID,
                    NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                    NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                    NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
+                   CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150)),
                    CONCAT('SQL Exception: Error ', vErrorCode, ': ', LEFT(vErrorMessage, 150))
             FROM temporarymeasurements
             WHERE FileID = vFileIDSafe AND BatchID = vBatchIDSafe;
@@ -110,8 +127,6 @@ BEGIN
     SET vFileIDSafe = vFileID COLLATE utf8mb4_0900_ai_ci;
     SET vBatchIDSafe = vBatchID COLLATE utf8mb4_0900_ai_ci;
 
-    SET vUploadId = CONCAT(vFileIDSafe, '-', vBatchIDSafe);
-
     -- Get census info
     SELECT CensusID, PlotID, COUNT(*)
     INTO vCurrentCensusID, vCurrentPlotID, vBatchRowCount
@@ -125,6 +140,21 @@ BEGIN
         SELECT 'No data found' as message, FALSE as batch_failed;
         LEAVE main_proc;
     END IF;
+
+    SET vUploadId = LEFT(
+        SHA2(
+            CONCAT_WS(
+                '#',
+                DATABASE(),
+                COALESCE(vCurrentPlotID, 0),
+                COALESCE(vCurrentCensusID, 0),
+                COALESCE(vFileIDSafe, ''),
+                COALESCE(vBatchIDSafe, '')
+            ),
+            256
+        ),
+        40
+    );
 
     -- ============================================================
     -- PERFORMANCE FIX: Use uploadmetrics for idempotency check
@@ -209,12 +239,12 @@ BEGIN
         SET vDataLossCount = (SELECT COUNT(*) FROM validation_failures);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM validation_failures;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -252,11 +282,13 @@ BEGIN
         SET @dup_count = (SELECT SUM(duplicate_count - 1) FROM initial_dup_filter WHERE duplicate_count > 1);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, tm.PlotID, tm.CensusID,
                NULLIF(tm.TreeTag, ''), NULLIF(tm.StemTag, ''), NULLIF(tm.SpeciesCode, ''), NULLIF(tm.QuadratName, ''),
                NULLIF(tm.LocalX, 0), NULLIF(tm.LocalY, 0), NULLIF(tm.DBH, 0), NULLIF(tm.HOM, 0),
                NULLIF(tm.MeasurementDate, '1900-01-01'), NULLIF(tm.Codes, ''), NULLIF(tm.Comments, ''),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
+               CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id),
                CONCAT('Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: ', idf.id)
         FROM temporarymeasurements tm
         INNER JOIN initial_dup_filter idf
@@ -323,12 +355,12 @@ BEGIN
         SET @invalid_count = (SELECT COUNT(*) FROM filter_validity WHERE Valid = false);
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
-                                       Comments, FailureReasons)
+                                       Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(TreeTag, ''), NULLIF(StemTag, ''), NULLIF(SpeciesCode, ''), NULLIF(QuadratName, ''),
                NULLIF(LocalX, 0), NULLIF(LocalY, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(MeasurementDate, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM filter_validity WHERE Valid = false;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -468,21 +500,21 @@ BEGIN
         );
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM quadrat_mismatch_failures;
 
         INSERT IGNORE INTO failedmeasurements (FileID, BatchID, PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM,
-                                       Date, Codes, Comments, FailureReasons)
+                                       Date, Codes, Comments, OriginalFailureReasons, CurrentFailureReasons, FailureReasons)
         SELECT vFileID, vBatchID, PlotID, CensusID,
                NULLIF(Tag, ''), NULLIF(StemTag, ''), NULLIF(SpCode, ''), NULLIF(Quadrat, ''),
                NULLIF(X, 0), NULLIF(Y, 0), NULLIF(DBH, 0), NULLIF(HOM, 0),
                NULLIF(Date, '1900-01-01'), NULLIF(Codes, ''), NULLIF(Comments, ''),
-               FailureReason
+               FailureReason, FailureReason, FailureReason
         FROM coordinate_drift_failures;
 
         INSERT IGNORE INTO uploadintegrityalerts (
@@ -493,7 +525,7 @@ BEGIN
             vUploadId, vFileID, vBatchID, vCurrentPlotID, vCurrentCensusID,
             'CROSS_CENSUS_VALIDATION_FAILURE',
             CONCAT(@cross_census_failures, ' records failed cross-census validation (quadrat changes, coordinate drift)'),
-            'error',
+            'warning',
             vBatchRowCount, 0, @cross_census_failures, 0
         );
 

@@ -10,6 +10,7 @@ import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinit
 import { getCookie } from '@/app/actions/cookiemanager';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ailogger from '@/ailogger';
+import { insertIngestionFailureRows, refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -18,7 +19,6 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
   attributes: 'Code',
   census: 'CensusID',
   cmattributes: 'CMAID',
-  cmverrors: 'CMVErrorID',
   family: 'FamilyID',
   genus: 'GenusID',
   personnel: 'PersonnelID',
@@ -31,6 +31,244 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
   roles: 'RoleID',
   sites: 'SiteID'
 };
+
+type MeasurementSummaryStructure = {
+  TreeTag?: string | null;
+  CensusID?: number | null;
+  SpeciesID?: number | null;
+  TreeID?: number | null;
+  StemTag?: string | null;
+  StemGUID?: number | null;
+  QuadratID?: number | null;
+  StemLocalX?: number | null;
+  StemLocalY?: number | null;
+  PlotID?: number | null;
+  QuadratName?: string | null;
+};
+
+function toPositiveNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeMeasurementSummaryDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0];
+  }
+  if (typeof value === 'string') {
+    if (!value.includes('T')) return value;
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+  }
+  return null;
+}
+
+type TreeStemStateLabel = 'old tree' | 'multi stem' | 'new recruit';
+
+async function computeTreeStemState(
+  connectionManager: ConnectionManager,
+  schema: string,
+  treeTag: string,
+  stemTag: string,
+  currentCensusID: number,
+  plotID: number,
+  transactionID?: string
+): Promise<TreeStemStateLabel> {
+  // Find the previous census for this plot (same logic as bulkingestionprocess Stage 4)
+  const prevCensusRows = await connectionManager.executeQuery(
+    `SELECT c_prev.CensusID
+     FROM ${schema}.census c_curr
+     INNER JOIN ${schema}.census c_prev
+       ON c_prev.PlotID = c_curr.PlotID
+       AND c_prev.PlotCensusNumber = c_curr.PlotCensusNumber - 1
+       AND c_prev.IsActive = 1
+     WHERE c_curr.CensusID = ?
+       AND c_curr.PlotID = ?
+       AND c_curr.IsActive = 1
+     ORDER BY c_prev.CensusID DESC
+     LIMIT 1`,
+    [currentCensusID, plotID],
+    transactionID
+  );
+
+  if (prevCensusRows.length === 0) {
+    // No previous census exists — every row is a new recruit
+    return 'new recruit';
+  }
+
+  const previousCensusID = prevCensusRows[0].CensusID;
+
+  // Check for previous stem match (TreeTag + StemTag in the previous census)
+  const prevStemMatch = await connectionManager.executeQuery(
+    `SELECT COUNT(*) AS MatchCount
+     FROM ${schema}.stems s
+     INNER JOIN ${schema}.trees t
+       ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+     WHERE t.TreeTag = ?
+       AND s.StemTag = ?
+       AND t.CensusID = ?
+       AND t.IsActive = 1
+       AND s.IsActive = 1`,
+    [treeTag, stemTag, previousCensusID],
+    transactionID
+  );
+
+  if (prevStemMatch[0]?.MatchCount > 0) {
+    return 'old tree';
+  }
+
+  // Check for previous tree match (TreeTag only in the previous census)
+  const prevTreeMatch = await connectionManager.executeQuery(
+    `SELECT COUNT(*) AS MatchCount
+     FROM ${schema}.trees t
+     WHERE t.TreeTag = ?
+       AND t.CensusID = ?
+       AND t.IsActive = 1`,
+    [treeTag, previousCensusID],
+    transactionID
+  );
+
+  if (prevTreeMatch[0]?.MatchCount > 0) {
+    return 'multi stem';
+  }
+
+  return 'new recruit';
+}
+
+async function resolveMeasurementSummaryQuadratID(
+  connectionManager: ConnectionManager,
+  schema: string,
+  quadratData: Pick<MeasurementSummaryStructure, 'QuadratID' | 'QuadratName' | 'PlotID'>,
+  transactionID?: string
+): Promise<number> {
+  const quadratID = toPositiveNumber(quadratData.QuadratID);
+  if (quadratID !== null) return quadratID;
+
+  const plotID = toPositiveNumber(quadratData.PlotID);
+  const quadratName = quadratData.QuadratName?.trim();
+  if (!plotID) throw new Error('Plot not found for quadrat lookup');
+  if (!quadratName) throw new Error('Quadrat not found for stem resolution');
+
+  const quadratSearchResults = await connectionManager.executeQuery(
+    `SELECT QuadratID
+     FROM ${schema}.quadrats
+     WHERE LOWER(QuadratName) = LOWER(?)
+       AND PlotID = ?
+       AND IsActive = 1
+     ORDER BY QuadratID
+     LIMIT 1`,
+    [quadratName, plotID],
+    transactionID
+  );
+  if (quadratSearchResults.length === 0) throw new Error('Quadrat not found');
+  return quadratSearchResults[0].QuadratID;
+}
+
+async function resolveMeasurementSummaryTree(
+  connectionManager: ConnectionManager,
+  schema: string,
+  treeData: Pick<MeasurementSummaryStructure, 'TreeTag' | 'SpeciesID' | 'CensusID'>,
+  transactionID?: string
+): Promise<number> {
+  const { TreeTag, SpeciesID, CensusID } = treeData;
+  if (!TreeTag) throw new Error('TreeTag not found for tree resolution');
+  const normalizedSpeciesID = toPositiveNumber(SpeciesID);
+  const normalizedCensusID = toPositiveNumber(CensusID);
+  if (normalizedSpeciesID === null) throw new Error('Species not found for tree resolution');
+  if (normalizedCensusID === null) throw new Error('Census not found for tree resolution');
+
+  const matchingTreeRows = await connectionManager.executeQuery(
+    `SELECT TreeID, IsActive
+     FROM ${schema}.trees
+     WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
+     ORDER BY TreeID
+     LIMIT 1`,
+    [TreeTag, normalizedSpeciesID, normalizedCensusID],
+    transactionID
+  );
+  if (matchingTreeRows.length > 0) {
+    const matchingTree = matchingTreeRows[0];
+    if (!matchingTree.IsActive) throw new Error(`Tree resolution failed: matching tree exists but is inactive for TreeTag "${TreeTag}"`);
+    return matchingTree.TreeID;
+  }
+
+  const insertResult = await connectionManager.executeQuery(
+    format(`INSERT INTO ?? SET ?`, [`${schema}.trees`, { TreeTag, SpeciesID: normalizedSpeciesID, CensusID: normalizedCensusID, IsActive: 1 }]),
+    [],
+    transactionID
+  );
+  return insertResult.insertId;
+}
+
+async function resolveMeasurementSummaryStem(
+  connectionManager: ConnectionManager,
+  schema: string,
+  stemData: Pick<MeasurementSummaryStructure, 'TreeID' | 'TreeTag' | 'CensusID' | 'StemTag' | 'QuadratID' | 'StemLocalX' | 'StemLocalY'>,
+  transactionID?: string
+): Promise<number> {
+  const { TreeID, TreeTag, CensusID, StemTag, QuadratID, StemLocalX, StemLocalY } = stemData;
+  const normalizedTreeID = toPositiveNumber(TreeID);
+  const normalizedCensusID = toPositiveNumber(CensusID);
+  const normalizedQuadratID = toPositiveNumber(QuadratID);
+  if (normalizedTreeID === null) throw new Error('Tree not found for stem resolution');
+  if (normalizedCensusID === null) throw new Error('Census not found for stem resolution');
+  if (!StemTag) throw new Error('StemTag not found for stem resolution');
+  if (normalizedQuadratID === null) throw new Error('Quadrat not found for stem resolution');
+
+  const exactActiveStemRows = await connectionManager.executeQuery(
+    `SELECT StemGUID
+     FROM ${schema}.stems
+     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
+     LIMIT 1`,
+    [normalizedTreeID, normalizedCensusID, StemTag, normalizedQuadratID],
+    transactionID
+  );
+  if (exactActiveStemRows.length > 0) return exactActiveStemRows[0].StemGUID;
+
+  const blockingStemRows = await connectionManager.executeQuery(
+    `SELECT StemGUID, QuadratID, IsActive
+     FROM ${schema}.stems
+     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ?
+     ORDER BY StemGUID
+     LIMIT 1`,
+    [normalizedTreeID, normalizedCensusID, StemTag],
+    transactionID
+  );
+  if (blockingStemRows.length > 0) {
+    const blockingStem = blockingStemRows[0];
+    if (!blockingStem.IsActive) {
+      throw new Error(`Stem resolution failed: matching TreeID ${normalizedTreeID} / StemTag "${StemTag}" exists but is inactive for this census`);
+    }
+    if (blockingStem.QuadratID !== normalizedQuadratID) {
+      throw new Error(
+        `Stem resolution failed: TreeTag "${TreeTag ?? normalizedTreeID}" / StemTag "${StemTag}" already exists in a different quadrat for this census`
+      );
+    }
+    return blockingStem.StemGUID;
+  }
+
+  const insertResult = await connectionManager.executeQuery(
+    format(`INSERT INTO ?? SET ?`, [
+      `${schema}.stems`,
+      {
+        TreeID: normalizedTreeID,
+        QuadratID: normalizedQuadratID,
+        CensusID: normalizedCensusID,
+        StemTag,
+        LocalX: StemLocalX ?? null,
+        LocalY: StemLocalY ?? null,
+        IsActive: 1
+      }
+    ]),
+    [],
+    transactionID
+  );
+  return insertResult.insertId;
+}
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -72,129 +310,208 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const updatedFields = {
           ...Object.fromEntries(Object.entries(getUpdatedValues(mappedOldRow, mappedUpdatedRow)).filter(([, val]: any) => val !== undefined && val !== null))
         };
-        if (updatedFields.SpeciesCode) {
-          const speciesSearchResults = await connectionManager.executeQuery(`SELECT SpeciesID FROM ${schema}.species WHERE SpeciesCode = ? LIMIT 1`, [
-            updatedFields.SpeciesCode
-          ]);
+        const normalizedMeasurementDate = normalizeMeasurementSummaryDate(mappedUpdatedRow.MeasurementDate ?? mappedOldRow.MeasurementDate ?? null);
+        const hasUpdatedField = (field: string) => Object.prototype.hasOwnProperty.call(updatedFields, field);
+        const shouldResolveTree = hasUpdatedField('SpeciesCode') || hasUpdatedField('TreeTag');
+        const previousTreeID = toPositiveNumber(mappedOldRow.TreeID ?? mappedUpdatedRow.TreeID);
+        // Full stem resolution (find-or-create) only when the stem identity
+        // changes: TreeTag, QuadratName, or StemTag. A species-code-only change
+        // still needs destination-stem resolution so we never mutate an
+        // existing stem row into a conflicting destination tree.
+        const needsFullStemResolution = hasUpdatedField('TreeTag') || hasUpdatedField('QuadratName') || hasUpdatedField('StemTag');
+
+        if (hasUpdatedField('SpeciesCode')) {
+          changesFound = true;
+          const speciesSearchResults = await connectionManager.executeQuery(
+            `SELECT SpeciesID
+             FROM ${schema}.species
+             WHERE LOWER(SpeciesCode) = LOWER(?)
+               AND IsActive = 1
+             ORDER BY SpeciesID
+             LIMIT 1`,
+            [updatedFields.SpeciesCode],
+            transactionID
+          );
           if (speciesSearchResults.length === 0) throw new Error('Species not found');
           mappedUpdatedRow.SpeciesID = speciesSearchResults[0].SpeciesID;
-          if (updatedFields.SpeciesName || updatedFields.SubspeciesName) {
-            changesFound = true;
-            await connectionManager.executeQuery('UPDATE ?? SET ? WHERE SpeciesID = ?', [
-              `${schema}.species`,
-              {
-                SpeciesName: updatedFields.SpeciesName ?? mappedUpdatedRow.SpeciesName,
-                SubspeciesName: updatedFields.SubspeciesName ?? mappedUpdatedRow.SubspeciesName
-              },
-              mappedUpdatedRow.SpeciesID
-            ]);
-          }
-          await connectionManager.executeQuery(
-            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.trees`, { SpeciesID: mappedUpdatedRow.SpeciesID }, 'TreeID', mappedUpdatedRow.TreeID])
-          );
-        }
-        if (updatedFields.TreeTag) {
-          changesFound = true;
-          const treeSearchResults = await connectionManager.executeQuery(`SELECT TreeID FROM ${schema}.trees WHERE TreeTag = ? LIMIT 1`, [
-            updatedFields.TreeTag
-          ]);
-          if (treeSearchResults.length === 0) {
-            const newTree = {
-              TreeTag: updatedFields.TreeTag,
-              SpeciesID: mappedUpdatedRow.SpeciesID
-            };
-            const treeInsertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.trees`, newTree]);
-            const treeResult = await connectionManager.executeQuery(treeInsertQuery);
-            mappedUpdatedRow.TreeID = treeResult.insertId;
-          } else mappedUpdatedRow.TreeID = treeSearchResults[0].TreeID;
-          await connectionManager.executeQuery(
-            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { TreeID: mappedUpdatedRow.TreeID }, 'StemGUID', mappedUpdatedRow.StemGUID])
-          );
-        }
-
-        if (updatedFields.QuadratName) {
-          changesFound = true;
-          const quadratSearchResults = await connectionManager.executeQuery(`SELECT QuadratID FROM ${schema}.quadrats WHERE QuadratName = ? LIMIT 1`, [
-            updatedFields.QuadratName
-          ]);
-          if (quadratSearchResults.length === 0) throw new Error('Quadrat not found');
-          mappedUpdatedRow.QuadratID = quadratSearchResults[0].QuadratID;
-          await connectionManager.executeQuery(
-            format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { QuadratID: mappedUpdatedRow.QuadratID }, 'StemGUID', mappedUpdatedRow.StemGUID])
-          );
-        }
-
-        if (updatedFields.StemTag) {
-          changesFound = true;
-          const stemSearchResults = await connectionManager.executeQuery(`SELECT StemGUID FROM ${schema}.stems WHERE StemTag = ? LIMIT 1`, [
-            updatedFields.StemTag
-          ]);
-          if (stemSearchResults.length === 0) {
-            const stemInsertQuery = format(`INSERT INTO ?? SET ?`, [
-              `${schema}.stems`,
-              {
-                StemTag: updatedFields.StemTag,
-                TreeID: mappedUpdatedRow.TreeID,
-                QuadratID: mappedUpdatedRow.QuadratID,
-                LocalX: updatedFields.StemLocalX ?? mappedUpdatedRow.StemLocalX,
-                LocalY: updatedFields.StemLocalY ?? mappedUpdatedRow.StemLocalY
-              }
-            ]);
-            const stemResult = await connectionManager.executeQuery(stemInsertQuery);
-            mappedUpdatedRow.StemGUID = stemResult.insertId;
-          } else mappedUpdatedRow.StemGUID = stemSearchResults[0].StemGUID;
-          if (updatedFields.StemLocalX || updatedFields.StemLocalY) {
+          if (hasUpdatedField('SpeciesName') || hasUpdatedField('SubspeciesName')) {
             await connectionManager.executeQuery(
-              format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-                `${schema}.stems`,
+              'UPDATE ?? SET ? WHERE SpeciesID = ?',
+              [
+                `${schema}.species`,
                 {
-                  LocalX: updatedFields.StemLocalX ?? mappedUpdatedRow.StemLocalX,
-                  LocalY: updatedFields.StemLocalY ?? mappedUpdatedRow.StemLocalY
+                  SpeciesName: updatedFields.SpeciesName ?? mappedUpdatedRow.SpeciesName,
+                  SubspeciesName: updatedFields.SubspeciesName ?? mappedUpdatedRow.SubspeciesName
                 },
-                'StemGUID',
-                mappedUpdatedRow.StemGUID
-              ])
+                mappedUpdatedRow.SpeciesID
+              ],
+              transactionID
             );
           }
+        }
+        if (hasUpdatedField('TreeTag')) {
+          changesFound = true;
+        }
+
+        if (hasUpdatedField('QuadratName')) {
+          changesFound = true;
+          mappedUpdatedRow.QuadratID = await resolveMeasurementSummaryQuadratID(
+            connectionManager,
+            schema,
+            {
+              QuadratID: null,
+              QuadratName: updatedFields.QuadratName,
+              PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
+            },
+            transactionID
+          );
+        }
+
+        if (shouldResolveTree) {
+          mappedUpdatedRow.TreeID = await resolveMeasurementSummaryTree(
+            connectionManager,
+            schema,
+            {
+              TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
+              SpeciesID: mappedUpdatedRow.SpeciesID ?? mappedOldRow.SpeciesID,
+              CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID
+            },
+            transactionID
+          );
+        }
+
+        const resolvedTreeID = toPositiveNumber(mappedUpdatedRow.TreeID ?? mappedOldRow.TreeID);
+        const needsStemResolution = needsFullStemResolution || (resolvedTreeID !== null && resolvedTreeID !== previousTreeID);
+
+        if (needsStemResolution) {
+          changesFound = true;
+          const resolvedQuadratID = await resolveMeasurementSummaryQuadratID(
+            connectionManager,
+            schema,
+            {
+              QuadratID: mappedUpdatedRow.QuadratID ?? mappedOldRow.QuadratID,
+              QuadratName: mappedUpdatedRow.QuadratName ?? mappedOldRow.QuadratName,
+              PlotID: mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID
+            },
+            transactionID
+          );
+          mappedUpdatedRow.QuadratID = resolvedQuadratID;
+          const resolvedStemGUID = await resolveMeasurementSummaryStem(
+            connectionManager,
+            schema,
+            {
+              TreeID: mappedUpdatedRow.TreeID ?? mappedOldRow.TreeID,
+              TreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag,
+              CensusID: mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID,
+              StemTag: mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag,
+              QuadratID: resolvedQuadratID,
+              StemLocalX: hasUpdatedField('StemLocalX') ? updatedFields.StemLocalX : mappedUpdatedRow.StemLocalX,
+              StemLocalY: hasUpdatedField('StemLocalY') ? updatedFields.StemLocalY : mappedUpdatedRow.StemLocalY
+            },
+            transactionID
+          );
+          if (resolvedStemGUID !== mappedUpdatedRow.StemGUID) {
+            await connectionManager.executeQuery(
+              format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+                `${schema}.coremeasurements`,
+                { StemGUID: resolvedStemGUID },
+                'CoreMeasurementID',
+                mappedUpdatedRow.CoreMeasurementID
+              ]),
+              [],
+              transactionID
+            );
+          }
+          mappedUpdatedRow.StemGUID = resolvedStemGUID;
+
+          // Recompute treestemstate — hard-failed rows never got this during
+          // ingestion (they fail before Stage 4 classification), so corrected
+          // rows would remain hidden in View Data without it.
+          const resolvedTreeTag = String(mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag ?? '');
+          const resolvedStemTag = String(mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag ?? '');
+          const resolvedCensusID = toPositiveNumber(mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID);
+          const resolvedPlotID = toPositiveNumber(mappedUpdatedRow.PlotID ?? mappedOldRow.PlotID);
+          const coreMeasurementID = mappedUpdatedRow.CoreMeasurementID;
+
+          if (resolvedTreeTag && resolvedStemTag && resolvedCensusID && resolvedPlotID && coreMeasurementID) {
+            const treeStemState = await computeTreeStemState(
+              connectionManager,
+              schema,
+              resolvedTreeTag,
+              resolvedStemTag,
+              resolvedCensusID,
+              resolvedPlotID,
+              transactionID
+            );
+
+            // Read existing UserDefinedFields and merge treestemstate
+            const existingUDFRows = await connectionManager.executeQuery(
+              `SELECT UserDefinedFields FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ?`,
+              [coreMeasurementID],
+              transactionID
+            );
+            const rawUDF = existingUDFRows?.[0]?.UserDefinedFields;
+            const currentFields: Record<string, unknown> = rawUDF ? (typeof rawUDF === 'string' ? JSON.parse(rawUDF) : rawUDF) : {};
+            currentFields.treestemstate = treeStemState;
+
+            await connectionManager.executeQuery(
+              format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+                `${schema}.coremeasurements`,
+                { UserDefinedFields: JSON.stringify(currentFields) },
+                'CoreMeasurementID',
+                coreMeasurementID
+              ]),
+              [],
+              transactionID
+            );
+          }
+        }
+
+        if (hasUpdatedField('StemLocalX') || hasUpdatedField('StemLocalY')) {
+          changesFound = true;
           await connectionManager.executeQuery(
             format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-              `${schema}.coremeasurements`,
-              { StemGUID: mappedUpdatedRow.StemGUID },
-              'CoreMeasurementID',
-              mappedUpdatedRow.CoreMeasurementID
-            ])
+              `${schema}.stems`,
+              {
+                LocalX: hasUpdatedField('StemLocalX') ? updatedFields.StemLocalX : mappedUpdatedRow.StemLocalX,
+                LocalY: hasUpdatedField('StemLocalY') ? updatedFields.StemLocalY : mappedUpdatedRow.StemLocalY
+              },
+              'StemGUID',
+              mappedUpdatedRow.StemGUID
+            ]),
+            [],
+            transactionID
           );
         }
 
         if (updatedFields.MeasuredDBH || updatedFields.MeasuredHOM || updatedFields.MeasurementDate) {
           changesFound = true;
-          // Convert MeasurementDate from ISO format to MySQL format (YYYY-MM-DD) if needed
-          let measurementDate = updatedFields.MeasurementDate ?? mappedUpdatedRow.MeasurementDate;
-          if (measurementDate && typeof measurementDate === 'string' && measurementDate.includes('T')) {
-            const date = new Date(measurementDate);
-            if (!isNaN(date.getTime())) {
-              measurementDate = date.toISOString().split('T')[0];
-            }
-          }
           await connectionManager.executeQuery(
             format(`UPDATE ?? SET ? WHERE ?? = ?`, [
               `${schema}.coremeasurements`,
               {
                 MeasuredDBH: updatedFields.MeasuredDBH ?? mappedUpdatedRow.MeasuredDBH,
                 MeasuredHOM: updatedFields.MeasuredHOM ?? mappedUpdatedRow.MeasuredHOM,
-                MeasurementDate: measurementDate
+                MeasurementDate: normalizedMeasurementDate
               },
               'CoreMeasurementID',
               mappedUpdatedRow.CoreMeasurementID
-            ])
+            ]),
+            [],
+            transactionID
           );
         }
 
         if (updatedFields.Attributes) {
+          changesFound = true;
           const parsedCodes = updatedFields.Attributes.split(';')
             .map((code: string) => code.trim())
             .filter(Boolean);
-          await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID]);
+          await connectionManager.executeQuery(
+            `DELETE FROM ?? WHERE ?? = ?`,
+            [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID],
+            transactionID
+          );
           if (parsedCodes.length === 0) {
             ailogger.error('No valid attribute codes found:', updatedFields.Attributes);
           } else {
@@ -207,35 +524,116 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
                   CoreMeasurementID: mappedOldRow.CoreMeasurementID,
                   Code: code
                 },
-                'CMAID'
+                'CMAID',
+                transactionID
               );
             }
           }
         }
 
-        if (changesFound) {
-          const deleteErrorsQuery = format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmverrors`, 'CoreMeasurementID', mappedUpdatedRow.CoreMeasurementID]);
-          await connectionManager.executeQuery(deleteErrorsQuery);
+        if (
+          hasUpdatedField('TreeTag') ||
+          hasUpdatedField('StemTag') ||
+          hasUpdatedField('SpeciesCode') ||
+          hasUpdatedField('QuadratName') ||
+          hasUpdatedField('StemLocalX') ||
+          hasUpdatedField('StemLocalY') ||
+          hasUpdatedField('MeasuredDBH') ||
+          hasUpdatedField('MeasuredHOM') ||
+          hasUpdatedField('MeasurementDate') ||
+          hasUpdatedField('Description') ||
+          hasUpdatedField('Attributes')
+        ) {
+          changesFound = true;
+          await connectionManager.executeQuery(
+            format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+              `${schema}.coremeasurements`,
+              {
+                RawTreeTag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag ?? null,
+                RawStemTag: mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag ?? null,
+                RawSpCode: mappedUpdatedRow.SpeciesCode ?? mappedOldRow.SpeciesCode ?? null,
+                RawQuadrat: mappedUpdatedRow.QuadratName ?? mappedOldRow.QuadratName ?? null,
+                RawX: mappedUpdatedRow.StemLocalX ?? mappedOldRow.StemLocalX ?? null,
+                RawY: mappedUpdatedRow.StemLocalY ?? mappedOldRow.StemLocalY ?? null,
+                RawCodes: mappedUpdatedRow.Attributes ?? mappedOldRow.Attributes ?? null,
+                RawComments: mappedUpdatedRow.Description ?? mappedOldRow.Description ?? null,
+                Description: mappedUpdatedRow.Description ?? mappedOldRow.Description ?? null,
+                MeasurementDate: normalizedMeasurementDate,
+                MeasuredDBH: mappedUpdatedRow.MeasuredDBH ?? mappedOldRow.MeasuredDBH ?? null,
+                MeasuredHOM: mappedUpdatedRow.MeasuredHOM ?? mappedOldRow.MeasuredHOM ?? null
+              },
+              'CoreMeasurementID',
+              mappedUpdatedRow.CoreMeasurementID
+            ]),
+            [],
+            transactionID
+          );
+        }
 
-          const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
+        if (changesFound) {
+          const measurementID = Number(mappedUpdatedRow.CoreMeasurementID ?? mappedOldRow.CoreMeasurementID ?? 0);
+          const censusID = Number(mappedUpdatedRow.CensusID ?? mappedOldRow.CensusID ?? 0);
+
+          if (measurementID > 0 && censusID > 0) {
+            await refreshIngestionErrorsForMeasurement(
+              connectionManager,
+              schema,
+              measurementID,
+              censusID,
+              {
+                Tag: mappedUpdatedRow.TreeTag ?? mappedOldRow.TreeTag ?? null,
+                StemTag: mappedUpdatedRow.StemTag ?? mappedOldRow.StemTag ?? null,
+                SpCode: mappedUpdatedRow.SpeciesCode ?? mappedOldRow.SpeciesCode ?? null,
+                Quadrat: mappedUpdatedRow.QuadratName ?? mappedOldRow.QuadratName ?? null,
+                X: mappedUpdatedRow.StemLocalX ?? mappedOldRow.StemLocalX ?? null,
+                Y: mappedUpdatedRow.StemLocalY ?? mappedOldRow.StemLocalY ?? null,
+                DBH: mappedUpdatedRow.MeasuredDBH ?? mappedOldRow.MeasuredDBH ?? null,
+                HOM: mappedUpdatedRow.MeasuredHOM ?? mappedOldRow.MeasuredHOM ?? null,
+                Date: normalizedMeasurementDate,
+                Codes: mappedUpdatedRow.Attributes ?? mappedOldRow.Attributes ?? null,
+                Comments: mappedUpdatedRow.Description ?? mappedOldRow.Description ?? null
+              },
+              transactionID
+            );
+          }
+
+          const deleteErrorsQuery = format(
+            `DELETE mel
+             FROM ??.measurement_error_log mel
+             JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+             WHERE mel.MeasurementID = ? AND me.ErrorSource = 'validation'`,
+            [schema, schema]
+          );
+          await connectionManager.executeQuery(deleteErrorsQuery, [mappedUpdatedRow.CoreMeasurementID], transactionID);
+
+          const resetValidationQuery = format('/* skip_changelog */ UPDATE ?? SET ?? = ? WHERE ?? = ?', [
             `${schema}.coremeasurements`,
             'IsValidated',
             null,
             'CoreMeasurementID',
             mappedUpdatedRow.CoreMeasurementID
           ]);
-          await connectionManager.executeQuery(resetValidationQuery);
+          await connectionManager.executeQuery(resetValidationQuery, [], transactionID);
         }
       } else {
-        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
-        const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
+        const mapper = MapperFactory.getMapper<any, any>(dataType);
+        const oldRowData = mapper.demapData([oldRow])[0];
+        const newRowData = mapper.demapData([{ ...oldRow, ...newRow }])[0];
+        const previousGridIDKey = oldRowData?.[demappedGridID];
+        const { [demappedGridID]: updatedGridIDKey, ...remainingProperties } = newRowData;
 
         let dataToUpdate;
         const censusID = parseInt((await getCookie('censusID')) ?? '0');
 
         if (dataType === 'failedmeasurements') {
           const { Hash_ID, ...failedTrimmed } = newRowData;
-          failedTrimmed['FailureReasons'] = '';
+          if (failedTrimmed['CurrentFailureReasons'] == null && failedTrimmed['FailureReasons'] != null) {
+            failedTrimmed['CurrentFailureReasons'] = failedTrimmed['FailureReasons'];
+          }
+          if (failedTrimmed['FailureReasons'] == null && failedTrimmed['CurrentFailureReasons'] != null) {
+            failedTrimmed['FailureReasons'] = failedTrimmed['CurrentFailureReasons'];
+          }
+          failedTrimmed['LastValidatedAt'] = null;
           // Convert Date from ISO format to MySQL format (YYYY-MM-DD)
           if (failedTrimmed['Date']) {
             const date = new Date(failedTrimmed['Date']);
@@ -244,27 +642,99 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               failedTrimmed['Date'] = date.toISOString().split('T')[0];
             }
           }
-          dataToUpdate = failedTrimmed;
+          const failedMeasurementID = Number(updatedGridIDKey);
+          const updateFailedQuery = format(
+            `UPDATE ??.coremeasurements
+             SET RawTreeTag = ?, RawStemTag = ?, RawSpCode = ?, RawQuadrat = ?,
+                 RawX = ?, RawY = ?, MeasuredDBH = ?, MeasuredHOM = ?, MeasurementDate = ?,
+                 RawCodes = ?, RawComments = ?, Description = ?, UploadFileID = COALESCE(?, UploadFileID),
+                 UploadBatchID = COALESCE(?, UploadBatchID), IsValidated = FALSE
+             WHERE CoreMeasurementID = ? AND StemGUID IS NULL`,
+            [schema]
+          );
+          await connectionManager.executeQuery(updateFailedQuery, [
+            failedTrimmed['Tag'] ?? null,
+            failedTrimmed['StemTag'] ?? null,
+            failedTrimmed['SpCode'] ?? null,
+            failedTrimmed['Quadrat'] ?? null,
+            failedTrimmed['X'] ?? null,
+            failedTrimmed['Y'] ?? null,
+            failedTrimmed['DBH'] ?? null,
+            failedTrimmed['HOM'] ?? null,
+            failedTrimmed['Date'] ?? null,
+            failedTrimmed['Codes'] ?? null,
+            failedTrimmed['Comments'] ?? null,
+            failedTrimmed['Comments'] ?? null,
+            failedTrimmed['FileID'] ?? null,
+            failedTrimmed['BatchID'] ?? null,
+            failedMeasurementID
+          ]);
+
+          // Revalidate the edited row and refresh current ingestion errors
+          // without destroying the row's historical error trail.
+          const validationErrors = await refreshIngestionErrorsForMeasurement(
+            connectionManager,
+            schema,
+            failedMeasurementID,
+            censusID,
+            {
+              Tag: failedTrimmed['Tag'],
+              StemTag: failedTrimmed['StemTag'],
+              SpCode: failedTrimmed['SpCode'],
+              Quadrat: failedTrimmed['Quadrat'],
+              X: failedTrimmed['X'],
+              Y: failedTrimmed['Y'],
+              DBH: failedTrimmed['DBH'],
+              HOM: failedTrimmed['HOM'],
+              Date: failedTrimmed['Date'],
+              Codes: failedTrimmed['Codes'],
+              Comments: failedTrimmed['Comments']
+            },
+            transactionID
+          );
+
+          // Update Description with concatenated current failure reasons
+          if (validationErrors.length > 0) {
+            const descriptionText = validationErrors.map(e => e.errorMessage).join('; ');
+            const updateDescQuery = format('UPDATE ??.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?', [schema]);
+            await connectionManager.executeQuery(updateDescQuery, [descriptionText, failedMeasurementID], transactionID);
+          }
+
+          updateIDs = { [dataType]: failedMeasurementID };
+          await connectionManager.commitTransaction(transactionID ?? '');
+          return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
         } else if (dataType === 'plots') {
           const { NumQuadrats, ...plotTrimmed } = newRowData;
           dataToUpdate = plotTrimmed;
-        } else if (['attributes', 'quadrats', 'species'].includes(dataType)) {
+        } else if (dataType === 'attributes') {
+          dataToUpdate = {
+            [demappedGridID]: updatedGridIDKey,
+            ...remainingProperties
+          };
+        } else if (['quadrats', 'species'].includes(dataType)) {
           const { CensusID, ...specTrimmed } = newRowData;
           dataToUpdate = specTrimmed;
         } else if (dataType === 'personnel') {
           const { CensusActive, ...personnelTrimmed } = newRowData;
-          const query = CensusActive
-            ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
-            : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
-          await connectionManager.executeQuery(query, [censusID, gridIDKey]);
+          const hasCensusActiveFlag =
+            Object.prototype.hasOwnProperty.call(oldRowData ?? {}, 'CensusActive') || Object.prototype.hasOwnProperty.call(newRowData, 'CensusActive');
+          if (hasCensusActiveFlag) {
+            if (!Number.isInteger(censusID) || censusID <= 0) {
+              throw new Error('Census context required to update personnel census activity');
+            }
+            const query = CensusActive
+              ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
+              : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
+            await connectionManager.executeQuery(query, [censusID, previousGridIDKey]);
+          }
           dataToUpdate = personnelTrimmed;
         } else dataToUpdate = remainingProperties;
 
-        const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]);
+        const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, previousGridIDKey]);
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
-        updateIDs = { [dataType]: gridIDKey };
+        updateIDs = { [dataType]: updatedGridIDKey };
       }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
@@ -301,7 +771,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       const { Genus, GenusAuthority } = newRowData;
       const { SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, ValidCode, FieldFamily, Description } = newRowData;
 
-      const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID');
+      const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID', transactionID);
 
       const { id: newGenusID } = await handleUpsert<GenusResult>(
         connectionManager,
@@ -312,7 +782,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           GenusAuthority,
           FamilyID: newFamilyID
         },
-        'GenusID'
+        'GenusID',
+        transactionID
       );
 
       await handleUpsert<SpeciesResult>(
@@ -331,7 +802,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           FieldFamily,
           Description
         },
-        'SpeciesID'
+        'SpeciesID',
+        transactionID
       );
     } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
       if (params.dataType === 'attributes') {
@@ -351,19 +823,40 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       if (params.dataType === 'personnel') delete newRowData.CensusActive;
 
-      // Convert Date from ISO format to MySQL format (YYYY-MM-DD) for failedmeasurements
-      if (params.dataType === 'failedmeasurements' && newRowData['Date']) {
-        const date = new Date(newRowData['Date']);
-        if (!isNaN(date.getTime())) {
-          newRowData['Date'] = date.toISOString().split('T')[0];
-        }
-      }
-
       let insertQuery = '';
-      if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      const results = await connectionManager.executeQuery(insertQuery);
-      insertIDs = { [params.dataType]: results.insertId };
+      if (params.dataType === 'failedmeasurements') {
+        const inserted = await insertIngestionFailureRows(
+          connectionManager,
+          schema,
+          [
+            {
+              plotID: Number(newRowData.PlotID ?? 0),
+              censusID: Number(newRowData.CensusID ?? censusID ?? 0),
+              tag: newRowData.Tag ?? null,
+              stemTag: newRowData.StemTag ?? null,
+              spCode: newRowData.SpCode ?? null,
+              quadrat: newRowData.Quadrat ?? null,
+              x: newRowData.X ?? null,
+              y: newRowData.Y ?? null,
+              dbh: newRowData.DBH ?? null,
+              hom: newRowData.HOM ?? null,
+              date: newRowData.Date ?? null,
+              codes: newRowData.Codes ?? null,
+              comments: newRowData.Comments ?? null,
+              failureReason: newRowData.FailureReasons ?? null,
+              fileID: newRowData.FileID ?? null,
+              batchID: newRowData.BatchID ?? null,
+              sourceRowIndex: newRowData.SourceRowIndex ?? null
+            }
+          ],
+          transactionID
+        );
+        insertIDs = { [params.dataType]: inserted[0] ?? 0 };
+      } else {
+        insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+        const results = await connectionManager.executeQuery(insertQuery);
+        insertIDs = { [params.dataType]: results.insertId };
+      }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
@@ -386,16 +879,18 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
-    const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
     if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
+    } else if (params.dataType === 'failedmeasurements') {
+      const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
+      await connectionManager.executeQuery(deleteFailedQuery, [gridIDKey]);
     } else if (params.dataType === 'measurementssummary') {
-      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmverrors`, demappedGridID, gridIDKey]));
+      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE MeasurementID = ?', [`${schema}.measurement_error_log`]), [gridIDKey]);
       await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmattributes`, demappedGridID, gridIDKey]));
       await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.coremeasurements`, demappedGridID, gridIDKey]));
     } else {

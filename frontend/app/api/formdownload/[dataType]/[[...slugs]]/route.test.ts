@@ -61,6 +61,10 @@ function makeProps(dataType?: string, slugs?: string[]) {
   return { params: Promise.resolve({ dataType: dataType as any, slugs }) } as any;
 }
 
+function makeRequest(url: string = 'http://localhost:3000') {
+  return { nextUrl: new URL(url) } as any;
+}
+
 // Route does JSON.parse() directly, so pass a plain JSON string (not URL-encoded)
 function fm(obj: any) {
   return JSON.stringify(obj);
@@ -72,14 +76,14 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
   });
 
   it('returns 400 if data type or slugs not provided', async () => {
-    const res = await GET({} as any, makeProps(undefined as any, undefined as any));
+    const res = await GET(makeRequest(), makeProps(undefined as any, undefined as any));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body = await res.json();
     expect(body.error).toMatch(/data type or slugs not provided/i);
   });
 
   it('returns 400 if schema missing', async () => {
-    const res = await GET({} as any, makeProps('attributes', [undefined as any, '1', '2', fm({})]));
+    const res = await GET(makeRequest(), makeProps('attributes', [undefined as any, '1', '2', fm({})]));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);
     const body = await res.json();
     expect(body.error).toMatch(/no schema provided/i);
@@ -97,7 +101,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const props = makeProps('attributes', ['myschema', '10', '20', fm({ quickFilterValues: ['oak'], items: [{ f: 1 }] })]);
-    const res = await GET({} as any, props);
+    const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -125,7 +129,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const props = makeProps('personnel', ['myschema', '1', '2', fm({ quickFilterValues: ['gr'], items: [{ f: 2 }] })]);
-    const res = await GET({} as any, props);
+    const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -161,7 +165,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const props = makeProps('species', ['myschema', '7', '8', fm({ quickFilterValues: ['AB'], items: [{ f: 3 }] })]);
-    const res = await GET({} as any, props);
+    const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -201,7 +205,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
     const props = makeProps('quadrats', ['myschema', '7', '8', fm({ quickFilterValues: ['Q'], items: [{ f: 4 }] })]);
-    const res = await GET({} as any, props);
+    const res = await GET(makeRequest(), props);
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -253,7 +257,7 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
       tss: ['multi stem']
     };
 
-    const res = await GET({} as any, makeProps('measurements', ['myschema', '7', '80', fm(fmParam)]));
+    const res = await GET(makeRequest(), makeProps('measurements', ['myschema', '7', '80', fm(fmParam)]));
 
     expect(res.status).toBe(HTTPResponses.OK);
     expect(await res.json()).toEqual([
@@ -281,16 +285,37 @@ describe('GET /api/formdownload/[dataType]/[[...slugs]]', () => {
     expect(sql).toMatch(/cm\.IsValidated = TRUE/);
     expect(sql).toMatch(/cm\.IsValidated = FALSE/);
     expect(sql).toMatch(/JSON_CONTAINS\(UserDefinedFields, JSON_QUOTE\('multi stem'\), '\$\.treestemstate'\) = 1/);
+    expect(sql).toMatch(/LEFT JOIN myschema\.sitespecificvalidations vp/i);
+    expect(sql).toMatch(/COALESCE\(/);
     expect(sql).toMatch(/\(SEARCH_STUB OR FILTER_STUB\)/);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('measurements: returns no rows when visible filters are all disabled', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi
+      .spyOn(cm, 'executeQuery')
+      .mockResolvedValueOnce([{ COLUMN_NAME: 'MeasuredDBH' }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
+
+    const res = await GET(
+      makeRequest(),
+      makeProps('measurements', ['myschema', '7', '80', fm({ quickFilterValues: [], items: [], visible: [], tss: ['multi stem'] })])
+    );
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.json()).toEqual([]);
+
+    const sql = exec.mock.calls[1][0] as string;
+    expect(sql).toMatch(/AND 1 = 0/);
   });
 
   it('returns 500 on errors during columns discovery and closes connection', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('columns fail'));
-    const close = vi.spyOn(cm, 'closeConnection').mockResolvedValueOnce(undefined);
 
-    const res = await GET({} as any, makeProps('attributes', ['myschema', '1', '2', fm({})]));
+    const res = await GET(makeRequest(), makeProps('attributes', ['myschema', '1', '2', fm({})]));
 
     expect(res.status).toBe(HTTPResponses.INTERNAL_SERVER_ERROR);
     const body = await res.json();

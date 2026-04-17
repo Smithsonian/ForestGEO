@@ -172,9 +172,7 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                     onDelimiterChange={delimiter => onDelimiterChange(file.name, delimiter)}
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}
-                    onValidationStatusChange={
-                      onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined
-                    }
+                    onValidationStatusChange={onValidationStatusChange ? (isValid, issues) => onValidationStatusChange(file.name, isValid, issues) : undefined}
                   />
                 </Stack>
               </Stack>

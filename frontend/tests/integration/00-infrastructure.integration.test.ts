@@ -17,14 +17,15 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import {
-  setupTestDatabase,
-  teardownTestDatabase,
-  type TestData
-} from '../setup/local-db-setup';
+import { setupTestDatabase, teardownTestDatabase, type TestData } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
 
-// Expected validation definitions from corequeries.sql
+function toBool(value: unknown): boolean {
+  if (Buffer.isBuffer(value)) return value[0] === 1;
+  return Boolean(value);
+}
+
+// Expected validation definitions from corequeries.sql plus inline validation metadata
 const EXPECTED_VALIDATIONS = [
   { id: 1, name: 'ValidateDBHGrowthExceedsMax' },
   { id: 2, name: 'ValidateDBHShrinkageExceedsMax' },
@@ -36,9 +37,14 @@ const EXPECTED_VALIDATIONS = [
   { id: 8, name: 'ValidateFindStemsOutsidePlots' },
   { id: 9, name: 'ValidateFindTreeStemsInDifferentQuadrats' },
   { id: 11, name: 'ValidateScreenMeasuredDiameterMinMax' },
+  { id: 12, name: 'ValidateScreenStemsWithMeasurementsButDeadAttributes' },
   { id: 13, name: 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes' },
   { id: 14, name: 'ValidateFindInvalidAttributeCodes' },
-  { id: 15, name: 'ValidateFindAbnormallyHighDBH' }
+  { id: 15, name: 'ValidateFindAbnormallyHighDBH' },
+  { id: 17, name: 'ValidateQuadratMismatchAcrossCensuses' },
+  { id: 18, name: 'ValidateCoordinateDriftAcrossCensuses' },
+  { id: 20, name: 'SpeciesMismatchCrossCensus' },
+  { id: 21, name: 'SameBatchSpeciesConflict' }
 ] as const;
 
 // Expected core tables that must exist
@@ -52,10 +58,10 @@ const EXPECTED_TABLES = [
   'stems',
   'coremeasurements',
   'cmattributes',
-  'cmverrors',
+  'measurement_error_log',
+  'measurement_errors',
   'attributes',
   'temporarymeasurements',
-  'failedmeasurements',
   'sitespecificvalidations'
 ] as const;
 
@@ -110,9 +116,7 @@ describe('Infrastructure Validation', () => {
     });
 
     it('should have correct table structure for coremeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>(
-        "SHOW COLUMNS FROM coremeasurements"
-      );
+      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM coremeasurements');
       const columnNames = columns.map(c => c.Field);
 
       const requiredColumns = [
@@ -120,7 +124,18 @@ describe('Infrastructure Validation', () => {
         'StemGUID',
         'CensusID',
         'MeasuredDBH',
-        'MeasurementDate'
+        'MeasurementDate',
+        'UploadFileID',
+        'UploadBatchID',
+        'RawTreeTag',
+        'RawStemTag',
+        'RawSpCode',
+        'RawQuadrat',
+        'RawX',
+        'RawY',
+        'RawCodes',
+        'RawComments',
+        'SourceRowIndex'
       ];
 
       for (const col of requiredColumns) {
@@ -128,10 +143,16 @@ describe('Infrastructure Validation', () => {
       }
     });
 
+    it('should not include legacy failed-row tables removed by the unified schema', async () => {
+      const [tables] = await connection.query<RowDataPacket[]>('SHOW TABLES');
+      const tableNames = tables.map(row => String(Object.values(row)[0]));
+
+      expect(tableNames).not.toContain('failedmeasurements');
+      expect(tableNames).not.toContain('cmverrors');
+    });
+
     it('should have correct table structure for temporarymeasurements', async () => {
-      const [columns] = await connection.query<RowDataPacket[]>(
-        "SHOW COLUMNS FROM temporarymeasurements"
-      );
+      const [columns] = await connection.query<RowDataPacket[]>('SHOW COLUMNS FROM temporarymeasurements');
       const columnNames = columns.map(c => c.Field);
 
       const requiredColumns = ['FileID', 'BatchID', 'PlotID', 'CensusID', 'TreeTag', 'StemTag', 'DBH'];
@@ -159,12 +180,26 @@ describe('Infrastructure Validation', () => {
 
     it('should have bulkingestionprocess callable', async () => {
       // Just verify we can call it without error (with dummy data that won't match anything)
-      const [result] = await connection.query<RowDataPacket[]>(
-        "CALL bulkingestionprocess('nonexistent_file', 'nonexistent_batch')"
-      );
+      const [result] = await connection.query<RowDataPacket[]>("CALL bulkingestionprocess('nonexistent_file', 'nonexistent_batch')");
 
       // The procedure should return something (even if empty)
       expect(result).toBeDefined();
+    });
+
+    it('should use the unified measurement error workflow inside bulkingestionprocess', async () => {
+      const [rows] = await connection.query<RowDataPacket[]>('SHOW CREATE PROCEDURE bulkingestionprocess');
+      expect(rows.length).toBe(1);
+
+      const definition = String(rows[0]['Create Procedure'] || '');
+      const normalizedDefinition = definition.toLowerCase();
+
+      expect(normalizedDefinition).toContain('measurement_error_log');
+      expect(normalizedDefinition).toContain('measurement_errors');
+      expect(normalizedDefinition).toContain('uploadfileid');
+      expect(normalizedDefinition).toContain('uploadbatchid');
+      expect(normalizedDefinition).toContain('sourcerowindex');
+      expect(normalizedDefinition).not.toContain('failedmeasurements');
+      expect(normalizedDefinition).not.toContain('cmverrors');
     });
   });
 
@@ -184,9 +219,7 @@ describe('Infrastructure Validation', () => {
         if (!found) {
           missingValidations.push(`ValidationID ${expected.id} (${expected.name})`);
         } else if (found.ProcedureName !== expected.name) {
-          wrongNames.push(
-            `ValidationID ${expected.id}: expected "${expected.name}", got "${found.ProcedureName}"`
-          );
+          wrongNames.push(`ValidationID ${expected.id}: expected "${expected.name}", got "${found.ProcedureName}"`);
         }
       }
 
@@ -201,7 +234,7 @@ describe('Infrastructure Validation', () => {
 
     it('should have non-empty Definition for API validations', async () => {
       // API validations (not inline) should have SQL in their Definition field
-      const apiValidationIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 15];
+      const apiValidationIDs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 15, 17, 18];
 
       const [validations] = await connection.query<RowDataPacket[]>(
         `SELECT ValidationID, ProcedureName, Definition
@@ -219,6 +252,22 @@ describe('Infrastructure Validation', () => {
 
       if (emptyDefinitions.length > 0) {
         throw new Error(`Validations with empty Definition: ${emptyDefinitions.join(', ')}`);
+      }
+    });
+
+    it('should model inline validations as disabled rows with empty definitions', async () => {
+      const [validations] = await connection.query<RowDataPacket[]>(
+        `SELECT ValidationID, ProcedureName, Definition, IsEnabled
+         FROM sitespecificvalidations
+         WHERE ValidationID IN (20, 21)
+         ORDER BY ValidationID`
+      );
+
+      expect(validations).toHaveLength(2);
+
+      for (const validation of validations) {
+        expect(validation.Definition ?? '').toBe('');
+        expect(toBool(validation.IsEnabled)).toBe(false);
       }
     });
   });
@@ -250,16 +299,12 @@ describe('Infrastructure Validation', () => {
     });
 
     it('should have species in database matching testData', async () => {
-      const [dbSpecies] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM species'
-      );
+      const [dbSpecies] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM species');
       expect(dbSpecies[0].count).toBeGreaterThanOrEqual(testData.species.length);
     });
 
     it('should have attributes in database matching testData', async () => {
-      const [dbAttrs] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM attributes'
-      );
+      const [dbAttrs] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM attributes');
       expect(dbAttrs[0].count).toBeGreaterThanOrEqual(testData.attributes.length);
     });
   });

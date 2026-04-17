@@ -68,6 +68,56 @@ describe('NextAuth route (App Router compliant)', () => {
     expect([200, 401, 500, 503]).toContain(res.status);
   });
 
+  it('only uses the E2E session shortcut for e2e-credentials tokens', async () => {
+    const previousE2EFlag = process.env.NEXT_PUBLIC_E2E_TESTING;
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'true';
+    process.env.NODE_ENV = 'development';
+
+    try {
+      await loadRoute<any>(ROUTE_PATH);
+      const cfg = __auth.getConfig();
+      expect(cfg?.callbacks?.session).toBeTypeOf('function');
+      expect(cfg?.callbacks?.jwt).toBeTypeOf('function');
+
+      const e2eToken = await cfg.callbacks.jwt({
+        token: { email: 'e2e-admin@forestgeo.si.edu' },
+        user: { id: 'e2e-test-user', email: 'e2e-admin@forestgeo.si.edu', userStatus: 'global', sites: [], allsites: [] },
+        account: { provider: 'e2e-credentials' }
+      });
+
+      const e2eSession = await cfg.callbacks.session({
+        session: { user: { email: 'e2e-admin@forestgeo.si.edu' } },
+        token: e2eToken
+      });
+
+      expect(__auth.spies.fetchMock).not.toHaveBeenCalled();
+      expect(e2eSession.user.userStatus).toBe('global');
+
+      __auth.pushFetchOk(__auth.makeSessionOkPayload());
+
+      const normalSession = await cfg.callbacks.session({
+        session: { user: { email: 'entra-user@forestgeo.si.edu' } },
+        token: { email: 'entra-user@forestgeo.si.edu', isE2ETestUser: false }
+      });
+
+      expect(__auth.spies.fetchMock).toHaveBeenCalledTimes(1);
+      expect(normalSession.user.userStatus).toBe('active');
+    } finally {
+      if (previousE2EFlag === undefined) {
+        delete process.env.NEXT_PUBLIC_E2E_TESTING;
+      } else {
+        process.env.NEXT_PUBLIC_E2E_TESTING = previousE2EFlag;
+      }
+
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
   it('handles signin POST', async () => {
     const mod = await loadRoute<any>(ROUTE_PATH);
     const { POST } = pickHandlers(mod);

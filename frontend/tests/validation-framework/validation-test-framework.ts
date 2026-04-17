@@ -6,7 +6,7 @@
  *
  * 1. Create test data for specific validation scenarios
  * 2. Execute validation queries
- * 3. Verify correct errors are flagged in cmverrors
+ * 3. Verify correct errors are flagged in measurement_error_log
  * 4. Clean up test data after testing
  *
  * Usage:
@@ -609,12 +609,15 @@ export class ValidationTester {
   }> {
     // Get all errors created by this validation for test data
     const [errors] = await this.connection.query<mysql.RowDataPacket[]>(
-      `SELECT e.CoreMeasurementID, cm.StemGUID, t.TreeTag, s.StemTag
-       FROM ${this.schema}.cmverrors e
-       JOIN ${this.schema}.coremeasurements cm ON e.CoreMeasurementID = cm.CoreMeasurementID
+      `SELECT mel.MeasurementID AS CoreMeasurementID, cm.StemGUID, t.TreeTag, s.StemTag
+       FROM ${this.schema}.measurement_error_log mel
+       JOIN ${this.schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+       JOIN ${this.schema}.coremeasurements cm ON cm.CoreMeasurementID = mel.MeasurementID
        JOIN ${this.schema}.stems s ON cm.StemGUID = s.StemGUID
        JOIN ${this.schema}.trees t ON s.TreeID = t.TreeID
-       WHERE e.ValidationErrorID = ?
+       WHERE me.ErrorSource = 'validation'
+         AND me.ErrorCode = CAST(? AS CHAR)
+         AND mel.IsResolved = FALSE
          AND cm.CoreMeasurementID IN (${this.testDataIDs.get('coremeasurements')?.join(',') || '0'})`,
       [validationID]
     );
@@ -668,9 +671,11 @@ export class ValidationTester {
     const cmIDs = this.testDataIDs.get('coremeasurements') || [];
     if (cmIDs.length > 0) {
       await this.connection.query(
-        `DELETE FROM ${this.schema}.cmverrors
-         WHERE ValidationErrorID = ?
-           AND CoreMeasurementID IN (${cmIDs.join(',')})`,
+        `DELETE mel FROM ${this.schema}.measurement_error_log mel
+         JOIN ${this.schema}.measurement_errors me ON me.ErrorID = mel.ErrorID
+         WHERE me.ErrorSource = 'validation'
+           AND me.ErrorCode = CAST(? AS CHAR)
+           AND mel.MeasurementID IN (${cmIDs.join(',')})`,
         [validationID]
       );
     }
@@ -685,7 +690,7 @@ export class ValidationTester {
       const cmIDs = this.testDataIDs.get('coremeasurements') || [];
       if (cmIDs.length > 0) {
         await this.connection.query(`DELETE FROM ${this.schema}.cmattributes WHERE CoreMeasurementID IN (${cmIDs.join(',')})`);
-        await this.connection.query(`DELETE FROM ${this.schema}.cmverrors WHERE CoreMeasurementID IN (${cmIDs.join(',')})`);
+        await this.connection.query(`DELETE FROM ${this.schema}.measurement_error_log WHERE MeasurementID IN (${cmIDs.join(',')})`);
         await this.connection.query(`DELETE FROM ${this.schema}.coremeasurements WHERE CoreMeasurementID IN (${cmIDs.join(',')})`);
       }
 

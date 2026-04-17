@@ -58,9 +58,7 @@ describe('ApiWrapper', () => {
 
       await ApiWrapper.fetch('/test');
 
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'ApiWrapper not initialized with loading context. Loading states will not work.'
-      );
+      expect(consoleSpy).toHaveBeenCalledWith('ApiWrapper not initialized with loading context. Loading states will not work.');
 
       consoleSpy.mockRestore();
       ApiWrapper.initialize(mockLoadingContext);
@@ -81,10 +79,7 @@ describe('ApiWrapper', () => {
       const response = await ApiWrapper.fetch('/api/test');
 
       expect(response).toBe(mockResponse);
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/test',
-        expect.objectContaining({ signal: expect.any(AbortSignal) })
-      );
+      expect(global.fetch).toHaveBeenCalledWith('/api/test', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     });
 
     it('should start and end loading operation', async () => {
@@ -188,11 +183,15 @@ describe('ApiWrapper', () => {
         return Promise.resolve({ ok: true, status: 200 });
       });
 
-      const response = await ApiWrapper.fetch('/api/test', {}, {
-        retryAttempts: 3,
-        retryDelay: 0,
-        showErrorAlert: false
-      });
+      const response = await ApiWrapper.fetch(
+        '/api/test',
+        {},
+        {
+          retryAttempts: 3,
+          retryDelay: 0,
+          showErrorAlert: false
+        }
+      );
 
       expect(attempts).toBe(3);
       expect(response.ok).toBe(true);
@@ -203,11 +202,15 @@ describe('ApiWrapper', () => {
       (global.fetch as any).mockRejectedValue(new Error('Invalid JSON'));
 
       await expect(
-        ApiWrapper.fetch('/api/test', {}, {
-          retryAttempts: 3,
-          retryDelay: 0,
-          showErrorAlert: false
-        })
+        ApiWrapper.fetch(
+          '/api/test',
+          {},
+          {
+            retryAttempts: 3,
+            retryDelay: 0,
+            showErrorAlert: false
+          }
+        )
       ).rejects.toThrow('Invalid JSON');
 
       // Should only try once since error is not retryable
@@ -218,11 +221,15 @@ describe('ApiWrapper', () => {
       (global.fetch as any).mockRejectedValue(new Error('timeout'));
 
       await expect(
-        ApiWrapper.fetch('/api/test', {}, {
-          retryAttempts: 5,
-          retryDelay: 0,
-          showErrorAlert: false
-        })
+        ApiWrapper.fetch(
+          '/api/test',
+          {},
+          {
+            retryAttempts: 5,
+            retryDelay: 0,
+            showErrorAlert: false
+          }
+        )
       ).rejects.toThrow();
 
       expect(global.fetch).toHaveBeenCalledTimes(5);
@@ -231,37 +238,41 @@ describe('ApiWrapper', () => {
     it('should wait between retries', async () => {
       vi.useFakeTimers();
 
-      let callCount = 0;
-      (global.fetch as any).mockImplementation(() => {
-        callCount++;
-        return Promise.reject(new Error('connection refused'));
-      });
-
-      const promise = ApiWrapper.fetch('/api/test', {}, {
-        retryAttempts: 3,
-        retryDelay: 100, // Use shorter delay for faster tests
-        showErrorAlert: false
-      });
-
-      // First attempt happens immediately
-      await vi.waitFor(() => expect(callCount).toBe(1));
-
-      // Advance time for first retry delay
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.waitFor(() => expect(callCount).toBe(2));
-
-      // Advance time for second retry delay
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.waitFor(() => expect(callCount).toBe(3));
-
-      // Catch the rejection to prevent unhandled promise rejection
       try {
-        await promise;
-      } catch (error: any) {
-        expect(error.message).toBe('connection refused');
-      }
+        let callCount = 0;
+        (global.fetch as any).mockImplementation(() => {
+          callCount++;
+          return Promise.reject(new Error('connection refused'));
+        });
 
-      vi.useRealTimers();
+        const promise = ApiWrapper.fetch(
+          '/api/test',
+          {},
+          {
+            retryAttempts: 3,
+            retryDelay: 100, // Use shorter delay for faster tests
+            showErrorAlert: false
+          }
+        );
+        const settledPromise = promise.catch(error => error);
+
+        // First attempt happens immediately
+        await vi.waitFor(() => expect(callCount).toBe(1));
+
+        // Advance time for first retry delay
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(callCount).toBe(2));
+
+        // Advance time for second retry delay
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(callCount).toBe(3));
+
+        const error = await settledPromise;
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe('connection refused');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should identify retryable errors correctly', async () => {
@@ -271,11 +282,15 @@ describe('ApiWrapper', () => {
       (global.fetch as any).mockRejectedValue(new Error(errorMsg));
 
       try {
-        await ApiWrapper.fetch('/api/test', {}, {
-          retryAttempts: 2,
-          retryDelay: 0,
-          showErrorAlert: false
-        });
+        await ApiWrapper.fetch(
+          '/api/test',
+          {},
+          {
+            retryAttempts: 2,
+            retryDelay: 0,
+            showErrorAlert: false
+          }
+        );
       } catch (error: any) {
         // Expected to throw
       }
@@ -293,9 +308,7 @@ describe('ApiWrapper', () => {
         statusText: 'Not Found'
       });
 
-      await expect(
-        ApiWrapper.fetch('/api/test', {}, { showErrorAlert: false })
-      ).rejects.toThrow('HTTP 404: Not Found');
+      await expect(ApiWrapper.fetch('/api/test', {}, { showErrorAlert: false })).rejects.toThrow('HTTP 404: Not Found');
 
       expect(mockEndOperation).toHaveBeenCalled();
     });
@@ -303,9 +316,7 @@ describe('ApiWrapper', () => {
     it('should show error alert by default', async () => {
       (global.fetch as any).mockRejectedValue(new Error('Test error'));
 
-      await expect(
-        ApiWrapper.fetch('/api/test', {}, { retryAttempts: 1 })
-      ).rejects.toThrow();
+      await expect(ApiWrapper.fetch('/api/test', {}, { retryAttempts: 1 })).rejects.toThrow();
 
       expect(global.alert).toHaveBeenCalledWith('Request failed: Test error');
     });
@@ -313,9 +324,7 @@ describe('ApiWrapper', () => {
     it('should not show alert when showErrorAlert is false', async () => {
       (global.fetch as any).mockRejectedValue(new Error('Test error'));
 
-      await expect(
-        ApiWrapper.fetch('/api/test', {}, { retryAttempts: 1, showErrorAlert: false })
-      ).rejects.toThrow();
+      await expect(ApiWrapper.fetch('/api/test', {}, { retryAttempts: 1, showErrorAlert: false })).rejects.toThrow();
 
       expect(global.alert).not.toHaveBeenCalled();
     });
@@ -323,9 +332,7 @@ describe('ApiWrapper', () => {
     it('should always end loading operation on error', async () => {
       (global.fetch as any).mockRejectedValue(new Error('Test error'));
 
-      await expect(
-        ApiWrapper.fetch('/api/test', {}, { showErrorAlert: false })
-      ).rejects.toThrow();
+      await expect(ApiWrapper.fetch('/api/test', {}, { showErrorAlert: false })).rejects.toThrow();
 
       expect(mockEndOperation).toHaveBeenCalledWith('operation-1');
     });
@@ -339,9 +346,13 @@ describe('ApiWrapper', () => {
         statusText: 'Precondition Failed'
       });
 
-      const response = await ApiWrapper.fetch('/api/validate', {}, {
-        acceptedStatuses: [412]
-      });
+      const response = await ApiWrapper.fetch(
+        '/api/validate',
+        {},
+        {
+          acceptedStatuses: [412]
+        }
+      );
 
       expect(response.status).toBe(412);
       expect(mockEndOperation).toHaveBeenCalled();
@@ -357,9 +368,13 @@ describe('ApiWrapper', () => {
           statusText: 'Custom'
         });
 
-        const response = await ApiWrapper.fetch('/api/test', {}, {
-          acceptedStatuses: statuses
-        });
+        const response = await ApiWrapper.fetch(
+          '/api/test',
+          {},
+          {
+            acceptedStatuses: statuses
+          }
+        );
 
         expect(response.status).toBe(status);
       }
@@ -432,9 +447,13 @@ describe('ApiWrapper', () => {
       });
 
       it('should allow custom headers', async () => {
-        await ApiWrapper.post('/api/users', {}, {
-          headers: { 'X-CSRF-Token': 'token123' }
-        });
+        await ApiWrapper.post(
+          '/api/users',
+          {},
+          {
+            headers: { 'X-CSRF-Token': 'token123' }
+          }
+        );
 
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/users',
@@ -512,7 +531,7 @@ describe('ApiWrapper', () => {
       };
 
       // Create a constructor function that returns our mock
-      MockXHRConstructor = function() {
+      MockXHRConstructor = function () {
         return mockXHR;
       };
 
@@ -541,9 +560,7 @@ describe('ApiWrapper', () => {
       const promise = ApiWrapper.uploadFile('/api/upload', file, { onProgress });
 
       // Simulate progress event
-      const progressHandler = mockXHR.upload.addEventListener.mock.calls.find(
-        (call: any) => call[0] === 'progress'
-      )?.[1];
+      const progressHandler = mockXHR.upload.addEventListener.mock.calls.find((call: any) => call[0] === 'progress')?.[1];
 
       progressHandler?.({ lengthComputable: true, loaded: 50, total: 100 });
       expect(onProgress).toHaveBeenCalledWith(50);

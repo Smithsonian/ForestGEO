@@ -5,8 +5,40 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
+import { readValidationStream } from '@/components/processors/readvalidationstream';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
+type ValidationExecutionResult = { procedureName: string; success: boolean; error?: string };
+
+const DBH_GROWTH_PROCEDURE = 'ValidateDBHGrowthExceedsMax';
+const DBH_SHRINKAGE_PROCEDURE = 'ValidateDBHShrinkageExceedsMax';
+const QUADRAT_MISMATCH_PROCEDURE = 'ValidateQuadratMismatchAcrossCensuses';
+const COORDINATE_DRIFT_PROCEDURE = 'ValidateCoordinateDriftAcrossCensuses';
+
+export function isNetworkValidationFetchFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === 'TypeError' ||
+    message.includes('networkerror') ||
+    message.includes('failed to fetch') ||
+    message.includes('load failed') ||
+    message.includes('network request failed')
+  );
+}
+
+export function hasBlockingValidationFailures(results: PromiseSettledResult<ValidationExecutionResult[]>[]): boolean {
+  return results.some(result => {
+    if (result.status === 'rejected') {
+      return result.reason?.name !== 'AbortError';
+    }
+
+    return result.value.some(validationResult => !validationResult.success);
+  });
+}
 
 /**
  * Converts camelCase or PascalCase validation names to human-readable format
@@ -40,6 +72,12 @@ type VCProps = {
   onValidationComplete?: (result: ValidationResult) => void;
 };
 
+/**
+ * @deprecated Use ValidationRunner (config/validation-runner.ts) + useBackgroundValidation hook
+ * instead. This synchronous component blocks the UI during validation and is susceptible to
+ * Azure timeout on large datasets. Kept temporarily for the manual re-validation modal in
+ * measurementscommons.tsx — migrate that caller to the background runner before removing.
+ */
 export default function ValidationCore({ onValidationComplete }: VCProps) {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
@@ -159,11 +197,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
 
   const performValidations = useCallback(async () => {
     try {
-      const validationProcedureNames = Object.keys(validationMessages);
-
-      // Run validations in parallel for better performance
-      // Use Promise.allSettled to handle individual failures without stopping other validations
-      const validationPromises = validationProcedureNames.map(async procedureName => {
+      const runSingleValidation = async (procedureName: string): Promise<ValidationExecutionResult[]> => {
         const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
 
         try {
@@ -181,7 +215,15 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
           });
 
           if (!response.ok) {
-            throw new Error(`Error executing ${procedureName}`);
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing ${procedureName}: ${serverError}`);
+          }
+
+          const payload = await readValidationStream<boolean>(response, abortControllerRef.current?.signal);
+
+          if (payload === false) {
+            throw new Error(`Validation returned failure for ${procedureName}`);
           }
 
           if (isMounted.current) {
@@ -191,7 +233,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             }));
           }
 
-          return { procedureName, success: true };
+          return [{ procedureName, success: true }];
         } catch (error: any) {
           if (error.name === 'AbortError') {
             ailogger.info(`Fetch aborted for ${procedureName}`);
@@ -207,12 +249,194 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
             }));
           }
 
-          return { procedureName, success: false, error: error.message };
+          return [{ procedureName, success: false, error: error.message }];
         }
-      });
+      };
 
-      // Wait for all validations to complete (or fail)
-      const results = await Promise.allSettled(validationPromises);
+      const runValidationSequence = async (procedureNames: string[]): Promise<ValidationExecutionResult[]> => {
+        const results: ValidationExecutionResult[] = [];
+
+        for (const procedureName of procedureNames) {
+          results.push(...(await runSingleValidation(procedureName)));
+        }
+
+        return results;
+      };
+
+      const runCombinedDBHValidation = async (): Promise<ValidationExecutionResult[]> => {
+        try {
+          const response = await fetch('/api/validations/procedures/shared-dbh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortControllerRef.current?.signal,
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
+              p_PlotID: plotID
+            })
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing shared DBH validations: ${serverError}`);
+          }
+
+          const payload = await readValidationStream<{ success: boolean; ranGrowth: boolean; ranShrinkage: boolean; error?: string }>(
+            response,
+            abortControllerRef.current?.signal
+          );
+
+          if (!payload.success) {
+            throw new Error(`Shared DBH validations failed: ${payload.error ?? 'unknown error'}`);
+          }
+
+          if (isMounted.current) {
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [DBH_GROWTH_PROCEDURE]: 100,
+              [DBH_SHRINKAGE_PROCEDURE]: 100
+            }));
+          }
+
+          return [
+            { procedureName: DBH_GROWTH_PROCEDURE, success: true },
+            { procedureName: DBH_SHRINKAGE_PROCEDURE, success: true }
+          ];
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            ailogger.info('Fetch aborted for shared DBH validations');
+            throw error;
+          }
+
+          if (isNetworkValidationFetchFailure(error)) {
+            ailogger.error(`Shared DBH validation path failed at the network layer; not falling back to individual calls: ${error.message}`);
+            if (isMounted.current) {
+              setApiErrors(prev => [...prev, `Failed to execute shared DBH validations: ${error.message}`]);
+              setValidationProgress(prevProgress => ({
+                ...prevProgress,
+                [DBH_GROWTH_PROCEDURE]: -1,
+                [DBH_SHRINKAGE_PROCEDURE]: -1
+              }));
+            }
+
+            return [
+              { procedureName: DBH_GROWTH_PROCEDURE, success: false, error: error.message },
+              { procedureName: DBH_SHRINKAGE_PROCEDURE, success: false, error: error.message }
+            ];
+          }
+
+          ailogger.warn(`Shared DBH validation path failed, falling back to individual calls: ${error.message}`);
+          return runValidationSequence([DBH_GROWTH_PROCEDURE, DBH_SHRINKAGE_PROCEDURE]);
+        }
+      };
+
+      const runCombinedCrossCensusLocationValidation = async (): Promise<ValidationExecutionResult[]> => {
+        try {
+          const response = await fetch('/api/validations/procedures/shared-cross-census-location', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortControllerRef.current?.signal,
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              p_CensusID: currentCensus?.dateRanges?.[0]?.censusID,
+              p_PlotID: plotID
+            })
+          });
+
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            const serverError = errorBody?.error || `HTTP ${response.status}`;
+            throw new Error(`Error executing shared cross-census location validations: ${serverError}`);
+          }
+
+          const payload = await readValidationStream<{
+            success: boolean;
+            ranQuadratMismatch: boolean;
+            ranCoordinateDrift: boolean;
+            error?: string;
+          }>(response, abortControllerRef.current?.signal);
+
+          if (!payload.success) {
+            throw new Error(`Shared cross-census location validations failed: ${payload.error ?? 'unknown error'}`);
+          }
+
+          if (isMounted.current) {
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [QUADRAT_MISMATCH_PROCEDURE]: 100,
+              [COORDINATE_DRIFT_PROCEDURE]: 100
+            }));
+          }
+
+          return [
+            { procedureName: QUADRAT_MISMATCH_PROCEDURE, success: true },
+            { procedureName: COORDINATE_DRIFT_PROCEDURE, success: true }
+          ];
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            ailogger.info('Fetch aborted for shared cross-census location validations');
+            throw error;
+          }
+
+          // Never fall back to individual calls for cross-census validations.
+          // The individual path lacks MAX_EXECUTION_TIME protection and maxDuration,
+          // causing queries to run for hours, exhaust the connection pool, and trigger
+          // the pool's inactivity shutdown.  If the combined path fails, report the
+          // failure directly.
+          ailogger.error(`Shared cross-census location validation failed: ${error.message}`);
+          if (isMounted.current) {
+            setApiErrors(prev => [...prev, `Failed to execute shared cross-census location validations: ${error.message}`]);
+            setValidationProgress(prevProgress => ({
+              ...prevProgress,
+              [QUADRAT_MISMATCH_PROCEDURE]: -1,
+              [COORDINATE_DRIFT_PROCEDURE]: -1
+            }));
+          }
+
+          return [
+            { procedureName: QUADRAT_MISMATCH_PROCEDURE, success: false, error: error.message },
+            { procedureName: COORDINATE_DRIFT_PROCEDURE, success: false, error: error.message }
+          ];
+        }
+      };
+
+      const validationProcedureNames = Object.keys(validationMessages);
+      const shouldUseCombinedDBHPath = Boolean(validationMessages[DBH_GROWTH_PROCEDURE] && validationMessages[DBH_SHRINKAGE_PROCEDURE]);
+      const shouldUseCombinedCrossCensusLocationPath = Boolean(
+        validationMessages[QUADRAT_MISMATCH_PROCEDURE] && validationMessages[COORDINATE_DRIFT_PROCEDURE]
+      );
+      const standaloneValidationNames = validationProcedureNames.filter(
+        procedureName =>
+          !(
+            (shouldUseCombinedDBHPath && (procedureName === DBH_GROWTH_PROCEDURE || procedureName === DBH_SHRINKAGE_PROCEDURE)) ||
+            (shouldUseCombinedCrossCensusLocationPath && (procedureName === QUADRAT_MISMATCH_PROCEDURE || procedureName === COORDINATE_DRIFT_PROCEDURE))
+          )
+      );
+
+      // Build ordered list of validation tasks. Run sequentially to avoid
+      // lock contention on measurement_errors / measurement_error_log —
+      // parallel execution with 14+ concurrent transactions causes lock-wait
+      // timeouts that are slower than sequential execution.
+      const validationTasks: Array<() => Promise<ValidationExecutionResult[]>> = standaloneValidationNames.map(
+        procedureName => () => runSingleValidation(procedureName)
+      );
+      if (shouldUseCombinedDBHPath) {
+        validationTasks.push(() => runCombinedDBHValidation());
+      }
+      if (shouldUseCombinedCrossCensusLocationPath) {
+        validationTasks.push(() => runCombinedCrossCensusLocationValidation());
+      }
+
+      const results: PromiseSettledResult<ValidationExecutionResult[]>[] = [];
+      for (const task of validationTasks) {
+        try {
+          const value = await task();
+          results.push({ status: 'fulfilled', value });
+        } catch (reason: any) {
+          results.push({ status: 'rejected', reason });
+        }
+      }
 
       // Check if any validation was aborted (indicating request cancellation)
       const wasAborted = results.some(result => result.status === 'rejected' && result.reason?.name === 'AbortError');
@@ -223,9 +447,15 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
       }
 
       // Log validation summary
-      const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
-      const failCount = results.filter(r => r.status === 'fulfilled' && !r.value?.success).length;
+      const flattenedResults = results.flatMap(result => (result.status === 'fulfilled' ? result.value : []));
+      const successCount = flattenedResults.filter(result => result.success).length;
+      const failCount = flattenedResults.filter(result => !result.success).length;
       ailogger.info(`Parallel validation complete: ${successCount} succeeded, ${failCount} failed`);
+
+      if (hasBlockingValidationFailures(results)) {
+        ailogger.warn('Skipping updatepassedvalidations because one or more validations failed or lost their request response');
+        return;
+      }
 
       try {
         if (isMounted.current) {

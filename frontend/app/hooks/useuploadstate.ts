@@ -14,9 +14,11 @@
 import React, { useCallback, useReducer, Dispatch } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FormType } from '@/config/macros/formdetails';
+import { UploadMode } from '@/config/uploadmodes';
 
 export interface UploadStateType {
   uploadForm?: FormType;
+  uploadMode?: UploadMode;
   reviewState: ReviewStates;
   personnelRecording: string;
   isDataUnsaved: boolean;
@@ -27,17 +29,19 @@ export interface UploadStateType {
 // Action types for state reducer
 type UploadStateAction =
   | { type: 'SET_UPLOAD_FORM'; payload: FormType | undefined }
+  | { type: 'SET_UPLOAD_MODE'; payload: UploadMode | undefined }
   | { type: 'SET_REVIEW_STATE'; payload: ReviewStates }
   | { type: 'SET_PERSONNEL'; payload: string }
   | { type: 'SET_DATA_UNSAVED'; payload: boolean }
   | { type: 'SET_COMPLETE_MESSAGE'; payload: string }
   | { type: 'SET_DATA_VIEW_ACTIVE'; payload: number }
   | { type: 'RESET_TO_START' }
-  | { type: 'INITIALIZE'; payload: { uploadForm?: FormType; reviewState?: ReviewStates } };
+  | { type: 'INITIALIZE'; payload: { uploadForm?: FormType; uploadMode?: UploadMode; reviewState?: ReviewStates } };
 
 // Initial state
 const initialState: UploadStateType = {
   uploadForm: undefined,
+  uploadMode: undefined,
   reviewState: ReviewStates.START,
   personnelRecording: '',
   isDataUnsaved: false,
@@ -50,6 +54,9 @@ function uploadStateReducer(state: UploadStateType, action: UploadStateAction): 
   switch (action.type) {
     case 'SET_UPLOAD_FORM':
       return { ...state, uploadForm: action.payload };
+
+    case 'SET_UPLOAD_MODE':
+      return { ...state, uploadMode: action.payload };
 
     case 'SET_REVIEW_STATE':
       return { ...state, reviewState: action.payload };
@@ -77,6 +84,7 @@ function uploadStateReducer(state: UploadStateType, action: UploadStateAction): 
       return {
         ...initialState,
         uploadForm: action.payload.uploadForm,
+        uploadMode: action.payload.uploadMode,
         reviewState: action.payload.reviewState || ReviewStates.START
       };
 
@@ -92,6 +100,7 @@ export interface UseUploadStateReturn {
 
   // Convenience setters (compatible with React.Dispatch<SetStateAction<T>>)
   setUploadForm: Dispatch<React.SetStateAction<FormType | undefined>>;
+  setUploadMode: Dispatch<React.SetStateAction<UploadMode | undefined>>;
   setReviewState: Dispatch<React.SetStateAction<ReviewStates>>;
   setPersonnelRecording: Dispatch<React.SetStateAction<string>>;
   setIsDataUnsaved: Dispatch<React.SetStateAction<boolean>>;
@@ -100,7 +109,7 @@ export interface UseUploadStateReturn {
 
   // Complex actions
   resetToStart: () => void;
-  initialize: (uploadForm?: FormType, reviewState?: ReviewStates) => void;
+  initialize: (uploadForm?: FormType, reviewState?: ReviewStates, uploadMode?: UploadMode) => void;
 
   // Derived state
   isComplete: boolean;
@@ -134,7 +143,7 @@ export interface UseUploadStateReturn {
  *   // Handle completion
  * }
  */
-export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?: boolean): UseUploadStateReturn {
+export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?: boolean, overrideUploadMode?: UploadMode): UseUploadStateReturn {
   // Determine initial review state:
   // 1. If skipToProcessing is true, go directly to UPLOAD_SQL (reingestion mode)
   // 2. If form type is pre-determined (overrideUploadForm), skip START and go to UPLOAD_FILES
@@ -149,6 +158,7 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
   const [state, dispatch] = useReducer(uploadStateReducer, {
     ...initialState,
     uploadForm: overrideUploadForm,
+    uploadMode: overrideUploadMode,
     reviewState: getInitialReviewState()
   });
 
@@ -161,6 +171,11 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
   const setUploadForm = useCallback((value: React.SetStateAction<FormType | undefined>) => {
     const form = typeof value === 'function' ? value(stateRef.current.uploadForm) : value;
     dispatch({ type: 'SET_UPLOAD_FORM', payload: form });
+  }, []);
+
+  const setUploadMode = useCallback((value: React.SetStateAction<UploadMode | undefined>) => {
+    const uploadMode = typeof value === 'function' ? value(stateRef.current.uploadMode) : value;
+    dispatch({ type: 'SET_UPLOAD_MODE', payload: uploadMode });
   }, []);
 
   const setReviewState = useCallback((value: React.SetStateAction<ReviewStates>) => {
@@ -193,8 +208,8 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
     dispatch({ type: 'RESET_TO_START' });
   }, []);
 
-  const initialize = useCallback((uploadForm?: FormType, reviewState?: ReviewStates) => {
-    dispatch({ type: 'INITIALIZE', payload: { uploadForm, reviewState } });
+  const initialize = useCallback((uploadForm?: FormType, reviewState?: ReviewStates, uploadMode?: UploadMode) => {
+    dispatch({ type: 'INITIALIZE', payload: { uploadForm, uploadMode, reviewState } });
   }, []);
 
   // Derived state
@@ -211,6 +226,7 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
 
     // Convenience setters
     setUploadForm,
+    setUploadMode,
     setReviewState,
     setPersonnelRecording,
     setIsDataUnsaved,

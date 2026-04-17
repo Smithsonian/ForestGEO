@@ -36,5 +36,6 @@ declare module 'next-auth' {
     userStatus: UserAuthRoles;
     sites: SitesRDS[];
     allsites: SitesRDS[];
+    isE2ETestUser?: boolean;
   }
 }

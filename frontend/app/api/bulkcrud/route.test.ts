@@ -222,7 +222,6 @@ describe('bulkcrud POST route', () => {
     expect(commitSpy).toHaveBeenCalledWith('tx-1');
     expect(rollbackSpy).not.toHaveBeenCalled();
     expect(closeSpy).toHaveBeenCalledTimes(1);
-
     const [firstSQL, firstParams] = execSpy.mock.calls[0];
     expect(String(firstSQL)).toMatch(/INSERT INTO `forestgeo_testing`\.temporarymeasurements[\s\S]*VALUES \?/i);
     // firstParams is an array: [values] where values is an array of row arrays

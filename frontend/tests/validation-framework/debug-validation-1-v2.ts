@@ -9,7 +9,7 @@ import mysql from 'mysql2/promise';
 const dbConfig = {
   host: process.env.AZURE_SQL_SERVER || 'forestgeo-mysqldataserver.mysql.database.azure.com',
   user: process.env.AZURE_SQL_USER || 'azureroot',
-  password: process.env.AZURE_SQL_PASSWORD || 'P@ssw0rd',
+  password: process.env.AZURE_SQL_PASSWORD,
   port: parseInt(process.env.AZURE_SQL_PORT || '3306'),
   database: process.env.AZURE_SQL_SCHEMA || 'forestgeo_testing'
 };
@@ -30,7 +30,7 @@ async function debugValidation1() {
     if (existingCMs.length > 0) {
       const cmIDs = existingCMs.map((r: any) => r.CoreMeasurementID).join(',');
       await connection.query(`DELETE FROM ${dbConfig.database}.cmattributes WHERE CoreMeasurementID IN (${cmIDs})`);
-      await connection.query(`DELETE FROM ${dbConfig.database}.cmverrors WHERE CoreMeasurementID IN (${cmIDs})`);
+      await connection.query(`DELETE FROM ${dbConfig.database}.measurement_error_log WHERE MeasurementID IN (${cmIDs})`);
     }
 
     await connection.query(`DELETE FROM ${dbConfig.database}.coremeasurements WHERE StemGUID = 999999`);
@@ -285,7 +285,7 @@ async function debugValidation1() {
     });
 
     // d) Full validation query simulation
-    console.log('  d) Full validation query (without inserting into cmverrors):');
+    console.log('  d) Full validation query (without inserting into measurement_error_log):');
     const [fullQuery] = await connection.query<mysql.RowDataPacket[]>(
       `SELECT DISTINCT
         cm_present.CoreMeasurementID,

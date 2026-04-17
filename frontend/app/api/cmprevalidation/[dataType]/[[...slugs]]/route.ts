@@ -17,6 +17,12 @@ function isValidDataType(dataType: string): dataType is AllowedDataType {
   return ALLOWED_DATA_TYPES.includes(dataType as AllowedDataType);
 }
 
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value || value === 'undefined') return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+}
+
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
@@ -31,17 +37,19 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
 
   const [schema, plotIDStr, plotCensusNumberStr] = params.slugs;
 
+  // Census-independent data types only need schema + plotID
+  const censusIndependentTypes = ['attributes', 'species', 'quadrats'];
+  const needsCensus = !censusIndependentTypes.includes(params.dataType);
+
   // Validate slug count and values
-  if (
-    !schema ||
-    schema === 'undefined' ||
-    !plotIDStr ||
-    plotIDStr === 'undefined' ||
-    !plotCensusNumberStr ||
-    plotCensusNumberStr === 'undefined' ||
-    params.slugs.length !== 3
-  ) {
+  if (!schema || schema === 'undefined' || !plotIDStr || plotIDStr === 'undefined') {
     return new NextResponse(JSON.stringify({ error: 'Invalid or missing slug parameters' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+
+  if (needsCensus && (!plotCensusNumberStr || plotCensusNumberStr === 'undefined')) {
+    return new NextResponse(JSON.stringify({ error: 'Census number required for this data type' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -63,10 +71,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
   }
 
   // Parse and validate numeric parameters
-  const plotID = parseInt(plotIDStr, 10);
-  const plotCensusNumber = parseInt(plotCensusNumberStr, 10);
+  const plotID = parsePositiveInt(plotIDStr);
+  const plotCensusNumber = parsePositiveInt(plotCensusNumberStr);
 
-  if (isNaN(plotID) || plotID <= 0 || isNaN(plotCensusNumber) || plotCensusNumber <= 0) {
+  if (!plotID || (needsCensus && !plotCensusNumber)) {
     return new NextResponse(JSON.stringify({ error: 'Invalid numeric parameters' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
@@ -125,9 +133,18 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
       case 'failedmeasurements': {
         // Use parameterized query for all user-provided values
         const fmQuery = format(
-          `SELECT 1 FROM \`${schema}\`.failedmeasurements fm
-           JOIN \`${schema}\`.census c ON c.CensusID = fm.CensusID
-           WHERE fm.PlotID = ? AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE LIMIT 1`,
+          `SELECT 1
+           FROM \`${schema}\`.coremeasurements cm
+           JOIN \`${schema}\`.census c ON c.CensusID = cm.CensusID
+           JOIN \`${schema}\`.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
+           JOIN \`${schema}\`.measurement_errors me ON me.ErrorID = mel.ErrorID
+           WHERE c.PlotID = ?
+             AND c.PlotCensusNumber = ?
+             AND c.IsActive IS TRUE
+             AND cm.StemGUID IS NULL
+             AND mel.IsResolved = FALSE
+             AND me.ErrorSource = 'ingestion'
+           LIMIT 1`,
           [plotID, plotCensusNumber]
         );
         const fmResults = await connection.executeQuery(fmQuery);

@@ -55,12 +55,11 @@ import {
   MeasurementsCommonsProps,
   PendingAction,
   sortRowsByMeasurementDate,
-  TSSFilter,
   VisibleFilter
 } from '@/config/datagridhelpers';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
-import { redirect } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import moment from 'moment';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -68,6 +67,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
+import { useBackgroundValidationState } from '@/config/store/appstore';
 import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
@@ -85,6 +85,24 @@ import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
+import { getMeasurementCsvErrorValue } from './measurementsexportutils';
+import {
+  areGridSortModelsEqual,
+  arePaginationModelsEqual,
+  buildMeasurementTssFilters,
+  buildMeasurementVisibleFilters,
+  createResetValidationErrorsQuery,
+  createResetValidationStatesQuery,
+  mergeMeasurementFilterModel,
+  shouldRefreshMeasurementsAfterValidationTransition,
+  shouldUseAutoMeasurementRowHeight
+} from './measurementscommonsutils';
+import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
+
+// Stable reference to prevent infinite resize observer loop in MUI DataGrid
+const AUTO_ROW_HEIGHT = () => 'auto' as const;
+const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
+const FIREFOX_FIXED_ROW_HEIGHT = 112;
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -123,6 +141,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     addNewRowToGrid,
     gridType,
     gridColumns,
+    initialVisibleFilters,
+    showToolbarActions = true,
     rows = [],
     setRows,
     rowCount,
@@ -140,9 +160,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
     locked = false,
-    dynamicButtons,
-    failedTrigger
+    dynamicButtons
   } = props;
+
+  const initialErrorRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('errors') : true;
+  const initialValidRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('valid') : true;
+  const initialPendingRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('pending') : true;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
@@ -155,6 +178,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
+  const [isResettingValidations, setIsResettingValidations] = useState(false);
   const [cmvSelected, setCMVSelected] = useState(-1);
   const [isClearingErrors, setIsClearingErrors] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
@@ -165,10 +189,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   } | null>(null);
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
-  const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
-  const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const showPendingRows = true;
-  const setShowPendingRows = () => {};
+  const [showErrorRows, setShowErrorRows] = useState<boolean>(initialErrorRowsVisible);
+  const [showValidRows, setShowValidRows] = useState<boolean>(initialValidRowsVisible);
+  const [showPendingRows, setShowPendingRows] = useState<boolean>(initialPendingRowsVisible);
   // tree-stem-state
   const [showOT, setShowOT] = useState<boolean>(true);
   const [showMS, setShowMS] = useState<boolean>(true);
@@ -178,25 +201,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>({
     items: [],
     quickFilterValues: [],
-    visible: [
-      ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
-      ...(showValidRows ? (['valid'] as VisibleFilter[]) : []),
-      ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
-    ],
-    tss: [
-      ...(showOT ? (['old tree'] as TSSFilter[]) : []),
-      ...(showMS ? (['multi stem'] as TSSFilter[]) : []),
-      ...(showNR ? (['new recruit'] as TSSFilter[]) : [])
-    ]
+    visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+    tss: buildMeasurementTssFilters(showOT, showMS, showNR)
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
-  const [errorCount, setErrorCount] = useState<number>(0);
+  const [invalidCount, setInvalidCount] = useState<number>(0);
+  const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
   const [validCount, setValidCount] = useState<number>(0);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [otCount, setOTCount] = useState<number>(0);
   const [msCount, setMSCount] = useState<number>(0);
   const [nrCount, setNRCount] = useState<number>(0);
-  const [failedCount, setFailedCount] = useState<number>(0);
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
   const [attributesMap, setAttributesMap] = useState<Map<string, AttributesRDS>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
@@ -213,22 +228,58 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const router = useRouter();
   const { setLoading } = useLoading();
   // use the session
   const { data: session } = useSession();
+  const { status: backgroundValidationStatus } = useBackgroundValidationState();
   // Track mounted state for safe state updates in deferred callbacks
   const { isMountedRef } = useIsMounted();
 
   const apiRef = useGridApiRef();
+  const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
+
+  const PAGE_CACHE_TTL_MS = 30_000;
+  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+  const previousValidationStatusRef = useRef(backgroundValidationStatus);
+
+  const refreshMeasurementsSummaryView = useCallback(async () => {
+    if (!currentSite?.schemaName) {
+      throw new Error('Measurements Summary View Refresh failure');
+    }
+
+    const body =
+      currentPlot?.plotID != null && activeCensusID != null
+        ? JSON.stringify({
+            plotID: currentPlot.plotID,
+            censusID: activeCensusID
+          })
+        : undefined;
+
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body
+    });
+
+    if (!response.ok) {
+      throw new Error('Measurements Summary View Refresh failure');
+    }
+  }, [activeCensusID, currentPlot?.plotID, currentSite?.schemaName]);
 
   // Define refreshCounts early so it can be used in other hooks
   const refreshCounts = useCallback(async () => {
-    if (!currentSite || !currentPlot || !currentCensus) return;
+    if (!currentSite?.schemaName || !currentPlot || !currentCensus) return;
 
     try {
-      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
-                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
-                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending,
+      const validCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'valid');
+      const invalidCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'errors');
+      const pendingCondition = buildMeasurementVisibleConditionSql(currentSite.schemaName, 'vft', 'pending');
+      const query = `SELECT SUM(CASE WHEN ${validCondition} THEN 1 ELSE 0 END) AS CountValid,
+                            SUM(CASE WHEN ${invalidCondition} THEN 1 ELSE 0 END) AS CountInvalid,
+                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountValidationErrors,
+                            SUM(CASE WHEN ${pendingCondition} THEN 1 ELSE 0 END) AS CountPending,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('old tree'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountOldTrees,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('new recruit'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountNewRecruits,
                             SUM(CASE WHEN JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('multi stem'), '$.treestemstate') = 1 THEN 1 ELSE 0 END) AS CountMultiStems
@@ -247,14 +298,15 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const countsData = data[0];
 
       setValidCount(Number(countsData.CountValid) || 0);
-      setErrorCount(Number(countsData.CountErrors) || 0);
+      setInvalidCount(Number(countsData.CountInvalid) || 0);
+      setValidationErrorCount(Number(countsData.CountValidationErrors) || 0);
       setPendingCount(Number(countsData.CountPending) || 0);
       setOTCount(Number(countsData.CountOldTrees) || 0);
       setMSCount(Number(countsData.CountMultiStems) || 0);
       setNRCount(Number(countsData.CountNewRecruits) || 0);
 
       const counts = [
-        { count: Number(countsData.CountErrors) || 0, message: `${countsData.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: Number(countsData.CountInvalid) || 0, message: `${countsData.CountInvalid} row(s) with unresolved errors detected.`, severity: 'warning' },
         { count: Number(countsData.CountPending) || 0, message: `${countsData.CountPending} row(s) pending validation.`, severity: 'info' },
         { count: Number(countsData.CountValid) || 0, message: `${countsData.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
@@ -265,16 +317,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
         });
       }
-
-      const failedQuery = `SELECT COUNT(*) AS CountFailed FROM ${currentSite.schemaName}.failedmeasurements WHERE PlotID = ${currentPlot.plotID} AND CensusID = ${currentCensus.dateRanges?.[0]?.censusID}`;
-      const failedResponse = await fetch(`/api/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(failedQuery)
-      });
-      if (!failedResponse.ok) throw new Error('measurementscommon failure. runquery execution for failedmeasurements count failed');
-      const failedData = await failedResponse.json();
-      setFailedCount(Number(failedData[0].CountFailed) || 0);
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error refreshing counts:', errorObj);
@@ -305,71 +347,81 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const fetchPaginatedData = useCallback(
-    (pageToFetch: number) =>
-      debounce(async () => {
-        if (!currentSite || !currentPlot || !currentCensus) {
-          ailogger.warn('Missing necessary context for fetchPaginatedData');
-          return;
+  const fetchPaginatedDataCore = useCallback(
+    async (pageToFetch: number) => {
+      if (!currentSite || !currentPlot || !currentCensus) {
+        ailogger.warn('Missing necessary context for fetchPaginatedData');
+        return;
+      }
+
+      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
+      const cached = pageCacheRef.current.get(cacheKey);
+      const now = Date.now();
+
+      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
+        setRows(cached.rows);
+        setRowCount(cached.totalCount);
+        if (isNewRowAdded && pageToFetch === newLastPage) {
+          addNewRowToGrid();
         }
+        return;
+      }
 
-        setLoading(true);
-        let paginatedQuery = '';
+      setLoading(true);
+      const paginatedQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        pageToFetch,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
 
-        paginatedQuery = createQFFetchQuery(
-          currentSite?.schemaName ?? '',
-          gridType,
-          pageToFetch,
-          paginationModel.pageSize,
-          currentPlot?.plotID,
-          currentCensus?.plotCensusNumber
-        );
+      try {
+        // Filter to only include valid, complete filter items (Bug #1 fix)
+        const validItems =
+          filterModel.items?.filter(item => {
+            // Field and operator are always required
+            if (!item.field || item.field === '' || !item.operator || item.operator === '') {
+              return false;
+            }
+            // isEmpty/isNotEmpty operators don't require a value
+            if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
+              return true;
+            }
+            // All other operators require a value
+            return item.value !== undefined && item.value !== null && item.value !== '';
+          }) ?? [];
 
-        try {
-          // Filter to only include valid, complete filter items (Bug #1 fix)
-          const validItems =
-            filterModel.items?.filter(item => {
-              // Field and operator are always required
-              if (!item.field || item.field === '' || !item.operator || item.operator === '') {
-                return false;
-              }
-              // isEmpty/isNotEmpty operators don't require a value
-              if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
-                return true;
-              }
-              // All other operators require a value
-              return item.value !== undefined && item.value !== null && item.value !== '';
-            }) ?? [];
+        const sanitizedFilterModel = {
+          ...filterModel,
+          items: validItems
+        };
 
-          const sanitizedFilterModel = {
-            ...filterModel,
-            items: validItems
-          };
+        const response = await fetch(paginatedQuery, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filterModel: sanitizedFilterModel })
+        });
 
-          const response = await fetch(paginatedQuery, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filterModel: sanitizedFilterModel })
-          });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Error fetching data');
 
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.message || 'Error fetching data');
+        setRows(data.output);
+        setRowCount(data.totalCount);
+        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
 
-          setRows(data.output);
-          setRowCount(data.totalCount);
-          // setUsingQuery(data.finishedQuery);
-
-          if (isNewRowAdded && pageToFetch === newLastPage) {
-            addNewRowToGrid();
-          }
-        } catch (error: unknown) {
-          const errorObj = error instanceof Error ? error : new Error(String(error));
-          ailogger.error('Error fetching data:', errorObj);
-          setSnackbar({ children: 'Error fetching data', severity: 'error' });
-        } finally {
-          setLoading(false);
+        if (isNewRowAdded && pageToFetch === newLastPage) {
+          addNewRowToGrid();
         }
-      }, 250)(),
+      } catch (error: unknown) {
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Error fetching data:', errorObj);
+        setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       filterModel,
@@ -385,12 +437,25 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     ]
   );
 
+  const debouncedFetchPaginatedData = useMemo(
+    () =>
+      debounce((pageToFetch: number) => {
+        fetchPaginatedDataCore(pageToFetch);
+      }, 250),
+    [fetchPaginatedDataCore]
+  );
+
+  const fetchPaginatedData = fetchPaginatedDataCore;
+
   const fetchValidationErrors = useCallback(async () => {
     try {
       const response = await fetch(
         `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
       );
-      if (!response.ok) throw new Error('Failed to fetch validation errors');
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Failed to fetch validation errors (${response.status}): ${errorBody}`);
+      }
       const data = await response.json();
       const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
         ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
@@ -434,39 +499,42 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
-    await fetchPaginatedData(paginationModel.page);
-    await fetchValidationErrors();
+    await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
   }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
 
   useEffect(() => {
-    setFilterModel(prevModel => ({
-      ...prevModel,
-      visible: [
-        ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
-        ...(showValidRows ? (['valid'] as VisibleFilter[]) : []),
-        ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
-      ],
-      tss: [
-        ...(showOT ? (['old tree'] as TSSFilter[]) : []),
-        ...(showMS ? (['multi stem'] as TSSFilter[]) : []),
-        ...(showNR ? (['new recruit'] as TSSFilter[]) : [])
-      ]
-    }));
-    setRefresh(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setFilterModel(prevModel =>
+      mergeMeasurementFilterModel(prevModel, {
+        visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+        tss: buildMeasurementTssFilters(showOT, showMS, showNR)
+      })
+    );
   }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
 
-  // Handle refresh signal - use ref to track previous state to avoid infinite rerender
-  const previousRefresh = useRef(refresh);
+  // Handle refresh signal - use ref to guard against concurrent/redundant fetches
+  const isRefreshing = useRef(false);
   useEffect(() => {
-    // Only refresh when transitioning from false to true
-    if (refresh && !previousRefresh.current) {
-      Promise.all([runFetchPaginated(), refreshCounts()])
-        .then(() => setRefresh(false))
-        .catch(ailogger.error);
+    if (!refresh || isRefreshing.current) return;
+    isRefreshing.current = true;
+    pageCacheRef.current.clear();
+
+    Promise.all([runFetchPaginated(), refreshCounts()])
+      .catch(ailogger.error)
+      .finally(() => {
+        isRefreshing.current = false;
+        setRefresh(false);
+      });
+    // Only trigger on refresh flag changes — callback identity changes should not re-trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh]);
+
+  useEffect(() => {
+    const previousStatus = previousValidationStatusRef.current;
+    if (shouldRefreshMeasurementsAfterValidationTransition(previousStatus, backgroundValidationStatus)) {
+      setRefresh(true);
     }
-    previousRefresh.current = refresh;
-  }, [refresh, runFetchPaginated, refreshCounts, setRefresh]);
+    previousValidationStatusRef.current = backgroundValidationStatus;
+  }, [backgroundValidationStatus, setRefresh]);
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -479,6 +547,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       queueMicrotask(() => {
         // Guard against state updates before mount or after unmount
         if (!isMountedRef.current) return;
+        if (areGridSortModelsEqual(sortModel, newModel)) return;
 
         setSortModel(newModel);
 
@@ -491,7 +560,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         }
       });
     },
-    [rows, isMountedRef]
+    [rows, isMountedRef, setRows, sortModel]
   );
 
   const cellHasError = useCallback(
@@ -607,12 +676,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       let csvRows = headers.join(',') + '\n';
       Object.entries(results).forEach(([_, row]) => {
         const rowValues = headers.map(header => {
+          const value =
+            header === 'Errors' || header === 'errors'
+              ? getMeasurementCsvErrorValue(row as Record<string, unknown>, validationErrors)
+              : row[header as keyof MeasurementsSummaryResult];
           if (header === 'StemGUID' || header === 'TreeID') return Number(row[header]);
           if (header === 'IsValidated') return bitToBoolean(row[header]);
-          if (header === 'MeasurementDate') return moment(new Date(row[header as keyof MeasurementsSummaryResult])).format('YYYY-MM-DD');
-          if (Object.prototype.toString.call(row[header as keyof MeasurementsSummaryResult]) === '[object Object]')
-            return `"${JSON.stringify(row[header as keyof MeasurementsSummaryResult]).replace(/"/g, '""')}"`;
-          const value = row[header as keyof MeasurementsSummaryResult];
+          if (header === 'MeasurementDate') return moment(new Date(value as any)).format('YYYY-MM-DD');
+          if (Object.prototype.toString.call(value) === '[object Object]') return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
           if (typeof value === 'string' && value.includes(',')) return `"${value.replace(/"/g, '""')}"`;
           return value ?? 'NULL';
         });
@@ -662,8 +733,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       if (oldRow.isNew) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
-        await fetchPaginatedData(paginationModel.page);
-        await fetchValidationErrors();
+        await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
       }
 
       return newRow;
@@ -817,16 +887,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
-        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-        if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await refreshMeasurementsSummaryView();
       } catch (e: unknown) {
         const errorObj = e instanceof Error ? e : new Error(String(e));
         ailogger.error('Error refreshing measurements summary view:', errorObj);
       } finally {
         setLoading(false);
       }
-      await new Promise(resolve => setTimeout(resolve, 1000)); // forced delay
       await fetchPaginatedData(paginationModel.page);
     }
   };
@@ -847,12 +914,22 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     [locked, openConfirmationDialog]
   );
 
+  // Fetch on pagination, sort, or context changes (no debounce)
   useEffect(() => {
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(ailogger.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPlot, currentCensus, paginationModel.page, sortModel, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel]);
+
+  // Debounce fetches triggered by filter model changes (rapid typing in search)
+  useEffect(() => {
+    pageCacheRef.current.clear();
+    if (currentPlot && currentCensus && paginationModel.page >= 0) {
+      debouncedFetchPaginatedData(paginationModel.page);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterModel]);
 
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
@@ -1284,12 +1361,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   };
 
   function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => {
-      return {
-        ...prevFilterModel,
+    setFilterModel(prevFilterModel =>
+      mergeMeasurementFilterModel(prevFilterModel, {
+        items: incomingValues.items || [],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      };
-    });
+      })
+    );
   }
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
@@ -1298,69 +1375,69 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-      if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await refreshMeasurementsSummaryView();
     } catch (e: unknown) {
       const errorObj = e instanceof Error ? e : new Error(String(e));
       ailogger.error('Error refreshing measurements summary view:', errorObj);
     } finally {
       setLoading(false);
     }
-    await runFetchPaginated();
+    await Promise.all([runFetchPaginated(), refreshCounts()]);
   }
 
   async function handleResetValidations() {
+    if (!currentSite?.schemaName || !currentPlot?.plotID || !activeCensusID) {
+      throw new Error('Active site, plot, or census selection is missing.');
+    }
+
     try {
-      const clearCMVQuery = `DELETE cmv
-                             FROM ${currentSite?.schemaName}.cmverrors AS cmv
-                                    JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-                                         ON cmv.CoreMeasurementID = cm.CoreMeasurementID
-                                    JOIN ${currentSite?.schemaName}.census AS c
-                                         ON c.CensusID = cm.CensusID
-                             WHERE c.CensusID IN (SELECT CensusID
-                                                  from ${currentSite?.schemaName}.census
-                                                  WHERE PlotID = ${currentPlot?.plotID}
-                                                    AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                               AND c.PlotID = ${currentPlot?.plotID}
-                               AND (cm.IsValidated = 0 OR cm.IsValidated IS NULL);`;
-      const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
-        JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-                     SET cm.IsValidated = NULL
-                     WHERE c.CensusID IN (SELECT CensusID
-                                          from ${currentSite?.schemaName}.census
-                                          WHERE PlotID = ${currentPlot?.plotID}
-                                            AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-                       AND c.PlotID = ${currentPlot?.plotID}`;
+      setLoading(true, 'Resetting validation states...');
+
+      const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
+      const resetStateRequest = createResetValidationStatesQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
+
       const clearCMVResponse = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(clearCMVQuery)
+        body: JSON.stringify(resolveErrorsRequest)
       });
       if (!clearCMVResponse.ok) {
-        const errorData = await clearCMVResponse.json();
-        ailogger.error('Clear CMVErrors query failed:', errorData);
-        throw new Error(`Clear cmverrors query failed: ${errorData.error || 'Unknown error'}`);
+        const errorData = await clearCMVResponse.json().catch(() => ({ error: 'Unknown error', details: '' }));
+        ailogger.error('Resolve validation errors query failed:', errorData);
+        throw new Error(errorData.details || errorData.error || 'Failed to resolve validation errors');
       }
       const response = await fetch(`/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query)
+        body: JSON.stringify(resetStateRequest)
       });
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error', details: '' }));
         ailogger.error('Validation reset query failed:', errorData);
-        throw new Error(`Validation reset failed: ${errorData.error || 'Unknown error'}`);
+        throw new Error(errorData.details || errorData.error || 'Failed to reset validation states');
       }
+
+      setSnackbar({
+        children: 'Validation states reset. Rows are pending validation.',
+        severity: 'success'
+      });
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(String(error));
       ailogger.error('Error in handleResetValidations:', errorObj);
       throw errorObj;
+    } finally {
+      setLoading(false);
     }
   }
 
+  useEffect(() => {
+    if (!currentSite || !currentPlot || !currentCensus) {
+      router.push('/dashboard');
+    }
+  }, [currentSite, currentPlot, currentCensus, router]);
+
   if (!currentSite || !currentPlot || !currentCensus) {
-    redirect('/dashboard');
+    return null;
   } else {
     return (
       <Box
@@ -1388,7 +1465,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             processRowUpdate={processRowUpdate}
             loading={refresh}
             paginationMode="server"
+            filterMode="server"
             onPaginationModelChange={newPaginationModel => {
+              if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
+                return;
+              }
               setPaginationModel(newPaginationModel);
             }}
             onProcessRowUpdateError={(error: Error) => {
@@ -1411,10 +1492,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onSortModelChange={handleSortModelChange}
             filterModel={filterModel}
             onFilterModelChange={newFilterModel => {
-              setFilterModel(prevModel => ({
-                ...prevModel,
-                ...newFilterModel
-              }));
+              setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
             }}
             ignoreDiacritics
             initialState={{
@@ -1431,6 +1509,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: async () => setRefresh(true),
                 handleExport: fetchRowsForExport,
+                showToolbarActions: showToolbarActions,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 gridColumns: gridColumns,
@@ -1445,31 +1524,30 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       if (!currentSite?.schemaName) return;
                       setLoading(true, 'Refreshing Measurements Summary View...');
                       try {
-                        const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite.schemaName}`, { method: 'POST' });
-                        if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await refreshMeasurementsSummaryView();
                       } finally {
                         setLoading(false);
                         setRefresh(true);
                       }
                     }}
                     pendingCount={pendingCount}
-                    errorCount={errorCount}
+                    errorCount={validationErrorCount}
                   />
                 ),
-                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: errorCount },
+                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
                 validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
                 pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
                 otControls: { show: showOT, toggle: setShowOT, count: otCount },
                 msControls: { show: showMS, toggle: setShowMS, count: msCount },
                 nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
                 hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty,
-                failedControls: { trigger: failedTrigger, count: failedCount }
+                setHidingEmpty: setHidingEmpty
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             showToolbar
-            getRowHeight={() => 'auto'}
+            getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
+            getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
+            rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
             isCellEditable={() => !locked}
           />
         </Box>
@@ -1526,20 +1604,41 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           />
         )}
         {isResetValidationModalOpen && (
-          <Modal open={isResetValidationModalOpen} onClose={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
+          <Modal
+            open={isResetValidationModalOpen}
+            onClose={async () => {
+              if (isResettingValidations) return;
+              await handleCloseModal(setIsResetValidationModalOpen, false);
+            }}
+          >
             <ModalDialog role={'alertdialog'}>
               <DialogTitle>Reset Validation States?</DialogTitle>
-              <DialogContent>Are you sure you want to reset all validation states? </DialogContent>
+              <DialogContent>Are you sure you want to clear current validation failures and set all rows in this census back to pending?</DialogContent>
               <DialogActions>
                 <Button
                   onClick={async () => {
-                    await handleResetValidations();
-                    await handleCloseModal(setIsResetValidationModalOpen, true);
+                    setIsResettingValidations(true);
+                    try {
+                      await handleResetValidations();
+                      await handleCloseModal(setIsResetValidationModalOpen, true);
+                    } catch (error: unknown) {
+                      const errorObj = error instanceof Error ? error : new Error(String(error));
+                      setSnackbar({
+                        children: `Error: ${errorObj.message}`,
+                        severity: 'error'
+                      });
+                    } finally {
+                      setIsResettingValidations(false);
+                    }
                   }}
+                  disabled={isResettingValidations}
+                  startDecorator={isResettingValidations ? <CircularProgress size="sm" /> : undefined}
                 >
-                  Yes
+                  {isResettingValidations ? 'Resetting...' : 'Yes'}
                 </Button>
-                <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>No</Button>
+                <Button disabled={isResettingValidations} onClick={async () => await handleCloseModal(setIsResetValidationModalOpen, false)}>
+                  No
+                </Button>
               </DialogActions>
             </ModalDialog>
           </Modal>
@@ -1580,8 +1679,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                       const deleteResponse = await fetch(`/api/query`, {
                         method: 'POST',
                         body: JSON.stringify({
-                          query: `DELETE FROM ??.cmverrors WHERE CoreMeasurementID = ?`,
-                          params: [currentSite?.schemaName, cmvSelected],
+                          query: `DELETE mel
+                                  FROM ??.measurement_error_log mel
+                                         JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+                                  WHERE mel.MeasurementID = ?
+                                    AND me.ErrorSource = ?`,
+                          params: [currentSite?.schemaName, currentSite?.schemaName, cmvSelected, 'validation'],
                           format: true
                         })
                       });

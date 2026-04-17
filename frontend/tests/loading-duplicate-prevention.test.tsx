@@ -32,7 +32,13 @@ describe('Loading Duplicate Prevention Tests', () => {
 
   describe('useAsyncOperation - Duplicate Prevention', () => {
     it('should prevent duplicate operations when preventDuplicates is true', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 50)));
+      let resolveOperation: ((value: string) => void) | undefined;
+      const mockAsyncFunction = vi.fn().mockImplementation(
+        () =>
+          new Promise(resolve => {
+            resolveOperation = resolve;
+          })
+      );
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {
@@ -45,21 +51,21 @@ describe('Loading Duplicate Prevention Tests', () => {
       // Mock isOperationActive to return true when an operation ID exists
       mockIsOperationActive.mockImplementation((id: string) => !!id);
 
-      // First call starts
-      const firstCallPromise = act(async () => {
-        await result.current.execute();
+      let firstCallPromise!: Promise<unknown>;
+      await act(async () => {
+        firstCallPromise = result.current.execute();
       });
 
       // Second call immediately after - should be prevented because first is still running
-      // Wait a tiny bit to ensure first call has started
-      await new Promise(resolve => setTimeout(resolve, 10));
-
       await act(async () => {
         await result.current.execute();
       });
 
-      // Wait for first call to complete
-      await firstCallPromise;
+      resolveOperation?.('success');
+
+      await act(async () => {
+        await firstCallPromise;
+      });
 
       // mockAsyncFunction should only be called once (second call was prevented)
       expect(mockAsyncFunction).toHaveBeenCalledTimes(1);
@@ -234,7 +240,13 @@ describe('Loading Duplicate Prevention Tests', () => {
     });
 
     it('should prevent duplicate "Loading plot data..." messages', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 100)));
+      let resolveOperation: ((value: string) => void) | undefined;
+      const mockAsyncFunction = vi.fn().mockImplementation(
+        () =>
+          new Promise(resolve => {
+            resolveOperation = resolve;
+          })
+      );
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {
@@ -246,8 +258,9 @@ describe('Loading Duplicate Prevention Tests', () => {
 
       // First operation starts
       mockIsOperationActive.mockReturnValue(false);
-      const promise1 = act(async () => {
-        await result.current.execute();
+      let promise1!: Promise<unknown>;
+      await act(async () => {
+        promise1 = result.current.execute();
       });
 
       // Second operation is blocked because first is still active
@@ -256,7 +269,11 @@ describe('Loading Duplicate Prevention Tests', () => {
         await result.current.execute();
       });
 
-      await promise1;
+      resolveOperation?.('success');
+
+      await act(async () => {
+        await promise1;
+      });
 
       // startOperation should only be called once
       expect(mockStartOperation).toHaveBeenCalledTimes(1);
@@ -474,7 +491,13 @@ describe('Loading Duplicate Prevention Tests', () => {
 
   describe('Operation State Tracking', () => {
     it('should correctly track active operation state', async () => {
-      const mockAsyncFunction = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve('success'), 100)));
+      let resolveOperation: ((value: string) => void) | undefined;
+      const mockAsyncFunction = vi.fn().mockImplementation(
+        () =>
+          new Promise(resolve => {
+            resolveOperation = resolve;
+          })
+      );
 
       const { result } = renderHook(() =>
         useAsyncOperation(mockAsyncFunction, {
@@ -490,12 +513,17 @@ describe('Loading Duplicate Prevention Tests', () => {
       expect(result.current.isActive).toBe(false);
 
       // During execution
-      const promise = act(async () => {
-        await result.current.execute();
+      let promise!: Promise<unknown>;
+      await act(async () => {
+        promise = result.current.execute();
       });
 
       // After completion
-      await promise;
+      resolveOperation?.('success');
+
+      await act(async () => {
+        await promise;
+      });
       expect(mockEndOperation).toHaveBeenCalled();
     });
 

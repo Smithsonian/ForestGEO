@@ -25,11 +25,11 @@ interface FailedMeasurementsModalProps {
   open: boolean;
   setReingested: Dispatch<SetStateAction<boolean>>;
   handleCloseModal: () => Promise<void>;
-  onTriggerReingestion?: () => void; // Callback to trigger upload modal reopening
+  autoCloseWhenEmpty?: boolean;
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, setReingested, handleCloseModal, onTriggerReingestion } = props;
+  const { open, setReingested, handleCloseModal, autoCloseWhenEmpty = true } = props;
   const [isReingesting, setIsReingesting] = useState(false);
   const [isClearingFailed, setIsClearingFailed] = useState(false);
   const [isClearingTemp, setIsClearingTemp] = useState(false);
@@ -156,31 +156,24 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
     setIsReingesting(true);
     try {
-      ailogger.info('Starting bulk reingestion: moving failed measurements to temporary table');
-
-      // Move all rows from failedmeasurements to temporarymeasurements
+      ailogger.info('Starting bulk reingestion');
       const response = await fetch(`/api/reingest/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.dateRanges?.[0].censusID}`, {
-        method: 'POST' // Changed to POST to indicate this is triggering the modal flow
+        method: 'GET'
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to prepare reingestion: ${response.status}`);
+        throw new Error(`Failed to run reingestion: ${response.status}`);
       }
 
       const result = await response.json();
-      ailogger.info('Rows moved to temporary table:', result);
+      ailogger.info('Reingestion result:', result);
 
       // Close the failed measurements modal
       await handleCloseModal();
 
-      // Trigger the upload modal to reopen, which will pick up the temporarymeasurements
-      if (onTriggerReingestion) {
-        onTriggerReingestion();
-      }
-
       setReingested(true);
     } catch (error: any) {
-      ailogger.error('Failed to prepare reingestion:', error);
+      ailogger.error('Failed to run reingestion:', error);
       // Don't close modal on error so user can see what happened
     } finally {
       setIsReingesting(false);
@@ -198,13 +191,13 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   // Note: Only auto-close when failedCount has been explicitly loaded (not null)
   // and equals 0, to prevent premature closing during initial load
   useEffect(() => {
-    if (open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
+    if (autoCloseWhenEmpty && open && failedCount !== null && failedCount === 0 && !isReingesting && !isClearingFailed && !isClearingTemp) {
       ailogger.info('All failed measurements resolved - auto-closing modal and marking as reingested');
       setReingested(true);
       // Use void to explicitly ignore the promise - the async close is fire-and-forget
       void handleCloseModal();
     }
-  }, [open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
+  }, [autoCloseWhenEmpty, open, failedCount, isReingesting, isClearingFailed, isClearingTemp, handleCloseModal, setReingested]);
 
   return (
     <Modal open={open} onClose={() => {}}>
