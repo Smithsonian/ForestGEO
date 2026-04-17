@@ -699,7 +699,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'stemLocalY',
@@ -708,7 +709,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'measuredDBH',
@@ -717,7 +719,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'measuredHOM',
@@ -726,7 +729,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'description',
