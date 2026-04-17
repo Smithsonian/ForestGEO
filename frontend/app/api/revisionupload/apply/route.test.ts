@@ -5,13 +5,15 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   isValidSchema: vi.fn(() => true),
   safeFormatQuery: vi.fn((_schema: string, query: string) => query),
+  loggerInfo: vi.fn(),
   loggerError: vi.fn(),
   ensureUploadSessionsTable: vi.fn(),
   withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
   acquireApplicationLock: vi.fn(async () => true),
   executeQuery: vi.fn(async () => []),
   closeConnection: vi.fn(async () => undefined),
-  buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`)
+  buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
+  refreshMeasurementViewsForScope: vi.fn(async () => undefined)
 }));
 
 vi.mock('@/auth', () => ({
@@ -55,8 +57,13 @@ vi.mock('@/config/connectionmanager', () => ({
   }
 }));
 
+vi.mock('@/lib/measurementviewrefresh', () => ({
+  refreshMeasurementViewsForScope: mocks.refreshMeasurementViewsForScope
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
+    info: mocks.loggerInfo,
     error: mocks.loggerError
   }
 }));
@@ -79,6 +86,7 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.acquireApplicationLock.mockResolvedValue(true);
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
+    mocks.refreshMeasurementViewsForScope.mockResolvedValue(undefined);
   });
 
   it('returns 409 when the plot/census measurement scope lock is unavailable', async () => {
@@ -228,5 +236,82 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?', [55], 'tx-1');
+    expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+  });
+
+  it('refreshes derived measurement views when matched rows are updated', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) {
+        return [];
+      }
+      if (query.includes('FROM ??.validation_runs')) {
+        return [];
+      }
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return [{ ok: 1 }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }],
+        newRows: [],
+        confirmNewRows: false,
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      updatedCount: 1,
+      skippedCount: 0,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      applyErrors: [],
+      validationPending: true
+    });
+
+    expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+  });
+
+  it('does not refresh derived measurement views when apply makes no changes', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) {
+        return [];
+      }
+      if (query.includes('FROM ??.validation_runs')) {
+        return [];
+      }
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return [{ ok: 1 }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        matchedRows: [{ coreMeasurementID: 101, csvRow: {} }],
+        newRows: [],
+        confirmNewRows: false,
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      updatedCount: 0,
+      skippedCount: 1,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      applyErrors: [],
+      validationPending: false
+    });
+
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
   });
 });

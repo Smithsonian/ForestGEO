@@ -100,7 +100,6 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
 
     startedAttemptsRef.current.add(applyAttempt);
 
-    let cancelled = false;
     const currentRequestPayload = requestPayloadRef.current;
     const duplicateMeasurementIDsToDelete = buildDuplicateDeletionHints(currentRequestPayload.matchedRows);
 
@@ -126,7 +125,6 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
         }
 
         const result: RevisionApplyResponse = await response.json();
-        if (cancelled) return;
         setApplyResult(result);
         setApplyStatus('success');
         setIsDataUnsaved(false);
@@ -143,7 +141,6 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           transitionTimeoutRef.current = null;
         }, TRANSITION_DELAY_MS);
       } catch (err: unknown) {
-        if (cancelled) return;
         const errorMessage = err instanceof Error ? err.message : String(err);
         setApplyError(errorMessage);
         setApplyStatus('error');
@@ -151,10 +148,6 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     }
 
     void runApply();
-
-    return () => {
-      cancelled = true;
-    };
   }, [applyAttempt, applyStatus, censusID, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
 
   function retryApply() {

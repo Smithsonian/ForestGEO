@@ -9,6 +9,7 @@ import { isMySQLError } from '@/lib/errorhelpers';
 import ailogger from '@/ailogger';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable, SESSION_TIMEOUTS } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 
 export const runtime = 'nodejs';
 
@@ -599,8 +600,18 @@ async function insertNewRowsThroughPipeline(
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const requestStartedAt = Date.now();
+  const requestTraceID = requestStartedAt.toString(36);
+  const logPrefix = `[revisionupload/apply][${requestTraceID}]`;
+
+  ailogger.info(`${logPrefix} request received`);
+
+  const authStartedAt = Date.now();
+  ailogger.info(`${logPrefix} auth start`);
   const session = await auth();
+  ailogger.info(`${logPrefix} auth complete in ${Date.now() - authStartedAt}ms`);
   if (!session?.user) {
+    ailogger.warn(`${logPrefix} unauthorized after ${Date.now() - requestStartedAt}ms`);
     return NextResponse.json({ error: 'Unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
   }
 
@@ -612,6 +623,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const { matchedRows, newRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID } = body;
+
+  ailogger.info(
+    `${logPrefix} parsed request body in ${Date.now() - requestStartedAt}ms (matchedRows=${Array.isArray(matchedRows) ? matchedRows.length : 'invalid'}, newRows=${Array.isArray(newRows) ? newRows.length : 'invalid'}, confirmNewRows=${confirmNewRows === true})`
+  );
 
   if (!Array.isArray(matchedRows) || !Array.isArray(newRows) || plotID === undefined || censusID === undefined || !schema) {
     return NextResponse.json(
@@ -661,9 +676,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
+    const ensureSessionsStartedAt = Date.now();
     await ensureUploadSessionsTable(schema);
+    ailogger.info(`${logPrefix} ensureUploadSessionsTable complete in ${Date.now() - ensureSessionsStartedAt}ms for schema=${schema}`);
 
+    const transactionStartedAt = Date.now();
+    ailogger.info(`${logPrefix} transaction requested for schema=${schema} plot=${normalizedPlotID} census=${normalizedCensusID}`);
     const result = await connectionManager.withTransaction(async (transactionID: string) => {
+      ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
 
       let updatedCount = 0;
@@ -697,8 +717,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         insertedCount = await insertNewRowsThroughPipeline(connectionManager, schema, normalizedPlotID, normalizedCensusID, newRows, transactionID);
       }
 
+      if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0) {
+        const viewRefreshStartedAt = Date.now();
+        ailogger.info(
+          `${logPrefix} derived view refresh start (tx=${transactionID}, updated=${updatedCount}, inserted=${insertedCount}, deletedDuplicate=${deletedDuplicateCount})`
+        );
+        await refreshMeasurementViewsForScope(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
+        ailogger.info(`${logPrefix} derived view refresh complete in ${Date.now() - viewRefreshStartedAt}ms (tx=${transactionID})`);
+      }
+
       return { updatedCount, skippedCount, insertedCount, deletedDuplicateCount, applyErrors };
     });
+    ailogger.info(`${logPrefix} transaction complete in ${Date.now() - transactionStartedAt}ms`);
 
     const response: ApplyResponse = {
       updatedCount: result.updatedCount,
@@ -709,10 +739,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       validationPending: result.updatedCount > 0 || result.insertedCount > 0 || result.deletedDuplicateCount > 0
     };
 
+    ailogger.info(
+      `${logPrefix} response ready in ${Date.now() - requestStartedAt}ms (updated=${response.updatedCount}, inserted=${response.insertedCount}, deletedDuplicate=${response.deletedDuplicateCount}, skipped=${response.skippedCount}, validationPending=${response.validationPending})`
+    );
     return NextResponse.json(response, { status: HTTPResponses.OK });
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
-    ailogger.error('[revisionupload/apply] Transaction failed:', errorObj);
+    ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });
   } finally {
