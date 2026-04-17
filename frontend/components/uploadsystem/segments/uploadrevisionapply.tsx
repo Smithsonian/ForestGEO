@@ -66,9 +66,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
   const [applyAttempt, setApplyAttempt] = useState(0);
   const startedAttemptsRef = useRef<Set<number>>(new Set());
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasDuplicateCleanupOnlyRows = matchedRows.some(
-    row => (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0 && !hasRevisionFieldValues(row.csvRow)
-  );
+  const hasDuplicateCleanupOnlyRows = matchedRows.some(row => (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0 && !hasRevisionFieldValues(row.csvRow));
   const requestPayloadRef = useRef({
     matchedRows,
     newRows,
@@ -196,9 +194,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
       {applyResult && (
         <Box>
           <Typography level="body-md">{applyResult.updatedCount} measurement(s) updated</Typography>
-          {applyResult.deletedDuplicateCount > 0 && (
-            <Typography level="body-md">{applyResult.deletedDuplicateCount} duplicate(s) deleted</Typography>
-          )}
+          {applyResult.deletedDuplicateCount > 0 && <Typography level="body-md">{applyResult.deletedDuplicateCount} duplicate(s) deleted</Typography>}
           {applyResult.insertedCount > 0 && <Typography level="body-md">{applyResult.insertedCount} new measurement(s) inserted</Typography>}
           {applyResult.skippedCount > 0 && (
             <Typography level="body-md" color="neutral">

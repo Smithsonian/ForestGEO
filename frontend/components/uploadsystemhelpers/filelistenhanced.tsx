@@ -18,7 +18,17 @@ interface FileListEnhancedProps extends FileListProps {
 }
 
 export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
-  const { acceptedFiles, dataViewActive, setDataViewActive, expectedHeaders, validationHeaders, onDelimiterChange, selectedDelimiters, onRemoveFile, onValidationStatusChange } = props;
+  const {
+    acceptedFiles,
+    dataViewActive,
+    setDataViewActive,
+    expectedHeaders,
+    validationHeaders,
+    onDelimiterChange,
+    selectedDelimiters,
+    onRemoveFile,
+    onValidationStatusChange
+  } = props;
 
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
 

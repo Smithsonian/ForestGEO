@@ -338,10 +338,7 @@ async function applyMatchedRowUpdate(
  *  - a duplicate ID is claimed by two different survivors
  *  - a survivor ID is not present in matchedRows
  */
-function validateDuplicateRequests(
-  duplicates: DuplicateToDelete[],
-  matchedRows: ApplyMatchedRow[]
-): ApplyError[] {
+function validateDuplicateRequests(duplicates: DuplicateToDelete[], matchedRows: ApplyMatchedRow[]): ApplyError[] {
   const errors: ApplyError[] = [];
   const survivorIDs = new Set(matchedRows.map(r => r.coreMeasurementID));
   const seenDuplicateIDs = new Map<number, number>(); // duplicateID -> survivorID

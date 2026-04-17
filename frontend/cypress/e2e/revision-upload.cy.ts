@@ -14,23 +14,30 @@ function openRevisionUploadFromSummary() {
   cy.openCensusHubLink('View Data');
   cy.get('[role="grid"]').should('be.visible');
 
-  cy.contains('button', /^Upload$/).scrollIntoView().should('be.visible').click({ force: true });
-  cy.get('[role="dialog"]').should('exist').within(() => {
-    cy.contains('button', 'Use Revisions Upload').should('be.visible').click();
-  });
+  cy.contains('button', /^Upload$/)
+    .scrollIntoView()
+    .should('be.visible')
+    .click({ force: true });
+  cy.get('[role="dialog"]')
+    .should('exist')
+    .within(() => {
+      cy.contains('button', 'Use Revisions Upload').should('be.visible').click();
+    });
   cy.get('[role="dialog"]').within(() => {
     cy.contains('Choose files or drag them here').should('be.visible');
   });
 }
 
 function attachRevisionCsv(csvContent: string, fileName = 'measurement-revision.csv') {
-  cy.get('input[type="file"]').first().then(input => {
-    const file = new File([csvContent], fileName, { type: 'text/csv' });
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    input[0].files = dataTransfer.files;
-    input[0].dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  cy.get('input[type="file"]')
+    .first()
+    .then(input => {
+      const file = new File([csvContent], fileName, { type: 'text/csv' });
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      input[0].files = dataTransfer.files;
+      input[0].dispatchEvent(new Event('change', { bubbles: true }));
+    });
 }
 
 function stubRevisionMatch() {
@@ -93,7 +100,9 @@ describe('Revision Upload Browser Flow', () => {
     openRevisionUploadFromSummary();
     attachRevisionCsv(`StemGUID,MeasuredDBH\n12345,15.6\n`);
 
-    cy.contains('button', /Continue Upload/).should('be.enabled').click();
+    cy.contains('button', /Continue Upload/)
+      .should('be.enabled')
+      .click();
 
     cy.wait('@matchRevisionUpload');
     cy.contains('Revision Upload Review').should('be.visible');
@@ -115,7 +124,9 @@ describe('Revision Upload Browser Flow', () => {
     openRevisionUploadFromSummary();
     attachRevisionCsv(`StemGUID,MeasuredDBH\n12345,15.6\n`, 'measurement-revision-conflict.csv');
 
-    cy.contains('button', /Continue Upload/).should('be.enabled').click();
+    cy.contains('button', /Continue Upload/)
+      .should('be.enabled')
+      .click();
     cy.wait('@matchRevisionUpload');
 
     cy.contains('button', 'Apply 1 Revisions').click();
