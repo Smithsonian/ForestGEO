@@ -1,21 +1,562 @@
+// measurementssummary writer — applies a single-row edit that the analyzer
+// has already validated.
+//
+// Ported from `frontend/config/macros/coreapifunctions.ts::PATCH` (the
+// `dataType === 'measurementssummary'` branch). The legacy PATCH handler is
+// still in place for other dataTypes but will be removed by Task 18.
+//
+// The writer runs INSIDE an outer transaction (owned by `applyEditInTransaction`
+// or a batch caller such as revision apply). It MUST NOT begin, commit, or
+// rollback transactions, and it MUST NOT close the connection.
 import ConnectionManager from '@/config/connectionmanager';
-import { EditPlan, ApplyResult } from '../types';
-import type { EditOperationStateRow } from '@/config/editoperations';
+import { format } from 'mysql2/promise';
+import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
+import type { EditOperationStateRow } from '@/config/editoperations';
+import {
+  computeTreeStemState,
+  resolveMeasurementSummaryQuadratID,
+  resolveMeasurementSummaryStem,
+  resolveMeasurementSummaryTree
+} from './resolvers-mutating';
+import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
+import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
+import { handleUpsert } from '@/config/utils';
+import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 export interface WriterResult {
   updatedIDs: Record<string, number>;
   beforeState: EditOperationStateRow[];
   afterState: EditOperationStateRow[];
-  postValidation?: ApplyResult['postValidation'];
+  postValidation?: { newErrors: number; clearedErrors: number };
   validationPending: boolean;
 }
 
+const IDENTITY_FIELDS: ReadonlySet<string> = new Set([
+  'SpeciesCode',
+  'TreeTag',
+  'StemTag',
+  'QuadratName',
+  'StemLocalX',
+  'StemLocalY'
+]);
+
+const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
+  'SpeciesCode',
+  'TreeTag',
+  'StemTag',
+  'QuadratName',
+  'StemLocalX',
+  'StemLocalY',
+  'MeasuredDBH',
+  'MeasuredHOM',
+  'MeasurementDate',
+  'Description',
+  'Attributes'
+]);
+
+function toPositiveNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeMeasurementSummaryDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0];
+  }
+  if (typeof value === 'string') {
+    if (!value.includes('T')) return value;
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+  }
+  return null;
+}
+
+function toOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+interface LoadedCoreMeasurementRow {
+  CoreMeasurementID: number;
+  CensusID: number | null;
+  PlotID: number | null;
+  StemGUID: number | null;
+  MeasurementDate: string | Date | null;
+  MeasuredDBH: number | string | null;
+  MeasuredHOM: number | string | null;
+  Description: string | null;
+  Attributes: string | null;
+  TreeTag: string | null;
+  TreeID: number | null;
+  SpeciesCode: string | null;
+  SpeciesID: number | null;
+  StemTag: string | null;
+  StemLocalX: number | string | null;
+  StemLocalY: number | string | null;
+  QuadratName: string | null;
+  QuadratID?: number | null;
+}
+
+async function loadCurrentJoinedRow(
+  cm: ConnectionManager,
+  schema: string,
+  coreMeasurementID: number,
+  transactionID: string
+): Promise<LoadedCoreMeasurementRow> {
+  const rows = await cm.executeQuery(
+    `SELECT
+       cm.CoreMeasurementID,
+       cm.CensusID,
+       c.PlotID,
+       cm.StemGUID,
+       cm.MeasurementDate,
+       cm.MeasuredDBH,
+       cm.MeasuredHOM,
+       cm.Description,
+       cm.RawCodes AS Attributes,
+       t.TreeTag,
+       t.TreeID,
+       sp.SpeciesCode,
+       sp.SpeciesID,
+       s.StemTag,
+       s.LocalX AS StemLocalX,
+       s.LocalY AS StemLocalY,
+       q.QuadratName
+     FROM ${schema}.coremeasurements cm
+     JOIN ${schema}.census c ON c.CensusID = cm.CensusID
+     LEFT JOIN ${schema}.stems s ON s.StemGUID = cm.StemGUID
+     LEFT JOIN ${schema}.trees t ON t.TreeID = s.TreeID
+     LEFT JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
+     LEFT JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
+     WHERE cm.CoreMeasurementID = ?
+     LIMIT 1`,
+    [coreMeasurementID],
+    transactionID
+  );
+  if (!rows.length) throw new Error(`measurementssummary writer: coremeasurements row ${coreMeasurementID} not found`);
+  return rows[0] as LoadedCoreMeasurementRow;
+}
+
+async function loadCoreMeasurementRow(
+  cm: ConnectionManager,
+  schema: string,
+  coreMeasurementID: number,
+  transactionID: string
+): Promise<Record<string, unknown> | null> {
+  const rows = await cm.executeQuery(
+    `SELECT * FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1`,
+    [coreMeasurementID],
+    transactionID
+  );
+  return rows.length ? (rows[0] as Record<string, unknown>) : null;
+}
+
+async function loadStemRow(
+  cm: ConnectionManager,
+  schema: string,
+  stemGUID: number | null,
+  transactionID: string
+): Promise<Record<string, unknown> | null> {
+  if (stemGUID === null) return null;
+  const rows = await cm.executeQuery(
+    `SELECT * FROM ${schema}.stems WHERE StemGUID = ? LIMIT 1`,
+    [stemGUID],
+    transactionID
+  );
+  return rows.length ? (rows[0] as Record<string, unknown>) : null;
+}
+
+async function loadCmAttributeRows(
+  cm: ConnectionManager,
+  schema: string,
+  coreMeasurementID: number,
+  transactionID: string
+): Promise<Array<Record<string, unknown>>> {
+  const rows = await cm.executeQuery(
+    `SELECT * FROM ${schema}.cmattributes WHERE CoreMeasurementID = ? ORDER BY CMAID`,
+    [coreMeasurementID],
+    transactionID
+  );
+  return rows as Array<Record<string, unknown>>;
+}
+
+function buildStateRow(
+  table: string,
+  primaryKey: string,
+  primaryKeyValue: string | number,
+  row: Record<string, unknown> | null
+): EditOperationStateRow {
+  return { table, primaryKey, primaryKeyValue, row };
+}
+
 export async function writeMeasurementsSummary(
-  _cm: ConnectionManager,
-  _input: ApplyInTransactionInput,
-  _plan: EditPlan,
-  _txID: string
+  cm: ConnectionManager,
+  input: ApplyInTransactionInput,
+  plan: EditPlan,
+  txID: string
 ): Promise<WriterResult> {
-  throw new Error('Task 8 not yet implemented');
+  const { schema, plotID, censusID, targetID } = input;
+  const coreMeasurementID = Number(targetID);
+
+  const changedFields = new Set<string>(plan.fieldChanges.map(fc => fc.field));
+  const newValues: Record<string, unknown> = {};
+  for (const { field, to } of plan.fieldChanges) {
+    newValues[field] = to;
+  }
+
+  // Capture before-state rows for exact-revert support.
+  const beforeCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
+  if (!beforeCoreRow) throw new Error(`measurementssummary writer: coremeasurements ${coreMeasurementID} not found at write time`);
+  const beforeStemGUID = beforeCoreRow.StemGUID as number | null;
+  const beforeStemRow = await loadStemRow(cm, schema, beforeStemGUID, txID);
+  const beforeCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
+
+  const beforeState: EditOperationStateRow[] = [];
+  beforeState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, beforeCoreRow));
+  if (beforeStemRow && beforeStemGUID !== null) {
+    beforeState.push(buildStateRow('stems', 'StemGUID', beforeStemGUID, beforeStemRow));
+  }
+  if (changedFields.has('Attributes')) {
+    for (const attrRow of beforeCmAttrRows) {
+      beforeState.push(buildStateRow('cmattributes', 'CMAID', Number(attrRow.CMAID), attrRow));
+    }
+  }
+
+  // Start from a freshly-joined current snapshot and overlay the plan's new
+  // values so downstream resolvers see the merged shape (the old PATCH code
+  // worked on a mapped new-row, we synthesize it here from the DB + plan).
+  const current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID);
+  const merged: LoadedCoreMeasurementRow = { ...current };
+  for (const field of Object.keys(newValues)) {
+    (merged as unknown as Record<string, unknown>)[field] = newValues[field];
+  }
+
+  const normalizedMeasurementDate = normalizeMeasurementSummaryDate(merged.MeasurementDate ?? current.MeasurementDate ?? null);
+
+  const previousTreeID = toPositiveNumber(current.TreeID);
+  const shouldResolveTree = changedFields.has('SpeciesCode') || changedFields.has('TreeTag');
+  const needsFullStemResolution =
+    changedFields.has('TreeTag') || changedFields.has('QuadratName') || changedFields.has('StemTag');
+
+  let changesFound = false;
+
+  // --- SpeciesCode change -> SpeciesID lookup (safety net; analyzer already
+  // ensured the code is known). No mutation of species row — removing the
+  // R1b SpeciesName side-effect that lived in the legacy PATCH handler.
+  if (changedFields.has('SpeciesCode')) {
+    changesFound = true;
+    const speciesSearchResults = await cm.executeQuery(
+      `SELECT SpeciesID
+       FROM ${schema}.species
+       WHERE LOWER(SpeciesCode) = LOWER(?)
+         AND IsActive = 1
+       ORDER BY SpeciesID
+       LIMIT 1`,
+      [merged.SpeciesCode],
+      txID
+    );
+    if (speciesSearchResults.length === 0) {
+      throw new Error('Species not found');
+    }
+    merged.SpeciesID = speciesSearchResults[0].SpeciesID;
+  }
+
+  if (changedFields.has('TreeTag')) {
+    changesFound = true;
+  }
+
+  if (changedFields.has('QuadratName')) {
+    changesFound = true;
+    merged.QuadratID = await resolveMeasurementSummaryQuadratID(
+      cm,
+      schema,
+      {
+        QuadratID: null,
+        QuadratName: merged.QuadratName,
+        PlotID: merged.PlotID ?? plotID
+      },
+      txID
+    );
+  }
+
+  if (shouldResolveTree) {
+    merged.TreeID = await resolveMeasurementSummaryTree(
+      cm,
+      schema,
+      {
+        TreeTag: merged.TreeTag ?? current.TreeTag,
+        SpeciesID: merged.SpeciesID ?? current.SpeciesID,
+        CensusID: merged.CensusID ?? current.CensusID
+      },
+      txID
+    );
+  }
+
+  const resolvedTreeID = toPositiveNumber(merged.TreeID ?? current.TreeID);
+  const needsStemResolution = needsFullStemResolution || (resolvedTreeID !== null && resolvedTreeID !== previousTreeID);
+
+  if (needsStemResolution) {
+    changesFound = true;
+    const resolvedQuadratID = await resolveMeasurementSummaryQuadratID(
+      cm,
+      schema,
+      {
+        QuadratID: (merged as any).QuadratID ?? null,
+        QuadratName: merged.QuadratName ?? current.QuadratName,
+        PlotID: merged.PlotID ?? plotID
+      },
+      txID
+    );
+    (merged as any).QuadratID = resolvedQuadratID;
+
+    const resolvedStemGUID = await resolveMeasurementSummaryStem(
+      cm,
+      schema,
+      {
+        TreeID: merged.TreeID ?? current.TreeID,
+        TreeTag: merged.TreeTag ?? current.TreeTag,
+        CensusID: merged.CensusID ?? current.CensusID,
+        StemTag: merged.StemTag ?? current.StemTag,
+        QuadratID: resolvedQuadratID,
+        StemLocalX: changedFields.has('StemLocalX') ? toOptionalNumber(newValues.StemLocalX) : toOptionalNumber(merged.StemLocalX),
+        StemLocalY: changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY)
+      },
+      txID
+    );
+
+    if (resolvedStemGUID !== merged.StemGUID) {
+      await cm.executeQuery(
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+          `${schema}.coremeasurements`,
+          { StemGUID: resolvedStemGUID },
+          'CoreMeasurementID',
+          coreMeasurementID
+        ]),
+        [],
+        txID
+      );
+    }
+    merged.StemGUID = resolvedStemGUID;
+
+    // Recompute treestemstate — hard-failed rows never got this during
+    // ingestion (they fail before Stage 4 classification), so corrected
+    // rows would remain hidden in View Data without it.
+    const resolvedTreeTag = String(merged.TreeTag ?? current.TreeTag ?? '');
+    const resolvedStemTag = String(merged.StemTag ?? current.StemTag ?? '');
+    const resolvedCensusID = toPositiveNumber(merged.CensusID ?? current.CensusID ?? censusID);
+    const resolvedPlotID = toPositiveNumber(merged.PlotID ?? current.PlotID ?? plotID);
+
+    if (resolvedTreeTag && resolvedStemTag && resolvedCensusID && resolvedPlotID) {
+      const treeStemState = await computeTreeStemState(cm, schema, resolvedTreeTag, resolvedStemTag, resolvedCensusID, resolvedPlotID, txID);
+
+      const existingUDFRows = await cm.executeQuery(
+        `SELECT UserDefinedFields FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ?`,
+        [coreMeasurementID],
+        txID
+      );
+      const rawUDF = existingUDFRows?.[0]?.UserDefinedFields;
+      const currentFields: Record<string, unknown> = rawUDF
+        ? typeof rawUDF === 'string'
+          ? JSON.parse(rawUDF)
+          : rawUDF
+        : {};
+      currentFields.treestemstate = treeStemState;
+
+      await cm.executeQuery(
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+          `${schema}.coremeasurements`,
+          { UserDefinedFields: JSON.stringify(currentFields) },
+          'CoreMeasurementID',
+          coreMeasurementID
+        ]),
+        [],
+        txID
+      );
+    }
+  }
+
+  // --- StemLocalX / StemLocalY update: propagates to the shared stems row
+  //     (affecting all measurements on that stem).
+  if (changedFields.has('StemLocalX') || changedFields.has('StemLocalY')) {
+    changesFound = true;
+    const xValue = changedFields.has('StemLocalX') ? toOptionalNumber(newValues.StemLocalX) : toOptionalNumber(merged.StemLocalX);
+    const yValue = changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY);
+    if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
+      await cm.executeQuery(
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+          `${schema}.stems`,
+          { LocalX: xValue, LocalY: yValue },
+          'StemGUID',
+          merged.StemGUID
+        ]),
+        [],
+        txID
+      );
+    }
+  }
+
+  // --- Numeric measurement fields on coremeasurements
+  if (changedFields.has('MeasuredDBH') || changedFields.has('MeasuredHOM') || changedFields.has('MeasurementDate')) {
+    changesFound = true;
+    await cm.executeQuery(
+      format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+        `${schema}.coremeasurements`,
+        {
+          MeasuredDBH: changedFields.has('MeasuredDBH') ? toOptionalNumber(newValues.MeasuredDBH) : toOptionalNumber(merged.MeasuredDBH),
+          MeasuredHOM: changedFields.has('MeasuredHOM') ? toOptionalNumber(newValues.MeasuredHOM) : toOptionalNumber(merged.MeasuredHOM),
+          MeasurementDate: normalizedMeasurementDate
+        },
+        'CoreMeasurementID',
+        coreMeasurementID
+      ]),
+      [],
+      txID
+    );
+  }
+
+  // --- Attributes change — rebuild cmattributes rows (DELETE + re-INSERT)
+  if (changedFields.has('Attributes')) {
+    changesFound = true;
+    const attrsValue = newValues.Attributes;
+    const rawAttrsString = attrsValue === null || attrsValue === undefined ? '' : String(attrsValue);
+    const parsedCodes = rawAttrsString
+      .split(';')
+      .map(code => code.trim())
+      .filter(Boolean);
+    await cm.executeQuery(
+      `DELETE FROM ?? WHERE ?? = ?`,
+      [`${schema}.cmattributes`, `CoreMeasurementID`, coreMeasurementID],
+      txID
+    );
+    for (const code of parsedCodes) {
+      await handleUpsert<CMAttributesResult>(
+        cm,
+        schema,
+        'cmattributes',
+        {
+          CoreMeasurementID: coreMeasurementID,
+          Code: code
+        },
+        'CMAID',
+        txID
+      );
+    }
+  }
+
+  // --- Sync Raw* / measurement fields on coremeasurements whenever any
+  //     user-visible editable field changed. Mirrors the legacy PATCH sync
+  //     block so View Data and the failed-measurements explorer stay aligned.
+  const shouldSyncRaw = Array.from(changedFields).some(f => RAW_SYNC_TRIGGER_FIELDS.has(f));
+  if (shouldSyncRaw) {
+    changesFound = true;
+    await cm.executeQuery(
+      format(`UPDATE ?? SET ? WHERE ?? = ?`, [
+        `${schema}.coremeasurements`,
+        {
+          RawTreeTag: merged.TreeTag ?? current.TreeTag ?? null,
+          RawStemTag: merged.StemTag ?? current.StemTag ?? null,
+          RawSpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
+          RawQuadrat: merged.QuadratName ?? current.QuadratName ?? null,
+          RawX: toOptionalNumber(merged.StemLocalX ?? current.StemLocalX),
+          RawY: toOptionalNumber(merged.StemLocalY ?? current.StemLocalY),
+          RawCodes: merged.Attributes ?? current.Attributes ?? null,
+          RawComments: merged.Description ?? current.Description ?? null,
+          Description: merged.Description ?? current.Description ?? null,
+          MeasurementDate: normalizedMeasurementDate,
+          MeasuredDBH: toOptionalNumber(merged.MeasuredDBH ?? current.MeasuredDBH),
+          MeasuredHOM: toOptionalNumber(merged.MeasuredHOM ?? current.MeasuredHOM)
+        },
+        'CoreMeasurementID',
+        coreMeasurementID
+      ]),
+      [],
+      txID
+    );
+  }
+
+  if (changesFound) {
+    const effectiveCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
+
+    if (coreMeasurementID > 0 && effectiveCensusID > 0) {
+      await refreshIngestionErrorsForMeasurement(
+        cm,
+        schema,
+        coreMeasurementID,
+        effectiveCensusID,
+        {
+          Tag: merged.TreeTag ?? current.TreeTag ?? null,
+          StemTag: merged.StemTag ?? current.StemTag ?? null,
+          SpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
+          Quadrat: merged.QuadratName ?? current.QuadratName ?? null,
+          X: toOptionalNumber(merged.StemLocalX ?? current.StemLocalX),
+          Y: toOptionalNumber(merged.StemLocalY ?? current.StemLocalY),
+          DBH: toOptionalNumber(merged.MeasuredDBH ?? current.MeasuredDBH),
+          HOM: toOptionalNumber(merged.MeasuredHOM ?? current.MeasuredHOM),
+          Date: normalizedMeasurementDate,
+          Codes: merged.Attributes ?? current.Attributes ?? null,
+          Comments: merged.Description ?? current.Description ?? null
+        },
+        txID
+      );
+    }
+
+    const deleteErrorsQuery = format(
+      `DELETE mel
+       FROM ??.measurement_error_log mel
+       JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
+       WHERE mel.MeasurementID = ? AND me.ErrorSource = 'validation'`,
+      [schema, schema]
+    );
+    await cm.executeQuery(deleteErrorsQuery, [coreMeasurementID], txID);
+
+    const resetValidationQuery = format('/* skip_changelog */ UPDATE ?? SET ?? = ? WHERE ?? = ?', [
+      `${schema}.coremeasurements`,
+      'IsValidated',
+      null,
+      'CoreMeasurementID',
+      coreMeasurementID
+    ]);
+    await cm.executeQuery(resetValidationQuery, [], txID);
+  }
+
+  // Refresh derived views so the UI sees the edit immediately.
+  const identityChanged = Array.from(changedFields).some(f => IDENTITY_FIELDS.has(f));
+  if (identityChanged) {
+    const refreshCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
+    const refreshPlotID = Number(merged.PlotID ?? current.PlotID ?? plotID);
+    if (refreshCensusID > 0 && refreshPlotID > 0) {
+      await refreshMeasurementViewsForScope(cm, schema, refreshPlotID, refreshCensusID, txID);
+    }
+  }
+
+  // Capture after-state for exact-revert support.
+  const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
+  const afterStemGUID = (afterCoreRow?.StemGUID ?? null) as number | null;
+  const afterStemRow = await loadStemRow(cm, schema, afterStemGUID, txID);
+  const afterCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
+
+  const afterState: EditOperationStateRow[] = [];
+  afterState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, afterCoreRow));
+  if (afterStemRow && afterStemGUID !== null) {
+    afterState.push(buildStateRow('stems', 'StemGUID', afterStemGUID, afterStemRow));
+  }
+  if (changedFields.has('Attributes')) {
+    for (const attrRow of afterCmAttrRows) {
+      afterState.push(buildStateRow('cmattributes', 'CMAID', Number(attrRow.CMAID), attrRow));
+    }
+  }
+
+  return {
+    updatedIDs: { CoreMeasurementID: coreMeasurementID },
+    beforeState,
+    afterState,
+    validationPending: true,
+    postValidation: undefined
+  };
 }
