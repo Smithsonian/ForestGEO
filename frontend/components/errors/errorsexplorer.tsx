@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -49,6 +49,10 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiff } from '@/components/datagrids/measurementscommonsutils';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -260,7 +264,18 @@ export default function ErrorsExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
-  const editGenerationRef = useRef(0);
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'measurementssummary',
+    surface: 'errorsexplorer',
+    onError: error => {
+      setErrorMessage(error.message);
+    }
+  });
 
   useEffect(() => {
     if (!storageKey) return;
@@ -492,21 +507,17 @@ export default function ErrorsExplorer() {
         throw new Error('Site context not available');
       }
 
-      const generation = ++editGenerationRef.current;
-
-      const response = await fetch(`/api/fixeddata/measurementssummary/${currentSite.schemaName}/coreMeasurementID`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          oldRow: stripRowForUpdate(oldRow as ErrorExplorerRow),
-          newRow: stripRowForUpdate(newRow as ErrorExplorerRow)
-        })
-      });
-
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body?.message || body?.error || 'Failed to update row');
+      const coreMeasurementID = Number((newRow as ErrorExplorerRow).coreMeasurementID ?? (oldRow as ErrorExplorerRow).coreMeasurementID);
+      if (!Number.isFinite(coreMeasurementID) || coreMeasurementID <= 0) {
+        throw new Error('Missing CoreMeasurementID for edit');
       }
+
+      const editableDiff = buildEditableFieldsDiff(newRow, oldRow);
+      if (Object.keys(editableDiff).length === 0) {
+        return newRow;
+      }
+
+      const applyResult = await editFlow.beginEdit(coreMeasurementID, editableDiff);
 
       const updatedRow = { ...(newRow as ErrorExplorerRow) };
       if (updatedRow.attributes !== (oldRow as ErrorExplorerRow).attributes) {
@@ -515,10 +526,8 @@ export default function ErrorsExplorer() {
       const rowScope = resolveExplorerScope(updatedRow) ?? resolveExplorerScope(oldRow as ErrorExplorerRow);
       syncEditedRowLocally(updatedRow);
 
-      // A newer edit has started — skip the slow refresh+fetch cycle so we
-      // don't overwrite the newer edit's data with a stale view snapshot.
-      if (editGenerationRef.current !== generation) {
-        return updatedRow;
+      if (applyResult.editOperationID !== null) {
+        setUndoToastOperationID(applyResult.editOperationID);
       }
 
       try {
@@ -526,10 +535,6 @@ export default function ErrorsExplorer() {
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(`Row updated, but the explorer could not refresh: ${errorObj.message}`);
-        return updatedRow;
-      }
-
-      if (editGenerationRef.current !== generation) {
         return updatedRow;
       }
 
@@ -542,6 +547,7 @@ export default function ErrorsExplorer() {
     },
     [
       currentSite?.schemaName,
+      editFlow,
       fetchDetails,
       fetchFacets,
       fetchRows,
@@ -1233,6 +1239,45 @@ export default function ErrorsExplorer() {
           </Stack>
         </Sheet>
       </Sheet>
+      {editFlow.dialogState.open && editFlow.dialogState.plan && (
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
+      )}
+      {undoToastOperationID !== null && (
+        <UndoToast
+          editOperationID={undoToastOperationID}
+          onUndo={async () => {
+            const scope = resolveExplorerScope();
+            if (!scope) {
+              setErrorMessage('Explorer scope is not available');
+              return;
+            }
+            try {
+              const response = await fetch(`/api/edits/revert`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  schema: scope.schema,
+                  plotID: scope.plotID,
+                  censusID: scope.censusID,
+                  editOperationID: undoToastOperationID
+                })
+              });
+              if (!response.ok) throw new Error(`revert failed (${response.status})`);
+              await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
+              await fetchRows(scope);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              setErrorMessage(`Undo failed: ${message}`);
+            }
+          }}
+          onDismiss={() => setUndoToastOperationID(null)}
+        />
+      )}
     </Stack>
   );
 }
