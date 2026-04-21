@@ -63,7 +63,7 @@ export interface BulkEditPlan {
 export interface ApplyResult {
   updatedIDs: Record<string, number>;
   applyErrors: Array<{ ruleID?: string; coreMeasurementID?: number; csvIndex?: number; reason: string }>;
-  editOperationID: number;
+  editOperationID: number | null;
   validationPending: boolean;
   postValidation?: { newErrors: number; clearedErrors: number };
 }
