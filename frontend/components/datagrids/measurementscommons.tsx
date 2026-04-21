@@ -19,7 +19,7 @@ import {
   GridToolbarProps,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Snackbar } from '@mui/material';
+import { Alert, AlertColor, AlertPropsColorOverrides, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -84,11 +84,15 @@ import { debounce, EditToolbar } from '../client/datagridelements';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
   arePaginationModelsEqual,
+  buildEditableFieldsDiff,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
@@ -239,6 +243,19 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const apiRef = useGridApiRef();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
   const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
+
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'measurementssummary',
+    surface: 'measurements',
+    onError: error => {
+      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+    }
+  });
 
   const PAGE_CACHE_TTL_MS = 30_000;
   const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
@@ -693,16 +710,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  const updateRow = async (
+  const createNewRowPost = async (
     gridType: string,
     schemaName: string | undefined,
     newRow: GridRowModel,
-    oldRow: GridRowModel,
-    setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>,
-    setIsNewRowAdded: (value: boolean) => void,
-    setShouldAddRowAfterFetch: (value: boolean) => void,
-    fetchPaginatedData: (page: number) => Promise<void>,
-    paginationModel: { page: number }
+    oldRow: GridRowModel
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
@@ -710,38 +722,43 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     newRow.userDefinedFields = JSON.stringify(newRow.userDefinedFields);
     try {
       const response = await fetch(fetchProcessQuery, {
-        method: oldRow.isNew ? 'POST' : 'PATCH',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
-
       const responseJSON = await response.json();
-
       if (!response.ok) {
-        setSnackbar({
-          children: `Error: ${responseJSON.message}`,
-          severity: 'error'
-        });
+        setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row);
       }
-
-      setSnackbar({
-        children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-        severity: 'success'
-      });
-
-      if (oldRow.isNew) {
-        setIsNewRowAdded(false);
-        setShouldAddRowAfterFetch(false);
-        await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
-      }
-
+      setSnackbar({ children: 'New row added!', severity: 'success' });
+      setIsNewRowAdded(false);
+      setShouldAddRowAfterFetch(false);
+      await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
       return newRow;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setSnackbar({ children: `Error: ${message}`, severity: 'error' });
       return Promise.reject(newRow);
     }
+  };
+
+  const applyEditViaPreviewFlow = async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    const coreMeasurementID = Number(newRow.coreMeasurementID ?? oldRow.coreMeasurementID);
+    if (!Number.isFinite(coreMeasurementID) || coreMeasurementID <= 0) {
+      setSnackbar({ children: 'Error: missing CoreMeasurementID for edit', severity: 'error' });
+      return Promise.reject(new Error('missing CoreMeasurementID'));
+    }
+    const editableDiff = buildEditableFieldsDiff(newRow, oldRow);
+    if (Object.keys(editableDiff).length === 0) {
+      return newRow;
+    }
+    const result = await editFlow.beginEdit(coreMeasurementID, editableDiff);
+    if (result.editOperationID !== null) {
+      setUndoToastOperationID(result.editOperationID);
+    }
+    setSnackbar({ children: 'Row updated!', severity: 'success' });
+    return newRow;
   };
 
   const openConfirmationDialog = useCallback(
@@ -790,20 +807,19 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (locked || !promiseArguments) return;
     setLoading(true, 'Saving changes...');
     try {
-      const updatedRow = await updateRow(
-        gridType,
-        currentSite?.schemaName,
-        promiseArguments.newRow,
-        promiseArguments.oldRow,
-        setSnackbar,
-        setIsNewRowAdded,
-        setShouldAddRowAfterFetch,
-        fetchPaginatedData,
-        paginationModel
-      );
+      const updatedRow = promiseArguments.oldRow.isNew
+        ? await createNewRowPost(gridType, currentSite?.schemaName, promiseArguments.newRow, promiseArguments.oldRow)
+        : await applyEditViaPreviewFlow(promiseArguments.newRow, promiseArguments.oldRow);
       promiseArguments.resolve(updatedRow);
     } catch (error: unknown) {
       promiseArguments.reject(error);
+      const wasCancelled = error instanceof Error && error.message === 'cancelled';
+      if (wasCancelled && !promiseArguments.oldRow.isNew) {
+        setRowModesModel(oldModel => ({
+          ...oldModel,
+          [id]: { mode: GridRowModes.Edit }
+        }));
+      }
     }
     const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
@@ -1548,7 +1564,21 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
             getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
             rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
-            isCellEditable={() => !locked}
+            isCellEditable={params => {
+              if (locked) return false;
+              const readOnlyFields = new Set([
+                'coreMeasurementID',
+                'speciesID',
+                'treeID',
+                'stemGUID',
+                'quadratID',
+                'plotID',
+                'censusID',
+                'speciesName',
+                'subspeciesName'
+              ]);
+              return !readOnlyFields.has(params.field);
+            }}
           />
         </Box>
         {!!snackbar && (
@@ -1558,6 +1588,40 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         )}
         {isDialogOpen && promiseArguments && (
           <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
+        )}
+        {editFlow.dialogState.open && editFlow.dialogState.plan && (
+          <PreviewDialog
+            plan={editFlow.dialogState.plan}
+            busy={editFlow.dialogState.busy}
+            onConfirm={editFlow.confirmDialog}
+            onCancel={editFlow.cancelDialog}
+          />
+        )}
+        {undoToastOperationID !== null && (
+          <UndoToast
+            editOperationID={undoToastOperationID}
+            onUndo={async () => {
+              try {
+                const response = await fetch(`/api/edits/revert`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    schema: currentSite?.schemaName ?? '',
+                    plotID: currentPlot?.plotID ?? 0,
+                    censusID: activeCensusID ?? 0,
+                    editOperationID: undoToastOperationID
+                  })
+                });
+                if (!response.ok) throw new Error(`revert failed (${response.status})`);
+                setSnackbar({ children: 'Edit reverted', severity: 'success' });
+                await runFetchPaginated();
+              } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                setSnackbar({ children: `Undo failed: ${message}`, severity: 'error' });
+              }
+            }}
+            onDismiss={() => setUndoToastOperationID(null)}
+          />
         )}
         {/*{isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (*/}
         {/*  <MSVEditingModal*/}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
+  buildEditableFieldsDiff,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
@@ -144,6 +145,104 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
         query: expect.stringContaining('SET cm.IsValidated = NULL'),
         params: ['forestgeo_testing_mason', 'forestgeo_testing_mason', 6, 22],
         format: true
+      });
+    });
+  });
+
+  describe('Edit preview flow: buildEditableFieldsDiff restricts to allowed fields', () => {
+    const OLD_ROW = {
+      coreMeasurementID: 101,
+      speciesID: 5,
+      treeID: 20,
+      stemGUID: 300,
+      quadratID: 7,
+      plotID: 1,
+      censusID: 3,
+      speciesName: 'old species',
+      subspeciesName: 'old subspecies',
+      speciesCode: 'ACRU',
+      treeTag: 'T-1',
+      stemTag: 'S-1',
+      quadratName: '0101',
+      stemLocalX: 1.23,
+      stemLocalY: 4.56,
+      measurementDate: '2026-01-01',
+      measuredDBH: 10,
+      measuredHOM: 1.3,
+      description: 'old desc',
+      attributes: 'L'
+    };
+
+    it('returns canonical PascalCase fields restricted to the measurementssummary surface', () => {
+      const newRow = { ...OLD_ROW, measuredDBH: 12, measuredHOM: 1.4 };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12, MeasuredHOM: 1.4 });
+    });
+
+    it('excludes internal IDs even when the new row provides different values', () => {
+      const newRow = {
+        ...OLD_ROW,
+        coreMeasurementID: 999,
+        speciesID: 999,
+        treeID: 999,
+        stemGUID: 999,
+        quadratID: 999,
+        plotID: 999,
+        censusID: 999,
+        measuredDBH: 12
+      };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12 });
+      expect(Object.keys(diff)).not.toContain('CoreMeasurementID');
+      expect(Object.keys(diff)).not.toContain('SpeciesID');
+      expect(Object.keys(diff)).not.toContain('TreeID');
+      expect(Object.keys(diff)).not.toContain('StemGUID');
+      expect(Object.keys(diff)).not.toContain('QuadratID');
+      expect(Object.keys(diff)).not.toContain('PlotID');
+      expect(Object.keys(diff)).not.toContain('CensusID');
+    });
+
+    it('excludes taxonomy display fields SpeciesName and SubspeciesName', () => {
+      const newRow = { ...OLD_ROW, speciesName: 'new species', subspeciesName: 'new subspecies', measuredDBH: 12 };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12 });
+      expect(Object.keys(diff)).not.toContain('SpeciesName');
+      expect(Object.keys(diff)).not.toContain('SubspeciesName');
+    });
+
+    it('returns an empty diff when no editable field changed', () => {
+      const diff = buildEditableFieldsDiff({ ...OLD_ROW }, OLD_ROW);
+      expect(diff).toEqual({});
+    });
+
+    it('includes multiple editable fields when they change together', () => {
+      const newRow = {
+        ...OLD_ROW,
+        speciesCode: 'PRLA',
+        treeTag: 'T-2',
+        stemTag: 'S-2',
+        quadratName: '0202',
+        stemLocalX: 9.99,
+        stemLocalY: 8.88,
+        measurementDate: '2026-02-02',
+        measuredDBH: 12,
+        measuredHOM: 1.5,
+        description: 'new desc',
+        attributes: 'L;M'
+      };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({
+        SpeciesCode: 'PRLA',
+        TreeTag: 'T-2',
+        StemTag: 'S-2',
+        QuadratName: '0202',
+        StemLocalX: 9.99,
+        StemLocalY: 8.88,
+        MeasurementDate: '2026-02-02',
+        MeasuredDBH: 12,
+        MeasuredHOM: 1.5,
+        Description: 'new desc',
+        Attributes: 'L;M'
       });
     });
   });
