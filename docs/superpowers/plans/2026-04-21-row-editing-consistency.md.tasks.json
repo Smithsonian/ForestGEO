@@ -1,0 +1,144 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-21-row-editing-consistency.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Create edit_operations table migration and ledger helpers",
+      "status": "pending",
+            "description": "**Goal:** New per-site edit_operations table + ensure-helper for synchronous undo ledger.\n\n**Files:**\n- Create: frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql\n- Create: frontend/config/editoperations.ts\n- Create: frontend/config/editoperations.test.ts\n\n**Verify:** cd frontend && npm run test:unit -- editoperations\n\n```json:metadata\n{\"files\": [\"frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql\", \"frontend/config/editoperations.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- editoperations\", \"acceptanceCriteria\": [\"Idempotent migration\", \"Ledger helpers exported\", \"Revertable flag supports audit-only bulk revision rows\", \"Integration tests pass\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: Shared types, field allowlist, plan hash",
+      "status": "pending",
+            "description": "**Goal:** Single foundation module consumed by every other task.\n\n**Files:**\n- frontend/config/editplan/types.ts\n- frontend/config/editplan/fieldpolicy.ts\n- frontend/config/editplan/planhash.ts (+ tests)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/planhash config/editplan/fieldpolicy\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/types.ts\", \"frontend/config/editplan/fieldpolicy.ts\", \"frontend/config/editplan/planhash.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/planhash config/editplan/fieldpolicy\", \"acceptanceCriteria\": [\"Types exported\", \"Field policy with allowlist/clear-semantics\", \"UI/API field aliases canonicalize before allowlist\", \"InvalidClearError rejects blank identity fields\", \"Plan hasher deterministic for nested BulkEditPlan row plans and sorted reference arrays\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Read-only planner resolvers",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Pure-read twins of tree/stem/quadrat/species resolvers.\n\n**Files:**\n- frontend/config/editplan/resolvers.ts (+ test)\n\n**Verify:** cd frontend && npm run test:integration -- config/editplan/resolvers\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/resolvers.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- config/editplan/resolvers\", \"acceptanceCriteria\": [\"Read-only resolvers\", \"Orphan counts\", \"Integration pass\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Analyzer rules R1a/R1c (species re-link)",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Species identity re-link rules + shared RuleContext.\n\n**Files:**\n- frontend/config/editplan/rules/context.ts\n- frontend/config/editplan/rules/species.ts (+ test)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/rules/species\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/rules/context.ts\", \"frontend/config/editplan/rules/species.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/rules/species\", \"acceptanceCriteria\": [\"R1a emitted\", \"SpeciesNotFoundError for unknown\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Analyzer rules R2/R3 (tree/stem reassignment + orphan promotion)",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** Identity-changing tree/stem rules with destructive promotion.\n\n**Files:**\n- frontend/config/editplan/rules/treestem.ts (+ test)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/rules/treestem\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/rules/treestem.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/rules/treestem\", \"acceptanceCriteria\": [\"R2/R3 emitted\", \"Orphan promotion\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Analyzer rules R4 (coordinates) and R5 (attributes)",
+      "status": "pending",
+      "blockedBy": [1],
+      "description": "**Goal:** Cross-row coordinate and attribute rebuild rules.\n\n**Files:**\n- frontend/config/editplan/rules/coordinates.ts\n- frontend/config/editplan/rules/attributes.ts (+ tests)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/rules/coordinates config/editplan/rules/attributes\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/rules/coordinates.ts\", \"frontend/config/editplan/rules/attributes.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/rules/coordinates config/editplan/rules/attributes\", \"acceptanceCriteria\": [\"R4 count\", \"R5 drop-detection\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Analyzer glue + bulk aggregator + R6/R9",
+      "status": "pending",
+      "blockedBy": [3, 4, 5],
+            "description": "**Goal:** Compose rules into EditPlan/BulkEditPlan.\n\n**Files:**\n- frontend/config/editplan/analyzer.ts\n- frontend/config/editplan/bulkanalyzer.ts\n- frontend/config/editplan/rules/duplicates.ts (+ tests)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/analyzer\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/analyzer.ts\", \"frontend/config/editplan/bulkanalyzer.ts\", \"frontend/config/editplan/rules/duplicates.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/analyzer\", \"acceptanceCriteria\": [\"Dispatch\", \"Aggregation\", \"R9 as invalid rows\", \"Canonical payload names before diff\", \"Target row constrained to requested plot/census\", \"Failed-measurement raw aliases mapped\"]}\n```"
+    },
+    {
+      "id": 7,
+            "subject": "Task 7: Apply helper skeleton (lock wrapper, transactional primitive, drift check, ledger writer)",
+      "status": "pending",
+      "blockedBy": [0, 6],
+            "description": "**Goal:** Orchestrator for preview-driven apply with a public single-row wrapper and a lower-level transactional primitive for batch callers.\n\n**Files:**\n- frontend/config/editplan/apply.ts (+ test)\n\n**Verify:** cd frontend && npm run test:unit -- config/editplan/apply\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/apply.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- config/editplan/apply\", \"acceptanceCriteria\": [\"applyEdit owns lock and transaction\", \"applyEditInTransaction never begins/commits/acquires lock\", \"Hash drift\", \"Ledger written in provided transaction\", \"Batch callers must not loop over applyEdit\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Apply writer — measurementssummary",
+      "status": "pending",
+      "blockedBy": [7],
+            "description": "**Goal:** Port coreapifunctions.ts PATCH measurementssummary branch.\n\n**Files:**\n- frontend/config/editplan/writers/resolvers-mutating.ts\n- frontend/config/editplan/writers/measurementssummary.ts (+ test)\n\n**Verify:** cd frontend && npm run test:integration -- config/editplan/writers/measurementssummary\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/writers/measurementssummary.ts\", \"frontend/config/editplan/writers/resolvers-mutating.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- config/editplan/writers/measurementssummary\", \"acceptanceCriteria\": [\"Port complete\", \"Full before/after state capture for coremeasurements and secondary writes\", \"State capture supports exact revert\", \"Integration green\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Apply writer — failedmeasurements",
+      "status": "pending",
+      "blockedBy": [7],
+            "description": "**Goal:** Port failedmeasurements PATCH branch.\n\n**Files:**\n- frontend/config/editplan/writers/failedmeasurements.ts (+ test)\n\n**Verify:** cd frontend && npm run test:integration -- config/editplan/writers/failedmeasurements\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/writers/failedmeasurements.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- config/editplan/writers/failedmeasurements\", \"acceptanceCriteria\": [\"Raw cols updated\", \"Errors refreshed\", \"Before/after state includes reversible failed-row side effects\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Revert helper",
+      "status": "pending",
+      "blockedBy": [0, 7],
+            "description": "**Goal:** Restore a single-row edit from the full edit_operations ledger, including secondary table side effects.\n\n**Files:**\n- frontend/config/editplan/revert.ts (+ test)\n\n**Verify:** cd frontend && npm run test:integration -- config/editplan/revert\n\n```json:metadata\n{\"files\": [\"frontend/config/editplan/revert.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- config/editplan/revert\", \"acceptanceCriteria\": [\"Restore full beforeState/afterState ledger, not only coremeasurements diff\", \"Reject non-revertable bulk rows\", \"Ledger pointer\", \"Round-trip restores stems and cmattributes side effects\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: HTTP endpoints /api/edits/{preview,apply,revert}",
+      "status": "pending",
+      "blockedBy": [8, 9, 10],
+            "description": "**Goal:** Thin Next.js route handlers.\n\n**Files:**\n- frontend/app/api/edits/preview/route.ts\n- frontend/app/api/edits/apply/route.ts\n- frontend/app/api/edits/revert/route.ts\n- frontend/config/editplan/scopeguard.ts (+ tests)\n\n**Verify:** cd frontend && npm run test:integration -- app/api/edits\n\n```json:metadata\n{\"files\": [\"frontend/app/api/edits/preview/route.ts\", \"frontend/app/api/edits/apply/route.ts\", \"frontend/app/api/edits/revert/route.ts\", \"frontend/config/editplan/scopeguard.ts\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- app/api/edits\", \"acceptanceCriteria\": [\"Auth\", \"Schema and plot/census access\", \"Target row ownership\", \"Preview returns 423 on active upload/validation conflicts\", \"Invalid clear translated to 422\", \"Error translation\", \"No public bypass\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Shared preview dialog + undo toast + revert menu",
+      "status": "pending",
+      "blockedBy": [11],
+            "description": "**Goal:** React surface used by all four grids.\n\n**Files:**\n- frontend/components/editplan/ (5 files)\n- frontend/hooks/useEditPreviewFlow.ts\n\n**Verify:** cd frontend && npm run test:component -- components/editplan\n\n```json:metadata\n{\"files\": [\"frontend/components/editplan/previewdialog.tsx\", \"frontend/components/editplan/impactsummary.tsx\", \"frontend/hooks/useEditPreviewFlow.ts\"], \"verifyCommand\": \"cd frontend && npm run test:component -- components/editplan\", \"acceptanceCriteria\": [\"Severity tiers\", \"Typed gate\", \"Undo toast only when editOperationID is non-null\", \"Flow hook 409 re-render\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: Wire measurement datagrid to editplan + narrow isCellEditable",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** Replace PATCH with flow hook; lock taxonomy read-only.\n\n**Files:** measurementscommons.tsx, datagridcolumns.tsx\n\n**Verify:** cd frontend && npm run test:unit -- datagrids/measurementscommons\n\n```json:metadata\n{\"files\": [\"frontend/components/datagrids/measurementscommons.tsx\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- datagrids/measurementscommons\", \"acceptanceCriteria\": [\"Hook wired\", \"Columns locked\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 14: Wire Errors Explorer to shared preview dialog",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** Remove custom PATCH; use shared dialog.\n\n**Files:** errorsexplorer.tsx\n\n**Verify:** cd frontend && npm run test:component -- errorsexplorer\n\n```json:metadata\n{\"files\": [\"frontend/components/errors/errorsexplorer.tsx\"], \"verifyCommand\": \"cd frontend && npm run test:component -- errorsexplorer\", \"acceptanceCriteria\": [\"Shared dialog\", \"Custom flow removed\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 15: Wire failed-measurements grid to editplan",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** Use flow hook with dataType=failedmeasurements.\n\n**Files:** isolatedfailedmeasurementsdatagrid.tsx\n\n**Verify:** cd frontend && npm run test:component -- isolatedfailedmeasurementsdatagrid\n\n```json:metadata\n{\"files\": [\"frontend/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid.tsx\"], \"verifyCommand\": \"cd frontend && npm run test:component -- isolatedfailedmeasurementsdatagrid\", \"acceptanceCriteria\": [\"Hook wired\", \"Regression green\"]}\n```"
+    },
+    {
+      "id": 16,
+      "subject": "Task 16: Revision match endpoint returns BulkEditPlan + review UI",
+      "status": "pending",
+      "blockedBy": [11, 12],
+      "description": "**Goal:** Match endpoint returns BulkEditPlan; review renders ImpactSummary.\n\n**Files:**\n- app/api/revisionupload/route.ts\n- uploadrevisionmatch.tsx\n- revisionuploadtypes.ts\n\n**Verify:** cd frontend && npm run test:integration -- revisionupload\n\n```json:metadata\n{\"files\": [\"frontend/app/api/revisionupload/route.ts\", \"frontend/components/uploadsystem/segments/uploadrevisionmatch.tsx\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- revisionupload\", \"acceptanceCriteria\": [\"BulkEditPlan in response\", \"Summary renders\", \"R5/R6 only\"]}\n```"
+    },
+    {
+      "id": 17,
+      "subject": "Task 17: Revision apply — shared transactional primitive + typed-confirm gate",
+      "status": "pending",
+      "blockedBy": [16],
+      "description": "**Goal:** Matched rows go through applyEditInTransaction under one revision-apply transaction; UI gates destructive batches.\n\n**Files:**\n- app/api/revisionupload/apply/route.ts\n- uploadrevisionapply.tsx\n\n**Verify:** cd frontend && npm run test:integration -- revisionupload/apply\n\n```json:metadata\n{\"files\": [\"frontend/app/api/revisionupload/apply/route.ts\", \"frontend/components/uploadsystem/segments/uploadrevisionapply.tsx\"], \"verifyCommand\": \"cd frontend && npm run test:integration -- revisionupload/apply\", \"acceptanceCriteria\": [\"One outer transaction and scope lock\", \"applyEditInTransaction per matched row\", \"No applyEdit loop\", \"Batch hash check\", \"Bulk rows operationType=bulk-revision-row and revertable=false\", \"Failure rolls back entire batch\", \"Typed gate\"]}\n```"
+    },
+    {
+      "id": 18,
+      "subject": "Task 18: PATCH compatibility shim + remove SpeciesName rename branch",
+      "status": "pending",
+      "blockedBy": [13, 14, 15, 17],
+      "description": "**Goal:** Shim legacy route; delete rename branch.\n\n**Files:** coreapifunctions.ts\n\n**Verify:** cd frontend && npm run test:unit -- coreapifunctions\n\n```json:metadata\n{\"files\": [\"frontend/config/macros/coreapifunctions.ts\"], \"verifyCommand\": \"cd frontend && npm run test:unit -- coreapifunctions\", \"acceptanceCriteria\": [\"Shim routes\", \"Rename deleted\", \"No public bypass\"]}\n```"
+    },
+    {
+      "id": 19,
+      "subject": "Task 19: E2E Cypress + integration drift/lock sweep",
+      "status": "pending",
+      "blockedBy": [18],
+      "description": "**Goal:** End-to-end + integration coverage matching spec testing and review findings.\n\n**Files:**\n- cypress/e2e/row-edit-ramification.cy.ts\n- cypress/component/editplan-preview-dialog.cy.tsx\n- tests/integration/editplan-drift-and-lock.integration.test.ts\n\n**Verify:** cd frontend && npm run test:all\n\n```json:metadata\n{\"files\": [\"frontend/cypress/e2e/row-edit-ramification.cy.ts\", \"frontend/tests/integration/editplan-drift-and-lock.integration.test.ts\"], \"verifyCommand\": \"cd frontend && npm run test:all\", \"acceptanceCriteria\": [\"E2E\", \"Drift/lock integration\", \"Preview 423 on active upload/validation\", \"403/404 scope ownership checks\", \"Revision apply whole-batch rollback\", \"Revert restores secondary table side effects\", \"Suite green\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-21T12:00:00Z"
+}
