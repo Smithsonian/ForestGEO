@@ -39,6 +39,7 @@ export interface EditOperationWriteInput {
   createdBy: string;
 }
 
+// Keep in sync with the migration file: frontend/db-migrations/unified-measurements-migrations/54_create_edit_operations.sql.
 const CREATE_EDIT_OPERATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS ??.edit_operations (
     EditOperationID INT AUTO_INCREMENT PRIMARY KEY,

@@ -1,3 +1,4 @@
+-- Keep in sync with ensureEditOperationsTable DDL in frontend/config/editoperations.ts (CREATE_EDIT_OPERATIONS_TABLE_SQL).
 CREATE TABLE IF NOT EXISTS edit_operations (
   EditOperationID INT AUTO_INCREMENT PRIMARY KEY,
   OperationType ENUM('single-row-edit', 'revert') NOT NULL,
