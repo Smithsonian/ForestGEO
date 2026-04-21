@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
+import type { BulkEditPlan } from '@/config/editplan/types';
+
+const EMPTY_BULK_PLAN: BulkEditPlan = {
+  dataType: 'measurementssummary',
+  rowCount: 0,
+  rowPlans: [],
+  aggregateEffects: [],
+  maxSeverity: 'info',
+  planHash: 'test-plan-hash-empty',
+  generatedAt: '2026-04-20T00:00:00.000Z'
+};
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -7,7 +18,8 @@ const mocks = vi.hoisted(() => ({
   safeFormatQuery: vi.fn((_schema: string, query: string) => query),
   loggerError: vi.fn(),
   executeQuery: vi.fn(async () => []),
-  closeConnection: vi.fn(async () => undefined)
+  closeConnection: vi.fn(async () => undefined),
+  analyzeBulk: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({
@@ -34,6 +46,10 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
+vi.mock('@/config/editplan/bulkanalyzer', () => ({
+  analyzeBulk: (...args: unknown[]) => mocks.analyzeBulk(...args)
+}));
+
 function buildRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/revisionupload', {
     method: 'POST',
@@ -48,6 +64,7 @@ describe('POST /api/revisionupload', () => {
     mocks.isValidSchema.mockReturnValue(true);
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
+    mocks.analyzeBulk.mockResolvedValue({ ...EMPTY_BULK_PLAN });
   });
 
   it('matches View Data export rows by StemGUID and keeps the highest measurement ID as survivor', async () => {
@@ -170,7 +187,8 @@ describe('POST /api/revisionupload', () => {
         new: 0,
         invalid: 0,
         total: 1
-      }
+      },
+      bulkPlan: EMPTY_BULK_PLAN
     });
   });
 
@@ -804,6 +822,262 @@ describe('POST /api/revisionupload', () => {
 
     const body = await response.json();
     expect(body.matchedRows[0].ignoredEdits).toBeUndefined();
+  });
+
+  it('includes a bulkPlan in the response shaped as a BulkEditPlan with rowPlans, aggregateEffects, maxSeverity and a planHash', async () => {
+    const capturedBulkPlan: BulkEditPlan = {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [{ rowIndex: 0, targetID: 401, status: 'matched' }],
+      aggregateEffects: [],
+      maxSeverity: 'info',
+      planHash: 'captured-plan-hash',
+      generatedAt: '2026-04-20T00:00:00.000Z'
+    };
+    mocks.analyzeBulk.mockResolvedValue(capturedBulkPlan);
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        files: [{ fileName: 'basic.csv', rows: [{ stemid: '12345', dbh: '10.0' }] }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    const body = await response.json();
+    expect(body.bulkPlan).toEqual(capturedBulkPlan);
+  });
+
+  it('passes matched rows to analyzeBulk with coreMeasurementID as targetID and canonicalized Attributes/MeasuredDBH/... keys so R5 can fire on codes changes across 3 rows', async () => {
+    const dbRows = [
+      {
+        CoreMeasurementID: 501,
+        StemGUID: 100,
+        IsActive: 1,
+        MeasuredDBH: 20.0,
+        MeasuredHOM: 1.3,
+        MeasurementDate: '2026-03-14',
+        RawCodes: 'A',
+        Description: null,
+        RawTreeTag: 'T1',
+        RawStemTag: 'S1',
+        StemIsActive: 1,
+        TreeIsActive: 1,
+        QuadratIsActive: 1,
+        PlotID: 1,
+        TreeTag: 'T1',
+        StemTag: 'S1',
+        SpeciesCode: 'SP1',
+        QuadratName: 'Q1',
+        LocalX: 1,
+        LocalY: 1
+      },
+      {
+        CoreMeasurementID: 502,
+        StemGUID: 200,
+        IsActive: 1,
+        MeasuredDBH: 21.0,
+        MeasuredHOM: 1.3,
+        MeasurementDate: '2026-03-14',
+        RawCodes: 'A',
+        Description: null,
+        RawTreeTag: 'T2',
+        RawStemTag: 'S2',
+        StemIsActive: 1,
+        TreeIsActive: 1,
+        QuadratIsActive: 1,
+        PlotID: 1,
+        TreeTag: 'T2',
+        StemTag: 'S2',
+        SpeciesCode: 'SP1',
+        QuadratName: 'Q1',
+        LocalX: 1,
+        LocalY: 1
+      },
+      {
+        CoreMeasurementID: 503,
+        StemGUID: 300,
+        IsActive: 1,
+        MeasuredDBH: 22.0,
+        MeasuredHOM: 1.3,
+        MeasurementDate: '2026-03-14',
+        RawCodes: 'A',
+        Description: null,
+        RawTreeTag: 'T3',
+        RawStemTag: 'S3',
+        StemIsActive: 1,
+        TreeIsActive: 1,
+        QuadratIsActive: 1,
+        PlotID: 1,
+        TreeTag: 'T3',
+        StemTag: 'S3',
+        SpeciesCode: 'SP1',
+        QuadratName: 'Q1',
+        LocalX: 1,
+        LocalY: 1
+      }
+    ];
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) return dbRows;
+      return [];
+    });
+
+    const R5_EFFECT = {
+      id: 'R5',
+      severity: 'destructive' as const,
+      category: 'destructive' as const,
+      title: 'Attribute codes A will be removed',
+      detail: '3 row(s) affected',
+      affectedTable: 'cmattributes',
+      affectedRowCount: 3
+    };
+    mocks.analyzeBulk.mockResolvedValue({
+      dataType: 'measurementssummary',
+      rowCount: 3,
+      rowPlans: [
+        { rowIndex: 0, targetID: 501, status: 'matched' },
+        { rowIndex: 1, targetID: 502, status: 'matched' },
+        { rowIndex: 2, targetID: 503, status: 'matched' }
+      ],
+      aggregateEffects: [R5_EFFECT],
+      maxSeverity: 'destructive',
+      planHash: 'r5-plan-hash',
+      generatedAt: '2026-04-20T00:00:00.000Z'
+    } as BulkEditPlan);
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'attr-changes.csv',
+            rows: [
+              { stemid: '100', codes: 'B' },
+              { stemid: '200', codes: 'B' },
+              { stemid: '300', codes: 'B' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeBulkArgs = mocks.analyzeBulk.mock.calls[0];
+    // args: (cm, schema, dataType, plotID, censusID, bulkInput)
+    expect(analyzeBulkArgs[1]).toBe('forestgeo_testing');
+    expect(analyzeBulkArgs[2]).toBe('measurementssummary');
+    expect(analyzeBulkArgs[3]).toBe(1);
+    expect(analyzeBulkArgs[4]).toBe(2);
+    const bulkInput = analyzeBulkArgs[5];
+    expect(bulkInput.matched).toHaveLength(3);
+    expect(bulkInput.matched[0].targetID).toBe(501);
+    expect(bulkInput.matched[0].newRow).toEqual({ Attributes: 'B' });
+    expect(bulkInput.matched[1].targetID).toBe(502);
+    expect(bulkInput.matched[1].newRow).toEqual({ Attributes: 'B' });
+    expect(bulkInput.matched[2].targetID).toBe(503);
+
+    const body = await response.json();
+    const r5 = body.bulkPlan.aggregateEffects.find((e: { id: string }) => e.id === 'R5');
+    expect(r5).toBeTruthy();
+    expect(r5.affectedRowCount).toBe(3);
+    expect(body.bulkPlan.maxSeverity).toBe('destructive');
+  });
+
+  it('forwards duplicateMeasurementIDsToDelete into analyzeBulk so R6 fires with destructive severity when duplicate survivors are detected', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 600,
+            StemGUID: 700,
+            IsActive: 1,
+            MeasuredDBH: 10.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'SP1',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 601,
+            StemGUID: 700,
+            IsActive: 1,
+            MeasuredDBH: 10.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'SP1',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    const R6_EFFECT = {
+      id: 'R6',
+      severity: 'destructive' as const,
+      category: 'destructive' as const,
+      title: '1 duplicate measurement(s) will be deleted',
+      detail: 'Survivor selection keeps one measurement per stem in this census; the rest are removed.',
+      affectedTable: 'coremeasurements',
+      affectedRowCount: 1
+    };
+    mocks.analyzeBulk.mockResolvedValue({
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [{ rowIndex: 0, targetID: 601, status: 'matched' }],
+      aggregateEffects: [R6_EFFECT],
+      maxSeverity: 'destructive',
+      planHash: 'r6-plan-hash',
+      generatedAt: '2026-04-20T00:00:00.000Z'
+    } as BulkEditPlan);
+
+    const response = await POST(
+      buildRequest({
+        files: [{ fileName: 'dup.csv', rows: [{ stemid: '700', dbh: '10.0' }] }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const bulkInput = mocks.analyzeBulk.mock.calls[0][5];
+    expect(bulkInput.duplicateMeasurementIDsToDelete).toEqual([600]);
+
+    const body = await response.json();
+    const r6 = body.bulkPlan.aggregateEffects.find((e: { id: string }) => e.id === 'R6');
+    expect(r6).toBeTruthy();
+    expect(r6.severity).toBe('destructive');
+    expect(body.bulkPlan.maxSeverity).toBe('destructive');
   });
 
   it('rejects files that do not contain stemid values or tag + stemtag headers', async () => {

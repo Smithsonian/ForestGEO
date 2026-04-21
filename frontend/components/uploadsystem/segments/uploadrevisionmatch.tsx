@@ -4,12 +4,15 @@ import React, { useState } from 'react';
 import { Alert, Box, Button, Chip, Sheet, Stack, Tab, TabList, TabPanel, Table, Tabs, Typography } from '@mui/joy';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { RevisionInvalidRow, RevisionMatchCounts, RevisionMatchedRow, RevisionNewRowCandidate } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
+import ImpactSummary from '@/components/editplan/impactsummary';
 
 interface UploadRevisionMatchProps {
   matchedRows: RevisionMatchedRow[];
   newRows: RevisionNewRowCandidate[];
   invalidRows: RevisionInvalidRow[];
   counts: RevisionMatchCounts;
+  bulkPlan?: BulkEditPlan;
   schema: string;
   plotID: number;
   censusID: number;
@@ -58,9 +61,10 @@ function hasIgnoredEdits(row: RevisionMatchedRow): boolean {
 }
 
 export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
-  const { matchedRows, newRows, invalidRows, counts, onApply, handleReturnToStart } = props;
+  const { matchedRows, newRows, invalidRows, counts, bulkPlan, onApply, handleReturnToStart } = props;
 
   const [confirmNewRows, setConfirmNewRows] = useState(false);
+  const [impactSummaryOpen, setImpactSummaryOpen] = useState(false);
 
   const rowsWithChanges = matchedRows.filter(r => Object.keys(r.changes).length > 0);
   const rowsWithDuplicateCleanupOnly = matchedRows.filter(r => Object.keys(r.changes).length === 0 && hasDuplicateCleanup(r));
@@ -346,10 +350,28 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         <Button variant="outlined" color="neutral" onClick={handleReturnToStart}>
           Cancel
         </Button>
-        <Button variant="solid" color="primary" disabled={!canApply} onClick={() => onApply(confirmNewRows)}>
+        <Button
+          variant="solid"
+          color="primary"
+          disabled={!canApply}
+          onClick={() => (bulkPlan ? setImpactSummaryOpen(true) : onApply(confirmNewRows))}
+          data-testid="revision-match-apply"
+        >
           Apply {actionableMatchedRowCount + (confirmNewRows ? newRows.length : 0)} Revisions
         </Button>
       </Stack>
+
+      {bulkPlan && impactSummaryOpen ? (
+        <ImpactSummary
+          bulkPlan={bulkPlan}
+          onConfirm={async () => {
+            setImpactSummaryOpen(false);
+            onApply(confirmNewRows);
+          }}
+          onCancel={() => setImpactSummaryOpen(false)}
+          busy={false}
+        />
+      ) : null}
     </Stack>
   );
 }

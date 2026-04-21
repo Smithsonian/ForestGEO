@@ -343,6 +343,7 @@ function UploadParentInner(props: UploadParentProps) {
             newRows={revisionMatchResult?.newRows ?? []}
             invalidRows={revisionMatchResult?.invalidRows ?? []}
             counts={revisionMatchResult?.counts ?? EMPTY_REVISION_MATCH_COUNTS}
+            bulkPlan={revisionMatchResult?.bulkPlan}
             schema={currentSite?.schemaName || ''}
             plotID={currentPlotID ?? 0}
             censusID={currentCensusID ?? 0}

@@ -1,4 +1,5 @@
 import { FileRow } from '@/config/macros/formdetails';
+import { BulkEditPlan } from '@/config/editplan/types';
 
 export interface RevisionMatchedRow {
   csvRow: FileRow;
@@ -60,6 +61,14 @@ export interface RevisionUploadResponse {
   newRows: RevisionNewRowCandidate[];
   invalidRows: RevisionInvalidRow[];
   counts: RevisionMatchCounts;
+  /**
+   * Bulk edit plan for this revision match, surfacing downstream effects
+   * (R5 attributes rebuild, R6 duplicate deletion) so the review screen
+   * can render an impact summary and gate destructive applies behind a
+   * typed-confirm prompt. See app/api/revisionupload/route.ts for Phase 1
+   * scope (attributes + duplicates only).
+   */
+  bulkPlan: BulkEditPlan;
 }
 
 export interface RevisionApplyMatchedRow {

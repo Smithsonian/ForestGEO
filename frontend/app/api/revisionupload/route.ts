@@ -6,9 +6,22 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';
 import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
 
 export const runtime = 'nodejs';
 
+/**
+ * Phase 1 scope for the revision-upload bulk plan:
+ * UPDATABLE_FIELDS below (`dbh`, `hom`, `date`, `codes`, `comments`) are the
+ * only fields written back to the DB. The bulk plan therefore only surfaces
+ * R5 (cmattributes rebuild from `codes`/`Attributes` changes) and R6
+ * (duplicate survivor cleanup from `duplicateMeasurementIDsToDelete`).
+ * Identity edits (`spcode`, `tag`, `stemtag`, `quadrat`, `lx`, `ly`) listed in
+ * IGNORED_EDIT_FIELDS are intentionally not propagated into `analyzeBulk`;
+ * they are already surfaced to the user via `ignoredEdits` on each matched
+ * row, which the review screen renders as ignored-edit warnings rather than
+ * plan effects.
+ */
 const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 const REQUIRED_INSERT_FIELDS = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'] as const;
 /**
@@ -503,6 +516,65 @@ async function loadMeasurementsByTagStemTag(
   return groupedRows;
 }
 
+/**
+ * Maps the CSV's lowercase updatable field keys (`dbh`, `hom`, `date`,
+ * `codes`, `comments`) onto the canonical `measurementssummary` surface keys
+ * the bulk analyzer expects. Blank/NULL placeholders are dropped so the
+ * analyzer's diff only sees real intended writes. `codes` is renamed to
+ * `Attributes` so the R5 attribute rule fires on code changes.
+ */
+function buildAnalyzerNewRow(csvRow: FileRow): Record<string, unknown> {
+  const newRow: Record<string, unknown> = {};
+  for (const field of UPDATABLE_FIELDS) {
+    const value = csvRow[field];
+    if (isBlankOrNullPlaceholder(value)) continue;
+    const trimmed = String(value).trim();
+
+    if (field === 'codes') {
+      newRow.Attributes = trimmed;
+    } else if (field === 'dbh') {
+      newRow.MeasuredDBH = trimmed;
+    } else if (field === 'hom') {
+      newRow.MeasuredHOM = trimmed;
+    } else if (field === 'date') {
+      newRow.MeasurementDate = trimmed;
+    } else if (field === 'comments') {
+      newRow.Description = trimmed;
+    }
+  }
+  return newRow;
+}
+
+function buildBulkInput(
+  matchedRows: RevisionMatchedRow[],
+  newRows: RevisionNewRowCandidate[],
+  invalidRows: RevisionInvalidRow[]
+): BulkInput {
+  const allDuplicateIDs: number[] = [];
+  for (const row of matchedRows) {
+    if (row.duplicateMeasurementIDsToDelete) {
+      allDuplicateIDs.push(...row.duplicateMeasurementIDsToDelete);
+    }
+  }
+
+  return {
+    matched: matchedRows.map((row, index) => ({
+      rowIndex: index,
+      targetID: row.coreMeasurementID,
+      newRow: buildAnalyzerNewRow(row.csvRow)
+    })),
+    newRows: newRows.map(row => ({
+      rowIndex: row.csvIndex,
+      newRow: buildAnalyzerNewRow(row.csvRow)
+    })),
+    invalid: invalidRows.map(row => ({
+      rowIndex: row.csvIndex,
+      reason: row.reason
+    })),
+    duplicateMeasurementIDsToDelete: allDuplicateIDs
+  };
+}
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
 
@@ -697,6 +769,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       csvIndexOffset += file.rows.length;
     }
 
+    const bulkPlan = await analyzeBulk(
+      connectionManager,
+      schema,
+      'measurementssummary',
+      normalizedPlotID,
+      normalizedCensusID,
+      buildBulkInput(matchedRows, newRows, invalidRows)
+    );
+
     const response: RevisionUploadResponse = {
       matchedRows,
       newRows,
@@ -707,7 +788,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         new: newRows.length,
         invalid: invalidRows.length,
         total: matchedRows.length + newRows.length + invalidRows.length
-      }
+      },
+      bulkPlan
     };
 
     return NextResponse.json(response, { status: HTTPResponses.OK });
