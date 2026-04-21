@@ -68,3 +68,5 @@ frontend/docs/.vscode/**
 # DB migration backups and generated SQL
 frontend/db-migrations/unified-measurements-migrations/backups/
 frontend/db-migrations/unified-measurements-migrations/branch_refresh_00_ensure_upload_tracking_tables.sql
+/superpowers
+/.superpowers/
