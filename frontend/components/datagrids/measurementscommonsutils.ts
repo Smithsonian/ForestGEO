@@ -1,15 +1,14 @@
 import { GridFilterItem, GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
-import { EDITABLE_FIELDS_BY_SURFACE, FIELD_ALIASES_BY_SURFACE } from '@/config/editplan/fieldpolicy';
+import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE } from '@/config/editplan/fieldpolicy';
 
-const MEASUREMENT_EDITABLE_FIELDS = EDITABLE_FIELDS_BY_SURFACE.measurementssummary;
-const MEASUREMENT_FIELD_ALIASES = FIELD_ALIASES_BY_SURFACE.measurementssummary;
-
-export function buildEditableFieldsDiff(newRow: GridRowModel, oldRow: GridRowModel): Record<string, unknown> {
+export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: GridRowModel, surface: EditSurface): Record<string, unknown> {
+  const editableFields = EDITABLE_FIELDS_BY_SURFACE[surface];
+  const aliases = FIELD_ALIASES_BY_SURFACE[surface];
   const diff: Record<string, unknown> = {};
   for (const [rawKey, newValue] of Object.entries(newRow)) {
-    const canonicalField = MEASUREMENT_FIELD_ALIASES[rawKey] ?? rawKey;
-    if (!MEASUREMENT_EDITABLE_FIELDS.has(canonicalField)) continue;
+    const canonicalField = aliases[rawKey] ?? rawKey;
+    if (!editableFields.has(canonicalField)) continue;
     const oldValue = oldRow[rawKey];
     if (Object.is(newValue, oldValue)) continue;
     if (newValue instanceof Date || oldValue instanceof Date) {
@@ -20,6 +19,10 @@ export function buildEditableFieldsDiff(newRow: GridRowModel, oldRow: GridRowMod
     diff[canonicalField] = newValue;
   }
   return diff;
+}
+
+export function buildEditableFieldsDiff(newRow: GridRowModel, oldRow: GridRowModel): Record<string, unknown> {
+  return buildEditableFieldsDiffForSurface(newRow, oldRow, 'measurementssummary');
 }
 
 export interface FormattedQueryRequest {

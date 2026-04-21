@@ -98,7 +98,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     apiRef = undefined,
     adminEmail = undefined,
     onDataUpdate,
-    onDataLoaded
+    onDataLoaded,
+    editFlowOverride
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -613,17 +614,21 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           [id]: { mode: GridRowModes.View }
         }));
 
-        const updatedRow = await updateRow(
-          gridType,
-          currentSite?.schemaName,
-          confirmedRow,
-          promiseArguments.oldRow,
-          setSnackbar,
-          setIsNewRowAdded,
-          setShouldAddRowAfterFetch,
-          fetchPaginatedData,
-          paginationModel
-        );
+        const isNewRow = promiseArguments.oldRow.isNew || !confirmedRow.id;
+        const updatedRow =
+          editFlowOverride && !isNewRow
+            ? await editFlowOverride(confirmedRow, promiseArguments.oldRow)
+            : await updateRow(
+                gridType,
+                currentSite?.schemaName,
+                confirmedRow,
+                promiseArguments.oldRow,
+                setSnackbar,
+                setIsNewRowAdded,
+                setShouldAddRowAfterFetch,
+                fetchPaginatedData,
+                paginationModel
+              );
 
         promiseArguments.resolve(updatedRow);
 
@@ -655,7 +660,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       clearPageCache,
       fetchPaginatedData,
       updateRow,
-      onDataUpdate
+      onDataUpdate,
+      editFlowOverride
     ]
   );
 
@@ -891,17 +897,19 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
 
       try {
-        const updatedRow = await updateRow(
-          gridType,
-          currentSite?.schemaName,
-          newRow,
-          oldRow,
-          setSnackbar,
-          setIsNewRowAdded,
-          setShouldAddRowAfterFetch,
-          fetchPaginatedData,
-          paginationModel
-        );
+        const updatedRow = editFlowOverride
+          ? await editFlowOverride(newRow, oldRow)
+          : await updateRow(
+              gridType,
+              currentSite?.schemaName,
+              newRow,
+              oldRow,
+              setSnackbar,
+              setIsNewRowAdded,
+              setShouldAddRowAfterFetch,
+              fetchPaginatedData,
+              paginationModel
+            );
         return updatedRow;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -920,7 +928,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       fetchPaginatedData,
       paginationModel,
       openConfirmationDialog,
-      updateRow
+      updateRow,
+      editFlowOverride
     ]
   );
 

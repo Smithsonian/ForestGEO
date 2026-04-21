@@ -17,6 +17,10 @@ import { loadSelectableOptions, selectableAutocomplete } from '@/components/clie
 import ailogger from '@/ailogger';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffForSurface } from '@/components/datagrids/measurementscommonsutils';
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -85,10 +89,25 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [validationResults, setValidationResults] = useState<any>(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const [editFlowError, setEditFlowError] = useState<string | null>(null);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const apiRef = useGridApiRef();
+
+  const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'failedmeasurements',
+    surface: 'failedmeasurements',
+    onError: error => {
+      setEditFlowError(error.message);
+    }
+  });
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -192,24 +211,31 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     [selectableOpts, countInvalidCodes]
   );
 
-  const onRowSave = useCallback(
-    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
+  const applyEditViaPreviewFlow = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+      const failedMeasurementID = Number(newRow.failedMeasurementID ?? oldRow.failedMeasurementID);
+      if (!Number.isFinite(failedMeasurementID) || failedMeasurementID <= 0) {
+        throw new Error('Missing failedMeasurementID for edit');
+      }
+
+      const editableDiff = buildEditableFieldsDiffForSurface(newRow, oldRow, 'failedmeasurements');
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
-      const failedMeasurementID = newRow.failedMeasurementID ?? oldRow.failedMeasurementID;
+
+      if (Object.keys(editableDiff).length > 0) {
+        try {
+          const applyResult = await editFlow.beginEdit(failedMeasurementID, editableDiff);
+          if (applyResult.editOperationID !== null) {
+            setUndoToastOperationID(applyResult.editOperationID);
+          }
+        } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ailogger.error('Failed to save row via edit preview flow:', err);
+          throw err;
+        }
+      }
 
       try {
-        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newRow: updatedRow, oldRow: oldRow })
-        });
-
-        if (!updateResponse.ok) {
-          const errorData = await updateResponse.json().catch(() => ({ message: `HTTP ${updateResponse.status}` }));
-          throw new Error(errorData.message || `Failed to save row edits: ${updateResponse.status}`);
-        }
-
         if (reasons.length === 0) {
           const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`);
           if (!reingestResponse.ok) {
@@ -219,21 +245,21 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
 
           await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
 
-          // Notify parent that a row was successfully reingested
           if (onRowReingested) {
             onRowReingested();
           }
         }
 
-        // Trigger refresh immediately - no arbitrary delay needed
-        // The database operations are already complete at this point
         setRefresh(true);
-      } catch (error: any) {
-        ailogger.error('Failed to save row:', error);
-        throw error;
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Failed to finalize row save:', err);
+        throw err;
       }
+
+      return updatedRow;
     },
-    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested]
+    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested, editFlow]
   );
 
   const displayFailureReason = useCallback(
@@ -428,8 +454,51 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         ]}
         defaultHideEmpty={false}
         apiRef={apiRef as RefObject<GridApiCommunity>}
-        onDataUpdate={onRowSave}
+        editFlowOverride={applyEditViaPreviewFlow}
       />
+      {editFlow.dialogState.open && editFlow.dialogState.plan && (
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
+      )}
+      {undoToastOperationID !== null && (
+        <UndoToast
+          editOperationID={undoToastOperationID}
+          onUndo={async () => {
+            try {
+              const response = await fetch(`/api/edits/revert`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  schema: currentSite?.schemaName ?? '',
+                  plotID: currentPlot?.plotID ?? 0,
+                  censusID: activeCensusID ?? 0,
+                  editOperationID: undoToastOperationID
+                })
+              });
+              if (!response.ok) {
+                throw new Error(`revert failed (${response.status})`);
+              }
+              setRefresh(true);
+            } catch (error: unknown) {
+              const err = error instanceof Error ? error : new Error(String(error));
+              ailogger.error('Undo failed:', err);
+              setEditFlowError(`Undo failed: ${err.message}`);
+            }
+          }}
+          onDismiss={() => setUndoToastOperationID(null)}
+        />
+      )}
+      {editFlowError !== null && (
+        <Box sx={{ mt: 1 }}>
+          <Chip variant="soft" color="danger" onClick={() => setEditFlowError(null)}>
+            {editFlowError}
+          </Chip>
+        </Box>
+      )}
       <ValidationCheckModal open={validationModalOpen} onClose={() => setValidationModalOpen(false)} results={validationResults} />
     </>
   ) : (

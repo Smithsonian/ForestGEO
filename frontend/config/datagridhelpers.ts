@@ -193,6 +193,7 @@ export interface IsolatedDataGridCommonProps {
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
   adminEmail?: string;
+  editFlowOverride?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
 }
 
 export interface DataGridCommonProps {
