@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     refreshMeasurementViewsForScope: vi.fn(async () => undefined),
     assertCanEditMeasurementScope: vi.fn(async () => undefined),
     writeEditOperation: vi.fn(async () => 1),
+    ensureEditOperationsTable: vi.fn(async () => undefined),
     MockScopeAccessError: class MockScopeAccessError extends Error {},
     MockScopeBusyError: class MockScopeBusyError extends Error {},
     MockScopeLockHeldError: class MockScopeLockHeldError extends Error {},
@@ -131,7 +132,8 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 }));
 
 vi.mock('@/config/editoperations', () => ({
-  writeEditOperation: mocks.writeEditOperation
+  writeEditOperation: mocks.writeEditOperation,
+  ensureEditOperationsTable: mocks.ensureEditOperationsTable
 }));
 
 vi.mock('@/ailogger', () => ({

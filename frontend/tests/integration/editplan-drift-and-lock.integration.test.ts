@@ -912,48 +912,21 @@ describe('editplan drift + lock (integration)', () => {
       expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
     });
 
-    // Exercises the FULL production bulk primitive (applyEditInTransaction)
-    // inside one outer transaction, mirroring the loop in
-    // app/api/revisionupload/apply/route.ts:902. The sibling test above drives
-    // the writer directly to prove writer-level transactional correctness; this
-    // test proves the invariant one level up — that a mid-loop failure rolls
-    // back prior iterations' ledger + data writes.
+    // Exercises the production bulk primitive (applyEditInTransaction) inside
+    // one outer transaction, mirroring the loop in the revision-apply route.
+    // The sibling test above drives the writer directly to prove writer-level
+    // transactional correctness; this test proves the invariant one level up —
+    // that a mid-loop failure rolls back prior iterations' data writes under
+    // the full apply primitive, including its edit_operations bootstrap.
     //
-    // CURRENTLY SKIPPED — reveals a confirmed production bug.
-    //
-    // applyEditInTransaction calls ensureEditOperationsTable on every invocation
-    // (frontend/config/editplan/apply.ts:81). That function issues
-    // `CREATE TABLE IF NOT EXISTS ??.edit_operations` (frontend/config/editoperations.ts:140).
-    // MySQL 8.0 treats CREATE TABLE as a DDL statement that implicitly commits
-    // the current transaction BEFORE executing, even when the IF NOT EXISTS
-    // branch is a no-op. Verified empirically against MySQL 8.0.36:
-    //
-    //   START TRANSACTION;
-    //   UPDATE t SET v=99 WHERE id=1;
-    //   CREATE TABLE IF NOT EXISTS existing_table (...);  -- implicit commit here
-    //   ROLLBACK;                                         -- no-op, nothing to roll back
-    //   SELECT v FROM t WHERE id=1;                       -- 99 (durable)
-    //
-    // So in the bulk loop at app/api/revisionupload/apply/route.ts:880-919, the
-    // second iteration's ensureEditOperationsTable commits row 1's data UPDATE
-    // + ledger INSERT; if a later iteration throws, the outer withTransaction's
-    // rollback cannot undo prior iterations' work. The Batch B writer-direct
-    // test passes because it sidesteps ensureEditOperationsTable, but that bypass
-    // is exactly what the production route cannot do.
-    //
-    // Proposed fix (outside the scope of this test):
-    //   1. Hoist ensureEditOperationsTable to run ONCE before opening the outer
-    //      transaction in app/api/revisionupload/apply/route.ts (and any other
-    //      batch caller). The function is idempotent and safe to call without
-    //      a transactionID.
-    //   2. Add an option like `schemaEnsured?: boolean` to ApplyInTransactionInput
-    //      (frontend/config/editplan/apply.ts) so per-iteration calls can skip
-    //      the DDL. Default false preserves behavior for single-row callers.
-    //
-    // When the fix lands, remove the .skip on the it() below. The assertions
-    // already describe the correct post-fix behavior: row 1 reverted, row 2
-    // unchanged, and zero ledger rows for either target.
-    it.skip('rolls back the first applyEditInTransaction when the second call throws inside the same outer transaction', async () => {
+    // Regression guard for the DDL-implicit-commit fix: applyEditInTransaction
+    // used to call ensureEditOperationsTable every iteration, and MySQL 8.0
+    // implicitly commits on CREATE TABLE IF NOT EXISTS even for a no-op. That
+    // committed each iteration's UPDATE independently and defeated the outer
+    // rollback. The fix hoists the DDL out of the bulk loop and passes
+    // schemaEnsured: true to the per-row apply. If either half of that fix is
+    // reverted, this test catches it by failing on the row-1 rollback check.
+    it('rolls back the first applyEditInTransaction when the second call throws inside the same outer transaction', async () => {
       const SECOND_TREE_TAG = 'DLT003';
       const SECOND_STEM_TAG = 'DLS3';
       const SECOND_INITIAL_DBH = 8.88;
@@ -1041,6 +1014,10 @@ describe('editplan drift + lock (integration)', () => {
         );
         expect(acquired).toBe(true);
 
+        // schemaEnsured: true mirrors the bulk route's contract — the caller
+        // has already called ensureEditOperationsTable outside the transaction,
+        // so the per-row applyEditInTransaction skips the DDL that would
+        // otherwise implicit-commit the outer transaction.
         await applyEditInTransaction(cm, {
           dataType: 'measurementssummary',
           schema: config.database,
@@ -1054,7 +1031,8 @@ describe('editplan drift + lock (integration)', () => {
           refreshViews: false,
           createdBy: LEDGER_CREATED_BY,
           role: 'global',
-          transactionID: outerTxID
+          transactionID: outerTxID,
+          schemaEnsured: true
         });
 
         await expect(
@@ -1071,7 +1049,8 @@ describe('editplan drift + lock (integration)', () => {
             refreshViews: false,
             createdBy: LEDGER_CREATED_BY,
             role: 'global',
-            transactionID: outerTxID
+            transactionID: outerTxID,
+            schemaEnsured: true
           })
         ).rejects.toThrow(/[Ss]pecies not found/);
 

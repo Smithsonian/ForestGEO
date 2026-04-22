@@ -48,6 +48,13 @@ export interface ApplyInput {
   createdBy: string;
   role?: UserAuthRoles | null;
   assertAuthorizationFresh?: () => Promise<void>;
+  // Batch callers MUST set this true and call ensureEditOperationsTable ONCE
+  // before opening the outer transaction. MySQL treats CREATE TABLE IF NOT
+  // EXISTS as a DDL implicit-commit even when the table already exists, so a
+  // per-iteration DDL call commits prior iterations' writes and defeats the
+  // outer rollback. Default false preserves the self-bootstrap behavior for
+  // single-row callers that own their own transaction.
+  schemaEnsured?: boolean;
 }
 
 export interface ApplyInTransactionInput extends ApplyInput {
@@ -78,7 +85,9 @@ export async function applyEdit(cm: ConnectionManager, input: ApplyInput): Promi
 }
 
 export async function applyEditInTransaction(cm: ConnectionManager, input: ApplyInTransactionInput): Promise<ApplyResult> {
-  await ensureEditOperationsTable(cm, input.schema, input.transactionID);
+  if (!input.schemaEnsured) {
+    await ensureEditOperationsTable(cm, input.schema, input.transactionID);
+  }
 
   const freshPlan = await analyzeEdit(
     cm,

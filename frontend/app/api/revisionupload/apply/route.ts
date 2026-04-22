@@ -16,7 +16,7 @@ import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from 
 import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
-import { writeEditOperation } from '@/config/editoperations';
+import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
 
 export const runtime = 'nodejs';
 
@@ -806,6 +806,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await ensureUploadSessionsTable(schema);
     ailogger.info(`${logPrefix} ensureUploadSessionsTable complete in ${Date.now() - ensureSessionsStartedAt}ms for schema=${schema}`);
 
+    // Ensure the edit_operations table exists OUTSIDE the outer transaction.
+    // applyEditInTransaction and writeEditOperation both require the table,
+    // but their usual self-bootstrap (via ensureEditOperationsTable inside
+    // applyEditInTransaction) runs CREATE TABLE IF NOT EXISTS each iteration,
+    // which MySQL treats as a DDL implicit-commit — ending the outer
+    // transaction and defeating mid-bulk rollback. Bootstrap once here, then
+    // pass schemaEnsured: true to every applyEditInTransaction call below.
+    await ensureEditOperationsTable(connectionManager, schema);
+
     const transactionStartedAt = Date.now();
     ailogger.info(`${logPrefix} transaction requested for schema=${schema} plot=${normalizedPlotID} census=${normalizedCensusID}`);
     const createdBy = session.user.email ?? session.user.name ?? 'revision-apply';
@@ -916,7 +925,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           refreshViews: false,
           createdBy,
           role: session.user.userStatus,
-          transactionID
+          transactionID,
+          schemaEnsured: true
         });
 
         updatedCount++;
