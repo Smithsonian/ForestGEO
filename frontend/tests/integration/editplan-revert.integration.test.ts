@@ -81,6 +81,7 @@ import {
 } from '@/config/editplan/revert';
 import { ScopeLockHeldError } from '@/config/editplan/apply';
 import { readEditOperation } from '@/config/editoperations';
+import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 
 // ---------------------------------------------------------------------------
 // Fixture constants (kept short — StemTag is varchar(10)).
@@ -560,6 +561,73 @@ describe('revertEdit (integration)', () => {
 
       const original = await readEditOperation(cm, config.database, originalEditOperationID);
       expect(original!.revertedByEditOperationID).toBeNull();
+    });
+
+    // Referenced-entity deletion: the pre-edit species gets deactivated after the
+    // original edit, before anyone tries to undo the edit. Revert wants to restore
+    // SpeciesCode = ACERRU (captured in the ledger), but resolveSpeciesByCode only
+    // finds IsActive=1 rows. The revert must fail fast with SpeciesNotFoundError at
+    // analysis time — before the scope lock writes anything — and leave both the
+    // measurement's post-edit state and the original ledger entry intact so the
+    // user can make a conscious decision about the now-orphaned reference.
+    it('throws SpeciesNotFoundError when the pre-edit species has been deactivated since the original edit', async () => {
+      // SpeciesCode is gated to 'global' / 'db admin' by the field role policy,
+      // so both apply and revert must be called with an admin role for the
+      // underlying write paths to be reached at all. (A field-crew caller would
+      // be rejected with RoleForbiddenFieldError well before analysis.)
+      const ADMIN_ROLE = 'global';
+      const applyResult = await applyEdit(cm, {
+        dataType: 'measurementssummary',
+        schema: config.database,
+        plotID: fixture.plotID,
+        censusID: fixture.censusID,
+        targetID: fixture.coreMeasurementID,
+        newRow: { SpeciesCode: SPECIES_CODE_QUERCO },
+        expectedPlanHash: null,
+        createdBy: CREATED_BY_APPLY,
+        role: ADMIN_ROLE
+      });
+      const originalEditOperationID = applyResult.editOperationID!;
+
+      // Drift in isolation: an admin deactivates the species we came from.
+      await connection.query('UPDATE species SET IsActive = 0 WHERE SpeciesCode = ?', [SPECIES_CODE_ACERRU]);
+
+      try {
+        await expect(
+          revertEdit(cm, {
+            schema: config.database,
+            editOperationID: originalEditOperationID,
+            createdBy: CREATED_BY_REVERT,
+            role: ADMIN_ROLE
+          })
+        ).rejects.toBeInstanceOf(SpeciesNotFoundError);
+
+        const original = await readEditOperation(cm, config.database, originalEditOperationID);
+        expect(original!.revertedByEditOperationID).toBeNull();
+
+        // No revert ledger row should have been written for this target.
+        const [revertRowsForTarget] = await connection.query<RowDataPacket[]>(
+          `SELECT COUNT(*) AS cnt FROM edit_operations WHERE OperationType = 'revert' AND TargetID = ?`,
+          [fixture.coreMeasurementID]
+        );
+        expect(Number(revertRowsForTarget[0].cnt)).toBe(0);
+
+        // The measurement stays at the post-apply state (QUERCO species) — the
+        // failed revert did not flip tree linkage halfway.
+        const cmRowAfter = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+        const [stemRowsAfter] = await connection.query<RowDataPacket[]>(
+          'SELECT TreeID FROM stems WHERE StemGUID = ?',
+          [cmRowAfter.StemGUID]
+        );
+        const [treeRowsAfter] = await connection.query<RowDataPacket[]>(
+          'SELECT SpeciesID FROM trees WHERE TreeID = ?',
+          [stemRowsAfter[0].TreeID]
+        );
+        expect(treeRowsAfter[0].SpeciesID).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
+      } finally {
+        // Restore species state so downstream tests see the seeded fixture.
+        await connection.query('UPDATE species SET IsActive = 1 WHERE SpeciesCode = ?', [SPECIES_CODE_ACERRU]);
+      }
     });
 
     it('proceeds when the client re-posts revert with confirmedPlanHash matching the fresh plan', async () => {

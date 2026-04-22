@@ -179,6 +179,65 @@ describe('applyTreeStemRules', () => {
     expect(effects[1].severity).toBe('destructive');
   });
 
+  // Cascade worst case: a single-measurement stem on a single-stem tree moves to a new
+  // tree + new stem identity. Both source tree and source stem lose their last child in
+  // the same plan, so both rules must report destructive severity. The analyzer sums
+  // these into a single destructive maxSeverity which is what the UI gates on.
+  it('emits R2 destructive + R3 destructive when both source tree and source stem orphan simultaneously', async () => {
+    (resolvers.planTreeResolution as any).mockResolvedValue({
+      existingTreeID: 20,
+      wouldCreate: false,
+      sourceTreeID: 10,
+      sourceTreeRemainingStems: 0
+    });
+    (resolvers.planStemResolution as any).mockResolvedValue({
+      existingStemGUID: 200,
+      wouldCreate: false,
+      sourceStemGUID: 100,
+      sourceStemRemainingMeasurements: 0
+    });
+    const effects = await applyTreeStemRules(
+      makeCtx({
+        newRow: { TreeTag: 'T2', StemTag: 'S2' },
+        changedFields: new Set(['TreeTag', 'StemTag'])
+      })
+    );
+    expect(effects).toHaveLength(2);
+    expect(effects[0]).toMatchObject({ id: 'R2', severity: 'destructive', affectedTable: 'trees' });
+    expect(effects[1]).toMatchObject({ id: 'R3', severity: 'destructive', affectedTable: 'stems' });
+    expect(effects[0].references?.treeIDs).toEqual([20, 10]);
+    expect(effects[1].references?.stemGUIDs).toEqual([100, 200]);
+  });
+
+  // Cascade benign case: both identities change but neither source is orphaned
+  // (source tree keeps other stems, source stem keeps other measurements). Both
+  // rules fire at warn severity — no destructive escalation.
+  it('emits R2 warn + R3 warn when neither source orphans during a dual identity move', async () => {
+    (resolvers.planTreeResolution as any).mockResolvedValue({
+      existingTreeID: 20,
+      wouldCreate: false,
+      sourceTreeID: 10,
+      sourceTreeRemainingStems: 3
+    });
+    (resolvers.planStemResolution as any).mockResolvedValue({
+      existingStemGUID: 200,
+      wouldCreate: false,
+      sourceStemGUID: 100,
+      sourceStemRemainingMeasurements: 5
+    });
+    const effects = await applyTreeStemRules(
+      makeCtx({
+        newRow: { TreeTag: 'T2', StemTag: 'S2' },
+        changedFields: new Set(['TreeTag', 'StemTag'])
+      })
+    );
+    expect(effects).toHaveLength(2);
+    expect(effects[0].id).toBe('R2');
+    expect(effects[0].severity).toBe('warn');
+    expect(effects[1].id).toBe('R3');
+    expect(effects[1].severity).toBe('warn');
+  });
+
   it('skips R2 when species code does not resolve', async () => {
     (resolvers.resolveSpeciesByCode as any).mockResolvedValue({ speciesID: null });
     const effects = await applyTreeStemRules(makeCtx());

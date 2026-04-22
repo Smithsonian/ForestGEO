@@ -482,6 +482,128 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
+  // Constraint violations — the writer is the last line of defense. If the analyzer
+  // is bypassed or the world races us between preview and apply, the resolvers must
+  // refuse the write rather than silently corrupting data or violating
+  // ux_trees_treetag_speciesid_censusid / stems unique shape. Each case verifies
+  // the thrown message AND that the transaction rollback leaves no trace: the
+  // measurement's StemGUID is unchanged, no new tree/stem rows were created, and
+  // the original stem still carries this measurement.
+  describe('constraint violations', () => {
+    it('throws when TreeTag rename collides with an inactive tree for the same species+census', async () => {
+      // Seed an inactive tree row that shares the target TreeTag, species, and census.
+      // This would trip ux_trees_treetag_speciesid_censusid on INSERT, so the
+      // resolver must detect the inactive match and refuse up front.
+      const [inactiveRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)`,
+        [TREE_TAG_NEW, fixture.speciesIDs[SPECIES_CODE_ACERRU], fixture.censusID]
+      );
+      const inactiveTreeID = inactiveRes.insertId;
+
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+      const treeCountBefore = Number(
+        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt
+      );
+      const stemCountBefore = Number(
+        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt
+      );
+
+      const plan = buildPlan([{ field: 'TreeTag', from: TREE_TAG_T1, to: TREE_TAG_NEW }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { TreeTag: TREE_TAG_NEW });
+
+      const txID = await cm.beginTransaction();
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
+        /matching tree exists but is inactive/
+      );
+      await cm.rollbackTransaction(txID);
+
+      // Rollback invariants: no new trees/stems, measurement still on original stem,
+      // the inactive tree seeded above is still the only row with that tag/species.
+      const treeCountAfter = Number(
+        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt
+      );
+      const stemCountAfter = Number(
+        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt
+      );
+      expect(treeCountAfter).toBe(treeCountBefore);
+      expect(stemCountAfter).toBe(stemCountBefore);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.StemGUID).toBe(stemGUIDBefore);
+
+      const [inactiveTreeRows] = await connection.query<RowDataPacket[]>(
+        'SELECT IsActive FROM trees WHERE TreeID = ?',
+        [inactiveTreeID]
+      );
+      expect(Number(inactiveTreeRows[0].IsActive)).toBe(0);
+    });
+
+    it('throws when StemTag change lands on a stem that exists for the same tree+census in a different quadrat', async () => {
+      // Seed a blocking stem: same TreeID (T1) and a new StemTag, but in
+      // quadrat B. Our measurement lives in quadrat A on stem S1. Renaming
+      // S1 -> STEM_TAG_BLOCK while staying in quadrat A must fail because
+      // the stem identity (TreeID, CensusID, StemTag) already exists elsewhere.
+      const STEM_TAG_BLOCK = 'WSX';
+      const [blockingStem] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, 0, 0, 1)`,
+        [fixture.treeIDs[TREE_TAG_T1], fixture.quadratIDs[QUADRAT_NAME_B], fixture.censusID, STEM_TAG_BLOCK]
+      );
+      const blockingStemGUID = blockingStem.insertId;
+
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+
+      const plan = buildPlan([{ field: 'StemTag', from: STEM_TAG_S1, to: STEM_TAG_BLOCK }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: STEM_TAG_BLOCK });
+
+      const txID = await cm.beginTransaction();
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
+        /already exists in a different quadrat/
+      );
+      await cm.rollbackTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.StemGUID).toBe(stemGUIDBefore);
+
+      // Blocking stem is unchanged (same quadrat B, same StemTag).
+      const blockingAfter = await loadStem(connection, blockingStemGUID);
+      expect(blockingAfter?.QuadratID).toBe(fixture.quadratIDs[QUADRAT_NAME_B]);
+      expect(blockingAfter?.StemTag).toBe(STEM_TAG_BLOCK);
+    });
+
+    it('throws when StemTag change collides with an inactive stem for the same tree+census', async () => {
+      // Seed an inactive stem with the target StemTag on the same tree+census+quadrat
+      // as our measurement. The resolver must detect the inactive match and refuse
+      // rather than reactivating the row implicitly.
+      const STEM_TAG_INACTIVE = 'WSI';
+      const [inactiveStem] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, 0, 0, 0)`,
+        [fixture.treeIDs[TREE_TAG_T1], fixture.quadratIDs[QUADRAT_NAME_A], fixture.censusID, STEM_TAG_INACTIVE]
+      );
+      const inactiveStemGUID = inactiveStem.insertId;
+
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+
+      const plan = buildPlan([{ field: 'StemTag', from: STEM_TAG_S1, to: STEM_TAG_INACTIVE }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: STEM_TAG_INACTIVE });
+
+      const txID = await cm.beginTransaction();
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
+        /matching TreeID .* exists but is inactive/
+      );
+      await cm.rollbackTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.StemGUID).toBe(stemGUIDBefore);
+
+      // Inactive stem was not touched.
+      const inactiveAfter = await loadStem(connection, inactiveStemGUID);
+      expect(Number(inactiveAfter?.IsActive)).toBe(0);
+      expect(inactiveAfter?.StemTag).toBe(STEM_TAG_INACTIVE);
+    });
+  });
+
   describe('beforeState / afterState snapshots', () => {
     it('captures coremeasurements + stems + cmattributes state on both sides for attribute + identity change', async () => {
       const newAttributes = `${ATTR_CODE_BROKEN}`;
