@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { BulkEditPlan, EditPlanDataType, Effect, RowPlan, SEVERITY_RANK, Severity } from './types';
-import { analyzeEdit } from './analyzer';
+import { BulkEditPlan, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
+import { AnalyzeEditOptions, RoleForbiddenFieldError, analyzeEdit } from './analyzer';
 import { applyDuplicateRules } from './rules/duplicates';
 import { hashPlan } from './planhash';
 
@@ -18,12 +18,13 @@ export async function analyzeBulk(
   plotID: number,
   censusID: number,
   input: BulkInput,
-  transactionID?: string
+  transactionID?: string,
+  options: AnalyzeEditOptions = {}
 ): Promise<BulkEditPlan> {
   const rowPlans: RowPlan[] = [];
 
   for (const matched of input.matched) {
-    const plan = await analyzeEdit(cm, schema, dataType, plotID, censusID, matched.targetID, matched.newRow, transactionID);
+    const plan = await analyzeEdit(cm, schema, dataType, plotID, censusID, matched.targetID, matched.newRow, transactionID, options);
     rowPlans.push({
       rowIndex: matched.rowIndex,
       targetID: matched.targetID,
@@ -42,9 +43,13 @@ export async function analyzeBulk(
 
   const surfacedEffects: Effect[] = [];
   surfacedEffects.push(...applyDuplicateRules(input.duplicateMeasurementIDsToDelete.length));
+  const errors: PreviewError[] = [];
   for (const rowPlan of rowPlans) {
     if (rowPlan.status === 'invalid') continue;
-    if (rowPlan.plan) surfacedEffects.push(...rowPlan.plan.effects);
+    if (rowPlan.plan) {
+      surfacedEffects.push(...rowPlan.plan.effects);
+      errors.push(...(rowPlan.plan.errors ?? []).map(error => ({ ...error, rowIndex: rowPlan.rowIndex })));
+    }
   }
 
   const aggregateEffects = aggregateByRuleID(surfacedEffects);
@@ -58,12 +63,24 @@ export async function analyzeBulk(
     rowCount: rowPlans.length,
     rowPlans,
     aggregateEffects,
+    errors,
+    canApply: errors.length === 0,
     maxSeverity,
     planHash: '',
     generatedAt: new Date().toISOString()
   };
   plan.planHash = hashPlan(plan);
   return plan;
+}
+
+export function assertBulkPlanCanApply(plan: BulkEditPlan): void {
+  const roleErrors = (plan.errors ?? []).filter(error => error.kind === 'RoleForbiddenField' && error.blocking);
+  if (roleErrors.length > 0 || plan.canApply === false) {
+    throw new RoleForbiddenFieldError(
+      roleErrors.map(error => error.field),
+      roleErrors[0]?.role ?? 'unknown'
+    );
+  }
 }
 
 function aggregateByRuleID(effects: Effect[]): Effect[] {

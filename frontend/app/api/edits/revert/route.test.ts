@@ -45,6 +45,24 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockSessionExpiredError extends Error {
+    constructor() {
+      super('session expired');
+      this.name = 'SessionExpiredError';
+    }
+  }
+
+  class MockRoleForbiddenFieldError extends Error {
+    fields: string[];
+    role: string;
+    constructor(fields: string[], role = 'field crew') {
+      super(`role ${role} cannot edit fields: ${fields.join(',')}`);
+      this.name = 'RoleForbiddenFieldError';
+      this.fields = fields;
+      this.role = role;
+    }
+  }
+
   class MockEditOperationNotFoundError extends Error {
     editOperationID: number;
     constructor(editOperationID: number) {
@@ -129,6 +147,8 @@ const mocks = vi.hoisted(() => {
     MockSpeciesNotFoundError,
     MockHashDriftError,
     MockScopeLockHeldError,
+    MockSessionExpiredError,
+    MockRoleForbiddenFieldError,
     MockEditOperationNotFoundError,
     MockAlreadyRevertedError,
     MockCannotRevertRevertError,
@@ -159,6 +179,7 @@ vi.mock('@/config/connectionmanager', () => ({
 
 vi.mock('@/config/editplan/analyzer', () => ({
   DisallowedFieldError: mocks.MockDisallowedFieldError,
+  RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError,
   TargetNotFoundError: mocks.MockTargetNotFoundError
 }));
 
@@ -168,7 +189,8 @@ vi.mock('@/config/editplan/rules/context', () => ({
 
 vi.mock('@/config/editplan/apply', () => ({
   HashDriftError: mocks.MockHashDriftError,
-  ScopeLockHeldError: mocks.MockScopeLockHeldError
+  ScopeLockHeldError: mocks.MockScopeLockHeldError,
+  SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
 vi.mock('@/config/editplan/revert', () => ({
@@ -231,7 +253,7 @@ function buildLedgerRow(overrides: Partial<Record<string, unknown>> = {}) {
 describe('POST /api/edits/revert', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com' } });
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
     mocks.ensureEditOperationsTable.mockResolvedValue(undefined);
@@ -260,6 +282,15 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid schema' });
+    expect(mocks.revertEdit).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 before scope checks for pending users', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'pending', sites: [] } });
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
+    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
     expect(mocks.revertEdit).not.toHaveBeenCalled();
   });
 
@@ -370,6 +401,20 @@ describe('POST /api/edits/revert', () => {
     await expect(response.json()).resolves.toEqual({ error: 'scope locked' });
   });
 
+  it('returns 401 when revertEdit detects stale authorization before commit', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockSessionExpiredError());
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'session expired' });
+  });
+
+  it('returns 403 when revertEdit rejects a role-forbidden field', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockRoleForbiddenFieldError(['SpeciesCode'], 'field crew'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'role forbidden field', fields: ['SpeciesCode'], role: 'field crew' });
+  });
+
   it('returns 422 when revertEdit throws DisallowedFieldError', async () => {
     mocks.revertEdit.mockRejectedValue(new mocks.MockDisallowedFieldError(['SpeciesName']));
     const response = await POST(buildRequest(VALID_BODY));
@@ -398,7 +443,7 @@ describe('POST /api/edits/revert', () => {
     await expect(response.json()).resolves.toEqual(applyResult);
     expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
       expect.any(Object),
-      { user: { email: 'mason@example.com' } },
+      { user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } },
       {
         schema: 'forestgeo_testing',
         plotID: 1,
@@ -411,7 +456,9 @@ describe('POST /api/edits/revert', () => {
       expect.objectContaining({
         schema: 'forestgeo_testing',
         editOperationID: 7,
-        createdBy: 'mason@example.com'
+        createdBy: 'mason@example.com',
+        role: 'field crew',
+        assertAuthorizationFresh: expect.any(Function)
       })
     );
     expect(mocks.closeConnection).toHaveBeenCalled();

@@ -1,10 +1,11 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { EditPlan, EditPlanDataType, Effect, FieldChange, SEVERITY_RANK, Severity } from './types';
+import type { UserAuthRoles } from '@/config/macros';
+import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, SEVERITY_RANK, Severity } from './types';
 import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
-import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, PER_COLUMN_DECIMAL_PRECISION } from './fieldpolicy';
+import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole, PER_COLUMN_DECIMAL_PRECISION } from './fieldpolicy';
 import { hashPlan } from './planhash';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
@@ -57,6 +58,58 @@ const SURFACE_BY_DATATYPE: Record<EditPlanDataType, EditSurface> = {
   failedmeasurements: 'failedmeasurements'
 };
 
+export class RoleForbiddenFieldError extends Error {
+  constructor(
+    public fields: string[],
+    public role: UserAuthRoles | 'unknown'
+  ) {
+    super(`role ${role} cannot edit fields: ${fields.join(',')}`);
+    this.name = 'RoleForbiddenFieldError';
+  }
+}
+
+export interface AnalyzeEditOptions {
+  role?: UserAuthRoles | null;
+}
+
+function roleLabel(role: UserAuthRoles | null | undefined): UserAuthRoles | 'unknown' {
+  return role ?? 'unknown';
+}
+
+function buildRoleForbiddenError(field: string, role: UserAuthRoles | null | undefined): PreviewError {
+  const label = roleLabel(role);
+  return {
+    kind: 'RoleForbiddenField',
+    field,
+    role: label,
+    message: `${field} can only be edited by global or db admin users.`,
+    severity: 'destructive',
+    blocking: true
+  };
+}
+
+function buildRoleForbiddenEffect(error: PreviewError): Effect {
+  return {
+    id: `AUTH_ROLE_FORBIDDEN_FIELD_${error.field}`,
+    severity: 'destructive',
+    category: 'validation',
+    title: 'Field restricted by role',
+    detail: error.message,
+    affectedTable: 'authorization',
+    affectedRowCount: 1
+  };
+}
+
+export function assertEditPlanCanApply(plan: EditPlan): void {
+  const roleErrors = (plan.errors ?? []).filter(error => error.kind === 'RoleForbiddenField' && error.blocking);
+  if (roleErrors.length > 0 || plan.canApply === false) {
+    throw new RoleForbiddenFieldError(
+      roleErrors.map(error => error.field),
+      roleErrors[0]?.role ?? 'unknown'
+    );
+  }
+}
+
 export async function analyzeEdit(
   cm: ConnectionManager,
   schema: string,
@@ -65,7 +118,8 @@ export async function analyzeEdit(
   censusID: number,
   targetID: number,
   rawNewRow: Record<string, unknown>,
-  transactionID?: string
+  transactionID?: string,
+  options: AnalyzeEditOptions = {}
 ): Promise<EditPlan> {
   const surface = SURFACE_BY_DATATYPE[dataType];
   const newRow = canonicalizeEditPayload(surface, rawNewRow);
@@ -84,8 +138,13 @@ export async function analyzeEdit(
     }
   }
 
+  const errors = fieldChanges
+    .filter(change => !isFieldEditableByRole(change.field, options.role))
+    .map(change => buildRoleForbiddenError(change.field, options.role));
+  const roleForbiddenEffects = errors.map(buildRoleForbiddenEffect);
+
   const ctx = { cm, schema, transactionID, dataType, plotID, censusID, oldRow, newRow, changedFields };
-  const effects: Effect[] = [];
+  const effects: Effect[] = [...roleForbiddenEffects];
 
   // Measurement rules (R1a, R2, R3, R4, R5) surface cross-row and identity
   // ramifications on fully-resolved coremeasurements rows. Failed measurements
@@ -96,7 +155,7 @@ export async function analyzeEdit(
   // coremeasurements raw columns via writeFailedMeasurements. Skip the rule
   // dispatch entirely so the contract is explicit, rather than relying on every
   // rule to silently return [] for a data shape it was never designed to see.
-  if (dataType === 'measurementssummary') {
+  if (dataType === 'measurementssummary' && errors.length === 0) {
     effects.push(...(await applySpeciesRules(ctx)));
     effects.push(...(await applyTreeStemRules(ctx)));
     effects.push(...(await applyCoordinateRules(ctx)));
@@ -113,6 +172,8 @@ export async function analyzeEdit(
     targetID,
     fieldChanges,
     effects,
+    errors,
+    canApply: errors.length === 0,
     maxSeverity,
     planHash: '',
     generatedAt: new Date().toISOString()

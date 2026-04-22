@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { applyEdit, applyEditInTransaction, HashDriftError, ScopeLockHeldError, ApplyInput } from './apply';
-import { DisallowedFieldError } from './analyzer';
+import { applyEdit, applyEditInTransaction, HashDriftError, ScopeLockHeldError, ApplyInput, SessionExpiredError } from './apply';
+import { DisallowedFieldError, RoleForbiddenFieldError } from './analyzer';
 import { SpeciesNotFoundError } from './rules/context';
 
 vi.mock('./analyzer', async () => {
@@ -55,6 +55,8 @@ function mockFreshPlan(planHash: string = FRESH_PLAN_HASH) {
     targetID: 42,
     fieldChanges: [],
     effects: [],
+    errors: [],
+    canApply: true,
     maxSeverity: 'info',
     planHash,
     generatedAt: '2026-04-21T00:00:00Z'
@@ -127,6 +129,23 @@ describe('applyEdit', () => {
     expect(err).toBeInstanceOf(HashDriftError);
     expect((err as HashDriftError).freshPlan.planHash).toBe('different-hash');
 
+    expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
+    expect(editOps.writeEditOperation).not.toHaveBeenCalled();
+    expect(cm.rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
+    expect(cm.commitTransaction).not.toHaveBeenCalled();
+  });
+
+  it('revalidates authorization after hash check and rolls back before writing when stale', async () => {
+    const cm = makeCM({ lockAcquired: true });
+    mockFreshPlan();
+    mockWriterSuccess();
+    const assertAuthorizationFresh = vi.fn(async () => {
+      throw new SessionExpiredError('role changed');
+    });
+
+    await expect(applyEdit(cm, { ...baseInput, assertAuthorizationFresh })).rejects.toBeInstanceOf(SessionExpiredError);
+
+    expect(assertAuthorizationFresh).toHaveBeenCalledTimes(1);
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
     expect(editOps.writeEditOperation).not.toHaveBeenCalled();
     expect(cm.rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
@@ -241,6 +260,37 @@ describe('applyEditInTransaction', () => {
     const err = await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx' }).catch(e => e);
     expect(err).toBeInstanceOf(HashDriftError);
     expect((err as HashDriftError).freshPlan.planHash).toBe('different-hash');
+    expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
+    expect(editOps.writeEditOperation).not.toHaveBeenCalled();
+  });
+
+  it('throws RoleForbiddenFieldError for blocking role errors before writing', async () => {
+    const cm = makeCM({ lockAcquired: true });
+    (analyzer.analyzeEdit as any).mockResolvedValue({
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [{ field: 'SpeciesCode', from: 'AA', to: 'BB' }],
+      effects: [],
+      errors: [
+        {
+          kind: 'RoleForbiddenField',
+          field: 'SpeciesCode',
+          role: 'field crew',
+          message: 'SpeciesCode can only be edited by global or db admin users.',
+          severity: 'destructive',
+          blocking: true
+        }
+      ],
+      canApply: false,
+      maxSeverity: 'destructive',
+      planHash: EXPECTED_PLAN_HASH,
+      generatedAt: '2026-04-21T00:00:00Z'
+    });
+
+    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', role: 'field crew' })).rejects.toBeInstanceOf(
+      RoleForbiddenFieldError
+    );
+
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
     expect(editOps.writeEditOperation).not.toHaveBeenCalled();
   });

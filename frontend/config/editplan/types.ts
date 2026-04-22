@@ -1,3 +1,5 @@
+import type { UserAuthRoles } from '@/config/macros';
+
 export type Severity = 'info' | 'warn' | 'destructive';
 
 export const SEVERITY_RANK: Record<Severity, number> = {
@@ -32,11 +34,23 @@ export interface FieldChange {
   to: unknown;
 }
 
+export interface PreviewError {
+  kind: 'RoleForbiddenField';
+  field: string;
+  role: UserAuthRoles | 'unknown';
+  message: string;
+  severity: 'destructive';
+  blocking: true;
+  rowIndex?: number;
+}
+
 export interface EditPlan {
   dataType: EditPlanDataType;
   targetID: number;
   fieldChanges: FieldChange[];
   effects: Effect[];
+  errors?: PreviewError[];
+  canApply?: boolean;
   maxSeverity: Severity;
   planHash: string;
   generatedAt: string;
@@ -55,6 +69,8 @@ export interface BulkEditPlan {
   rowCount: number;
   rowPlans: RowPlan[];
   aggregateEffects: Effect[];
+  errors?: PreviewError[];
+  canApply?: boolean;
   maxSeverity: Severity;
   planHash: string;
   generatedAt: string;

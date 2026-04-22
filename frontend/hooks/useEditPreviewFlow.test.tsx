@@ -99,4 +99,38 @@ describe('useEditPreviewFlow', () => {
     expect(requestBody(fetchMock, 2).planHash).toBe(FRESH_PLAN.planHash);
     expect(result.current.dialogState.open).toBe(false);
   });
+
+  it('opens review instead of auto-applying an info-severity plan with blocking errors', async () => {
+    const blockedPlan: EditPlan = {
+      ...INFO_PLAN,
+      canApply: false,
+      errors: [
+        {
+          kind: 'RoleForbiddenField',
+          field: 'SpeciesCode',
+          role: 'field crew',
+          message: 'SpeciesCode can only be edited by global or db admin users.',
+          severity: 'destructive',
+          blocking: true
+        }
+      ]
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(blockedPlan));
+
+    const { result } = renderHook(() => useEditPreviewFlow(BASE_ARGS));
+
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = result.current.beginEdit(42, { SpeciesCode: 'BB' });
+    });
+
+    await waitFor(() => expect(result.current.dialogState.open).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.dialogState.plan?.canApply).toBe(false);
+
+    act(() => {
+      result.current.cancelDialog();
+    });
+    await expect(editPromise).rejects.toThrow('cancelled');
+  });
 });

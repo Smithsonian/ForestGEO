@@ -69,12 +69,55 @@ function buildRequest(body: Record<string, unknown>) {
 describe('POST /api/revisionupload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { name: 'Mason' } });
+    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com', userStatus: 'global', sites: [] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.analyzeBulk.mockResolvedValue({ ...EMPTY_BULK_PLAN });
     mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+  });
+
+  it('returns 403 before scope checks for pending users', async () => {
+    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com', userStatus: 'pending', sites: [] } });
+
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
+    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.analyzeBulk).not.toHaveBeenCalled();
+  });
+
+  it('marks revision new-row species codes as blocking for field crew users', async () => {
+    mocks.auth.mockResolvedValue({
+      user: { name: 'Mason', email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+    });
+    mocks.executeQuery.mockResolvedValue([]);
+
+    const response = await POST(
+      buildRequest({
+        rows: [{ tag: 'T1', stemtag: '1', spcode: 'QUAS', quadrat: '101', lx: '1', ly: '2', date: '2026-04-01', dbh: '10.0' }],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.newRows).toHaveLength(1);
+    expect(body.bulkPlan).toMatchObject({
+      canApply: false,
+      maxSeverity: 'destructive',
+      errors: [expect.objectContaining({ kind: 'RoleForbiddenField', field: 'spcode', role: 'field crew', rowIndex: 0 })]
+    });
   });
 
   it('matches View Data export rows by StemGUID and keeps the highest measurement ID as survivor', async () => {

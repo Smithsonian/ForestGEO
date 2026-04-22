@@ -1,3 +1,5 @@
+import type { UserAuthRoles } from '@/config/macros';
+
 export type EditSurface = 'measurementssummary' | 'failedmeasurements' | 'revision-row-local' | 'revision-identity';
 
 export const EDITABLE_FIELDS_BY_SURFACE: Record<EditSurface, ReadonlySet<string>> = {
@@ -115,6 +117,15 @@ export class InvalidClearError extends Error {
     super(`Field "${field}" cannot be cleared`);
     this.name = 'InvalidClearError';
   }
+}
+
+const TAXONOMIC_IDENTITY_FIELDS = new Set(['SpeciesCode', 'SpCode', 'spcode']);
+const SPECIES_EDIT_ROLES = new Set<UserAuthRoles>(['global', 'db admin']);
+
+export function isFieldEditableByRole(fieldName: string, role: UserAuthRoles | null | undefined): boolean {
+  if (role === 'pending') return false;
+  if (!TAXONOMIC_IDENTITY_FIELDS.has(fieldName)) return true;
+  return role !== null && role !== undefined && SPECIES_EDIT_ROLES.has(role);
 }
 
 export function normalizeFieldValue(field: string, value: unknown): unknown {

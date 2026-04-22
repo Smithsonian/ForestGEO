@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalizeEditPayload, InvalidClearError, normalizeFieldValue, rejectDisallowedFields } from './fieldpolicy';
+import { canonicalizeEditPayload, InvalidClearError, isFieldEditableByRole, normalizeFieldValue, rejectDisallowedFields } from './fieldpolicy';
 
 describe('fieldpolicy', () => {
   describe('rejectDisallowedFields', () => {
@@ -96,6 +96,22 @@ describe('fieldpolicy', () => {
     it('propagates InvalidClearError when an identity field is blanked', () => {
       expect(() => canonicalizeEditPayload('measurementssummary', { speciesCode: '' })).toThrow(InvalidClearError);
       expect(() => canonicalizeEditPayload('failedmeasurements', { rawSpCode: 'NULL' })).toThrow(InvalidClearError);
+    });
+  });
+
+  describe('isFieldEditableByRole', () => {
+    it('restricts taxonomic identity fields to global and db admin users', () => {
+      expect(isFieldEditableByRole('SpeciesCode', 'global')).toBe(true);
+      expect(isFieldEditableByRole('SpCode', 'db admin')).toBe(true);
+      expect(isFieldEditableByRole('spcode', 'lead technician')).toBe(false);
+      expect(isFieldEditableByRole('SpeciesCode', 'field crew')).toBe(false);
+      expect(isFieldEditableByRole('SpeciesCode', undefined)).toBe(false);
+    });
+
+    it('allows non-taxonomic fields for non-pending editor roles', () => {
+      expect(isFieldEditableByRole('MeasuredDBH', 'field crew')).toBe(true);
+      expect(isFieldEditableByRole('TreeTag', 'lead technician')).toBe(true);
+      expect(isFieldEditableByRole('MeasuredDBH', 'pending')).toBe(false);
     });
   });
 });

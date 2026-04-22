@@ -211,6 +211,55 @@ describe('analyzeEdit', () => {
     expect(plan.effects).toHaveLength(1);
     expect(plan.maxSeverity).toBe('warn');
   });
+
+  it('marks SpeciesCode edits as blocking for field crew without running downstream rules', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
+
+    const plan = await analyzeEdit(
+      cm,
+      SCHEMA,
+      'measurementssummary',
+      PLOT_ID,
+      CENSUS_ID,
+      TARGET_ID,
+      { SpeciesCode: 'BB' },
+      undefined,
+      { role: 'field crew' }
+    );
+
+    expect(plan.canApply).toBe(false);
+    expect(plan.maxSeverity).toBe('destructive');
+    expect(plan.errors).toEqual([
+      expect.objectContaining({
+        kind: 'RoleForbiddenField',
+        field: 'SpeciesCode',
+        role: 'field crew',
+        blocking: true
+      })
+    ]);
+    expect(plan.effects[0]).toMatchObject({ id: 'AUTH_ROLE_FORBIDDEN_FIELD_SpeciesCode', severity: 'destructive' });
+    expect(applySpeciesRules).not.toHaveBeenCalled();
+  });
+
+  it('marks failed-measurement SpCode edits as blocking for lead technicians', async () => {
+    const cm = makeConnectionManager(FAILED_OLD_ROW);
+
+    const plan = await analyzeEdit(
+      cm,
+      SCHEMA,
+      'failedmeasurements',
+      PLOT_ID,
+      CENSUS_ID,
+      99,
+      { SpCode: 'BB' },
+      undefined,
+      { role: 'lead technician' }
+    );
+
+    expect(plan.canApply).toBe(false);
+    expect(plan.errors?.[0]).toMatchObject({ field: 'SpCode', role: 'lead technician' });
+  });
 });
 
 describe('applyDuplicateRules (R6)', () => {
@@ -305,6 +354,30 @@ describe('analyzeBulk', () => {
       duplicateMeasurementIDsToDelete: []
     });
     expect(bulkPlan.maxSeverity).toBe('info');
+  });
+
+  it('carries row-level role errors into the aggregate bulk plan', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+
+    const bulkPlan = await analyzeBulk(
+      cm,
+      SCHEMA,
+      'measurementssummary',
+      PLOT_ID,
+      CENSUS_ID,
+      {
+        matched: [{ rowIndex: 4, targetID: 42, newRow: { SpeciesCode: 'BB' } }],
+        newRows: [],
+        invalid: [],
+        duplicateMeasurementIDsToDelete: []
+      },
+      undefined,
+      { role: 'field crew' }
+    );
+
+    expect(bulkPlan.canApply).toBe(false);
+    expect(bulkPlan.maxSeverity).toBe('destructive');
+    expect(bulkPlan.errors?.[0]).toMatchObject({ field: 'SpeciesCode', rowIndex: 4 });
   });
 
   it('aggregates affectedRowCount across repeated effect ids using max severity', async () => {

@@ -12,12 +12,15 @@
 // They MUST NOT loop over `applyEdit` — each call would try to re-acquire
 // the same scope lock on a new inner transaction and fail-fast (timeout 0).
 import ConnectionManager from '@/config/connectionmanager';
+import type { UserAuthRoles } from '@/config/macros';
 import { EditPlanDataType, ApplyResult, EditPlan } from './types';
-import { analyzeEdit } from './analyzer';
+import { analyzeEdit, assertEditPlanCanApply } from './analyzer';
 import { writeMeasurementsSummary } from './writers/measurementssummary';
 import { writeFailedMeasurements } from './writers/failedmeasurements';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
+
+export { SessionExpiredError } from './authorization';
 
 export class ScopeLockHeldError extends Error {
   name = 'ScopeLockHeldError';
@@ -43,6 +46,8 @@ export interface ApplyInput {
   writeLedger?: boolean;
   refreshViews?: boolean;
   createdBy: string;
+  role?: UserAuthRoles | null;
+  assertAuthorizationFresh?: () => Promise<void>;
 }
 
 export interface ApplyInTransactionInput extends ApplyInput {
@@ -83,11 +88,18 @@ export async function applyEditInTransaction(cm: ConnectionManager, input: Apply
     input.censusID,
     input.targetID,
     input.newRow,
-    input.transactionID
+    input.transactionID,
+    { role: input.role }
   );
+
+  assertEditPlanCanApply(freshPlan);
 
   if (input.expectedPlanHash !== null && freshPlan.planHash !== input.expectedPlanHash) {
     throw new HashDriftError(freshPlan);
+  }
+
+  if (input.assertAuthorizationFresh) {
+    await input.assertAuthorizationFresh();
   }
 
   const writer = input.dataType === 'measurementssummary' ? writeMeasurementsSummary : writeFailedMeasurements;

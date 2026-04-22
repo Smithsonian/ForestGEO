@@ -9,9 +9,12 @@ import ailogger from '@/ailogger';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable, SESSION_TIMEOUTS } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
-import { applyEditInTransaction } from '@/config/editplan/apply';
-import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
+import { applyEditInTransaction, SessionExpiredError } from '@/config/editplan/apply';
+import { analyzeBulk, assertBulkPlanCanApply, BulkInput } from '@/config/editplan/bulkanalyzer';
 import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
+import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 
 export const runtime = 'nodejs';
 
@@ -126,6 +129,68 @@ function getAffectedRowCount(result: unknown): number {
 
   const affectedRows = (result as { affectedRows?: unknown }).affectedRows;
   return typeof affectedRows === 'number' && Number.isFinite(affectedRows) ? affectedRows : 0;
+}
+
+function isBlankOrNullPlaceholder(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  const trimmed = String(value).trim();
+  return trimmed === '' || trimmed.toUpperCase() === 'NULL';
+}
+
+function speciesCodesDiffer(csvValue: unknown, dbValue: unknown): boolean {
+  if (isBlankOrNullPlaceholder(csvValue)) return false;
+  return String(csvValue).trim().toLowerCase() !== String(dbValue ?? '').trim().toLowerCase();
+}
+
+async function loadCurrentSpeciesCode(
+  connectionManager: ConnectionManager,
+  schema: string,
+  coreMeasurementID: number,
+  censusID: number,
+  plotID: number,
+  transactionID: string
+): Promise<unknown> {
+  const query = safeFormatQuery(
+    schema,
+    `SELECT sp.SpeciesCode
+     FROM ??.coremeasurements cm
+     JOIN ??.census c ON c.CensusID = cm.CensusID
+     LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID AND st.IsActive = 1
+     LEFT JOIN ??.trees tr ON tr.TreeID = st.TreeID AND tr.IsActive = 1
+     LEFT JOIN ??.species sp ON sp.SpeciesID = tr.SpeciesID
+     WHERE cm.CoreMeasurementID = ?
+       AND cm.CensusID = ?
+       AND c.PlotID = ?
+       AND cm.IsActive = 1
+     LIMIT 1`
+  );
+  const rows = await connectionManager.executeQuery(query, [coreMeasurementID, censusID, plotID], transactionID);
+  return rows[0]?.SpeciesCode ?? null;
+}
+
+async function buildRevisionRoleFieldCandidates(
+  connectionManager: ConnectionManager,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  matchedRows: ApplyMatchedRow[],
+  newRows: ApplyNewRow[],
+  transactionID: string
+): Promise<RevisionRoleFieldCandidate[]> {
+  const candidates: RevisionRoleFieldCandidate[] = [];
+  for (const [index, row] of matchedRows.entries()) {
+    if (isBlankOrNullPlaceholder(row.csvRow.spcode)) continue;
+    const dbSpeciesCode = await loadCurrentSpeciesCode(connectionManager, schema, row.coreMeasurementID, censusID, plotID, transactionID);
+    if (speciesCodesDiffer(row.csvRow.spcode, dbSpeciesCode)) {
+      candidates.push({ rowIndex: index, field: 'spcode' });
+    }
+  }
+  for (const row of newRows) {
+    if (!isBlankOrNullPlaceholder(row.csvRow.spcode)) {
+      candidates.push({ rowIndex: row.csvIndex, field: 'spcode' });
+    }
+  }
+  return candidates;
 }
 
 function normalizeMatchedRows(rawRows: ApplyMatchedRow[]): { matchedRows: ApplyMatchedRow[]; applyErrors: ApplyError[] } {
@@ -719,6 +784,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
+  try {
+    assertSessionMayEdit(session);
+  } catch (error) {
+    if (error instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+    }
+    throw error;
+  }
 
   const connectionManager = ConnectionManager.getInstance();
 
@@ -737,6 +810,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const transactionStartedAt = Date.now();
     ailogger.info(`${logPrefix} transaction requested for schema=${schema} plot=${normalizedPlotID} census=${normalizedCensusID}`);
     const createdBy = session.user.email ?? session.user.name ?? 'revision-apply';
+    const assertAuthorizationFresh = createFreshAuthorizationCheck(session, {
+      schema,
+      plotID: normalizedPlotID,
+      censusID: normalizedCensusID
+    });
     const result = await connectionManager.withTransaction(async (transactionID: string) => {
       ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
@@ -762,21 +840,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         })),
         duplicateMeasurementIDsToDelete: duplicates.map(d => d.coreMeasurementID)
       };
-      const freshPlan = await analyzeBulk(
+      const baseFreshPlan = await analyzeBulk(
         connectionManager,
         schema,
         'measurementssummary',
         normalizedPlotID,
         normalizedCensusID,
         bulkInputForHashCheck,
-        transactionID
+        transactionID,
+        { role: session.user.userStatus }
       );
+      const freshPlan = applyRevisionRolePolicy(
+        baseFreshPlan,
+        session.user.userStatus,
+        await buildRevisionRoleFieldCandidates(
+          connectionManager,
+          schema,
+          normalizedPlotID,
+          normalizedCensusID,
+          normalizedMatchedRows.matchedRows,
+          normalizedNewRows.newRows,
+          transactionID
+        )
+      );
+      assertBulkPlanCanApply(freshPlan);
       if (freshPlan.planHash !== bulkPlanHash) {
         ailogger.warn(
           `${logPrefix} bulk plan hash mismatch (expected=${bulkPlanHash}, fresh=${freshPlan.planHash}) — aborting apply so UI can re-review`
         );
         throw new RevisionApplyPlanHashMismatchError(freshPlan);
       }
+
+      await assertAuthorizationFresh();
 
       let updatedCount = 0;
       let skippedCount = 0;
@@ -816,6 +911,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           revertable: false,
           refreshViews: false,
           createdBy,
+          role: session.user.userStatus,
           transactionID
         });
 
@@ -873,11 +969,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
+    if (errorObj instanceof SessionExpiredError) {
+      return NextResponse.json({ error: 'session expired' }, { status: HTTPResponses.UNAUTHORIZED });
+    }
     if (errorObj instanceof EditScopeForbiddenError) {
       return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
     }
     if (errorObj instanceof EditScopeConflictError) {
       return NextResponse.json({ error: errorObj.message }, { status: 423 });
+    }
+    if (errorObj instanceof RoleForbiddenFieldError) {
+      return NextResponse.json({ error: 'role forbidden field', fields: errorObj.fields, role: errorObj.role }, { status: 403 });
     }
     if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });

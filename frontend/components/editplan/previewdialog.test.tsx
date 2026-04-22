@@ -28,6 +28,8 @@ function makePlan(overrides: Partial<EditPlan> = {}): EditPlan {
       { field: 'MeasuredHOM', from: null, to: 1.3 }
     ],
     effects: overrides.effects ?? [],
+    errors: overrides.errors,
+    canApply: overrides.canApply,
     maxSeverity: overrides.maxSeverity ?? 'info',
     planHash: overrides.planHash ?? PLAN_HASH,
     generatedAt: overrides.generatedAt ?? '2026-04-20T12:00:00Z'
@@ -142,6 +144,33 @@ describe('PreviewDialog', () => {
 
       expect(screen.getByTestId('edit-preview-apply')).toBeDisabled();
       expect(screen.getByTestId('edit-preview-cancel')).toBeDisabled();
+    });
+
+    it('disables Apply for blocking role errors while keeping Cancel available', async () => {
+      const user = userEvent.setup({ pointerEventsCheck: 0 });
+      const plan = makePlan({
+        canApply: false,
+        errors: [
+          {
+            kind: 'RoleForbiddenField',
+            field: 'SpeciesCode',
+            role: 'field crew',
+            message: 'SpeciesCode can only be edited by global or db admin users.',
+            severity: 'destructive',
+            blocking: true
+          }
+        ],
+        effects: [makeEffect({ id: 'AUTH_ROLE_FORBIDDEN_FIELD_SpeciesCode', severity: 'destructive' })],
+        maxSeverity: 'destructive'
+      });
+      render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.getByTestId('edit-preview-blocked')).toHaveTextContent('cannot be applied');
+      expect(screen.getByTestId('edit-preview-apply')).toBeDisabled();
+      expect(screen.getByTestId('edit-preview-cancel')).not.toBeDisabled();
+
+      await user.click(screen.getByTestId('edit-preview-apply'));
+      expect(onConfirm).not.toHaveBeenCalled();
     });
 
     it('does not call onConfirm when Apply is clicked while busy', async () => {

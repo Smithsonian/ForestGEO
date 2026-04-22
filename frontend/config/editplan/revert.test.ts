@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   readEditOperation: vi.fn(),
   markEditOperationReverted: vi.fn(),
   applyEditInTransaction: vi.fn(),
-  analyzeEdit: vi.fn()
+  analyzeEdit: vi.fn(),
+  assertEditPlanCanApply: vi.fn()
 }));
 
 vi.mock('@/config/editoperations', () => ({
@@ -24,7 +25,8 @@ vi.mock('./apply', () => ({
 }));
 
 vi.mock('./analyzer', () => ({
-  analyzeEdit: mocks.analyzeEdit
+  analyzeEdit: mocks.analyzeEdit,
+  assertEditPlanCanApply: mocks.assertEditPlanCanApply
 }));
 
 function buildRestorePlan(overrides: Partial<Record<string, unknown>> = {}) {
@@ -94,6 +96,7 @@ describe('revertEdit', () => {
     mocks.ensureEditOperationsTable.mockResolvedValue(undefined);
     mocks.markEditOperationReverted.mockResolvedValue(undefined);
     mocks.analyzeEdit.mockResolvedValue(buildRestorePlan());
+    mocks.assertEditPlanCanApply.mockReturnValue(undefined);
   });
 
   it('rejects non-revertable bulk revision rows before opening a transaction', async () => {

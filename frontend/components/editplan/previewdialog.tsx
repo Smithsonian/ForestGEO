@@ -50,6 +50,7 @@ function formatValue(value: unknown): string {
 
 export default function PreviewDialog({ plan, onConfirm, onCancel, busy }: PreviewDialogProps) {
   const orderedEffects = sortEffectsBySeverity(plan.effects);
+  const isBlocked = plan.canApply === false || (plan.errors ?? []).some(error => error.blocking);
 
   return (
     <Modal open={true} onClose={busy ? undefined : onCancel}>
@@ -119,6 +120,12 @@ export default function PreviewDialog({ plan, onConfirm, onCancel, busy }: Previ
                 </Stack>
               )}
             </Box>
+
+            {isBlocked ? (
+              <Typography level="body-sm" color="danger" data-testid="edit-preview-blocked">
+                This edit cannot be applied by your current role.
+              </Typography>
+            ) : null}
           </Stack>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -129,7 +136,7 @@ export default function PreviewDialog({ plan, onConfirm, onCancel, busy }: Previ
             <Button variant="outlined" color="neutral" onClick={onCancel} disabled={busy} data-testid="edit-preview-cancel">
               Cancel
             </Button>
-            <Button variant="solid" color="primary" onClick={onConfirm} disabled={busy} loading={busy} data-testid="edit-preview-apply">
+            <Button variant="solid" color="primary" onClick={onConfirm} disabled={busy || isBlocked} loading={busy} data-testid="edit-preview-apply">
               Apply
             </Button>
           </Stack>

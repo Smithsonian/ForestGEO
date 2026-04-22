@@ -72,7 +72,8 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   const rowsWithIgnoredEdits = matchedRows.filter(r => hasIgnoredEdits(r));
   const stemIdNotFoundCount = newRows.filter(r => r.reason === 'stemid-not-found').length;
   const actionableMatchedRowCount = rowsWithChanges.length + rowsWithDuplicateCleanupOnly.length;
-  const canApply = actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0);
+  const planBlocked = bulkPlan?.canApply === false || (bulkPlan?.errors ?? []).some(error => error.blocking);
+  const canApply = !planBlocked && (actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0));
   const defaultTabValue = rowsWithChanges.length > 0 ? 'changes' : rowsWithDuplicateCleanupOnly.length > 0 ? 'duplicates' : 'changes';
 
   return (
@@ -127,6 +128,12 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           </Stack>
         </Alert>
       )}
+
+      {planBlocked ? (
+        <Alert color="danger" variant="soft" data-testid="revision-role-blocked">
+          This revision contains species-code changes that require a global or db admin role.
+        </Alert>
+      ) : null}
 
       <Tabs defaultValue={defaultTabValue}>
         <TabList>

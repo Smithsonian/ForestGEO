@@ -9,9 +9,9 @@ import { z } from 'zod';
 import { auth } from '@/auth';
 import ConnectionManager from '@/config/connectionmanager';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
-import { DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
+import { DisallowedFieldError, RoleForbiddenFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
-import { HashDriftError, ScopeLockHeldError } from '@/config/editplan/apply';
+import { HashDriftError, ScopeLockHeldError, SessionExpiredError } from '@/config/editplan/apply';
 import {
   AlreadyRevertedError,
   CannotRevertRevertError,
@@ -23,6 +23,7 @@ import {
 import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
 import { ensureEditOperationsTable, readEditOperation } from '@/config/editoperations';
 import { InvalidClearError } from '@/config/editplan/fieldpolicy';
+import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 
 export const runtime = 'nodejs';
 
@@ -58,6 +59,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidSchema(body.schema)) {
     return NextResponse.json({ error: 'invalid schema' }, { status: 400 });
   }
+  try {
+    assertSessionMayEdit(session);
+  } catch (err) {
+    if (err instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+    }
+    throw err;
+  }
 
   const createdBy = session.user?.email ?? session.user?.name ?? 'unknown';
 
@@ -82,10 +91,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       schema: body.schema,
       editOperationID: body.editOperationID,
       createdBy,
-      confirmedPlanHash: body.confirmedPlanHash
+      confirmedPlanHash: body.confirmedPlanHash,
+      role: session.user.userStatus,
+      assertAuthorizationFresh: createFreshAuthorizationCheck(session, {
+        schema: body.schema,
+        plotID: body.plotID,
+        censusID: body.censusID
+      })
     });
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
+    if (err instanceof SessionExpiredError) {
+      return NextResponse.json({ error: 'session expired' }, { status: 401 });
+    }
     if (err instanceof EditScopeForbiddenError) {
       return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
     }
@@ -112,6 +130,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof ScopeLockHeldError) {
       return NextResponse.json({ error: 'scope locked' }, { status: 423 });
+    }
+    if (err instanceof RoleForbiddenFieldError) {
+      return NextResponse.json({ error: 'role forbidden field', fields: err.fields, role: err.role }, { status: 403 });
     }
     if (err instanceof DisallowedFieldError) {
       return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: 422 });

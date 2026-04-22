@@ -4,39 +4,61 @@ import { POST } from './route';
 const MATCHED_PLAN_HASH = 'plan-hash-matched';
 const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
 
-const mocks = vi.hoisted(() => ({
-  auth: vi.fn(),
-  isValidSchema: vi.fn(() => true),
-  safeFormatQuery: vi.fn((_schema: string, query: string) => query),
-  loggerInfo: vi.fn(),
-  loggerWarn: vi.fn(),
-  loggerError: vi.fn(),
-  ensureUploadSessionsTable: vi.fn(),
-  withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
-  acquireApplicationLock: vi.fn(async () => true),
-  executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
-  closeConnection: vi.fn(async () => undefined),
-  buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
-  refreshMeasurementViewsForScope: vi.fn(async () => undefined),
-  assertEditScopeAllowed: vi.fn(async () => undefined),
-  MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
-  MockEditScopeConflictError: class MockEditScopeConflictError extends Error {},
-  applyEditInTransaction: vi.fn(async () => ({
-    updatedIDs: { CoreMeasurementID: 0 },
-    applyErrors: [],
-    editOperationID: null,
-    validationPending: true
-  })),
-  analyzeBulk: vi.fn(async () => ({
-    dataType: 'measurementssummary',
-    rowCount: 0,
-    rowPlans: [],
-    aggregateEffects: [],
-    maxSeverity: 'info',
-    planHash: 'hash-not-mocked',
-    generatedAt: '2026-04-21T00:00:00Z'
-  }))
-}));
+const mocks = vi.hoisted(() => {
+  class MockPendingUserEditForbiddenError extends Error {}
+  class MockRoleForbiddenFieldError extends Error {
+    fields: string[];
+    role: string;
+    constructor(fields: string[], role = 'field crew') {
+      super(`role ${role} cannot edit fields: ${fields.join(',')}`);
+      this.fields = fields;
+      this.role = role;
+    }
+  }
+  const assertAuthorizationFresh = vi.fn(async () => undefined);
+  return {
+    auth: vi.fn(),
+    isValidSchema: vi.fn(() => true),
+    safeFormatQuery: vi.fn((_schema: string, query: string) => query),
+    loggerInfo: vi.fn(),
+    loggerWarn: vi.fn(),
+    loggerError: vi.fn(),
+    ensureUploadSessionsTable: vi.fn(),
+    withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
+    acquireApplicationLock: vi.fn(async () => true),
+    executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
+    closeConnection: vi.fn(async () => undefined),
+    buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
+    refreshMeasurementViewsForScope: vi.fn(async () => undefined),
+    assertEditScopeAllowed: vi.fn(async () => undefined),
+    MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
+    MockEditScopeConflictError: class MockEditScopeConflictError extends Error {},
+    MockPendingUserEditForbiddenError,
+    MockSessionExpiredError: class MockSessionExpiredError extends Error {},
+    MockRoleForbiddenFieldError,
+    assertAuthorizationFresh,
+    assertSessionMayEdit: vi.fn((session: any) => {
+      if (session?.user?.userStatus === 'pending') throw new MockPendingUserEditForbiddenError();
+    }),
+    createFreshAuthorizationCheck: vi.fn(() => assertAuthorizationFresh),
+    applyEditInTransaction: vi.fn(async () => ({
+      updatedIDs: { CoreMeasurementID: 0 },
+      applyErrors: [],
+      editOperationID: null,
+      validationPending: true
+    })),
+    analyzeBulk: vi.fn(async () => ({
+      dataType: 'measurementssummary',
+      rowCount: 0,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'info',
+      planHash: 'hash-not-mocked',
+      generatedAt: '2026-04-21T00:00:00Z'
+    })),
+    assertBulkPlanCanApply: vi.fn()
+  };
+});
 
 vi.mock('@/auth', () => ({
   auth: mocks.auth
@@ -80,11 +102,23 @@ vi.mock('@/lib/measurementviewrefresh', () => ({
 }));
 
 vi.mock('@/config/editplan/apply', () => ({
-  applyEditInTransaction: mocks.applyEditInTransaction
+  applyEditInTransaction: mocks.applyEditInTransaction,
+  SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
 vi.mock('@/config/editplan/bulkanalyzer', () => ({
-  analyzeBulk: mocks.analyzeBulk
+  analyzeBulk: mocks.analyzeBulk,
+  assertBulkPlanCanApply: mocks.assertBulkPlanCanApply
+}));
+
+vi.mock('@/config/editplan/analyzer', () => ({
+  RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError
+}));
+
+vi.mock('@/config/editplan/authorization', () => ({
+  assertSessionMayEdit: mocks.assertSessionMayEdit,
+  createFreshAuthorizationCheck: mocks.createFreshAuthorizationCheck,
+  PendingUserEditForbiddenError: mocks.MockPendingUserEditForbiddenError
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
@@ -138,7 +172,7 @@ describe('POST /api/revisionupload/apply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com' } });
+    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com', userStatus: 'global', sites: [] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.ensureUploadSessionsTable.mockResolvedValue(undefined);
     mocks.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
@@ -147,6 +181,12 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.refreshMeasurementViewsForScope.mockResolvedValue(undefined);
     mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+    mocks.assertSessionMayEdit.mockImplementation((session: any) => {
+      if (session?.user?.userStatus === 'pending') throw new mocks.MockPendingUserEditForbiddenError();
+    });
+    mocks.createFreshAuthorizationCheck.mockReturnValue(mocks.assertAuthorizationFresh);
+    mocks.assertAuthorizationFresh.mockResolvedValue(undefined);
+    mocks.assertBulkPlanCanApply.mockReturnValue(undefined);
     mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
     mocks.applyEditInTransaction.mockResolvedValue({
       updatedIDs: { CoreMeasurementID: 0 },
@@ -171,6 +211,15 @@ describe('POST /api/revisionupload/apply', () => {
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error).toContain('bulkPlanHash');
+  });
+
+  it('returns 403 before scope checks for pending users', async () => {
+    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com', userStatus: 'pending', sites: [] } });
+    const response = await POST(buildRequest(buildValidBody()));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
+    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.withTransaction).not.toHaveBeenCalled();
   });
 
   it('returns 409 when the plot/census measurement scope lock is unavailable', async () => {
@@ -272,7 +321,8 @@ describe('POST /api/revisionupload/apply', () => {
         invalid: [{ rowIndex: 7, reason: 'duplicate stemid' }],
         duplicateMeasurementIDsToDelete: [303]
       },
-      'tx-1'
+      'tx-1',
+      { role: 'global' }
     );
   });
 
@@ -294,6 +344,35 @@ describe('POST /api/revisionupload/apply', () => {
       error: 'plan hash mismatch',
       freshPlan
     });
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the recomputed bulk plan contains role-forbidden fields', async () => {
+    mocks.assertBulkPlanCanApply.mockImplementation(() => {
+      throw new mocks.MockRoleForbiddenFieldError(['spcode'], 'field crew');
+    });
+
+    const response = await POST(buildRequest(buildValidBody()));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'role forbidden field', fields: ['spcode'], role: 'field crew' });
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 and does not write when authorization is stale after the hash check', async () => {
+    mocks.assertAuthorizationFresh.mockRejectedValue(new mocks.MockSessionExpiredError());
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'session expired' });
+    expect(mocks.assertAuthorizationFresh).toHaveBeenCalledTimes(1);
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 

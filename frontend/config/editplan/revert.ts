@@ -11,8 +11,9 @@
 // and retry with `confirmedPlanHash` matching the plan to explicitly accept
 // those consequences.
 import ConnectionManager from '@/config/connectionmanager';
+import type { UserAuthRoles } from '@/config/macros';
 import { ApplyResult, EditPlan, EditPlanDataType, SEVERITY_RANK } from './types';
-import { analyzeEdit } from './analyzer';
+import { analyzeEdit, assertEditPlanCanApply } from './analyzer';
 import { applyEditInTransaction, ScopeLockHeldError } from './apply';
 import {
   EditOperationRecord,
@@ -70,6 +71,8 @@ export interface RevertInput {
   // with the plan hash from that response to acknowledge the fresh ramifications.
   // Missing or mismatched hash on a non-info restore plan is a 409.
   confirmedPlanHash?: string;
+  role?: UserAuthRoles | null;
+  assertAuthorizationFresh?: () => Promise<void>;
 }
 
 export async function revertEdit(cm: ConnectionManager, input: RevertInput): Promise<ApplyResult> {
@@ -110,8 +113,11 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       original.censusID,
       original.targetID,
       newRow,
-      txID
+      txID,
+      { role: input.role }
     );
+
+    assertEditPlanCanApply(restorePlan);
 
     if (
       SEVERITY_RANK[restorePlan.maxSeverity] > SEVERITY_RANK.info &&
@@ -131,6 +137,8 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       operationType: 'revert',
       revertable: false,
       createdBy: input.createdBy,
+      role: input.role,
+      assertAuthorizationFresh: input.assertAuthorizationFresh,
       transactionID: txID
     });
 

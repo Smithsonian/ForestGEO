@@ -124,7 +124,7 @@ const VALID_BODY = {
 describe('POST /api/edits/preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com' } });
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
     mocks.closeConnection.mockResolvedValue(undefined);
@@ -152,6 +152,15 @@ describe('POST /api/edits/preview', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid schema' });
+    expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 before scope checks for pending users', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'pending', sites: [] } });
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
+    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
     expect(mocks.analyzeEdit).not.toHaveBeenCalled();
   });
 
@@ -216,7 +225,7 @@ describe('POST /api/edits/preview', () => {
     await expect(response.json()).resolves.toEqual(plan);
     expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
       expect.any(Object),
-      { user: { email: 'mason@example.com' } },
+      { user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } },
       {
         schema: 'forestgeo_testing',
         plotID: 1,
@@ -230,7 +239,9 @@ describe('POST /api/edits/preview', () => {
       1,
       2,
       42,
-      { MeasuredDBH: 12.5 }
+      { MeasuredDBH: 12.5 },
+      undefined,
+      { role: 'field crew' }
     );
     expect(mocks.closeConnection).toHaveBeenCalled();
   });

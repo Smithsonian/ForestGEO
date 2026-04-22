@@ -55,8 +55,9 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
   const expectedConfirmPhrase = `APPLY ${bulkPlan.rowCount}`;
   const [confirmInput, setConfirmInput] = useState('');
   const typedConfirmPassed = !typedConfirmRequired || confirmInput.trim() === expectedConfirmPhrase;
+  const isBlocked = bulkPlan.canApply === false || (bulkPlan.errors ?? []).some(error => error.blocking);
 
-  const applyDisabled = busy || !typedConfirmPassed;
+  const applyDisabled = busy || !typedConfirmPassed || isBlocked;
 
   return (
     <Modal open={true} onClose={busy ? undefined : onCancel}>
@@ -99,6 +100,12 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
                 </Stack>
               )}
             </Box>
+
+            {isBlocked ? (
+              <Typography level="body-sm" color="danger" data-testid="impact-summary-blocked">
+                This revision cannot be applied by your current role.
+              </Typography>
+            ) : null}
 
             {typedConfirmRequired ? (
               <FormControl data-testid="impact-summary-typed-confirm">

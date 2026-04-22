@@ -45,6 +45,24 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockSessionExpiredError extends Error {
+    constructor() {
+      super('session expired');
+      this.name = 'SessionExpiredError';
+    }
+  }
+
+  class MockRoleForbiddenFieldError extends Error {
+    fields: string[];
+    role: string;
+    constructor(fields: string[], role = 'field crew') {
+      super(`role ${role} cannot edit fields: ${fields.join(',')}`);
+      this.name = 'RoleForbiddenFieldError';
+      this.fields = fields;
+      this.role = role;
+    }
+  }
+
   class MockEditScopeForbiddenError extends Error {
     constructor(message = 'scope forbidden') {
       super(message);
@@ -80,6 +98,8 @@ const mocks = vi.hoisted(() => {
     MockSpeciesNotFoundError,
     MockHashDriftError,
     MockScopeLockHeldError,
+    MockSessionExpiredError,
+    MockRoleForbiddenFieldError,
     MockEditScopeForbiddenError,
     MockEditScopeConflictError,
     MockInvalidClearError
@@ -105,6 +125,7 @@ vi.mock('@/config/connectionmanager', () => ({
 
 vi.mock('@/config/editplan/analyzer', () => ({
   DisallowedFieldError: mocks.MockDisallowedFieldError,
+  RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError,
   TargetNotFoundError: mocks.MockTargetNotFoundError
 }));
 
@@ -115,7 +136,8 @@ vi.mock('@/config/editplan/rules/context', () => ({
 vi.mock('@/config/editplan/apply', () => ({
   applyEdit: mocks.applyEdit,
   HashDriftError: mocks.MockHashDriftError,
-  ScopeLockHeldError: mocks.MockScopeLockHeldError
+  ScopeLockHeldError: mocks.MockScopeLockHeldError,
+  SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
@@ -149,7 +171,7 @@ const VALID_BODY = {
 describe('POST /api/edits/apply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com' } });
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
     mocks.closeConnection.mockResolvedValue(undefined);
@@ -216,6 +238,29 @@ describe('POST /api/edits/apply', () => {
     await expect(response.json()).resolves.toEqual({ error: 'scope locked' });
   });
 
+  it('returns 401 when applyEdit detects stale authorization before commit', async () => {
+    mocks.applyEdit.mockRejectedValue(new mocks.MockSessionExpiredError());
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'session expired' });
+  });
+
+  it('returns 403 when applyEdit rejects a role-forbidden field', async () => {
+    mocks.applyEdit.mockRejectedValue(new mocks.MockRoleForbiddenFieldError(['SpeciesCode'], 'field crew'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'role forbidden field', fields: ['SpeciesCode'], role: 'field crew' });
+  });
+
+  it('returns 403 before scope checks for pending users', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'pending', sites: [] } });
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
+    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.applyEdit).not.toHaveBeenCalled();
+  });
+
   it('returns 422 when applyEdit throws DisallowedFieldError', async () => {
     mocks.applyEdit.mockRejectedValue(new mocks.MockDisallowedFieldError(['SpeciesName']));
     const response = await POST(buildRequest(VALID_BODY));
@@ -258,7 +303,7 @@ describe('POST /api/edits/apply', () => {
     await expect(response.json()).resolves.toEqual(applyResult);
     expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
       expect.any(Object),
-      { user: { email: 'mason@example.com' } },
+      { user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } },
       {
         schema: 'forestgeo_testing',
         plotID: 1,
@@ -276,7 +321,9 @@ describe('POST /api/edits/apply', () => {
         targetID: 42,
         newRow: { MeasuredDBH: 12.5 },
         expectedPlanHash: VALID_PLAN_HASH,
-        createdBy: 'mason@example.com'
+        createdBy: 'mason@example.com',
+        role: 'field crew',
+        assertAuthorizationFresh: expect.any(Function)
       })
     );
     expect(mocks.closeConnection).toHaveBeenCalled();

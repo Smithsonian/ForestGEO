@@ -139,6 +139,7 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
     const pending = pendingRef.current;
     const currentPlan = dialogState.plan;
     if (!pending || !currentPlan) return;
+    if (currentPlan.canApply === false) return;
 
     setDialogState(prev => ({ ...prev, busy: true }));
     try {
@@ -177,7 +178,7 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
         throw error;
       }
 
-      if (plan.maxSeverity === 'info') {
+      if (plan.maxSeverity === 'info' && plan.canApply !== false) {
         try {
           const applyResponse = await executeApply(plan, targetID, newRow);
           if (applyResponse.kind === 'conflict') {

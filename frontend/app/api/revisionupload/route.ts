@@ -8,6 +8,8 @@ import { FileRow } from '@/config/macros/formdetails';
 import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
 import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 
 export const runtime = 'nodejs';
 
@@ -206,6 +208,24 @@ function isBlankOrNullPlaceholder(value: unknown): boolean {
   if (value === undefined || value === null) return true;
   const trimmed = String(value).trim();
   return trimmed === '' || trimmed.toUpperCase() === 'NULL';
+}
+
+function buildRevisionRoleFieldCandidates(
+  matchedRows: RevisionMatchedRow[],
+  newRows: RevisionNewRowCandidate[]
+): RevisionRoleFieldCandidate[] {
+  const candidates: RevisionRoleFieldCandidate[] = [];
+  matchedRows.forEach((row, index) => {
+    if (row.ignoredEdits?.spcode) {
+      candidates.push({ rowIndex: index, field: 'spcode' });
+    }
+  });
+  for (const row of newRows) {
+    if (!isBlankOrNullPlaceholder(row.csvRow.spcode)) {
+      candidates.push({ rowIndex: row.csvIndex, field: 'spcode' });
+    }
+  }
+  return candidates;
 }
 
 function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
@@ -732,6 +752,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidSchema(schema)) {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
+  try {
+    assertSessionMayEdit(session);
+  } catch (error) {
+    if (error instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+    }
+    throw error;
+  }
 
   let requestFiles: NormalizedRequestFile[];
   try {
@@ -777,13 +805,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       csvIndexOffset += file.rows.length;
     }
 
-    const bulkPlan = await analyzeBulk(
+    const baseBulkPlan = await analyzeBulk(
       connectionManager,
       schema,
       'measurementssummary',
       normalizedPlotID,
       normalizedCensusID,
-      buildBulkInput(matchedRows, newRows, invalidRows)
+      buildBulkInput(matchedRows, newRows, invalidRows),
+      undefined,
+      { role: session.user.userStatus }
+    );
+    const bulkPlan = applyRevisionRolePolicy(
+      baseBulkPlan,
+      session.user.userStatus,
+      buildRevisionRoleFieldCandidates(matchedRows, newRows)
     );
 
     const response: RevisionUploadResponse = {

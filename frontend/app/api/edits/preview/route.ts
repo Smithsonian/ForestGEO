@@ -12,6 +12,7 @@ import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from '@/config
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
 import { InvalidClearError } from '@/config/editplan/fieldpolicy';
+import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 
 export const runtime = 'nodejs';
 
@@ -46,6 +47,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidSchema(body.schema)) {
     return NextResponse.json({ error: 'invalid schema' }, { status: 400 });
   }
+  try {
+    assertSessionMayEdit(session);
+  } catch (err) {
+    if (err instanceof PendingUserEditForbiddenError) {
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+    }
+    throw err;
+  }
 
   const cm = ConnectionManager.getInstance();
   try {
@@ -55,7 +64,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       censusID: body.censusID
     });
 
-    const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow);
+    const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow, undefined, {
+      role: session.user.userStatus
+    });
     return NextResponse.json(plan, { status: 200 });
   } catch (err) {
     if (err instanceof EditScopeForbiddenError) {
