@@ -523,6 +523,118 @@ describe('editplan drift + lock (integration)', () => {
     });
   });
 
+  // Concurrent edits — two users preview the same row at the same time. User A
+  // applies first and commits. User B's plan hash was identical to A's (same
+  // inputs → same deterministic hash), but A's commit has now drifted the row,
+  // so B's apply must return 409 with a freshPlan whose from-value reflects A's
+  // committed change. This is the apply-layer contract that protects users from
+  // silently overwriting each other — the existing drift-detection test covers
+  // out-of-band SQL writes; this one proves the same contract holds when the
+  // drift came from a legitimate concurrent apply through the same route.
+  describe('concurrent edit drift', () => {
+    it('returns 409 for the second caller and freshPlan reflects the first caller\'s committed change', async () => {
+      const USER_A_DBH = 42.0;
+      const USER_B_DBH = 55.0;
+
+      // Preview A and Preview B use identical inputs so their planHash must match
+      // bit-for-bit; the deterministic hash is what makes this whole coordination
+      // contract work.
+      const previewARes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: USER_A_DBH }
+        })
+      );
+      expect(previewARes.status).toBe(200);
+      const planA = (await previewARes.json()) as { planHash: string };
+
+      const previewBRes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: USER_B_DBH }
+        })
+      );
+      expect(previewBRes.status).toBe(200);
+      const planB = (await previewBRes.json()) as { planHash: string };
+      // Different target values → different hashes (sanity: we're not
+      // accidentally asserting two apply-same-value previews).
+      expect(planB.planHash).not.toBe(planA.planHash);
+
+      // User A applies successfully.
+      const applyARes = await applyPOST(
+        buildApplyRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: USER_A_DBH },
+          planHash: planA.planHash
+        })
+      );
+      expect(applyARes.status).toBe(200);
+
+      // User B applies with a plan that was built against the pre-A state.
+      // The apply route re-analyzes inside the transaction and sees A's commit
+      // as the new from-value, so the hash no longer matches and B gets 409.
+      const applyBRes = await applyPOST(
+        buildApplyRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: USER_B_DBH },
+          planHash: planB.planHash
+        })
+      );
+      expect(applyBRes.status).toBe(409);
+
+      const body = (await applyBRes.json()) as {
+        error: string;
+        freshPlan: {
+          planHash: string;
+          fieldChanges: Array<{ field: string; from: unknown; to: unknown }>;
+        };
+      };
+      expect(body.error).toBe('plan hash mismatch');
+      expect(body.freshPlan.planHash).toHaveLength(64);
+      expect(body.freshPlan.planHash).not.toBe(planB.planHash);
+
+      // freshPlan's from-value must reflect A's committed change so the UI can
+      // show User B what they actually collided with — not the row's value at
+      // preview time.
+      const dbhChange = body.freshPlan.fieldChanges.find(c => c.field === 'MeasuredDBH');
+      expect(dbhChange).toBeTruthy();
+      expect(Number(dbhChange!.from)).toBeCloseTo(USER_A_DBH, 2);
+      expect(Number(dbhChange!.to)).toBeCloseTo(USER_B_DBH, 2);
+
+      // Database still carries A's value, not B's. B's rejected apply did not
+      // half-write the row.
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(USER_A_DBH, 2);
+
+      // Exactly one ledger entry for this target — A's. B's rejected apply
+      // wrote nothing to the ledger.
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(ledgerRows[0].cnt)).toBe(1);
+    });
+  });
+
   // TOCTOU — between preview and apply the world changed in a way the hash can't
   // detect because the row that went stale isn't on the target table the hash
   // covers. The apply path re-analyzes inside its transaction, so the drift MUST
