@@ -17,7 +17,13 @@ import { setupTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG, type Test
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   activeTransactionID: null as string | null,
-  transactionCounter: 0
+  transactionCounter: 0,
+  // Per-test override for the auth-freshness re-check. Defaults to always-fresh
+  // so every other test runs as before; the "auth freshness" describe block
+  // below swaps this in-place to force a SessionExpiredError mid-apply.
+  assertAuthorizationFresh: async () => {
+    /* default: always-fresh */
+  }
 }));
 
 const TEST_TRANSACTION_PREFIX = 'tx-';
@@ -104,21 +110,21 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
-// Auth freshness re-check (#11) depends on process.env.AUTH_FUNCTIONS_POLL_URL
-// and a reachable identity endpoint, neither of which the integration harness
-// provides. Replace createFreshAuthorizationCheck with a no-op so these tests
-// exercise the apply flow under a valid, non-expiring session. Other exports
-// from the module (assertSessionMayEdit, PendingUserEditForbiddenError,
-// SessionExpiredError) are preserved via importActual.
+// Auth freshness re-check depends on process.env.AUTH_FUNCTIONS_POLL_URL and a
+// reachable identity endpoint, neither of which the integration harness
+// provides. Replace createFreshAuthorizationCheck with a per-test-controllable
+// stub so most tests run under an always-fresh session, while the "auth
+// freshness re-check" describe block can force a SessionExpiredError without
+// standing up a fake HTTP endpoint. Other exports (assertSessionMayEdit,
+// PendingUserEditForbiddenError, SessionExpiredError) come through via
+// importActual so type identity is preserved for the route's instanceof check.
 vi.mock('@/config/editplan/authorization', async () => {
   const actual = await vi.importActual<typeof import('@/config/editplan/authorization')>(
     '@/config/editplan/authorization'
   );
   return {
     ...actual,
-    createFreshAuthorizationCheck: () => async () => {
-      /* always-fresh in tests */
-    }
+    createFreshAuthorizationCheck: () => () => sharedState.assertAuthorizationFresh()
   };
 });
 
@@ -128,6 +134,8 @@ import { POST as applyPOST } from '@/app/api/edits/apply/route';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import ConnectionManager from '@/config/connectionmanager';
 import { writeMeasurementsSummary } from '@/config/editplan/writers/measurementssummary';
+import { applyEditInTransaction } from '@/config/editplan/apply';
+import { SessionExpiredError } from '@/config/editplan/authorization';
 import type { EditPlan } from '@/config/editplan/types';
 
 // ---------------------------------------------------------------------------
@@ -246,6 +254,9 @@ describe('editplan drift + lock (integration)', () => {
   let fixture: DriftLockFixture;
   beforeEach(async () => {
     sharedState.activeTransactionID = null;
+    sharedState.assertAuthorizationFresh = async () => {
+      /* default: always-fresh */
+    };
     // Defensive: ensure no stray transaction is left open on the shared
     // connection from a prior test. ROLLBACK is a no-op outside a txn.
     await connection.query('ROLLBACK');
@@ -536,9 +547,11 @@ describe('editplan drift + lock (integration)', () => {
       const USER_A_DBH = 42.0;
       const USER_B_DBH = 55.0;
 
-      // Preview A and Preview B use identical inputs so their planHash must match
-      // bit-for-bit; the deterministic hash is what makes this whole coordination
-      // contract work.
+      // Preview A and Preview B target the same row against the same pre-apply
+      // state; different target DBH values mean their planHashes must differ
+      // (sanity-asserted below), while both from-values equal INITIAL_DBH. This
+      // is the shape of a real two-user race: different intents against the same
+      // initial state, whichever commits first wins.
       const previewARes = await previewPOST(
         buildPreviewRequest({
           schema: config.database,
@@ -897,6 +910,262 @@ describe('editplan drift + lock (integration)', () => {
         [secondCoreMeasurementID]
       );
       expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
+    });
+
+    // Exercises the FULL production bulk primitive (applyEditInTransaction)
+    // inside one outer transaction, mirroring the loop in
+    // app/api/revisionupload/apply/route.ts:902. The sibling test above drives
+    // the writer directly to prove writer-level transactional correctness; this
+    // test proves the invariant one level up — that a mid-loop failure rolls
+    // back prior iterations' ledger + data writes.
+    //
+    // CURRENTLY SKIPPED — reveals a confirmed production bug.
+    //
+    // applyEditInTransaction calls ensureEditOperationsTable on every invocation
+    // (frontend/config/editplan/apply.ts:81). That function issues
+    // `CREATE TABLE IF NOT EXISTS ??.edit_operations` (frontend/config/editoperations.ts:140).
+    // MySQL 8.0 treats CREATE TABLE as a DDL statement that implicitly commits
+    // the current transaction BEFORE executing, even when the IF NOT EXISTS
+    // branch is a no-op. Verified empirically against MySQL 8.0.36:
+    //
+    //   START TRANSACTION;
+    //   UPDATE t SET v=99 WHERE id=1;
+    //   CREATE TABLE IF NOT EXISTS existing_table (...);  -- implicit commit here
+    //   ROLLBACK;                                         -- no-op, nothing to roll back
+    //   SELECT v FROM t WHERE id=1;                       -- 99 (durable)
+    //
+    // So in the bulk loop at app/api/revisionupload/apply/route.ts:880-919, the
+    // second iteration's ensureEditOperationsTable commits row 1's data UPDATE
+    // + ledger INSERT; if a later iteration throws, the outer withTransaction's
+    // rollback cannot undo prior iterations' work. The Batch B writer-direct
+    // test passes because it sidesteps ensureEditOperationsTable, but that bypass
+    // is exactly what the production route cannot do.
+    //
+    // Proposed fix (outside the scope of this test):
+    //   1. Hoist ensureEditOperationsTable to run ONCE before opening the outer
+    //      transaction in app/api/revisionupload/apply/route.ts (and any other
+    //      batch caller). The function is idempotent and safe to call without
+    //      a transactionID.
+    //   2. Add an option like `schemaEnsured?: boolean` to ApplyInTransactionInput
+    //      (frontend/config/editplan/apply.ts) so per-iteration calls can skip
+    //      the DDL. Default false preserves behavior for single-row callers.
+    //
+    // When the fix lands, remove the .skip on the it() below. The assertions
+    // already describe the correct post-fix behavior: row 1 reverted, row 2
+    // unchanged, and zero ledger rows for either target.
+    it.skip('rolls back the first applyEditInTransaction when the second call throws inside the same outer transaction', async () => {
+      const SECOND_TREE_TAG = 'DLT003';
+      const SECOND_STEM_TAG = 'DLS3';
+      const SECOND_INITIAL_DBH = 8.88;
+      const FIRST_NEW_DBH = 44.4;
+      const SECOND_NEW_DBH = 66.6;
+      const ROW2_TARGET_SPECIES_CODE = 'QUERCO';
+      const LEDGER_CREATED_BY = AUTH_USER_EMAIL;
+
+      const [targetSpeciesRows] = await connection.query<RowDataPacket[]>(
+        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
+        [ROW2_TARGET_SPECIES_CODE]
+      );
+      expect(targetSpeciesRows.length).toBe(1);
+      const row2TargetSpeciesID = targetSpeciesRows[0].SpeciesID as number;
+
+      const [secondTreeRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
+        [SECOND_TREE_TAG, fixture.speciesID, fixture.censusID]
+      );
+      const secondTreeID = secondTreeRes.insertId;
+
+      const [secondStemRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, 2, 2, 1)`,
+        [secondTreeID, fixture.quadratID, fixture.censusID, SECOND_STEM_TAG]
+      );
+      const secondStemGUID = secondStemRes.insertId;
+
+      const [secondCmRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO coremeasurements
+           (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate,
+            RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+            IsValidated, IsActive)
+         VALUES (?, ?, ?, 1.1, '2024-06-15', ?, ?, ?, ?, 2, 2, 1, 1)`,
+        [
+          secondStemGUID,
+          fixture.censusID,
+          SECOND_INITIAL_DBH,
+          SECOND_TREE_TAG,
+          SECOND_STEM_TAG,
+          SPECIES_CODE,
+          QUADRAT_NAME
+        ]
+      );
+      const secondCoreMeasurementID = secondCmRes.insertId;
+
+      // Pre-create edit_operations so the first applyEditInTransaction's DDL
+      // call is a no-op on an already-existing table — the steady-state case
+      // for the bulk route. (The first apply on a fresh schema creates the
+      // table; after that, every subsequent bulk loop starts with it present.)
+      // The implicit-commit effect this test reveals happens even for no-op
+      // CREATE TABLE IF NOT EXISTS, so pre-creating the table matches the
+      // worst-case production scenario.
+      const cm = ConnectionManager.getInstance();
+      await connection.query(
+        `CREATE TABLE IF NOT EXISTS edit_operations (
+          EditOperationID INT AUTO_INCREMENT PRIMARY KEY,
+          OperationType ENUM('single-row-edit','bulk-revision-row','revert') NOT NULL,
+          Revertable BOOLEAN NOT NULL DEFAULT TRUE,
+          DataType ENUM('measurementssummary','failedmeasurements') NOT NULL,
+          TargetID BIGINT NOT NULL,
+          PlotID INT NOT NULL,
+          CensusID INT NOT NULL,
+          PlanHash CHAR(64) NOT NULL,
+          BeforeState JSON NOT NULL,
+          AfterState JSON NOT NULL,
+          CreatedBy VARCHAR(255) NOT NULL,
+          CreatedAt TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+          RevertedByEditOperationID INT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+      );
+
+      // Deactivate the species row 2 will try to switch TO. resolveSpeciesByCode
+      // filters IsActive=1, so the analyzer throws SpeciesNotFoundError during
+      // row 2's applyEditInTransaction — a realistic TOCTOU-style mid-bulk
+      // failure. Row 1 is DBH-only and writes cleanly.
+      await connection.query('UPDATE species SET IsActive = 0 WHERE SpeciesID = ?', [row2TargetSpeciesID]);
+
+      const outerTxID = await cm.beginTransaction();
+      try {
+        const acquired = await cm.acquireApplicationLock(
+          buildMeasurementScopeLockName(config.database, fixture.plotID, fixture.censusID),
+          outerTxID,
+          MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
+        );
+        expect(acquired).toBe(true);
+
+        await applyEditInTransaction(cm, {
+          dataType: 'measurementssummary',
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: FIRST_NEW_DBH },
+          expectedPlanHash: null,
+          operationType: 'bulk-revision-row',
+          revertable: false,
+          refreshViews: false,
+          createdBy: LEDGER_CREATED_BY,
+          role: 'global',
+          transactionID: outerTxID
+        });
+
+        await expect(
+          applyEditInTransaction(cm, {
+            dataType: 'measurementssummary',
+            schema: config.database,
+            plotID: fixture.plotID,
+            censusID: fixture.censusID,
+            targetID: secondCoreMeasurementID,
+            newRow: { MeasuredDBH: SECOND_NEW_DBH, SpeciesCode: ROW2_TARGET_SPECIES_CODE },
+            expectedPlanHash: null,
+            operationType: 'bulk-revision-row',
+            revertable: false,
+            refreshViews: false,
+            createdBy: LEDGER_CREATED_BY,
+            role: 'global',
+            transactionID: outerTxID
+          })
+        ).rejects.toThrow(/[Ss]pecies not found/);
+
+        await cm.rollbackTransaction(outerTxID);
+      } catch (err) {
+        await cm.rollbackTransaction(outerTxID).catch(() => {});
+        throw err;
+      } finally {
+        await connection.query('UPDATE species SET IsActive = 1 WHERE SpeciesID = ?', [row2TargetSpeciesID]);
+      }
+
+      // Row 1 must be at its pre-transaction value — the outer rollback has to
+      // wipe every prior applyEditInTransaction's data AND ledger writes, even
+      // ones that completed in isolation.
+      const [row1After] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(row1After[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
+
+      const [row2After] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [secondCoreMeasurementID]
+      );
+      expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
+
+      // Ledger must be empty for these targets — no half-committed bulk rows.
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID IN (?, ?)`,
+        [fixture.coreMeasurementID, secondCoreMeasurementID]
+      );
+      expect(Number(ledgerRows[0].cnt)).toBe(0);
+    });
+  });
+
+  // Auth freshness re-check — apply.ts:101-103 awaits assertAuthorizationFresh
+  // AFTER the hash check and BEFORE the writer. If the fresh re-check throws
+  // (role downgrade, scope loss, session revoked out-of-band between preview
+  // and apply), the apply route must return 401 AND roll back the transaction
+  // so no data write and no ledger entry survive. Existing unit tests cover
+  // the call-site wiring (frontend/config/editplan/apply.test.ts:138-153) and
+  // the route-level error-to-status mapping (app/api/edits/apply/route.test.ts).
+  // This test closes the integration-level gap: the real transaction actually
+  // rolls back against a live MySQL when the safeguard fires.
+  describe('auth freshness re-check', () => {
+    it('returns 401 and leaves the row + ledger unchanged when assertAuthorizationFresh throws mid-apply', async () => {
+      const previewRes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: PREVIEW_ATTEMPT_DBH }
+        })
+      );
+      expect(previewRes.status).toBe(200);
+      const plan = (await previewRes.json()) as { planHash: string };
+
+      sharedState.assertAuthorizationFresh = async () => {
+        throw new SessionExpiredError('role changed between preview and apply');
+      };
+
+      const applyRes = await applyPOST(
+        buildApplyRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: PREVIEW_ATTEMPT_DBH },
+          planHash: plan.planHash
+        })
+      );
+      expect(applyRes.status).toBe(401);
+      const body = (await applyRes.json()) as { error: string };
+      expect(body.error).toBe('session expired');
+
+      // Row must retain its pre-apply DBH. If the safeguard fires but the
+      // rollback wiring is broken, the writer's UPDATE could leak through.
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
+
+      // Ledger must be empty — writeEditOperation runs AFTER the writer, so a
+      // ledger row would only exist if both the auth check and the transaction
+      // rollback were broken.
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(ledgerRows[0].cnt)).toBe(0);
     });
   });
 
