@@ -110,17 +110,17 @@ const mocks = vi.hoisted(() => {
     }
   }
 
-  class MockEditScopeForbiddenError extends Error {
+  class MockScopeAccessError extends Error {
     constructor(message = 'scope forbidden') {
       super(message);
-      this.name = 'EditScopeForbiddenError';
+      this.name = 'ScopeAccessError';
     }
   }
 
-  class MockEditScopeConflictError extends Error {
+  class MockScopeBusyError extends Error {
     constructor(message = 'edit scope is currently busy') {
       super(message);
-      this.name = 'EditScopeConflictError';
+      this.name = 'ScopeBusyError';
     }
   }
 
@@ -140,7 +140,8 @@ const mocks = vi.hoisted(() => {
     revertEdit: vi.fn(),
     readEditOperation: vi.fn(),
     ensureEditOperationsTable: vi.fn(async () => undefined),
-    assertEditScopeAllowed: vi.fn(),
+    assertCanEditMeasurementScope: vi.fn(),
+    assertNoActiveMeasurementScopeConflict: vi.fn(),
     closeConnection: vi.fn(async () => undefined),
     MockDisallowedFieldError,
     MockTargetNotFoundError,
@@ -154,8 +155,8 @@ const mocks = vi.hoisted(() => {
     MockCannotRevertRevertError,
     MockNonRevertableEditOperationError,
     MockRevertDriftError,
-    MockEditScopeForbiddenError,
-    MockEditScopeConflictError,
+    MockScopeAccessError,
+    MockScopeBusyError,
     MockInvalidClearError
   };
 });
@@ -203,9 +204,10 @@ vi.mock('@/config/editplan/revert', () => ({
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
-  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
-  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
-  EditScopeConflictError: mocks.MockEditScopeConflictError
+  assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
+  assertNoActiveMeasurementScopeConflict: mocks.assertNoActiveMeasurementScopeConflict,
+  ScopeAccessError: mocks.MockScopeAccessError,
+  ScopeBusyError: mocks.MockScopeBusyError
 }));
 
 vi.mock('@/config/editplan/fieldpolicy', () => ({
@@ -255,7 +257,8 @@ describe('POST /api/edits/revert', () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } });
     mocks.isValidSchema.mockReturnValue(true);
-    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+    mocks.assertCanEditMeasurementScope.mockResolvedValue(undefined);
+    mocks.assertNoActiveMeasurementScopeConflict.mockResolvedValue(undefined);
     mocks.ensureEditOperationsTable.mockResolvedValue(undefined);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.readEditOperation.mockResolvedValue(buildLedgerRow());
@@ -290,12 +293,12 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
-    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
     expect(mocks.revertEdit).not.toHaveBeenCalled();
   });
 
-  it('returns 403 when the scope guard rejects the requested scope', async () => {
-    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeForbiddenError());
+  it('returns 403 when the scope access guard rejects the requested scope', async () => {
+    mocks.assertCanEditMeasurementScope.mockRejectedValue(new mocks.MockScopeAccessError());
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'scope forbidden' });
@@ -304,8 +307,8 @@ describe('POST /api/edits/revert', () => {
     expect(mocks.revertEdit).not.toHaveBeenCalled();
   });
 
-  it('returns 423 when the scope guard detects active work in the scope', async () => {
-    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeConflictError('validation run 9 is active for this plot/census'));
+  it('returns 423 when the conflict probe detects active work in the scope', async () => {
+    mocks.assertNoActiveMeasurementScopeConflict.mockRejectedValue(new mocks.MockScopeBusyError('validation run 9 is active for this plot/census'));
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(423);
     await expect(response.json()).resolves.toEqual({ error: 'validation run 9 is active for this plot/census' });
@@ -441,9 +444,17 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(applyResult);
-    expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
+    expect(mocks.assertCanEditMeasurementScope).toHaveBeenCalledWith(
       expect.any(Object),
       { user: { email: 'mason@example.com', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] } },
+      {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      }
+    );
+    expect(mocks.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(
+      expect.any(Object),
       {
         schema: 'forestgeo_testing',
         plotID: 1,

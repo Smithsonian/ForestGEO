@@ -7,7 +7,7 @@ import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';
 import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
-import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 
@@ -783,11 +783,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const invalidRows: RevisionInvalidRow[] = [];
 
   try {
-    await assertEditScopeAllowed(connectionManager, session, {
+    await assertCanEditMeasurementScope(connectionManager, session, {
       schema,
       plotID: normalizedPlotID,
-      censusID: normalizedCensusID,
-      rejectActiveOperations: false
+      censusID: normalizedCensusID
     });
 
     let csvIndexOffset = 0;
@@ -841,11 +840,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (errorObj instanceof RevisionUploadRequestError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INVALID_REQUEST });
     }
-    if (errorObj instanceof EditScopeForbiddenError) {
-      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    if (errorObj instanceof ScopeAccessError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: HTTPResponses.FORBIDDEN });
     }
-    if (errorObj instanceof EditScopeConflictError) {
-      return NextResponse.json({ error: errorObj.message }, { status: 423 });
+    if (errorObj instanceof ScopeBusyError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.LOCKED });
     }
     ailogger.error('[revisionupload API] Error classifying rows:', errorObj);
     return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });

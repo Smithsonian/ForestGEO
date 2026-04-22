@@ -30,9 +30,11 @@ const mocks = vi.hoisted(() => {
     closeConnection: vi.fn(async () => undefined),
     buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
     refreshMeasurementViewsForScope: vi.fn(async () => undefined),
-    assertEditScopeAllowed: vi.fn(async () => undefined),
-    MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
-    MockEditScopeConflictError: class MockEditScopeConflictError extends Error {},
+    assertCanEditMeasurementScope: vi.fn(async () => undefined),
+    writeEditOperation: vi.fn(async () => 1),
+    MockScopeAccessError: class MockScopeAccessError extends Error {},
+    MockScopeBusyError: class MockScopeBusyError extends Error {},
+    MockScopeLockHeldError: class MockScopeLockHeldError extends Error {},
     MockPendingUserEditForbiddenError,
     MockSessionExpiredError: class MockSessionExpiredError extends Error {},
     MockRoleForbiddenFieldError,
@@ -103,6 +105,7 @@ vi.mock('@/lib/measurementviewrefresh', () => ({
 
 vi.mock('@/config/editplan/apply', () => ({
   applyEditInTransaction: mocks.applyEditInTransaction,
+  ScopeLockHeldError: mocks.MockScopeLockHeldError,
   SessionExpiredError: mocks.MockSessionExpiredError
 }));
 
@@ -122,9 +125,13 @@ vi.mock('@/config/editplan/authorization', () => ({
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
-  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
-  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
-  EditScopeConflictError: mocks.MockEditScopeConflictError
+  assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
+  ScopeAccessError: mocks.MockScopeAccessError,
+  ScopeBusyError: mocks.MockScopeBusyError
+}));
+
+vi.mock('@/config/editoperations', () => ({
+  writeEditOperation: mocks.writeEditOperation
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -180,7 +187,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.refreshMeasurementViewsForScope.mockResolvedValue(undefined);
-    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+    mocks.assertCanEditMeasurementScope.mockResolvedValue(undefined);
+    mocks.writeEditOperation.mockResolvedValue(1);
     mocks.assertSessionMayEdit.mockImplementation((session: any) => {
       if (session?.user?.userStatus === 'pending') throw new mocks.MockPendingUserEditForbiddenError();
     });
@@ -218,16 +226,16 @@ describe('POST /api/revisionupload/apply', () => {
     const response = await POST(buildRequest(buildValidBody()));
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
-    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
     expect(mocks.withTransaction).not.toHaveBeenCalled();
   });
 
-  it('returns 409 when the plot/census measurement scope lock is unavailable', async () => {
+  it('returns 423 Locked when the plot/census measurement scope lock is unavailable', async () => {
     mocks.acquireApplicationLock.mockResolvedValue(false);
 
     const response = await POST(buildRequest(buildValidBody()));
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(423);
     await expect(response.json()).resolves.toEqual({
       error: 'Another measurement operation is already in progress for plot 1, census 2'
     });
@@ -235,7 +243,7 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.acquireApplicationLock).toHaveBeenCalledWith('measurement-scope:forestgeo_testing:1:2', 'tx-1', 0);
   });
 
-  it('returns 409 when a clean upload session is active for the same plot/census', async () => {
+  it('returns 423 Locked when a clean upload session is active for the same plot/census', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) {
         return [{ session_id: 'upload-session-7' }];
@@ -245,13 +253,13 @@ describe('POST /api/revisionupload/apply', () => {
 
     const response = await POST(buildRequest(buildValidBody()));
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(423);
     await expect(response.json()).resolves.toEqual({
       error: 'Cannot apply revisions while upload session upload-session-7 is active for plot 1, census 2'
     });
   });
 
-  it('returns 409 when a recent validation run is active for the same plot/census', async () => {
+  it('returns 423 Locked when a recent validation run is active for the same plot/census', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) {
         return [];
@@ -264,7 +272,7 @@ describe('POST /api/revisionupload/apply', () => {
 
     const response = await POST(buildRequest(buildValidBody()));
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(423);
     await expect(response.json()).resolves.toEqual({
       error: 'Cannot apply revisions while validation run 99 is active for plot 1, census 2'
     });
@@ -376,7 +384,7 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
-  it('calls applyEditInTransaction per matched row with operationType=bulk-revision-row and non-revertable ledger rows', async () => {
+  it('calls applyEditInTransaction per matched row with operationType=bulk-revision-row, suppresses per-row ledger writes, and writes one summary ledger entry', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -413,12 +421,13 @@ describe('POST /api/revisionupload/apply', () => {
       plotID: 1,
       censusID: 2,
       targetID: 101,
-        expectedPlanHash: null,
-        operationType: 'bulk-revision-row',
-        revertable: false,
-        refreshViews: false,
-        transactionID: 'tx-1'
-      });
+      expectedPlanHash: null,
+      operationType: 'bulk-revision-row',
+      revertable: false,
+      writeLedger: false,
+      refreshViews: false,
+      transactionID: 'tx-1'
+    });
     expect(firstInput.newRow).toEqual({ MeasuredDBH: '12.5', Attributes: 'L;D' });
 
     const secondCall = mocks.applyEditInTransaction.mock.calls[1] as unknown as [unknown, Record<string, unknown>];
@@ -427,9 +436,35 @@ describe('POST /api/revisionupload/apply', () => {
       targetID: 202,
       operationType: 'bulk-revision-row',
       revertable: false,
+      writeLedger: false,
       refreshViews: false
     });
     expect(secondInput.newRow).toEqual({ MeasuredHOM: '1.3' });
+
+    // Exactly one ledger entry for the whole batch, summarizing all IDs.
+    expect(mocks.writeEditOperation).toHaveBeenCalledTimes(1);
+    const summaryArgs = mocks.writeEditOperation.mock.calls[0] as unknown as [unknown, string, Record<string, unknown>, string];
+    expect(summaryArgs[1]).toBe('forestgeo_testing');
+    expect(summaryArgs[3]).toBe('tx-1');
+    const summaryRecord = summaryArgs[2];
+    expect(summaryRecord).toMatchObject({
+      operationType: 'bulk-revision-row',
+      revertable: false,
+      dataType: 'measurementssummary',
+      targetID: 101,
+      plotID: 1,
+      censusID: 2,
+      planHash: MATCHED_PLAN_HASH
+    });
+    const beforeState = summaryRecord.beforeState as Array<Record<string, unknown>>;
+    expect(beforeState).toHaveLength(1);
+    expect(beforeState[0]).toMatchObject({
+      table: 'bulk-revision-apply',
+      primaryKey: 'bulkPlanHash',
+      primaryKeyValue: MATCHED_PLAN_HASH
+    });
+    expect((beforeState[0].row as Record<string, unknown>).updatedCoreMeasurementIDs).toEqual([101, 202]);
+    expect((beforeState[0].row as Record<string, unknown>).deletedDuplicateCoreMeasurementIDs).toEqual([]);
   });
 
   it('rolls back the entire batch and surfaces 500 when the writer throws mid-loop', async () => {
@@ -606,5 +641,6 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+    expect(mocks.writeEditOperation).not.toHaveBeenCalled();
   });
 });

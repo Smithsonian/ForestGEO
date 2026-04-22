@@ -8,9 +8,15 @@ import { z } from 'zod';
 import { auth } from '@/auth';
 import ConnectionManager from '@/config/connectionmanager';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { HTTPResponses } from '@/config/macros';
 import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
-import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import {
+  assertCanEditMeasurementScope,
+  assertNoActiveMeasurementScopeConflict,
+  ScopeAccessError,
+  ScopeBusyError
+} from '@/config/editplan/scopeguard';
 import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 
@@ -28,37 +34,42 @@ const PreviewBody = z.object({
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await auth();
   if (!session) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: 'invalid JSON body' }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   const parsed = PreviewBody.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json({ error: 'bad body', details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: 'bad body', details: parsed.error.flatten() }, { status: HTTPResponses.BAD_REQUEST });
   }
 
   const body = parsed.data;
   if (!isValidSchema(body.schema)) {
-    return NextResponse.json({ error: 'invalid schema' }, { status: 400 });
+    return NextResponse.json({ error: 'invalid schema' }, { status: HTTPResponses.BAD_REQUEST });
   }
   try {
     assertSessionMayEdit(session);
   } catch (err) {
     if (err instanceof PendingUserEditForbiddenError) {
-      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: HTTPResponses.FORBIDDEN });
     }
     throw err;
   }
 
   const cm = ConnectionManager.getInstance();
   try {
-    await assertEditScopeAllowed(cm, session, {
+    await assertCanEditMeasurementScope(cm, session, {
+      schema: body.schema,
+      plotID: body.plotID,
+      censusID: body.censusID
+    });
+    await assertNoActiveMeasurementScopeConflict(cm, {
       schema: body.schema,
       plotID: body.plotID,
       censusID: body.censusID
@@ -67,25 +78,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow, undefined, {
       role: session.user.userStatus
     });
-    return NextResponse.json(plan, { status: 200 });
+    return NextResponse.json(plan, { status: HTTPResponses.OK });
   } catch (err) {
-    if (err instanceof EditScopeForbiddenError) {
-      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    if (err instanceof ScopeAccessError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: HTTPResponses.FORBIDDEN });
     }
-    if (err instanceof EditScopeConflictError) {
-      return NextResponse.json({ error: err.message }, { status: 423 });
+    if (err instanceof ScopeBusyError) {
+      return NextResponse.json({ error: err.message }, { status: HTTPResponses.LOCKED });
     }
     if (err instanceof DisallowedFieldError) {
-      return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: 422 });
+      return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     if (err instanceof InvalidClearError) {
-      return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: 422 });
+      return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     if (err instanceof SpeciesNotFoundError) {
-      return NextResponse.json({ error: 'species not found', code: err.code }, { status: 422 });
+      return NextResponse.json({ error: 'species not found', code: err.code }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     if (err instanceof TargetNotFoundError) {
-      return NextResponse.json({ error: 'target not found' }, { status: 404 });
+      return NextResponse.json({ error: 'target not found' }, { status: HTTPResponses.NOT_FOUND });
     }
     throw err;
   } finally {

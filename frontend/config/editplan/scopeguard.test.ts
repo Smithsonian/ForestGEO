@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from './scopeguard';
+import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from './scopeguard';
 
 vi.mock('@/config/uploadsessiontracker', () => ({
   ACTIVE_UPLOAD_SESSION_STATES: ['initialized', 'uploading', 'uploaded', 'processing', 'collapsing'],
@@ -24,7 +24,7 @@ function makeConnectionManager() {
   } as any;
 }
 
-describe('assertEditScopeAllowed', () => {
+describe('assertCanEditMeasurementScope', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -34,31 +34,29 @@ describe('assertEditScopeAllowed', () => {
     const session = makeSession({ sites: [{ schemaName: 'forestgeo_other' }] });
 
     await expect(
-      assertEditScopeAllowed(cm, session, {
+      assertCanEditMeasurementScope(cm, session, {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2
       })
-    ).rejects.toBeInstanceOf(EditScopeForbiddenError);
+    ).rejects.toBeInstanceOf(ScopeAccessError);
     expect(cm.executeQuery).not.toHaveBeenCalled();
   });
 
-  it('allows global users after plot/census and activity checks pass', async () => {
+  it('allows global users after the plot/census existence check passes', async () => {
     const cm = makeConnectionManager();
-    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]);
 
     await expect(
-      assertEditScopeAllowed(cm, makeSession({ userStatus: 'global', sites: [] }), {
+      assertCanEditMeasurementScope(cm, makeSession({ userStatus: 'global', sites: [] }), {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2
       })
     ).resolves.toBeUndefined();
 
-    expect(cm.executeQuery).toHaveBeenCalledTimes(3);
+    expect(cm.executeQuery).toHaveBeenCalledTimes(1);
     expect(cm.executeQuery.mock.calls[0][0]).toContain('FROM `forestgeo_testing`.census');
-    expect(cm.executeQuery.mock.calls[1][0]).toContain('FROM `forestgeo_testing`.upload_sessions');
-    expect(cm.executeQuery.mock.calls[2][0]).toContain('FROM `forestgeo_testing`.validation_runs');
   });
 
   it('rejects unavailable plot/census scopes', async () => {
@@ -66,41 +64,63 @@ describe('assertEditScopeAllowed', () => {
     cm.executeQuery.mockResolvedValueOnce([]);
 
     await expect(
-      assertEditScopeAllowed(cm, makeSession(), {
+      assertCanEditMeasurementScope(cm, makeSession(), {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2
       })
-    ).rejects.toBeInstanceOf(EditScopeForbiddenError);
+    ).rejects.toBeInstanceOf(ScopeAccessError);
+  });
+});
+
+describe('assertNoActiveMeasurementScopeConflict', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resolves when neither upload sessions nor validation runs are active', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await expect(
+      assertNoActiveMeasurementScopeConflict(cm, {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      })
+    ).resolves.toBeUndefined();
+
+    expect(cm.executeQuery).toHaveBeenCalledTimes(2);
+    expect(cm.executeQuery.mock.calls[0][0]).toContain('FROM `forestgeo_testing`.upload_sessions');
+    expect(cm.executeQuery.mock.calls[1][0]).toContain('FROM `forestgeo_testing`.validation_runs');
   });
 
   it('rejects active upload sessions in the requested scope', async () => {
     const cm = makeConnectionManager();
-    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]).mockResolvedValueOnce([{ session_id: 'upload-1' }]);
+    cm.executeQuery.mockResolvedValueOnce([{ session_id: 'upload-1' }]);
 
     await expect(
-      assertEditScopeAllowed(cm, makeSession(), {
+      assertNoActiveMeasurementScopeConflict(cm, {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2
       })
-    ).rejects.toThrow(EditScopeConflictError);
+    ).rejects.toThrow(ScopeBusyError);
   });
 
   it('rejects fresh running validation runs in the requested scope', async () => {
     const cm = makeConnectionManager();
     cm.executeQuery
-      .mockResolvedValueOnce([{ ok: 1 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ RunID: 99, StartedAt: new Date().toISOString() }]);
 
     await expect(
-      assertEditScopeAllowed(cm, makeSession(), {
+      assertNoActiveMeasurementScopeConflict(cm, {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2
       })
-    ).rejects.toThrow(EditScopeConflictError);
+    ).rejects.toThrow(ScopeBusyError);
   });
 
   it('ignores missing optional activity tables for legacy schemas', async () => {
@@ -108,10 +128,10 @@ describe('assertEditScopeAllowed', () => {
     const missingTable = Object.assign(new Error("Table 'forestgeo_testing.upload_sessions' doesn't exist"), {
       code: 'ER_NO_SUCH_TABLE'
     });
-    cm.executeQuery.mockResolvedValueOnce([{ ok: 1 }]).mockRejectedValueOnce(missingTable).mockRejectedValueOnce(missingTable);
+    cm.executeQuery.mockRejectedValueOnce(missingTable).mockRejectedValueOnce(missingTable);
 
     await expect(
-      assertEditScopeAllowed(cm, makeSession(), {
+      assertNoActiveMeasurementScopeConflict(cm, {
         schema: 'forestgeo_testing',
         plotID: 1,
         censusID: 2

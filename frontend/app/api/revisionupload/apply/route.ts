@@ -6,23 +6,23 @@ import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
 import ailogger from '@/ailogger';
-import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable, SESSION_TIMEOUTS } from '@/config/uploadsessiontracker';
+import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
-import { applyEditInTransaction, SessionExpiredError } from '@/config/editplan/apply';
+import { applyEditInTransaction, ScopeLockHeldError, SessionExpiredError } from '@/config/editplan/apply';
 import { analyzeBulk, assertBulkPlanCanApply, BulkInput } from '@/config/editplan/bulkanalyzer';
-import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
+import { writeEditOperation } from '@/config/editoperations';
 
 export const runtime = 'nodejs';
 
 const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 
 const REVISION_UPLOAD_FILE_ID = 'revision-upload';
-const STALE_VALIDATION_RUN_THRESHOLD_MINUTES = 15;
-const ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS = Math.ceil(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
 
 class RevisionApplyConflictError extends Error {
   constructor(message: string) {
@@ -570,7 +570,7 @@ async function assertNoConflictingApplyActivity(
   );
 
   if (!lockAcquired) {
-    throw new RevisionApplyConflictError(`Another measurement operation is already in progress for plot ${plotID}, census ${censusID}`);
+    throw new ScopeLockHeldError(`Another measurement operation is already in progress for plot ${plotID}, census ${censusID}`);
   }
 
   const activeUploadStatesPlaceholders = ACTIVE_UPLOAD_SESSION_STATES.map(() => '?').join(', ');
@@ -593,7 +593,7 @@ async function assertNoConflictingApplyActivity(
   );
 
   if (activeUploadSessions.length > 0) {
-    throw new RevisionApplyConflictError(
+    throw new ScopeBusyError(
       `Cannot apply revisions while upload session ${activeUploadSessions[0].session_id} is active for plot ${plotID}, census ${censusID}`
     );
   }
@@ -614,7 +614,7 @@ async function assertNoConflictingApplyActivity(
     const ageMinutes = Number.isNaN(startedAt) ? 0 : (Date.now() - startedAt) / 60_000;
 
     if (ageMinutes < STALE_VALIDATION_RUN_THRESHOLD_MINUTES) {
-      throw new RevisionApplyConflictError(
+      throw new ScopeBusyError(
         `Cannot apply revisions while validation run ${runningValidationRows[0].RunID} is active for plot ${plotID}, census ${censusID}`
       );
     }
@@ -788,7 +788,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     assertSessionMayEdit(session);
   } catch (error) {
     if (error instanceof PendingUserEditForbiddenError) {
-      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
+      return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: HTTPResponses.FORBIDDEN });
     }
     throw error;
   }
@@ -796,11 +796,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    await assertEditScopeAllowed(connectionManager, session, {
+    await assertCanEditMeasurementScope(connectionManager, session, {
       schema,
       plotID: normalizedPlotID,
-      censusID: normalizedCensusID,
-      rejectActiveOperations: false
+      censusID: normalizedCensusID
     });
 
     const ensureSessionsStartedAt = Date.now();
@@ -876,6 +875,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       let updatedCount = 0;
       let skippedCount = 0;
       const applyErrors: ApplyError[] = [];
+      const updatedCoreMeasurementIDs: number[] = [];
 
       for (const row of normalizedMatchedRows.matchedRows) {
         const stillActive = await verifyMeasurementStillActive(
@@ -899,6 +899,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         const canonicalNewRow = buildCanonicalNewRow(row.csvRow);
 
+        // Per-row ledger entries are suppressed: bulk rows are revertable:false,
+        // so the full beforeState/afterState JSON would be pure audit cost.
+        // A single summary entry is written once the batch completes.
         await applyEditInTransaction(connectionManager, {
           dataType: 'measurementssummary',
           schema,
@@ -909,6 +912,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           expectedPlanHash: null,
           operationType: 'bulk-revision-row',
           revertable: false,
+          writeLedger: false,
           refreshViews: false,
           createdBy,
           role: session.user.userStatus,
@@ -916,13 +920,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
 
         updatedCount++;
+        updatedCoreMeasurementIDs.push(row.coreMeasurementID);
       }
 
       // --- Delete verified duplicates ---
       let deletedDuplicateCount = 0;
+      const deletedDuplicateIDs: number[] = [];
       for (const dup of duplicates) {
         const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
         deletedDuplicateCount += dupResult.deleted;
+        if (dupResult.deleted > 0) {
+          deletedDuplicateIDs.push(dup.coreMeasurementID);
+        }
         if (dupResult.applyError) {
           throw new RevisionApplyConflictError(dupResult.applyError.error);
         }
@@ -949,6 +958,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ailogger.info(`${logPrefix} derived view refresh complete in ${Date.now() - viewRefreshStartedAt}ms (tx=${transactionID})`);
       }
 
+      // One batch-level ledger entry summarizes the whole apply. Row-level
+      // state is intentionally NOT captured since bulk rows are not
+      // revertable through the single-row revert path.
+      if (updatedCount > 0 || deletedDuplicateCount > 0) {
+        const ledgerTargetID = updatedCoreMeasurementIDs[0] ?? deletedDuplicateIDs[0] ?? 0;
+        await writeEditOperation(
+          connectionManager,
+          schema,
+          {
+            operationType: 'bulk-revision-row',
+            revertable: false,
+            dataType: 'measurementssummary',
+            targetID: ledgerTargetID,
+            plotID: normalizedPlotID,
+            censusID: normalizedCensusID,
+            planHash: bulkPlanHash,
+            beforeState: [
+              {
+                table: 'bulk-revision-apply',
+                primaryKey: 'bulkPlanHash',
+                primaryKeyValue: bulkPlanHash,
+                row: {
+                  updatedCoreMeasurementIDs,
+                  deletedDuplicateCoreMeasurementIDs: deletedDuplicateIDs,
+                  updatedCount,
+                  skippedCount,
+                  insertedCount,
+                  deletedDuplicateCount
+                }
+              }
+            ],
+            afterState: [],
+            createdBy
+          },
+          transactionID
+        );
+      }
+
       return { updatedCount, skippedCount, insertedCount, deletedDuplicateCount, applyErrors };
     });
     ailogger.info(`${logPrefix} transaction complete in ${Date.now() - transactionStartedAt}ms`);
@@ -972,14 +1019,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (errorObj instanceof SessionExpiredError) {
       return NextResponse.json({ error: 'session expired' }, { status: HTTPResponses.UNAUTHORIZED });
     }
-    if (errorObj instanceof EditScopeForbiddenError) {
-      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    if (errorObj instanceof ScopeAccessError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: HTTPResponses.FORBIDDEN });
     }
-    if (errorObj instanceof EditScopeConflictError) {
-      return NextResponse.json({ error: errorObj.message }, { status: 423 });
+    if (errorObj instanceof ScopeLockHeldError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.LOCKED });
+    }
+    if (errorObj instanceof ScopeBusyError) {
+      return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.LOCKED });
     }
     if (errorObj instanceof RoleForbiddenFieldError) {
-      return NextResponse.json({ error: 'role forbidden field', fields: errorObj.fields, role: errorObj.role }, { status: 403 });
+      return NextResponse.json({ error: 'role forbidden field', fields: errorObj.fields, role: errorObj.role }, { status: HTTPResponses.FORBIDDEN });
     }
     if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });

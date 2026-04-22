@@ -20,9 +20,9 @@ const mocks = vi.hoisted(() => ({
   executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
   closeConnection: vi.fn(async () => undefined),
   analyzeBulk: vi.fn(),
-  assertEditScopeAllowed: vi.fn(async () => undefined),
-  MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
-  MockEditScopeConflictError: class MockEditScopeConflictError extends Error {}
+  assertCanEditMeasurementScope: vi.fn(async () => undefined),
+  MockScopeAccessError: class MockScopeAccessError extends Error {},
+  MockScopeBusyError: class MockScopeBusyError extends Error {}
 }));
 
 vi.mock('@/auth', () => ({
@@ -54,9 +54,9 @@ vi.mock('@/config/editplan/bulkanalyzer', () => ({
 }));
 
 vi.mock('@/config/editplan/scopeguard', () => ({
-  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
-  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
-  EditScopeConflictError: mocks.MockEditScopeConflictError
+  assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
+  ScopeAccessError: mocks.MockScopeAccessError,
+  ScopeBusyError: mocks.MockScopeBusyError
 }));
 
 function buildRequest(body: Record<string, unknown>) {
@@ -74,7 +74,7 @@ describe('POST /api/revisionupload', () => {
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.analyzeBulk.mockResolvedValue({ ...EMPTY_BULK_PLAN });
-    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+    mocks.assertCanEditMeasurementScope.mockResolvedValue(undefined);
   });
 
   it('returns 403 before scope checks for pending users', async () => {
@@ -91,7 +91,7 @@ describe('POST /api/revisionupload', () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'pending users cannot edit measurements' });
-    expect(mocks.assertEditScopeAllowed).not.toHaveBeenCalled();
+    expect(mocks.assertCanEditMeasurementScope).not.toHaveBeenCalled();
     expect(mocks.analyzeBulk).not.toHaveBeenCalled();
   });
 

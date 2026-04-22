@@ -22,6 +22,7 @@ import {
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 export interface WriterResult {
@@ -101,7 +102,9 @@ async function loadCurrentJoinedRow(
   transactionID: string
 ): Promise<LoadedCoreMeasurementRow> {
   const rows = await cm.executeQuery(
-    `SELECT
+    safeFormatQuery(
+      schema,
+      `SELECT
        cm.CoreMeasurementID,
        cm.CensusID,
        c.PlotID,
@@ -119,14 +122,15 @@ async function loadCurrentJoinedRow(
        s.LocalX AS StemLocalX,
        s.LocalY AS StemLocalY,
        q.QuadratName
-     FROM ${schema}.coremeasurements cm
-     JOIN ${schema}.census c ON c.CensusID = cm.CensusID
-     LEFT JOIN ${schema}.stems s ON s.StemGUID = cm.StemGUID
-     LEFT JOIN ${schema}.trees t ON t.TreeID = s.TreeID
-     LEFT JOIN ${schema}.species sp ON sp.SpeciesID = t.SpeciesID
-     LEFT JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
+     FROM ??.coremeasurements cm
+     JOIN ??.census c ON c.CensusID = cm.CensusID
+     LEFT JOIN ??.stems s ON s.StemGUID = cm.StemGUID
+     LEFT JOIN ??.trees t ON t.TreeID = s.TreeID
+     LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
+     LEFT JOIN ??.quadrats q ON q.QuadratID = s.QuadratID
      WHERE cm.CoreMeasurementID = ?
-     LIMIT 1`,
+     LIMIT 1`
+    ),
     [coreMeasurementID],
     transactionID
   );
@@ -141,7 +145,7 @@ async function loadCoreMeasurementRow(
   transactionID: string
 ): Promise<Record<string, unknown> | null> {
   const rows = await cm.executeQuery(
-    `SELECT * FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1`,
+    safeFormatQuery(schema, `SELECT * FROM ??.coremeasurements WHERE CoreMeasurementID = ? LIMIT 1`),
     [coreMeasurementID],
     transactionID
   );
@@ -156,7 +160,7 @@ async function loadStemRow(
 ): Promise<Record<string, unknown> | null> {
   if (stemGUID === null) return null;
   const rows = await cm.executeQuery(
-    `SELECT * FROM ${schema}.stems WHERE StemGUID = ? LIMIT 1`,
+    safeFormatQuery(schema, `SELECT * FROM ??.stems WHERE StemGUID = ? LIMIT 1`),
     [stemGUID],
     transactionID
   );
@@ -171,7 +175,7 @@ async function loadTreeRow(
 ): Promise<Record<string, unknown> | null> {
   if (treeID === null) return null;
   const rows = await cm.executeQuery(
-    `SELECT * FROM ${schema}.trees WHERE TreeID = ? LIMIT 1`,
+    safeFormatQuery(schema, `SELECT * FROM ??.trees WHERE TreeID = ? LIMIT 1`),
     [treeID],
     transactionID
   );
@@ -185,7 +189,7 @@ async function loadCmAttributeRows(
   transactionID: string
 ): Promise<Array<Record<string, unknown>>> {
   const rows = await cm.executeQuery(
-    `SELECT * FROM ${schema}.cmattributes WHERE CoreMeasurementID = ? ORDER BY CMAID`,
+    safeFormatQuery(schema, `SELECT * FROM ??.cmattributes WHERE CoreMeasurementID = ? ORDER BY CMAID`),
     [coreMeasurementID],
     transactionID
   );
@@ -218,11 +222,14 @@ async function findExistingTreeID(
   if (!treeTag || normalizedSpeciesID === null || normalizedCensusID === null) return null;
 
   const rows = await cm.executeQuery(
-    `SELECT TreeID
-     FROM ${schema}.trees
+    safeFormatQuery(
+      schema,
+      `SELECT TreeID
+     FROM ??.trees
      WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
      ORDER BY TreeID
-     LIMIT 1`,
+     LIMIT 1`
+    ),
     [treeTag, normalizedSpeciesID, normalizedCensusID],
     transactionID
   );
@@ -244,10 +251,13 @@ async function findExactActiveStemGUID(
   if (normalizedTreeID === null || normalizedCensusID === null || !stemTag || normalizedQuadratID === null) return null;
 
   const rows = await cm.executeQuery(
-    `SELECT StemGUID
-     FROM ${schema}.stems
+    safeFormatQuery(
+      schema,
+      `SELECT StemGUID
+     FROM ??.stems
      WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
-     LIMIT 1`,
+     LIMIT 1`
+    ),
     [normalizedTreeID, normalizedCensusID, stemTag, normalizedQuadratID],
     transactionID
   );
@@ -316,12 +326,15 @@ export async function writeMeasurementsSummary(
   if (changedFields.has('SpeciesCode')) {
     changesFound = true;
     const speciesSearchResults = await cm.executeQuery(
-      `SELECT SpeciesID
-       FROM ${schema}.species
+      safeFormatQuery(
+        schema,
+        `SELECT SpeciesID
+       FROM ??.species
        WHERE LOWER(SpeciesCode) = LOWER(?)
          AND IsActive = 1
        ORDER BY SpeciesID
-       LIMIT 1`,
+       LIMIT 1`
+      ),
       [merged.SpeciesCode],
       txID
     );
@@ -445,7 +458,7 @@ export async function writeMeasurementsSummary(
       const treeStemState = await computeTreeStemState(cm, schema, resolvedTreeTag, resolvedStemTag, resolvedCensusID, resolvedPlotID, txID);
 
       const existingUDFRows = await cm.executeQuery(
-        `SELECT UserDefinedFields FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ?`,
+        safeFormatQuery(schema, `SELECT UserDefinedFields FROM ??.coremeasurements WHERE CoreMeasurementID = ?`),
         [coreMeasurementID],
         txID
       );

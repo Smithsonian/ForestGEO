@@ -1,35 +1,32 @@
 import type { Session } from 'next-auth';
 import ConnectionManager from '@/config/connectionmanager';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
-import { ACTIVE_UPLOAD_SESSION_STATES, SESSION_TIMEOUTS } from '@/config/uploadsessiontracker';
-import { errorMessageContains, getErrorCode } from '@/lib/errorhelpers';
+import { ACTIVE_UPLOAD_SESSION_STATES } from '@/config/uploadsessiontracker';
+import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
+import { getErrorCode } from '@/lib/errorhelpers';
 
-const ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS = Math.ceil(SESSION_TIMEOUTS.HEARTBEAT_TIMEOUT / 1000);
-const STALE_VALIDATION_RUN_THRESHOLD_MINUTES = 15;
-
-export class EditScopeForbiddenError extends Error {
+export class ScopeAccessError extends Error {
   constructor(message = 'edit scope is not allowed for this user') {
     super(message);
-    this.name = 'EditScopeForbiddenError';
+    this.name = 'ScopeAccessError';
   }
 }
 
-export class EditScopeConflictError extends Error {
+export class ScopeBusyError extends Error {
   constructor(message = 'edit scope is currently busy') {
     super(message);
-    this.name = 'EditScopeConflictError';
+    this.name = 'ScopeBusyError';
   }
 }
 
-export interface EditScopeGuardInput {
+export interface MeasurementScopeInput {
   schema: string;
   plotID: number;
   censusID: number;
-  rejectActiveOperations?: boolean;
 }
 
 function isMissingTableError(error: unknown): boolean {
-  return getErrorCode(error) === 'ER_NO_SUCH_TABLE' || errorMessageContains(error, "doesn't exist");
+  return getErrorCode(error) === 'ER_NO_SUCH_TABLE';
 }
 
 function hasSchemaAccess(session: Session, schema: string): boolean {
@@ -56,11 +53,11 @@ async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plo
   );
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    throw new EditScopeForbiddenError('plot/census scope is not available');
+    throw new ScopeAccessError('plot/census scope is not available');
   }
 }
 
-async function assertNoActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
   const placeholders = ACTIVE_UPLOAD_SESSION_STATES.map(() => '?').join(', ');
   try {
     const rows = await cm.executeQuery(
@@ -79,16 +76,16 @@ async function assertNoActiveUploadSession(cm: ConnectionManager, schema: string
     );
 
     if (Array.isArray(rows) && rows.length > 0) {
-      throw new EditScopeConflictError(`upload session ${rows[0].session_id} is active for this plot/census`);
+      throw new ScopeBusyError(`upload session ${rows[0].session_id} is active for this plot/census`);
     }
   } catch (error: unknown) {
-    if (error instanceof EditScopeConflictError) throw error;
+    if (error instanceof ScopeBusyError) throw error;
     if (isMissingTableError(error)) return;
     throw error;
   }
 }
 
-async function assertNoActiveValidationRun(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+async function probeActiveValidationRun(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
   try {
     const rows = await cm.executeQuery(
       safeFormatQuery(
@@ -111,24 +108,44 @@ async function assertNoActiveValidationRun(cm: ConnectionManager, schema: string
     const startedAt = new Date(rows[0].StartedAt).getTime();
     const ageMinutes = Number.isNaN(startedAt) ? 0 : (Date.now() - startedAt) / 60_000;
     if (ageMinutes < STALE_VALIDATION_RUN_THRESHOLD_MINUTES) {
-      throw new EditScopeConflictError(`validation run ${rows[0].RunID} is active for this plot/census`);
+      throw new ScopeBusyError(`validation run ${rows[0].RunID} is active for this plot/census`);
     }
   } catch (error: unknown) {
-    if (error instanceof EditScopeConflictError) throw error;
+    if (error instanceof ScopeBusyError) throw error;
     if (isMissingTableError(error)) return;
     throw error;
   }
 }
 
-export async function assertEditScopeAllowed(cm: ConnectionManager, session: Session, input: EditScopeGuardInput): Promise<void> {
+/**
+ * Authorization gate: the session user may address the given plot/census
+ * scope, and that plot/census actually exists. Does NOT probe for concurrent
+ * activity — call `assertNoActiveMeasurementScopeConflict` for that.
+ *
+ * Callers that later acquire the authoritative scope lock (applyEdit,
+ * revisionupload/apply) can skip the conflict probe and rely on the
+ * in-transaction FOR UPDATE checks.
+ *
+ * Note: the plan's `assertTargetInScope` check is enforced implicitly by
+ * `analyzer.loadCurrentRow`, which constrains its WHERE clause to
+ * CoreMeasurementID + CensusID + PlotID + StemGUID shape and translates a
+ * missed lookup to TargetNotFoundError (→ 404).
+ */
+export async function assertCanEditMeasurementScope(cm: ConnectionManager, session: Session, input: MeasurementScopeInput): Promise<void> {
   if (!hasSchemaAccess(session, input.schema)) {
-    throw new EditScopeForbiddenError();
+    throw new ScopeAccessError();
   }
 
   await assertPlotCensusExists(cm, input.schema, input.plotID, input.censusID);
+}
 
-  if (input.rejectActiveOperations !== false) {
-    await assertNoActiveUploadSession(cm, input.schema, input.plotID, input.censusID);
-    await assertNoActiveValidationRun(cm, input.schema, input.plotID, input.censusID);
-  }
+/**
+ * Non-locking conflict probe: rejects if a recent upload session or a fresh
+ * validation run is active for the given scope. Read-only routes
+ * (preview, revert) use this before analysis; routes that take the
+ * authoritative scope lock do not need it.
+ */
+export async function assertNoActiveMeasurementScopeConflict(cm: ConnectionManager, input: MeasurementScopeInput): Promise<void> {
+  await probeActiveUploadSession(cm, input.schema, input.plotID, input.censusID);
+  await probeActiveValidationRun(cm, input.schema, input.plotID, input.censusID);
 }

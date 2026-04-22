@@ -284,7 +284,9 @@ function reconstructMeasurementsSummaryRow(record: EditOperationRecord): Record<
     const codes = cmattrStates
       .map(s => (s.row ? toStringOrNull((s.row as Record<string, unknown>).Code) : null))
       .filter((code): code is string => code !== null && code.length > 0);
-    newRow.Attributes = codes.join(';');
+    // Match the seed/display format used by revision exports and
+    // measurementssummary.RawCodes: '; ' separator with a trailing space.
+    newRow.Attributes = codes.join('; ');
   } else {
     newRow.Attributes = toStringOrNull(core.RawCodes);
   }

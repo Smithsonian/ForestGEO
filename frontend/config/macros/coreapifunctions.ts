@@ -267,6 +267,12 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
       const { SpeciesID } = deleteRowData;
       await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
     } else if (params.dataType === 'failedmeasurements') {
+      // Measurement deletes bypass the edit_operations ledger: deletion is a
+      // terminal operation, not a revertable edit, and the ledger's
+      // single-row revert path cannot reconstruct a deleted coremeasurements
+      // row from beforeState alone (stems/trees/cmattributes dependencies).
+      // Audit trail for deletes lives in the uploadmetrics and database
+      // binlog, not edit_operations.
       const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
       await connectionManager.executeQuery(deleteFailedQuery, [gridIDKey]);
     } else if (params.dataType === 'measurementssummary') {

@@ -244,8 +244,8 @@ describe('revertEdit', () => {
               MeasuredDBH: 12,
               MeasuredHOM: 1.3,
               MeasurementDate: '1994-12-05',
-              RawCodes: null,
-              Description: null
+              RawCodes: 'A; M',
+              Description: 'Initial measurement'
             }
           },
           { table: 'stems', primaryKey: 'StemGUID', primaryKeyValue: 555, row: null },
