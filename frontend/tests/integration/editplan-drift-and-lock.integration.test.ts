@@ -104,10 +104,31 @@ vi.mock('@/ailogger', () => ({
   }
 }));
 
+// Auth freshness re-check (#11) depends on process.env.AUTH_FUNCTIONS_POLL_URL
+// and a reachable identity endpoint, neither of which the integration harness
+// provides. Replace createFreshAuthorizationCheck with a no-op so these tests
+// exercise the apply flow under a valid, non-expiring session. Other exports
+// from the module (assertSessionMayEdit, PendingUserEditForbiddenError,
+// SessionExpiredError) are preserved via importActual.
+vi.mock('@/config/editplan/authorization', async () => {
+  const actual = await vi.importActual<typeof import('@/config/editplan/authorization')>(
+    '@/config/editplan/authorization'
+  );
+  return {
+    ...actual,
+    createFreshAuthorizationCheck: () => async () => {
+      /* always-fresh in tests */
+    }
+  };
+});
+
 // Imports must follow vi.mock so the mocked modules are wired in.
 import { POST as previewPOST } from '@/app/api/edits/preview/route';
 import { POST as applyPOST } from '@/app/api/edits/apply/route';
-import { buildMeasurementScopeLockName } from '@/config/measurementscopelock';
+import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import ConnectionManager from '@/config/connectionmanager';
+import { writeMeasurementsSummary } from '@/config/editplan/writers/measurementssummary';
+import type { EditPlan } from '@/config/editplan/types';
 
 // ---------------------------------------------------------------------------
 // Fixture constants — matched to seedSampleData defaults + short identifiers
@@ -499,6 +520,333 @@ describe('editplan drift + lock (integration)', () => {
         [fixture.coreMeasurementID]
       );
       expect(Number(finalRows[0].MeasuredDBH)).toBeCloseTo(PREVIEW_ATTEMPT_DBH, 2);
+    });
+  });
+
+  // TOCTOU — between preview and apply the world changed in a way the hash can't
+  // detect because the row that went stale isn't on the target table the hash
+  // covers. The apply path re-analyzes inside its transaction, so the drift MUST
+  // surface there as a clean HTTP status rather than a silent half-write.
+  describe('TOCTOU between preview and apply', () => {
+    it('returns 404 when the target measurement is soft-deleted between preview and apply', async () => {
+      const previewRes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: PREVIEW_ATTEMPT_DBH }
+        })
+      );
+      expect(previewRes.status).toBe(200);
+      const plan = (await previewRes.json()) as { planHash: string };
+
+      // Soft-delete between preview and apply. The analyzer's loadCurrentRow
+      // filters by cm.IsActive = 1, so the next analysis will miss it.
+      await connection.query(
+        `UPDATE coremeasurements SET IsActive = 0 WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+
+      const applyRes = await applyPOST(
+        buildApplyRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { MeasuredDBH: PREVIEW_ATTEMPT_DBH },
+          planHash: plan.planHash
+        })
+      );
+      expect(applyRes.status).toBe(404);
+      const body = (await applyRes.json()) as { error: string };
+      expect(body.error).toBe('target not found');
+
+      // Row still carries its pre-apply DBH — no half-write.
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH, IsActive FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
+      expect(Number(rowsAfter[0].IsActive)).toBe(0);
+    });
+
+    it('returns 422 when the target species is deactivated between preview and apply of a SpeciesCode change', async () => {
+      // Seed a second species so we can redirect to it.
+      const OTHER_SPECIES_CODE = 'QUERCO';
+      const [otherSpeciesRows] = await connection.query<RowDataPacket[]>(
+        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
+        [OTHER_SPECIES_CODE]
+      );
+      expect(otherSpeciesRows.length).toBe(1);
+
+      const previewRes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { SpeciesCode: OTHER_SPECIES_CODE }
+        })
+      );
+      expect(previewRes.status).toBe(200);
+      const plan = (await previewRes.json()) as { planHash: string };
+
+      // Deactivate the target species after preview. resolveSpeciesByCode only
+      // matches IsActive=1 rows, so the apply-time re-analysis will fail to
+      // resolve QUERCO.
+      await connection.query('UPDATE species SET IsActive = 0 WHERE SpeciesCode = ?', [OTHER_SPECIES_CODE]);
+
+      try {
+        const applyRes = await applyPOST(
+          buildApplyRequest({
+            schema: config.database,
+            plotID: fixture.plotID,
+            censusID: fixture.censusID,
+            dataType: 'measurementssummary',
+            targetID: fixture.coreMeasurementID,
+            newRow: { SpeciesCode: OTHER_SPECIES_CODE },
+            planHash: plan.planHash
+          })
+        );
+        expect(applyRes.status).toBe(422);
+        const body = (await applyRes.json()) as { error: string; code?: string };
+        expect(body.error).toBe('species not found');
+        expect(body.code).toBe(OTHER_SPECIES_CODE);
+
+        // Row is still linked to the original species.
+        const [rowsAfter] = await connection.query<RowDataPacket[]>(
+          `SELECT t.SpeciesID
+           FROM coremeasurements cm
+           JOIN stems s ON s.StemGUID = cm.StemGUID
+           JOIN trees t ON t.TreeID = s.TreeID
+           WHERE cm.CoreMeasurementID = ?`,
+          [fixture.coreMeasurementID]
+        );
+        expect(rowsAfter[0].SpeciesID).toBe(fixture.speciesID);
+      } finally {
+        await connection.query('UPDATE species SET IsActive = 1 WHERE SpeciesCode = ?', [OTHER_SPECIES_CODE]);
+      }
+    });
+  });
+
+  // Bulk rollback granularity — the revision-apply route runs every matched row
+  // through the measurementssummary writer inside ONE outer transaction. If a
+  // later row's writer throws, the caller rolls back the outer transaction and
+  // rows 1..N-1 must not remain durable. This test drives the writer directly
+  // (bypassing applyEditInTransaction's ensureEditOperationsTable DDL call,
+  // which MySQL treats as an implicit commit and would mask the rollback). The
+  // route-level happy path is already covered in revision-upload.integration.test.ts.
+  describe('mid-bulk rollback granularity', () => {
+    it('rolls back the first row writer when the second row writer throws inside the same outer transaction', async () => {
+      // Seed a second measurement in the same scope so the bulk loop has two
+      // addressable rows.
+      const SECOND_TREE_TAG = 'DLT002';
+      const SECOND_STEM_TAG = 'DLS2';
+      const SECOND_INITIAL_DBH = 7.77;
+      const FIRST_NEW_DBH = 55.5;
+      const SECOND_NEW_DBH = 77.7;
+
+      const [secondTreeRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
+        [SECOND_TREE_TAG, fixture.speciesID, fixture.censusID]
+      );
+      const secondTreeID = secondTreeRes.insertId;
+
+      const [secondStemRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, 1, 1, 1)`,
+        [secondTreeID, fixture.quadratID, fixture.censusID, SECOND_STEM_TAG]
+      );
+      const secondStemGUID = secondStemRes.insertId;
+
+      const [secondCmRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO coremeasurements
+           (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate,
+            RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
+            IsValidated, IsActive)
+         VALUES (?, ?, ?, 1.2, '2024-06-15', ?, ?, ?, ?, 1, 1, 1, 1)`,
+        [
+          secondStemGUID,
+          fixture.censusID,
+          SECOND_INITIAL_DBH,
+          SECOND_TREE_TAG,
+          SECOND_STEM_TAG,
+          SPECIES_CODE,
+          QUADRAT_NAME
+        ]
+      );
+      const secondCoreMeasurementID = secondCmRes.insertId;
+
+      // Deactivate species out-of-band AFTER seeding so the writer's internal
+      // species-code safety net (`Species not found`) fires on row 2 without
+      // affecting the plan-build phase for row 1. We restore IsActive in the
+      // finally block so downstream tests see the seeded fixture.
+      await connection.query('UPDATE species SET IsActive = 0 WHERE SpeciesID = ?', [fixture.speciesID]);
+
+      const cm = ConnectionManager.getInstance();
+      const txID = await cm.beginTransaction();
+      try {
+        const acquired = await cm.acquireApplicationLock(
+          buildMeasurementScopeLockName(config.database, fixture.plotID, fixture.censusID),
+          txID,
+          MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
+        );
+        expect(acquired).toBe(true);
+
+        // Row 1 plan: DBH-only — does not touch species/tree/stem paths so it
+        // writes cleanly even with the seed species deactivated.
+        const row1Plan: EditPlan = {
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          fieldChanges: [{ field: 'MeasuredDBH', from: INITIAL_DBH, to: FIRST_NEW_DBH }],
+          effects: [],
+          maxSeverity: 'info',
+          planHash: 'bulk-rollback-row1-hash',
+          generatedAt: new Date().toISOString()
+        };
+
+        await writeMeasurementsSummary(
+          cm,
+          {
+            dataType: 'measurementssummary',
+            schema: config.database,
+            plotID: fixture.plotID,
+            censusID: fixture.censusID,
+            targetID: fixture.coreMeasurementID,
+            newRow: { MeasuredDBH: FIRST_NEW_DBH },
+            expectedPlanHash: null,
+            refreshViews: false,
+            createdBy: AUTH_USER_EMAIL,
+            transactionID: txID
+          },
+          row1Plan,
+          txID
+        );
+
+        // Row 2 plan: includes SpeciesCode change. The writer hits its species
+        // lookup inside the transaction, finds the seed species inactive, and
+        // throws `Species not found` — simulating a mid-bulk writer failure.
+        const row2Plan: EditPlan = {
+          dataType: 'measurementssummary',
+          targetID: secondCoreMeasurementID,
+          fieldChanges: [
+            { field: 'MeasuredDBH', from: SECOND_INITIAL_DBH, to: SECOND_NEW_DBH },
+            { field: 'SpeciesCode', from: SPECIES_CODE, to: SPECIES_CODE }
+          ],
+          effects: [],
+          maxSeverity: 'info',
+          planHash: 'bulk-rollback-row2-hash',
+          generatedAt: new Date().toISOString()
+        };
+
+        await expect(
+          writeMeasurementsSummary(
+            cm,
+            {
+              dataType: 'measurementssummary',
+              schema: config.database,
+              plotID: fixture.plotID,
+              censusID: fixture.censusID,
+              targetID: secondCoreMeasurementID,
+              newRow: { MeasuredDBH: SECOND_NEW_DBH, SpeciesCode: SPECIES_CODE },
+              expectedPlanHash: null,
+              refreshViews: false,
+              createdBy: AUTH_USER_EMAIL,
+              transactionID: txID
+            },
+            row2Plan,
+            txID
+          )
+        ).rejects.toThrow(/Species not found/);
+
+        await cm.rollbackTransaction(txID);
+      } catch (err) {
+        await cm.rollbackTransaction(txID).catch(() => {});
+        throw err;
+      } finally {
+        await connection.query('UPDATE species SET IsActive = 1 WHERE SpeciesID = ?', [fixture.speciesID]);
+      }
+
+      // Row 1 must be back at its pre-transaction value — the rollback has to
+      // wipe the earlier writer's UPDATE even though that writer completed
+      // successfully in isolation.
+      const [row1After] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(row1After[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
+
+      const [row2After] = await connection.query<RowDataPacket[]>(
+        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [secondCoreMeasurementID]
+      );
+      expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
+    });
+  });
+
+  // View refresh — when a single-row edit moves a measurement to a different
+  // stem, the derived measurementssummary table must end up pointing at the
+  // new StemGUID and StemTag. Prior gap: the happy-path writer tests did not
+  // assert that the view reflected stem moves, only that the write itself
+  // succeeded.
+  describe('view refresh after stem move', () => {
+    it('rewrites measurementssummary to point at the new stem after a StemTag change', async () => {
+      const NEW_STEM_TAG = 'DLS9';
+
+      const previewRes = await previewPOST(
+        buildPreviewRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { StemTag: NEW_STEM_TAG }
+        })
+      );
+      expect(previewRes.status).toBe(200);
+      const plan = (await previewRes.json()) as {
+        planHash: string;
+        maxSeverity: string;
+      };
+      // The single-stem fixture would orphan the source stem on move — plan
+      // should reach destructive severity but still be applyable given the
+      // confirmed hash.
+      expect(plan.maxSeverity).toBe('destructive');
+
+      const applyRes = await applyPOST(
+        buildApplyRequest({
+          schema: config.database,
+          plotID: fixture.plotID,
+          censusID: fixture.censusID,
+          dataType: 'measurementssummary',
+          targetID: fixture.coreMeasurementID,
+          newRow: { StemTag: NEW_STEM_TAG },
+          planHash: plan.planHash
+        })
+      );
+      expect(applyRes.status).toBe(200);
+
+      // coremeasurements.StemGUID now points at the new stem row.
+      const [cmRows] = await connection.query<RowDataPacket[]>(
+        `SELECT StemGUID FROM coremeasurements WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      const newStemGUID = cmRows[0].StemGUID as number;
+      expect(newStemGUID).not.toBe(fixture.stemGUID);
+
+      // And the refreshed measurementssummary view row reflects the new stem
+      // identity — this is the regression we want to guard against.
+      const [viewRows] = await connection.query<RowDataPacket[]>(
+        `SELECT StemGUID, StemTag FROM measurementssummary WHERE CoreMeasurementID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(viewRows.length).toBe(1);
+      expect(viewRows[0].StemGUID).toBe(newStemGUID);
+      expect(viewRows[0].StemTag).toBe(NEW_STEM_TAG);
     });
   });
 });
