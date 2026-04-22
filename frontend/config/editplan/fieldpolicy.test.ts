@@ -99,6 +99,47 @@ describe('fieldpolicy', () => {
     });
   });
 
+  // Boundary inputs — legitimate but unusual values arriving from paste, export,
+  // or CSV cleanup. The analyzer's first-pass normalization is the only chance
+  // to reject truly malformed values before they reach the writer, so its
+  // behavior on these inputs is worth pinning.
+  describe('normalizeFieldValue boundary inputs', () => {
+    const UNICODE_TREE_TAG_RAW = '  木本-柏 1 \t';
+    const UNICODE_TREE_TAG_TRIMMED = '木本-柏 1';
+    const EMOJI_DESCRIPTION_RAW = '  broken 🌳 stem ';
+    const EMOJI_DESCRIPTION_TRIMMED = 'broken 🌳 stem';
+    const NEGATIVE_DBH = -5.5;
+    const GIANT_COORDINATE = 1e12;
+    const TAB_INDENT_TREE_TAG = '\tT9\t';
+
+    it('preserves unicode characters inside identifier fields after trimming whitespace', () => {
+      expect(normalizeFieldValue('TreeTag', UNICODE_TREE_TAG_RAW)).toBe(UNICODE_TREE_TAG_TRIMMED);
+    });
+
+    it('preserves emoji inside free-text fields (Description is clear-on-blank, not emoji-stripping)', () => {
+      expect(normalizeFieldValue('Description', EMOJI_DESCRIPTION_RAW)).toBe(EMOJI_DESCRIPTION_TRIMMED);
+    });
+
+    it('passes through negative numeric DBH/HOM unchanged — range validation lives in site-specific validations, not fieldpolicy', () => {
+      expect(normalizeFieldValue('MeasuredDBH', NEGATIVE_DBH)).toBe(NEGATIVE_DBH);
+      expect(normalizeFieldValue('MeasuredHOM', -0.1)).toBe(-0.1);
+    });
+
+    it('passes through extreme finite coordinates unchanged — analyzer does not clamp StemLocalX/Y', () => {
+      expect(normalizeFieldValue('StemLocalX', GIANT_COORDINATE)).toBe(GIANT_COORDINATE);
+      expect(normalizeFieldValue('StemLocalY', -GIANT_COORDINATE)).toBe(-GIANT_COORDINATE);
+    });
+
+    it('treats tab-only content as empty whitespace for invalid-clear fields', () => {
+      expect(() => normalizeFieldValue('SpeciesCode', '\t\t')).toThrow(InvalidClearError);
+    });
+
+    it('strips surrounding tab/newline characters on identifier fields', () => {
+      expect(normalizeFieldValue('TreeTag', TAB_INDENT_TREE_TAG)).toBe('T9');
+      expect(normalizeFieldValue('StemTag', '  S12\n')).toBe('S12');
+    });
+  });
+
   describe('isFieldEditableByRole', () => {
     it('restricts taxonomic identity fields to global and db admin users', () => {
       expect(isFieldEditableByRole('SpeciesCode', 'global')).toBe(true);
