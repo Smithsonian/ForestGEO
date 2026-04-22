@@ -11,6 +11,7 @@ import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { applyEditInTransaction } from '@/config/editplan/apply';
 import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
+import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
 
 export const runtime = 'nodejs';
 
@@ -37,6 +38,18 @@ class RevisionApplyPlanHashMismatchError extends Error {
 interface ApplyMatchedRow {
   coreMeasurementID: number;
   csvRow: FileRow;
+  duplicateMeasurementIDsToDelete?: number[];
+}
+
+interface ApplyNewRow {
+  csvRow: FileRow;
+  csvIndex: number;
+}
+
+interface ApplyInvalidRow {
+  csvRow?: FileRow;
+  csvIndex: number;
+  reason: string;
 }
 
 interface DuplicateToDelete {
@@ -46,7 +59,8 @@ interface DuplicateToDelete {
 
 interface ApplyRequest {
   matchedRows: ApplyMatchedRow[];
-  newRows: FileRow[];
+  newRows: Array<ApplyNewRow | FileRow>;
+  invalidRows?: ApplyInvalidRow[];
   confirmNewRows: boolean;
   duplicateMeasurementIDsToDelete?: DuplicateToDelete[];
   schema: string;
@@ -87,6 +101,24 @@ function parsePositiveInteger(value: unknown): number | null {
   return null;
 }
 
+function parseNonNegativeInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+
+  return null;
+}
+
 function getAffectedRowCount(result: unknown): number {
   if (!result || typeof result !== 'object' || !('affectedRows' in result)) {
     return 0;
@@ -110,13 +142,81 @@ function normalizeMatchedRows(rawRows: ApplyMatchedRow[]): { matchedRows: ApplyM
       return;
     }
 
+    let duplicateMeasurementIDsToDelete: number[] | undefined;
+    if (Array.isArray(row?.duplicateMeasurementIDsToDelete)) {
+      duplicateMeasurementIDsToDelete = [];
+      row.duplicateMeasurementIDsToDelete.forEach((rawDuplicateID, duplicateIndex) => {
+        const duplicateID = parsePositiveInteger(rawDuplicateID);
+        if (duplicateID === null) {
+          applyErrors.push({
+            coreMeasurementID,
+            error: `Matched row ${index + 1} has an invalid duplicateMeasurementIDsToDelete value at position ${duplicateIndex + 1}`
+          });
+          return;
+        }
+        duplicateMeasurementIDsToDelete?.push(duplicateID);
+      });
+    }
+
     matchedRows.push({
       coreMeasurementID,
-      csvRow: row?.csvRow ?? {}
+      csvRow: row?.csvRow ?? {},
+      ...(duplicateMeasurementIDsToDelete ? { duplicateMeasurementIDsToDelete } : {})
     });
   });
 
   return { matchedRows, applyErrors };
+}
+
+function normalizeNewRows(rawRows: Array<ApplyNewRow | FileRow>): { newRows: ApplyNewRow[]; applyErrors: ApplyError[] } {
+  const newRows: ApplyNewRow[] = [];
+  const applyErrors: ApplyError[] = [];
+
+  rawRows.forEach((row, index) => {
+    const maybeWrapped = row as Partial<ApplyNewRow>;
+    const hasWrappedShape = maybeWrapped.csvRow !== undefined || maybeWrapped.csvIndex !== undefined;
+    const csvRow = hasWrappedShape ? maybeWrapped.csvRow : (row as FileRow);
+    const parsedIndex = hasWrappedShape ? parseNonNegativeInteger(maybeWrapped.csvIndex) : index;
+
+    if (parsedIndex === null) {
+      applyErrors.push({
+        coreMeasurementID: 0,
+        error: `New row ${index + 1} has an invalid csvIndex`
+      });
+      return;
+    }
+
+    newRows.push({
+      csvIndex: parsedIndex,
+      csvRow: csvRow ?? {}
+    });
+  });
+
+  return { newRows, applyErrors };
+}
+
+function normalizeInvalidRows(rawRows: ApplyInvalidRow[] | undefined): { invalidRows: ApplyInvalidRow[]; applyErrors: ApplyError[] } {
+  const invalidRows: ApplyInvalidRow[] = [];
+  const applyErrors: ApplyError[] = [];
+
+  (rawRows ?? []).forEach((row, index) => {
+    const csvIndex = parseNonNegativeInteger(row?.csvIndex);
+    if (csvIndex === null || typeof row?.reason !== 'string' || row.reason.trim() === '') {
+      applyErrors.push({
+        coreMeasurementID: 0,
+        error: `Invalid row ${index + 1} must include csvIndex and reason`
+      });
+      return;
+    }
+
+    invalidRows.push({
+      csvIndex,
+      csvRow: row.csvRow ?? {},
+      reason: row.reason
+    });
+  });
+
+  return { invalidRows, applyErrors };
 }
 
 function normalizeDuplicates(rawDuplicates: DuplicateToDelete[]): { duplicates: DuplicateToDelete[]; applyErrors: ApplyError[] } {
@@ -142,6 +242,29 @@ function normalizeDuplicates(rawDuplicates: DuplicateToDelete[]): { duplicates: 
   });
 
   return { duplicates, applyErrors };
+}
+
+function buildDuplicateDeletionHints(matchedRows: ApplyMatchedRow[]): DuplicateToDelete[] {
+  const duplicates: DuplicateToDelete[] = [];
+  for (const row of matchedRows) {
+    for (const duplicateID of row.duplicateMeasurementIDsToDelete ?? []) {
+      duplicates.push({
+        coreMeasurementID: duplicateID,
+        survivorCoreMeasurementID: row.coreMeasurementID
+      });
+    }
+  }
+  return duplicates;
+}
+
+function duplicateKey(duplicate: DuplicateToDelete): string {
+  return `${duplicate.survivorCoreMeasurementID}:${duplicate.coreMeasurementID}`;
+}
+
+function duplicatesMatch(left: DuplicateToDelete[], right: DuplicateToDelete[]): boolean {
+  const leftKeys = left.map(duplicateKey).sort();
+  const rightKeys = right.map(duplicateKey).sort();
+  return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index]);
 }
 
 /**
@@ -215,7 +338,7 @@ function buildCanonicalNewRow(csvRow: FileRow): Record<string, unknown> {
     } else if (field === 'hom') {
       newRow.MeasuredHOM = trimmed;
     } else if (field === 'date') {
-      newRow.MeasurementDate = normalizeDateForSQL(trimmed);
+      newRow.MeasurementDate = trimmed;
     } else if (field === 'comments') {
       newRow.Description = trimmed;
     }
@@ -516,7 +639,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { matchedRows, newRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID, bulkPlanHash } = body;
+  const { matchedRows, newRows, invalidRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID, bulkPlanHash } = body;
 
   ailogger.info(
     `${logPrefix} parsed request body in ${Date.now() - requestStartedAt}ms (matchedRows=${Array.isArray(matchedRows) ? matchedRows.length : 'invalid'}, newRows=${Array.isArray(newRows) ? newRows.length : 'invalid'}, confirmNewRows=${confirmNewRows === true})`
@@ -543,15 +666,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const normalizedMatchedRows = normalizeMatchedRows(matchedRows);
-  if (normalizedMatchedRows.applyErrors.length > 0) {
+  const normalizedNewRows = normalizeNewRows(newRows);
+  const normalizedInvalidRows = normalizeInvalidRows(invalidRows);
+  const normalizationErrors = [
+    ...normalizedMatchedRows.applyErrors,
+    ...normalizedNewRows.applyErrors,
+    ...normalizedInvalidRows.applyErrors
+  ];
+  if (normalizationErrors.length > 0) {
     return NextResponse.json(
-      { error: 'Matched rows failed validation', applyErrors: normalizedMatchedRows.applyErrors },
+      { error: 'Revision rows failed validation', applyErrors: normalizationErrors },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
 
   // Pre-flight validation of duplicate deletion requests (before opening a transaction)
-  const normalizedDuplicateResults = normalizeDuplicates(Array.isArray(duplicateMeasurementIDsToDelete) ? duplicateMeasurementIDsToDelete : []);
+  const rowDuplicateHints = buildDuplicateDeletionHints(normalizedMatchedRows.matchedRows);
+  const normalizedDuplicateResults = normalizeDuplicates(Array.isArray(duplicateMeasurementIDsToDelete) ? duplicateMeasurementIDsToDelete : rowDuplicateHints);
   if (normalizedDuplicateResults.applyErrors.length > 0) {
     return NextResponse.json(
       { error: 'Duplicate deletion request failed validation', applyErrors: normalizedDuplicateResults.applyErrors },
@@ -559,7 +690,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const duplicates = normalizedDuplicateResults.duplicates;
+  if (Array.isArray(duplicateMeasurementIDsToDelete) && !duplicatesMatch(rowDuplicateHints, normalizedDuplicateResults.duplicates)) {
+    return NextResponse.json(
+      {
+        error: 'Duplicate deletion request failed validation',
+        applyErrors: [
+          {
+            coreMeasurementID: 0,
+            error: 'Duplicate deletion hints must match the matchedRows payload'
+          }
+        ]
+      },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  const duplicates = rowDuplicateHints.length > 0 ? rowDuplicateHints : normalizedDuplicateResults.duplicates;
   if (duplicates.length > 0) {
     const preflightErrors = validateDuplicateRequests(duplicates, normalizedMatchedRows.matchedRows);
     if (preflightErrors.length > 0) {
@@ -577,6 +723,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
+    await assertEditScopeAllowed(connectionManager, session, {
+      schema,
+      plotID: normalizedPlotID,
+      censusID: normalizedCensusID,
+      rejectActiveOperations: false
+    });
+
     const ensureSessionsStartedAt = Date.now();
     await ensureUploadSessionsTable(schema);
     ailogger.info(`${logPrefix} ensureUploadSessionsTable complete in ${Date.now() - ensureSessionsStartedAt}ms for schema=${schema}`);
@@ -599,11 +752,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           targetID: row.coreMeasurementID,
           newRow: buildCanonicalNewRow(row.csvRow)
         })),
-        newRows: newRows.map((csvRow, index) => ({
-          rowIndex: index,
-          newRow: buildCanonicalNewRow(csvRow)
+        newRows: normalizedNewRows.newRows.map(row => ({
+          rowIndex: row.csvIndex,
+          newRow: buildCanonicalNewRow(row.csvRow)
         })),
-        invalid: [],
+        invalid: normalizedInvalidRows.invalidRows.map(row => ({
+          rowIndex: row.csvIndex,
+          reason: row.reason
+        })),
         duplicateMeasurementIDsToDelete: duplicates.map(d => d.coreMeasurementID)
       };
       const freshPlan = await analyzeBulk(
@@ -636,11 +792,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           transactionID
         );
         if (!stillActive) {
-          applyErrors.push({
-            coreMeasurementID: row.coreMeasurementID,
-            error: 'Measurement no longer active in this plot/census — may have been deactivated since upload was matched'
-          });
-          continue;
+          throw new RevisionApplyConflictError(
+            `Measurement ${row.coreMeasurementID} is no longer active in this plot/census — may have been deactivated since upload was matched`
+          );
         }
 
         if (!hasAnyCanonicalField(row.csvRow)) {
@@ -659,7 +813,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           newRow: canonicalNewRow,
           expectedPlanHash: null,
           operationType: 'bulk-revision-row',
-          writeLedger: false,
+          revertable: false,
+          refreshViews: false,
           createdBy,
           transactionID
         });
@@ -673,13 +828,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
         deletedDuplicateCount += dupResult.deleted;
         if (dupResult.applyError) {
-          applyErrors.push(dupResult.applyError);
+          throw new RevisionApplyConflictError(dupResult.applyError.error);
         }
       }
 
       let insertedCount = 0;
-      if (confirmNewRows && newRows.length > 0) {
-        insertedCount = await insertNewRowsThroughPipeline(connectionManager, schema, normalizedPlotID, normalizedCensusID, newRows, transactionID);
+      if (confirmNewRows && normalizedNewRows.newRows.length > 0) {
+        insertedCount = await insertNewRowsThroughPipeline(
+          connectionManager,
+          schema,
+          normalizedPlotID,
+          normalizedCensusID,
+          normalizedNewRows.newRows.map(row => row.csvRow),
+          transactionID
+        );
       }
 
       if (updatedCount > 0 || insertedCount > 0 || deletedDuplicateCount > 0) {
@@ -711,6 +873,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
+    if (errorObj instanceof EditScopeForbiddenError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    }
+    if (errorObj instanceof EditScopeConflictError) {
+      return NextResponse.json({ error: errorObj.message }, { status: 423 });
+    }
     if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });
     }

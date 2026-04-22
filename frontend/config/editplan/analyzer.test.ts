@@ -171,6 +171,46 @@ describe('analyzeEdit', () => {
     });
     expect(plan.fieldChanges).toEqual([{ field: 'DBH', from: 15, to: 20 }]);
   });
+
+  it('skips measurement rules for the failedmeasurements surface (failed rows are row-local)', async () => {
+    // Failed measurements have StemGUID IS NULL: no species link, no linked
+    // stem/tree row, no cmattributes. The ramification rules can't fire on
+    // them; dispatching would be misleading. Assert the dispatch is gated.
+    const cm = makeConnectionManager(FAILED_OLD_ROW);
+    vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
+    vi.mocked(applyTreeStemRules).mockResolvedValue([makeEffect('R2', 'destructive', 1)]);
+    vi.mocked(applyCoordinateRules).mockResolvedValue([makeEffect('R4', 'warn', 1)]);
+    vi.mocked(applyAttributeRules).mockResolvedValue([makeEffect('R5', 'destructive', 1)]);
+
+    const plan = await analyzeEdit(cm, SCHEMA, 'failedmeasurements', PLOT_ID, CENSUS_ID, 99, {
+      DBH: 20,
+      Codes: 'alive;dead'
+    });
+
+    expect(plan.effects).toEqual([]);
+    expect(plan.maxSeverity).toBe('info');
+    expect(applySpeciesRules).not.toHaveBeenCalled();
+    expect(applyTreeStemRules).not.toHaveBeenCalled();
+    expect(applyCoordinateRules).not.toHaveBeenCalled();
+    expect(applyAttributeRules).not.toHaveBeenCalled();
+  });
+
+  it('still dispatches rules for the measurementssummary surface', async () => {
+    // Regression guard: the skip above is gated on dataType, not a fallthrough.
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    vi.mocked(applyCoordinateRules).mockResolvedValue([makeEffect('R4', 'warn', 1)]);
+
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, {
+      StemLocalX: 50
+    });
+
+    expect(applySpeciesRules).toHaveBeenCalledTimes(1);
+    expect(applyTreeStemRules).toHaveBeenCalledTimes(1);
+    expect(applyCoordinateRules).toHaveBeenCalledTimes(1);
+    expect(applyAttributeRules).toHaveBeenCalledTimes(1);
+    expect(plan.effects).toHaveLength(1);
+    expect(plan.maxSeverity).toBe('warn');
+  });
 });
 
 describe('applyDuplicateRules (R6)', () => {

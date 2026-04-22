@@ -1,11 +1,8 @@
 // POST /api/edits/preview — read-only analyzer entry point for single-row edits.
 //
-// Phase 1 simplification: preview does NOT probe upload-session / validation-run
-// conflicts and does NOT acquire the measurement scope lock. Preview is a
-// best-effort analysis; the authoritative guarantee is at apply time, where the
-// scope lock and hash re-check catch drift (ScopeLockHeldError → 423,
-// HashDriftError → 409). See Task 11 acceptance criteria in
-// docs/superpowers/plans/2026-04-21-row-editing-consistency.md.
+// Preview enforces schema/plot/census scope and probes active upload/validation
+// conflicts before returning effects for user review. Apply still owns the
+// authoritative scope lock and hash re-check.
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/auth';
@@ -13,6 +10,8 @@ import ConnectionManager from '@/config/connectionmanager';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
+import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 
 export const runtime = 'nodejs';
 
@@ -50,11 +49,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const cm = ConnectionManager.getInstance();
   try {
+    await assertEditScopeAllowed(cm, session, {
+      schema: body.schema,
+      plotID: body.plotID,
+      censusID: body.censusID
+    });
+
     const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow);
     return NextResponse.json(plan, { status: 200 });
   } catch (err) {
+    if (err instanceof EditScopeForbiddenError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    }
+    if (err instanceof EditScopeConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 423 });
+    }
     if (err instanceof DisallowedFieldError) {
       return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: 422 });
+    }
+    if (err instanceof InvalidClearError) {
+      return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: 422 });
     }
     if (err instanceof SpeciesNotFoundError) {
       return NextResponse.json({ error: 'species not found', code: err.code }, { status: 422 });

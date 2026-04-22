@@ -2,7 +2,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import ailogger from '@/ailogger';
 
-export type EditOperationType = 'single-row-edit' | 'revert';
+export type EditOperationType = 'single-row-edit' | 'bulk-revision-row' | 'revert';
 export type EditOperationDataType = 'measurementssummary' | 'failedmeasurements';
 
 export interface EditOperationStateRow {
@@ -15,6 +15,7 @@ export interface EditOperationStateRow {
 export interface EditOperationRecord {
   editOperationID: number;
   operationType: EditOperationType;
+  revertable: boolean;
   dataType: EditOperationDataType;
   targetID: number;
   plotID: number;
@@ -29,6 +30,7 @@ export interface EditOperationRecord {
 
 export interface EditOperationWriteInput {
   operationType: EditOperationType;
+  revertable?: boolean;
   dataType: EditOperationDataType;
   targetID: number;
   plotID: number;
@@ -43,7 +45,8 @@ export interface EditOperationWriteInput {
 const CREATE_EDIT_OPERATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS ??.edit_operations (
     EditOperationID INT AUTO_INCREMENT PRIMARY KEY,
-    OperationType ENUM('single-row-edit', 'revert') NOT NULL,
+    OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL,
+    Revertable BOOLEAN NOT NULL DEFAULT TRUE,
     DataType ENUM('measurementssummary', 'failedmeasurements') NOT NULL,
     TargetID BIGINT NOT NULL,
     PlotID INT NOT NULL,
@@ -64,6 +67,71 @@ const CREATE_EDIT_OPERATIONS_TABLE_SQL = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 `;
 
+const ALTER_EDIT_OPERATION_TYPE_SQL = `
+  ALTER TABLE ??.edit_operations
+  MODIFY COLUMN OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL
+`;
+
+async function ensureOperationTypeColumn(
+  connectionManager: ConnectionManager,
+  schema: string,
+  transactionID?: string
+): Promise<void> {
+  const rows = await connectionManager.executeQuery(
+    `SELECT COLUMN_TYPE AS columnType
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ?
+       AND TABLE_NAME = 'edit_operations'
+       AND COLUMN_NAME = 'OperationType'
+     LIMIT 1`,
+    [schema],
+    transactionID
+  );
+
+  const columnType = Array.isArray(rows) && rows.length > 0 ? String((rows[0] as Record<string, unknown>).columnType ?? '') : '';
+  if (columnType.includes('bulk-revision-row')) {
+    return;
+  }
+
+  await connectionManager.executeQuery(safeFormatQuery(schema, ALTER_EDIT_OPERATION_TYPE_SQL), undefined, transactionID);
+}
+
+async function ensureRevertableColumn(
+  connectionManager: ConnectionManager,
+  schema: string,
+  transactionID?: string
+): Promise<void> {
+  const rows = await connectionManager.executeQuery(
+    `SELECT COUNT(*) AS columnCount
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ?
+       AND TABLE_NAME = 'edit_operations'
+       AND COLUMN_NAME = 'Revertable'`,
+    [schema],
+    transactionID
+  );
+
+  const columnCount = Array.isArray(rows) && rows.length > 0 ? Number((rows[0] as Record<string, unknown>).columnCount) : 0;
+  if (columnCount > 0) {
+    return;
+  }
+
+  await connectionManager.executeQuery(
+    safeFormatQuery(schema, `ALTER TABLE ??.edit_operations ADD COLUMN Revertable BOOLEAN NOT NULL DEFAULT TRUE AFTER OperationType`),
+    undefined,
+    transactionID
+  );
+}
+
+async function ensureEditOperationsSchemaUpgrades(
+  connectionManager: ConnectionManager,
+  schema: string,
+  transactionID?: string
+): Promise<void> {
+  await ensureOperationTypeColumn(connectionManager, schema, transactionID);
+  await ensureRevertableColumn(connectionManager, schema, transactionID);
+}
+
 export async function ensureEditOperationsTable(
   connectionManager: ConnectionManager,
   schema: string,
@@ -72,6 +140,7 @@ export async function ensureEditOperationsTable(
   const sql = safeFormatQuery(schema, CREATE_EDIT_OPERATIONS_TABLE_SQL);
   try {
     await connectionManager.executeQuery(sql, undefined, transactionID);
+    await ensureEditOperationsSchemaUpgrades(connectionManager, schema, transactionID);
   } catch (error: unknown) {
     ailogger.error(
       `[editoperations] Failed to ensure edit_operations table in ${schema}:`,
@@ -90,13 +159,14 @@ export async function writeEditOperation(
   const sql = safeFormatQuery(
     schema,
     `INSERT INTO ??.edit_operations (
-       OperationType, DataType, TargetID, PlotID, CensusID, PlanHash,
+       OperationType, Revertable, DataType, TargetID, PlotID, CensusID, PlanHash,
        BeforeState, AfterState, CreatedBy
-     ) VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), ?)`
   );
 
   const params = [
     record.operationType,
+    record.revertable ?? true,
     record.dataType,
     record.targetID,
     record.plotID,
@@ -126,6 +196,7 @@ export async function readEditOperation(
     `SELECT
        EditOperationID,
        OperationType,
+       Revertable,
        DataType,
        TargetID,
        PlotID,
@@ -209,6 +280,22 @@ function toIsoString(value: unknown): string {
   return String(value);
 }
 
+function toBoolean(value: unknown, defaultValue: boolean): boolean {
+  if (value === null || value === undefined) {
+    return defaultValue;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    return value === '1' || value.toLowerCase() === 'true';
+  }
+  return Boolean(value);
+}
+
 function mapRowToEditOperationRecord(row: Record<string, unknown>): EditOperationRecord {
   const revertedByRaw = row.RevertedByEditOperationID;
   const revertedBy = revertedByRaw === null || revertedByRaw === undefined ? null : Number(revertedByRaw);
@@ -216,6 +303,7 @@ function mapRowToEditOperationRecord(row: Record<string, unknown>): EditOperatio
   return {
     editOperationID: Number(row.EditOperationID),
     operationType: row.OperationType as EditOperationType,
+    revertable: toBoolean(row.Revertable, true),
     dataType: row.DataType as EditOperationDataType,
     targetID: Number(row.TargetID),
     plotID: Number(row.PlotID),

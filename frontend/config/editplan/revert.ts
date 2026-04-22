@@ -3,16 +3,26 @@
 // `applyEditInTransaction` with `operationType: 'revert'`. After success,
 // the original ledger entry's `RevertedByEditOperationID` is pointed at the
 // revert operation — all in a single atomic transaction.
+//
+// Drift gate: the restore plan is re-analyzed against current DB state before
+// writing. If the restore would now cause cross-row or destructive effects
+// because the world moved on since the original edit, revert throws
+// `RevertDriftError` with the fresh plan. The client is expected to surface it
+// and retry with `confirmedPlanHash` matching the plan to explicitly accept
+// those consequences.
 import ConnectionManager from '@/config/connectionmanager';
-import { ApplyResult, EditPlanDataType } from './types';
+import { ApplyResult, EditPlan, EditPlanDataType, SEVERITY_RANK } from './types';
+import { analyzeEdit } from './analyzer';
 import { applyEditInTransaction, ScopeLockHeldError } from './apply';
 import {
   EditOperationRecord,
   EditOperationStateRow,
+  ensureEditOperationsTable,
   markEditOperationReverted,
   readEditOperation
 } from '@/config/editoperations';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 export class EditOperationNotFoundError extends Error {
   constructor(public editOperationID: number) {
@@ -38,13 +48,33 @@ export class CannotRevertRevertError extends Error {
   }
 }
 
+export class NonRevertableEditOperationError extends Error {
+  constructor(public editOperationID: number) {
+    super(`edit operation is not revertable: ${editOperationID}`);
+    this.name = 'NonRevertableEditOperationError';
+  }
+}
+
+export class RevertDriftError extends Error {
+  constructor(public freshPlan: EditPlan) {
+    super('revert plan has cross-row or destructive effects; confirmation required');
+    this.name = 'RevertDriftError';
+  }
+}
+
 export interface RevertInput {
   schema: string;
   editOperationID: number;
   createdBy: string;
+  // When the first revert attempt returned RevertDriftError, the client re-posts
+  // with the plan hash from that response to acknowledge the fresh ramifications.
+  // Missing or mismatched hash on a non-info restore plan is a 409.
+  confirmedPlanHash?: string;
 }
 
 export async function revertEdit(cm: ConnectionManager, input: RevertInput): Promise<ApplyResult> {
+  await ensureEditOperationsTable(cm, input.schema);
+
   const original = await readEditOperation(cm, input.schema, input.editOperationID);
   if (!original) {
     throw new EditOperationNotFoundError(input.editOperationID);
@@ -54,6 +84,9 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
   }
   if (original.operationType === 'revert') {
     throw new CannotRevertRevertError(original.editOperationID);
+  }
+  if (!original.revertable) {
+    throw new NonRevertableEditOperationError(original.editOperationID);
   }
 
   const newRow = reconstructNewRow(original);
@@ -69,6 +102,24 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       throw new ScopeLockHeldError('scope locked');
     }
 
+    const restorePlan = await analyzeEdit(
+      cm,
+      input.schema,
+      original.dataType,
+      original.plotID,
+      original.censusID,
+      original.targetID,
+      newRow,
+      txID
+    );
+
+    if (
+      SEVERITY_RANK[restorePlan.maxSeverity] > SEVERITY_RANK.info &&
+      input.confirmedPlanHash !== restorePlan.planHash
+    ) {
+      throw new RevertDriftError(restorePlan);
+    }
+
     const result = await applyEditInTransaction(cm, {
       dataType: original.dataType,
       schema: input.schema,
@@ -76,8 +127,9 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       censusID: original.censusID,
       targetID: original.targetID,
       newRow,
-      expectedPlanHash: null,
+      expectedPlanHash: restorePlan.planHash,
       operationType: 'revert',
+      revertable: false,
       createdBy: input.createdBy,
       transactionID: txID
     });
@@ -85,6 +137,8 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
     if (result.editOperationID !== null) {
       await markEditOperationReverted(cm, input.schema, original.editOperationID, result.editOperationID, txID);
     }
+
+    await removeCreatedAfterStateSideEffects(cm, input.schema, original, txID);
 
     await cm.commitTransaction(txID);
     return result;
@@ -104,6 +158,59 @@ function findStateRow(state: EditOperationStateRow[], table: string): EditOperat
 
 function findStateRows(state: EditOperationStateRow[], table: string): EditOperationStateRow[] {
   return state.filter(r => r.table === table);
+}
+
+function findStateRowByPrimaryKey(state: EditOperationStateRow[], table: string, primaryKeyValue: string | number): EditOperationStateRow | undefined {
+  return state.find(r => r.table === table && String(r.primaryKeyValue) === String(primaryKeyValue));
+}
+
+function afterRowsCreatedByOriginal(record: EditOperationRecord, table: string): EditOperationStateRow[] {
+  return record.afterState.filter(row => {
+    if (row.table !== table || row.row === null) return false;
+    const before = findStateRowByPrimaryKey(record.beforeState, row.table, row.primaryKeyValue);
+    return before?.row === null;
+  });
+}
+
+async function removeCreatedAfterStateSideEffects(
+  cm: ConnectionManager,
+  schema: string,
+  record: EditOperationRecord,
+  transactionID: string
+): Promise<void> {
+  for (const stemState of afterRowsCreatedByOriginal(record, 'stems')) {
+    await cm.executeQuery(
+      safeFormatQuery(
+        schema,
+        `DELETE FROM ??.stems
+         WHERE StemGUID = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM ??.coremeasurements cm
+             WHERE cm.StemGUID = ?
+             LIMIT 1
+           )`
+      ),
+      [stemState.primaryKeyValue, stemState.primaryKeyValue],
+      transactionID
+    );
+  }
+
+  for (const treeState of afterRowsCreatedByOriginal(record, 'trees')) {
+    await cm.executeQuery(
+      safeFormatQuery(
+        schema,
+        `DELETE FROM ??.trees
+         WHERE TreeID = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM ??.stems s
+             WHERE s.TreeID = ?
+             LIMIT 1
+           )`
+      ),
+      [treeState.primaryKeyValue, treeState.primaryKeyValue],
+      transactionID
+    );
+  }
 }
 
 function normalizeMeasurementDate(value: unknown): string | null {

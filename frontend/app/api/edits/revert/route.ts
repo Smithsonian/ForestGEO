@@ -12,16 +12,28 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { HashDriftError, ScopeLockHeldError } from '@/config/editplan/apply';
-import { AlreadyRevertedError, CannotRevertRevertError, EditOperationNotFoundError, revertEdit } from '@/config/editplan/revert';
-import { readEditOperation } from '@/config/editoperations';
+import {
+  AlreadyRevertedError,
+  CannotRevertRevertError,
+  EditOperationNotFoundError,
+  NonRevertableEditOperationError,
+  RevertDriftError,
+  revertEdit
+} from '@/config/editplan/revert';
+import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { ensureEditOperationsTable, readEditOperation } from '@/config/editoperations';
+import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 
 export const runtime = 'nodejs';
+
+const PLAN_HASH_LENGTH = 64;
 
 const RevertBody = z.object({
   schema: z.string(),
   plotID: z.number().int().positive(),
   censusID: z.number().int().positive(),
-  editOperationID: z.number().int().positive()
+  editOperationID: z.number().int().positive(),
+  confirmedPlanHash: z.string().length(PLAN_HASH_LENGTH).optional()
 });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -51,6 +63,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const cm = ConnectionManager.getInstance();
   try {
+    await assertEditScopeAllowed(cm, session, {
+      schema: body.schema,
+      plotID: body.plotID,
+      censusID: body.censusID
+    });
+    await ensureEditOperationsTable(cm, body.schema);
+
     const ledgerRow = await readEditOperation(cm, body.schema, body.editOperationID);
     if (!ledgerRow) {
       return NextResponse.json({ error: 'edit operation not found' }, { status: 404 });
@@ -62,10 +81,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await revertEdit(cm, {
       schema: body.schema,
       editOperationID: body.editOperationID,
-      createdBy
+      createdBy,
+      confirmedPlanHash: body.confirmedPlanHash
     });
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
+    if (err instanceof EditScopeForbiddenError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    }
+    if (err instanceof EditScopeConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 423 });
+    }
     if (err instanceof EditOperationNotFoundError) {
       return NextResponse.json({ error: 'edit operation not found' }, { status: 404 });
     }
@@ -75,6 +101,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (err instanceof CannotRevertRevertError) {
       return NextResponse.json({ error: 'cannot revert a revert operation' }, { status: 422 });
     }
+    if (err instanceof NonRevertableEditOperationError) {
+      return NextResponse.json({ error: 'edit operation is not revertable' }, { status: 422 });
+    }
+    if (err instanceof RevertDriftError) {
+      return NextResponse.json({ error: 'revert drift', freshPlan: err.freshPlan }, { status: 409 });
+    }
     if (err instanceof HashDriftError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: err.freshPlan }, { status: 409 });
     }
@@ -83,6 +115,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof DisallowedFieldError) {
       return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: 422 });
+    }
+    if (err instanceof InvalidClearError) {
+      return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: 422 });
     }
     if (err instanceof SpeciesNotFoundError) {
       return NextResponse.json({ error: 'species not found', code: err.code }, { status: 422 });

@@ -11,6 +11,8 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { applyEdit, HashDriftError, ScopeLockHeldError } from '@/config/editplan/apply';
+import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
+import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 
 export const runtime = 'nodejs';
 
@@ -51,6 +53,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const cm = ConnectionManager.getInstance();
   try {
+    await assertEditScopeAllowed(cm, session, {
+      schema: body.schema,
+      plotID: body.plotID,
+      censusID: body.censusID
+    });
+
     const result = await applyEdit(cm, {
       dataType: body.dataType,
       schema: body.schema,
@@ -63,6 +71,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
     return NextResponse.json(result, { status: 200 });
   } catch (err) {
+    if (err instanceof EditScopeForbiddenError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    }
+    if (err instanceof EditScopeConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 423 });
+    }
     if (err instanceof HashDriftError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: err.freshPlan }, { status: 409 });
     }
@@ -71,6 +85,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof DisallowedFieldError) {
       return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: 422 });
+    }
+    if (err instanceof InvalidClearError) {
+      return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: 422 });
     }
     if (err instanceof SpeciesNotFoundError) {
       return NextResponse.json({ error: 'species not found', code: err.code }, { status: 422 });

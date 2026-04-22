@@ -521,6 +521,45 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       });
     });
 
+    it('does not show UndoToast when the same save automatically reingests the row', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({
+        updatedIDs: { failedmeasurements: 123 },
+        applyErrors: [],
+        editOperationID: 888,
+        validationPending: false
+      });
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'reingest ok' })
+      });
+
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        tag: '011375',
+        stemTag: '5',
+        spCode: 'CRATSN',
+        quadrat: '0101',
+        x: 18.4,
+        y: 9.9,
+        dbh: 10.0,
+        hom: 1.3,
+        date: '1994-12-05',
+        codes: 'M'
+      };
+      const newRow = { ...oldRow, dbh: 12.0 };
+
+      await (window as any).testEditFlowOverride(newRow, oldRow);
+
+      await waitFor(() => {
+        const urls = (global.fetch as any).mock.calls.map(([url]: any[]) => url);
+        expect(urls.some((u: string) => u.includes('/api/reingestsinglefailure/') && u.endsWith('/123'))).toBe(true);
+      });
+      expect(screen.queryByTestId('undo-toast-888')).not.toBeInTheDocument();
+    });
+
     it('skips beginEdit when the diff is empty but still handles reingest + refresh', async () => {
       await mountGridWithOptions();
 

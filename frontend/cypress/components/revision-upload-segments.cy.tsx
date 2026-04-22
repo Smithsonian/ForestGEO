@@ -108,11 +108,13 @@ describe('Revision Upload Segments', () => {
           }
         ]}
         newRows={[]}
+        invalidRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
         bulkPlanHash="cypress-plan-hash"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
+        onPlanConflict={cy.stub().as('onPlanConflict')}
       />
     );
 

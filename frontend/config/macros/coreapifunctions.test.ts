@@ -7,6 +7,8 @@ import { applyEdit } from '@/config/editplan/apply';
 // Keep measurementerrors mocked even though no test reads the mock directly; it
 // prevents the module from hitting the real DB stack when imported transitively.
 
+const PLAN_HASH = 'a'.repeat(64);
+
 // Mock dependencies
 vi.mock('@/config/connectionmanager');
 vi.mock('@/config/datamapper');
@@ -43,18 +45,10 @@ vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: vi.fn(() => Promise.resolve([1])),
   refreshIngestionErrorsForMeasurement: vi.fn(() => Promise.resolve([]))
 }));
+// applyEdit is kept mocked so the 405-rejection test can assert it was NOT called.
+// The PATCH route no longer calls it; production callers use /api/edits/apply instead.
 vi.mock('@/config/editplan/apply', () => ({
-  applyEdit: vi.fn(() =>
-    Promise.resolve({
-      updatedIDs: { CoreMeasurementID: 88 },
-      applyErrors: [],
-      editOperationID: 1,
-      validationPending: false
-    })
-  )
-}));
-vi.mock('@/auth', () => ({
-  auth: vi.fn(() => Promise.resolve({ user: { email: 'tester@example.com' } }))
+  applyEdit: vi.fn()
 }));
 
 describe('CoreAPIFunctions', () => {
@@ -228,215 +222,31 @@ describe('CoreAPIFunctions', () => {
       expect(censusActivityQueries).toHaveLength(0);
     });
 
-    it('routes measurementssummary PATCH through applyEdit as a legacy compatibility shim', async () => {
+    it.each([
+      ['measurementssummary', '77'],
+      ['failedmeasurements', '5']
+    ])('rejects PATCH for %s with 405 and does not invoke applyEdit', async (dataType, targetID) => {
       const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-      applyEditMock.mockResolvedValueOnce({
-        updatedIDs: { CoreMeasurementID: 77 },
-        applyErrors: [],
-        editOperationID: 42,
-        validationPending: false
-      });
-
-      const newRow = {
-        Attributes: 'D',
-        MeasuredDBH: 12.34
-      };
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
-        body: JSON.stringify({ newRow, oldRow: { Attributes: 'A', MeasuredDBH: 10 } })
+        body: JSON.stringify({ newRow: { MeasuredDBH: 12.34 }, oldRow: {}, planHash: PLAN_HASH })
       });
 
       const response = await PATCH(mockRequest, {
         params: Promise.resolve({
-          dataType: 'measurementssummary',
-          slugs: ['testSchema', '77']
+          dataType,
+          slugs: ['testSchema', targetID]
         })
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(405);
       await expect(response.json()).resolves.toEqual({
-        message: 'Update successful',
-        updatedIDs: { measurementssummary: 77 }
+        error: 'measurement edits must go through /api/edits/preview and /api/edits/apply'
       });
-
-      expect(applyEditMock).toHaveBeenCalledTimes(1);
-      const applyInput = applyEditMock.mock.calls[0][1];
-      expect(applyInput).toMatchObject({
-        dataType: 'measurementssummary',
-        schema: 'testSchema',
-        plotID: 5,
-        censusID: 1,
-        targetID: 77,
-        expectedPlanHash: null,
-        operationType: 'single-row-edit'
-      });
-      expect(applyInput.newRow).toEqual({ Attributes: 'D', MeasuredDBH: 12.34 });
+      expect(applyEditMock).not.toHaveBeenCalled();
+      expect(mockConnectionManager.beginTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
     });
-
-    it('drops SpeciesName, SubspeciesName, and internal IDs from the shim newRow via the allowlist and never updates the species row', async () => {
-      const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-      applyEditMock.mockResolvedValueOnce({
-        updatedIDs: { CoreMeasurementID: 77 },
-        applyErrors: [],
-        editOperationID: 43,
-        validationPending: false
-      });
-
-      const newRow = {
-        SpeciesCode: 'NEWSP',
-        SpeciesName: 'Attempted rename',
-        SubspeciesName: 'Attempted subspecies rename',
-        SpeciesID: 999,
-        TreeID: 12,
-        StemGUID: 34,
-        CoreMeasurementID: 77,
-        MeasuredDBH: 15.5
-      };
-      const mockRequest = new NextRequest('http://localhost/api/test', {
-        method: 'PATCH',
-        body: JSON.stringify({ newRow, oldRow: { SpeciesCode: 'OLDSP', MeasuredDBH: 10 } })
-      });
-
-      const response = await PATCH(mockRequest, {
-        params: Promise.resolve({
-          dataType: 'measurementssummary',
-          slugs: ['testSchema', '77']
-        })
-      });
-
-      expect(response.status).toBe(200);
-
-      const applyInput = applyEditMock.mock.calls[0][1];
-      expect(applyInput.newRow).not.toHaveProperty('SpeciesName');
-      expect(applyInput.newRow).not.toHaveProperty('SubspeciesName');
-      expect(applyInput.newRow).not.toHaveProperty('SpeciesID');
-      expect(applyInput.newRow).not.toHaveProperty('TreeID');
-      expect(applyInput.newRow).not.toHaveProperty('StemGUID');
-      expect(applyInput.newRow).not.toHaveProperty('CoreMeasurementID');
-      expect(applyInput.newRow).toEqual({ SpeciesCode: 'NEWSP', MeasuredDBH: 15.5 });
-
-      // Regression: the R1b species-rename branch must be gone. The shim
-      // must never issue an UPDATE against the species table.
-      const speciesRenameCall = mockConnectionManager.executeQuery.mock.calls.find(
-        (call: any[]) => typeof call[0] === 'string' && /UPDATE .*species/i.test(call[0]) && call[0].includes('SpeciesName')
-      );
-      expect(speciesRenameCall, 'Expected no UPDATE species SET SpeciesName = ? call from the legacy shim').toBeUndefined();
-    });
-
-    it('canonicalizes lowercase grid-key aliases before forwarding to applyEdit', async () => {
-      const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-      applyEditMock.mockResolvedValueOnce({
-        updatedIDs: { CoreMeasurementID: 88 },
-        applyErrors: [],
-        editOperationID: 44,
-        validationPending: false
-      });
-
-      const newRow = {
-        speciesCode: 'NEWSP',
-        measuredDBH: 22.2,
-        quadratName: '1301'
-      };
-      const mockRequest = new NextRequest('http://localhost/api/test', {
-        method: 'PATCH',
-        body: JSON.stringify({ newRow, oldRow: {} })
-      });
-
-      const response = await PATCH(mockRequest, {
-        params: Promise.resolve({
-          dataType: 'measurementssummary',
-          slugs: ['testSchema', '88']
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const applyInput = applyEditMock.mock.calls[0][1];
-      expect(applyInput.newRow).toEqual({
-        SpeciesCode: 'NEWSP',
-        MeasuredDBH: 22.2,
-        QuadratName: '1301'
-      });
-    });
-
-    it('routes failedmeasurements PATCH through applyEdit with the failedmeasurements surface allowlist', async () => {
-      const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-      applyEditMock.mockResolvedValueOnce({
-        updatedIDs: { CoreMeasurementID: 5 },
-        applyErrors: [],
-        editOperationID: 99,
-        validationPending: false
-      });
-
-      const newRow = {
-        Tag: 'TREE-5',
-        StemTag: '1',
-        SpCode: 'BAD',
-        Quadrat: 'Q01',
-        Date: '2025-01-01',
-        Comments: 'reviewed',
-        FailureReasons: 'ignored-by-allowlist',
-        Hash_ID: 'also-ignored'
-      };
-      const mockRequest = new NextRequest('http://localhost/api/test', {
-        method: 'PATCH',
-        body: JSON.stringify({ newRow, oldRow: {} })
-      });
-
-      const response = await PATCH(mockRequest, {
-        params: Promise.resolve({
-          dataType: 'failedmeasurements',
-          slugs: ['forestgeo_panama', '5']
-        })
-      });
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        message: 'Update successful',
-        updatedIDs: { failedmeasurements: 5 }
-      });
-
-      const applyInput = applyEditMock.mock.calls[0][1];
-      expect(applyInput).toMatchObject({
-        dataType: 'failedmeasurements',
-        schema: 'forestgeo_panama',
-        targetID: 5,
-        expectedPlanHash: null,
-        operationType: 'single-row-edit'
-      });
-      expect(applyInput.newRow).toEqual({
-        Tag: 'TREE-5',
-        StemTag: '1',
-        SpCode: 'BAD',
-        Quadrat: 'Q01',
-        Date: '2025-01-01',
-        Comments: 'reviewed'
-      });
-      expect(applyInput.newRow).not.toHaveProperty('FailureReasons');
-      expect(applyInput.newRow).not.toHaveProperty('Hash_ID');
-    });
-
-    it('propagates applyEdit errors through handleError so the shim surface stays consistent with the rest of the handler', async () => {
-      const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-      applyEditMock.mockRejectedValueOnce(new Error('matching tree exists but is inactive'));
-
-      const mockRequest = new NextRequest('http://localhost/api/test', {
-        method: 'PATCH',
-        body: JSON.stringify({ newRow: { SpeciesCode: 'NEWSP' }, oldRow: {} })
-      });
-
-      const response = await PATCH(mockRequest, {
-        params: Promise.resolve({
-          dataType: 'measurementssummary',
-          slugs: ['testSchema', '88']
-        })
-      });
-
-      expect(response.status).toBe(500);
-      await expect(response.json()).resolves.toEqual({
-        error: expect.stringContaining('matching tree exists but is inactive')
-      });
-    });
-
   });
 
   describe('POST function', () => {
@@ -719,20 +529,14 @@ describe('CoreAPIFunctions', () => {
 
   describe('PRIMARY_KEY_MAP Logic', () => {
     describe('PATCH with PRIMARY_KEY_MAP', () => {
-      it('uses the numeric slugs gridID as applyEdit targetID for failedmeasurements (never the column name)', async () => {
+      it('still rejects failedmeasurements PATCH with 405 regardless of slugs shape (numeric or column-name)', async () => {
         const applyEditMock = applyEdit as ReturnType<typeof vi.fn>;
-        applyEditMock.mockResolvedValueOnce({
-          updatedIDs: { CoreMeasurementID: 1 },
-          applyErrors: [],
-          editOperationID: 10,
-          validationPending: false
-        });
-
         const mockRequest = new NextRequest('http://localhost/api/test', {
           method: 'PATCH',
           body: JSON.stringify({
             newRow: { Tag: '123' },
-            oldRow: { Tag: '122' }
+            oldRow: { Tag: '122' },
+            planHash: PLAN_HASH
           })
         });
 
@@ -743,14 +547,8 @@ describe('CoreAPIFunctions', () => {
           })
         });
 
-        expect(response.status).toBe(200);
-        expect(applyEditMock).toHaveBeenCalledTimes(1);
-        const applyInput = applyEditMock.mock.calls[0][1];
-        expect(applyInput).toMatchObject({
-          dataType: 'failedmeasurements',
-          targetID: 1,
-          schema: 'forestgeo_panama'
-        });
+        expect(response.status).toBe(405);
+        expect(applyEditMock).not.toHaveBeenCalled();
       });
 
       it('should use CoreMeasurementID for coremeasurements dataType', async () => {

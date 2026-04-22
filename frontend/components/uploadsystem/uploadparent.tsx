@@ -28,6 +28,7 @@ import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -40,6 +41,33 @@ export interface DetailedCMIDRow extends CMIDRow {
   plotCensusNumber?: number;
   quadratName?: string;
   speciesName?: string;
+}
+
+function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkEditPlan): RevisionUploadResponse {
+  const changesByTarget = new Map<number, Record<string, { from: unknown; to: unknown }>>();
+  for (const rowPlan of freshPlan.rowPlans) {
+    if (rowPlan.targetID === undefined) continue;
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const change of rowPlan.plan?.fieldChanges ?? []) {
+      changes[change.field] = { from: change.from, to: change.to };
+    }
+    changesByTarget.set(rowPlan.targetID, changes);
+  }
+
+  const matchedRows = result.matchedRows.map(row => ({
+    ...row,
+    changes: changesByTarget.get(row.coreMeasurementID) ?? row.changes
+  }));
+
+  return {
+    ...result,
+    matchedRows,
+    counts: {
+      ...result.counts,
+      matchedWithChanges: matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length
+    },
+    bulkPlan: freshPlan
+  };
 }
 
 interface UploadParentProps {
@@ -358,19 +386,21 @@ function UploadParentInner(props: UploadParentProps) {
       case ReviewStates.REVISION_APPLY:
         return (
           <UploadRevisionApply
-            matchedRows={(revisionMatchResult?.matchedRows ?? [])
-              .filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0)
-              .map(row => ({
-                coreMeasurementID: row.coreMeasurementID,
-                csvRow: row.csvRow,
-                duplicateMeasurementIDsToDelete: row.duplicateMeasurementIDsToDelete ?? []
-              }))}
-            newRows={(revisionMatchResult?.newRows ?? []).map(row => row.csvRow)}
+            matchedRows={(revisionMatchResult?.matchedRows ?? []).map(row => ({
+              coreMeasurementID: row.coreMeasurementID,
+              csvRow: row.csvRow,
+              duplicateMeasurementIDsToDelete: row.duplicateMeasurementIDsToDelete ?? []
+            }))}
+            newRows={(revisionMatchResult?.newRows ?? []).map(row => ({ csvRow: row.csvRow, csvIndex: row.csvIndex }))}
+            invalidRows={revisionMatchResult?.invalidRows ?? []}
             confirmNewRows={revisionConfirmNewRows}
             schema={currentSite?.schemaName || ''}
             bulkPlanHash={revisionMatchResult?.bulkPlan?.planHash ?? ''}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            onPlanConflict={freshPlan => {
+              setRevisionMatchResult(current => (current ? mergeFreshRevisionPlan(current, freshPlan) : current));
+            }}
           />
         );
       case ReviewStates.VALIDATE:

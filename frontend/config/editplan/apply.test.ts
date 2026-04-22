@@ -195,6 +195,7 @@ describe('applyEditInTransaction', () => {
     expect(schemaArg).toBe(baseInput.schema);
     expect(txArg).toBe('outer-tx');
     expect(record.operationType).toBe('single-row-edit');
+    expect(record.revertable).toBe(true);
     expect(record.planHash).toBe(FRESH_PLAN_HASH);
     expect(record.beforeState).toHaveLength(1);
     expect(record.afterState).toHaveLength(1);
@@ -215,6 +216,7 @@ describe('applyEditInTransaction', () => {
 
     const [, , record] = (editOps.writeEditOperation as any).mock.calls[0];
     expect(record.operationType).toBe('bulk-revision-row');
+    expect(record.revertable).toBe(false);
   });
 
   it('skips the ledger write when writeLedger is false', async () => {

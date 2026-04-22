@@ -14,10 +14,13 @@ const mocks = vi.hoisted(() => ({
   ensureUploadSessionsTable: vi.fn(),
   withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
   acquireApplicationLock: vi.fn(async () => true),
-  executeQuery: vi.fn(async () => []),
+  executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
   closeConnection: vi.fn(async () => undefined),
   buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
   refreshMeasurementViewsForScope: vi.fn(async () => undefined),
+  assertEditScopeAllowed: vi.fn(async () => undefined),
+  MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
+  MockEditScopeConflictError: class MockEditScopeConflictError extends Error {},
   applyEditInTransaction: vi.fn(async () => ({
     updatedIDs: { CoreMeasurementID: 0 },
     applyErrors: [],
@@ -84,6 +87,12 @@ vi.mock('@/config/editplan/bulkanalyzer', () => ({
   analyzeBulk: mocks.analyzeBulk
 }));
 
+vi.mock('@/config/editplan/scopeguard', () => ({
+  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
+  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
+  EditScopeConflictError: mocks.MockEditScopeConflictError
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: mocks.loggerInfo,
@@ -137,6 +146,7 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.refreshMeasurementViewsForScope.mockResolvedValue(undefined);
+    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
     mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
     mocks.applyEditInTransaction.mockResolvedValue({
       updatedIDs: { CoreMeasurementID: 0 },
@@ -215,7 +225,7 @@ describe('POST /api/revisionupload/apply', () => {
     const response = await POST(
       buildRequest(
         buildValidBody({
-          matchedRows: [{ coreMeasurementID: 42, csvRow: {} }],
+          matchedRows: [{ coreMeasurementID: 42, csvRow: {}, duplicateMeasurementIDsToDelete: [42] }],
           duplicateMeasurementIDsToDelete: [{ coreMeasurementID: '42', survivorCoreMeasurementID: 42 }]
         })
       )
@@ -231,6 +241,39 @@ describe('POST /api/revisionupload/apply', () => {
         }
       ]
     });
+  });
+
+  it('recomputes the bulk hash from the full reviewed row set', async () => {
+    await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: 101, csvRow: { dbh: '12.5' } },
+            { coreMeasurementID: 202, csvRow: {}, duplicateMeasurementIDsToDelete: [303] }
+          ],
+          newRows: [{ csvIndex: 5, csvRow: { tag: 'T2', dbh: '1.2' } }],
+          invalidRows: [{ csvIndex: 7, csvRow: { tag: 'BAD' }, reason: 'duplicate stemid' }]
+        })
+      )
+    );
+
+    expect(mocks.analyzeBulk).toHaveBeenCalledWith(
+      expect.any(Object),
+      'forestgeo_testing',
+      'measurementssummary',
+      1,
+      2,
+      {
+        matched: [
+          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: '12.5' } },
+          { rowIndex: 1, targetID: 202, newRow: {} }
+        ],
+        newRows: [{ rowIndex: 5, newRow: { MeasuredDBH: '1.2' } }],
+        invalid: [{ rowIndex: 7, reason: 'duplicate stemid' }],
+        duplicateMeasurementIDsToDelete: [303]
+      },
+      'tx-1'
+    );
   });
 
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
@@ -254,7 +297,7 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
-  it('calls applyEditInTransaction per matched row with operationType=bulk-revision-row and writeLedger=false', async () => {
+  it('calls applyEditInTransaction per matched row with operationType=bulk-revision-row and non-revertable ledger rows', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -291,11 +334,12 @@ describe('POST /api/revisionupload/apply', () => {
       plotID: 1,
       censusID: 2,
       targetID: 101,
-      expectedPlanHash: null,
-      operationType: 'bulk-revision-row',
-      writeLedger: false,
-      transactionID: 'tx-1'
-    });
+        expectedPlanHash: null,
+        operationType: 'bulk-revision-row',
+        revertable: false,
+        refreshViews: false,
+        transactionID: 'tx-1'
+      });
     expect(firstInput.newRow).toEqual({ MeasuredDBH: '12.5', Attributes: 'L;D' });
 
     const secondCall = mocks.applyEditInTransaction.mock.calls[1] as unknown as [unknown, Record<string, unknown>];
@@ -303,7 +347,8 @@ describe('POST /api/revisionupload/apply', () => {
     expect(secondInput).toMatchObject({
       targetID: 202,
       operationType: 'bulk-revision-row',
-      writeLedger: false
+      revertable: false,
+      refreshViews: false
     });
     expect(secondInput.newRow).toEqual({ MeasuredHOM: '1.3' });
   });
@@ -352,7 +397,7 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
   });
 
-  it('records an applyError and skips the writer when TOCTOU re-resolve finds the measurement inactive', async () => {
+  it('rolls back the batch when TOCTOU re-resolve finds a measurement inactive', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
@@ -370,15 +415,9 @@ describe('POST /api/revisionupload/apply', () => {
       )
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     const body = await response.json();
-    expect(body.updatedCount).toBe(0);
-    expect(body.applyErrors).toEqual([
-      {
-        coreMeasurementID: 101,
-        error: 'Measurement no longer active in this plot/census — may have been deactivated since upload was matched'
-      }
-    ]);
+    expect(body.error).toBe('Measurement 101 is no longer active in this plot/census — may have been deactivated since upload was matched');
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
@@ -404,7 +443,7 @@ describe('POST /api/revisionupload/apply', () => {
     const response = await POST(
       buildRequest(
         buildValidBody({
-          matchedRows: [{ coreMeasurementID: 101, csvRow: {} }],
+          matchedRows: [{ coreMeasurementID: 101, csvRow: {}, duplicateMeasurementIDsToDelete: [55] }],
           duplicateMeasurementIDsToDelete: [{ coreMeasurementID: 55, survivorCoreMeasurementID: 101 }]
         })
       )

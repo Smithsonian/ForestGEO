@@ -29,15 +29,42 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockEditScopeForbiddenError extends Error {
+    constructor(message = 'scope forbidden') {
+      super(message);
+      this.name = 'EditScopeForbiddenError';
+    }
+  }
+
+  class MockEditScopeConflictError extends Error {
+    constructor(message = 'edit scope is currently busy') {
+      super(message);
+      this.name = 'EditScopeConflictError';
+    }
+  }
+
+  class MockInvalidClearError extends Error {
+    field: string;
+    constructor(field: string) {
+      super(`Field "${field}" cannot be cleared`);
+      this.name = 'InvalidClearError';
+      this.field = field;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
     safeFormatQuery: vi.fn((_schema: string, query: string) => query),
     analyzeEdit: vi.fn(),
+    assertEditScopeAllowed: vi.fn(),
     closeConnection: vi.fn(async () => undefined),
     MockDisallowedFieldError,
     MockTargetNotFoundError,
-    MockSpeciesNotFoundError
+    MockSpeciesNotFoundError,
+    MockEditScopeForbiddenError,
+    MockEditScopeConflictError,
+    MockInvalidClearError
   };
 });
 
@@ -68,6 +95,16 @@ vi.mock('@/config/editplan/rules/context', () => ({
   SpeciesNotFoundError: mocks.MockSpeciesNotFoundError
 }));
 
+vi.mock('@/config/editplan/scopeguard', () => ({
+  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
+  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
+  EditScopeConflictError: mocks.MockEditScopeConflictError
+}));
+
+vi.mock('@/config/editplan/fieldpolicy', () => ({
+  InvalidClearError: mocks.MockInvalidClearError
+}));
+
 function buildRequest(body: unknown) {
   return new Request('http://localhost/api/edits/preview', {
     method: 'POST',
@@ -89,6 +126,7 @@ describe('POST /api/edits/preview', () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com' } });
     mocks.isValidSchema.mockReturnValue(true);
+    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
     mocks.closeConnection.mockResolvedValue(undefined);
   });
 
@@ -117,11 +155,34 @@ describe('POST /api/edits/preview', () => {
     expect(mocks.analyzeEdit).not.toHaveBeenCalled();
   });
 
+  it('returns 403 when the scope guard rejects the requested scope', async () => {
+    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeForbiddenError());
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'scope forbidden' });
+    expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+  });
+
+  it('returns 423 when the scope guard detects active work in the scope', async () => {
+    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeConflictError('validation run 9 is active for this plot/census'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(423);
+    await expect(response.json()).resolves.toEqual({ error: 'validation run 9 is active for this plot/census' });
+    expect(mocks.analyzeEdit).not.toHaveBeenCalled();
+  });
+
   it('returns 422 when the analyzer throws DisallowedFieldError', async () => {
     mocks.analyzeEdit.mockRejectedValue(new mocks.MockDisallowedFieldError(['SpeciesName']));
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'disallowed fields', fields: ['SpeciesName'] });
+  });
+
+  it('returns 422 when the analyzer throws InvalidClearError', async () => {
+    mocks.analyzeEdit.mockRejectedValue(new mocks.MockInvalidClearError('SpeciesCode'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid clear', field: 'SpeciesCode' });
   });
 
   it('returns 422 when the analyzer throws SpeciesNotFoundError', async () => {
@@ -153,6 +214,15 @@ describe('POST /api/edits/preview', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(plan);
+    expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
+      expect.any(Object),
+      { user: { email: 'mason@example.com' } },
+      {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      }
+    );
     expect(mocks.analyzeEdit).toHaveBeenCalledWith(
       expect.any(Object),
       'forestgeo_testing',

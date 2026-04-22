@@ -231,6 +231,7 @@ describe('editoperations (integration)', () => {
       expect.arrayContaining([
         'EditOperationID',
         'OperationType',
+        'Revertable',
         'DataType',
         'TargetID',
         'PlotID',
@@ -247,6 +248,8 @@ describe('editoperations (integration)', () => {
     expect(fs.existsSync(MIGRATION_PATH)).toBe(true);
     const migrationSQL = fs.readFileSync(MIGRATION_PATH, 'utf-8');
     expect(migrationSQL).toContain('CREATE TABLE IF NOT EXISTS edit_operations');
+    expect(migrationSQL).toContain("'bulk-revision-row'");
+    expect(migrationSQL).toContain('Revertable BOOLEAN NOT NULL DEFAULT TRUE');
     expect(migrationSQL).toContain('fk_edit_operations_revert');
   });
 
@@ -265,6 +268,7 @@ describe('editoperations (integration)', () => {
     expect(roundTripped).not.toBeNull();
     expect(roundTripped!.editOperationID).toBe(editOperationID);
     expect(roundTripped!.operationType).toBe(input.operationType);
+    expect(roundTripped!.revertable).toBe(true);
     expect(roundTripped!.dataType).toBe(input.dataType);
     expect(roundTripped!.targetID).toBe(input.targetID);
     expect(roundTripped!.plotID).toBe(input.plotID);
@@ -278,6 +282,24 @@ describe('editoperations (integration)', () => {
     expect(roundTripped!.afterState).toEqual(SAMPLE_AFTER_STATE);
     expect(roundTripped!.beforeState[0].row).toEqual(SAMPLE_BEFORE_STATE[0].row);
     expect(roundTripped!.afterState[1].row).toEqual(SAMPLE_AFTER_STATE[1].row);
+  });
+
+  it('round-trips non-revertable bulk revision row ledger entries', async () => {
+    await ensureEditOperationsTable(cm, config.database);
+
+    const transactionID = await cm.beginTransaction();
+    const editOperationID = await writeEditOperation(
+      cm,
+      config.database,
+      buildInput({ operationType: 'bulk-revision-row', revertable: false }),
+      transactionID
+    );
+    await cm.commitTransaction(transactionID);
+
+    const roundTripped = await readEditOperation(cm, config.database, editOperationID);
+    expect(roundTripped).not.toBeNull();
+    expect(roundTripped!.operationType).toBe('bulk-revision-row');
+    expect(roundTripped!.revertable).toBe(false);
   });
 
   it('markEditOperationReverted links the original record to the reverting record', async () => {

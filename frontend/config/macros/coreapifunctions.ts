@@ -9,10 +9,6 @@ import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
-import { applyEdit } from '@/config/editplan/apply';
-import { EditPlanDataType } from '@/config/editplan/types';
-import { canonicalizeEditPayload, EDITABLE_FIELDS_BY_SURFACE, FIELD_ALIASES_BY_SURFACE } from '@/config/editplan/fieldpolicy';
-import { auth } from '@/auth';
 
 // Mapping from dataType to primary key column name
 const PRIMARY_KEY_MAP: Record<string, string> = {
@@ -34,83 +30,27 @@ const PRIMARY_KEY_MAP: Record<string, string> = {
   sites: 'SiteID'
 };
 
-function parsePositiveInteger(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function filterNewRowToSurface(dataType: EditPlanDataType, rawNewRow: Record<string, unknown>): Record<string, unknown> {
-  const allowed = EDITABLE_FIELDS_BY_SURFACE[dataType];
-  const aliases = FIELD_ALIASES_BY_SURFACE[dataType];
-  const remapped: Record<string, unknown> = {};
-  for (const [rawKey, value] of Object.entries(rawNewRow)) {
-    const canonical = aliases[rawKey] ?? rawKey;
-    if (allowed.has(canonical)) remapped[canonical] = value;
-  }
-  return canonicalizeEditPayload(dataType, remapped);
-}
-
-async function resolvePlotIDForMeasurement(
-  cm: ConnectionManager,
-  schema: string,
-  dataType: EditPlanDataType,
-  targetID: number
-): Promise<number | null> {
-  const cookiePlotID = parsePositiveInteger(await getCookie('plotID'));
-  if (cookiePlotID !== null) return cookiePlotID;
-
-  // Both surfaces live in coremeasurements (failedmeasurements rows have
-  // StemGUID IS NULL) so we resolve the owning plot via the census row.
-  const lookupSQL =
-    dataType === 'measurementssummary'
-      ? `SELECT c.PlotID AS PlotID FROM ${schema}.coremeasurements cm JOIN ${schema}.census c ON c.CensusID = cm.CensusID WHERE cm.CoreMeasurementID = ? LIMIT 1`
-      : `SELECT c.PlotID AS PlotID FROM ${schema}.coremeasurements cm JOIN ${schema}.census c ON c.CensusID = cm.CensusID WHERE cm.CoreMeasurementID = ? AND cm.StemGUID IS NULL LIMIT 1`;
-
-  const rows = await cm.executeQuery(lookupSQL, [targetID]);
-  return parsePositiveInteger(rows?.[0]?.PlotID);
-}
-
-async function runMeasurementEditShim(
-  cm: ConnectionManager,
-  schema: string,
-  dataType: EditPlanDataType,
-  targetID: number,
-  rawNewRow: Record<string, unknown>
-): Promise<NextResponse> {
-  const censusID = parsePositiveInteger(await getCookie('censusID'));
-  if (censusID === null) throw new Error('Census context required for measurement edit');
-
-  const plotID = await resolvePlotIDForMeasurement(cm, schema, dataType, targetID);
-  if (plotID === null) throw new Error('Unable to resolve plot context for measurement edit');
-
-  const filteredNewRow = filterNewRowToSurface(dataType, rawNewRow);
-
-  const session = await auth().catch(() => null);
-  const createdBy = session?.user?.email ?? session?.user?.name ?? 'legacy-patch-shim';
-
-  const result = await applyEdit(cm, {
-    dataType,
-    schema,
-    plotID,
-    censusID,
-    targetID,
-    newRow: filteredNewRow,
-    expectedPlanHash: null,
-    operationType: 'single-row-edit',
-    createdBy
-  });
-
-  const writerIDKey = Object.keys(result.updatedIDs)[0];
-  const writerID = writerIDKey ? result.updatedIDs[writerIDKey] : targetID;
-
-  return NextResponse.json({ message: 'Update successful', updatedIDs: { [dataType]: writerID } }, { status: HTTPResponses.OK });
-}
+const MEASUREMENT_PATCH_BLOCKED_DATATYPES = new Set(['measurementssummary', 'failedmeasurements']);
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
   const [schema, gridID] = slugs ?? [];
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
+
+  // Measurement editing is handled exclusively by POST /api/edits/preview +
+  // POST /api/edits/apply. The legacy PATCH path is rejected at the public
+  // boundary so the preview/drift/ledger contract can't be bypassed by a
+  // crafted request. If an internal call site ever needs to skip preview,
+  // it must invoke config/editplan/apply::applyEditInTransaction directly —
+  // never through this route.
+  if (MEASUREMENT_PATCH_BLOCKED_DATATYPES.has(dataType)) {
+    return NextResponse.json(
+      {
+        error: 'measurement edits must go through /api/edits/preview and /api/edits/apply'
+      },
+      { status: HTTPResponses.METHOD_NOT_ALLOWED }
+    );
+  }
 
   const connectionManager = ConnectionManager.getInstance();
   // Get the primary key column name for this dataType, or fallback to capitalized gridID
@@ -119,23 +59,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   const { newRow, oldRow } = await request.json();
   let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
-
-  // Legacy compatibility shim: route measurement edits through the new writer
-  // so the single-row edit path is unified. The public /api/edits/apply
-  // endpoint requires a plan hash; this shim is the only caller allowed to
-  // bypass the hash check (expectedPlanHash: null) because legacy grid
-  // clients never compute one.
-  if (dataType === 'measurementssummary' || dataType === 'failedmeasurements') {
-    try {
-      const targetID = Number(gridID);
-      if (!Number.isInteger(targetID) || targetID <= 0) throw new Error('invalid targetID in slugs');
-      return await runMeasurementEditShim(connectionManager, schema, dataType, targetID, newRow ?? {});
-    } catch (error: any) {
-      return handleError(error, connectionManager, newRow);
-    } finally {
-      await connectionManager.closeConnection();
-    }
-  }
 
   try {
     transactionID = await connectionManager.beginTransaction();

@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import UploadRevisionApply from './uploadrevisionapply';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { RevisionApplyMatchedRow } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
 
 const startValidation = vi.fn();
 
@@ -21,17 +22,20 @@ describe('UploadRevisionApply', () => {
   const fetchMock = vi.fn();
   const setReviewState = vi.fn();
   const setIsDataUnsaved = vi.fn();
+  const onPlanConflict = vi.fn();
 
   function renderComponent(overrides?: Partial<ComponentProps<typeof UploadRevisionApply>>) {
     return render(
       <UploadRevisionApply
         matchedRows={[]}
         newRows={[]}
+        invalidRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
         bulkPlanHash="plan-hash-test"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
+        onPlanConflict={onPlanConflict}
         {...overrides}
       />
     );
@@ -41,6 +45,7 @@ describe('UploadRevisionApply', () => {
     fetchMock.mockReset();
     setReviewState.mockReset();
     setIsDataUnsaved.mockReset();
+    onPlanConflict.mockReset();
     startValidation.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -101,11 +106,13 @@ describe('UploadRevisionApply', () => {
       <UploadRevisionApply
         matchedRows={[{ coreMeasurementID: 101, csvRow: { dbh: '12.3' } }]}
         newRows={[]}
+        invalidRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
         bulkPlanHash="plan-hash-test"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
+        onPlanConflict={onPlanConflict}
       />
     );
 
@@ -136,6 +143,31 @@ describe('UploadRevisionApply', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('returns to review with the fresh plan on a 409 drift response', async () => {
+    const freshPlan: BulkEditPlan = {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [],
+      aggregateEffects: [],
+      maxSeverity: 'warn',
+      planHash: 'fresh-hash',
+      generatedAt: '2026-04-21T00:00:00Z'
+    };
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'plan hash mismatch', freshPlan })
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(onPlanConflict).toHaveBeenCalledWith(freshPlan);
+      expect(setReviewState).toHaveBeenCalledWith(ReviewStates.REVISION_MATCH);
+    });
+    expect(screen.queryByText('Failed to Apply Revisions')).not.toBeInTheDocument();
   });
 
   it('reports duplicate cleanup separately from field updates on success', async () => {

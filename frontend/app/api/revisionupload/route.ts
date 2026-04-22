@@ -7,6 +7,7 @@ import ailogger from '@/ailogger';
 import { FileRow } from '@/config/macros/formdetails';
 import { RevisionInvalidRow, RevisionMatchedRow, RevisionNewRowCandidate, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
+import { assertEditScopeAllowed, EditScopeConflictError, EditScopeForbiddenError } from '@/config/editplan/scopeguard';
 
 export const runtime = 'nodejs';
 
@@ -754,6 +755,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const invalidRows: RevisionInvalidRow[] = [];
 
   try {
+    await assertEditScopeAllowed(connectionManager, session, {
+      schema,
+      plotID: normalizedPlotID,
+      censusID: normalizedCensusID,
+      rejectActiveOperations: false
+    });
+
     let csvIndexOffset = 0;
 
     for (const file of requestFiles) {
@@ -797,6 +805,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     if (errorObj instanceof RevisionUploadRequestError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+    if (errorObj instanceof EditScopeForbiddenError) {
+      return NextResponse.json({ error: 'scope forbidden' }, { status: 403 });
+    }
+    if (errorObj instanceof EditScopeConflictError) {
+      return NextResponse.json({ error: errorObj.message }, { status: 423 });
     }
     ailogger.error('[revisionupload API] Error classifying rows:', errorObj);
     return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });

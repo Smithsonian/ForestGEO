@@ -120,16 +120,8 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
   );
 
   const executeApply = useCallback(
-    async (plan: EditPlan, targetID: number, newRow: Record<string, unknown>): Promise<ApplyResult> => {
-      let currentPlan = plan;
-      while (true) {
-        const applyResponse = await postApply(buildRequestBody(targetID, newRow, currentPlan.planHash));
-        if (applyResponse.kind === 'ok') {
-          return applyResponse.result;
-        }
-        currentPlan = applyResponse.freshPlan;
-        setDialogState({ open: true, plan: currentPlan, busy: false });
-      }
+    async (plan: EditPlan, targetID: number, newRow: Record<string, unknown>): Promise<ApplyResponseSuccess | ApplyResponseConflict> => {
+      return postApply(buildRequestBody(targetID, newRow, plan.planHash));
     },
     [buildRequestBody]
   );
@@ -150,7 +142,13 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
 
     setDialogState(prev => ({ ...prev, busy: true }));
     try {
-      const result = await executeApply(currentPlan, pending.targetID, pending.newRow);
+      const applyResponse = await executeApply(currentPlan, pending.targetID, pending.newRow);
+      if (applyResponse.kind === 'conflict') {
+        setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false });
+        return;
+      }
+
+      const { result } = applyResponse;
       pendingRef.current = null;
       setDialogState({ open: false, plan: null, busy: false });
       if (onSuccess) onSuccess(result, currentPlan);
@@ -181,7 +179,15 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
 
       if (plan.maxSeverity === 'info') {
         try {
-          const result = await executeApply(plan, targetID, newRow);
+          const applyResponse = await executeApply(plan, targetID, newRow);
+          if (applyResponse.kind === 'conflict') {
+            return new Promise<ApplyResult>((resolve, reject) => {
+              pendingRef.current = { targetID, newRow, resolve, reject };
+              setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false });
+            });
+          }
+
+          const { result } = applyResponse;
           if (onSuccess) onSuccess(result, plan);
           return result;
         } catch (err) {

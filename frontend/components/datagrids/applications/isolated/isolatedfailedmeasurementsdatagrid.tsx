@@ -221,13 +221,12 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       const editableDiff = buildEditableFieldsDiffForSurface(newRow, oldRow, 'failedmeasurements');
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
+      let editOperationID: number | null = null;
 
       if (Object.keys(editableDiff).length > 0) {
         try {
           const applyResult = await editFlow.beginEdit(failedMeasurementID, editableDiff);
-          if (applyResult.editOperationID !== null) {
-            setUndoToastOperationID(applyResult.editOperationID);
-          }
+          editOperationID = applyResult.editOperationID;
         } catch (error: unknown) {
           const err = error instanceof Error ? error : new Error(String(error));
           ailogger.error('Failed to save row via edit preview flow:', err);
@@ -248,6 +247,8 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
           if (onRowReingested) {
             onRowReingested();
           }
+        } else if (editOperationID !== null) {
+          setUndoToastOperationID(editOperationID);
         }
 
         setRefresh(true);

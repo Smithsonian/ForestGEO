@@ -78,6 +78,11 @@ export interface RevisionApplyMatchedRow {
   duplicateMeasurementIDsToDelete?: number[];
 }
 
+export interface RevisionApplyNewRow {
+  csvRow: FileRow;
+  csvIndex: number;
+}
+
 export interface RevisionDuplicateToDelete {
   /** The CoreMeasurementID of the duplicate row to remove. */
   coreMeasurementID: number;

@@ -17,9 +17,12 @@ const mocks = vi.hoisted(() => ({
   isValidSchema: vi.fn(() => true),
   safeFormatQuery: vi.fn((_schema: string, query: string) => query),
   loggerError: vi.fn(),
-  executeQuery: vi.fn(async () => []),
+  executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
   closeConnection: vi.fn(async () => undefined),
-  analyzeBulk: vi.fn()
+  analyzeBulk: vi.fn(),
+  assertEditScopeAllowed: vi.fn(async () => undefined),
+  MockEditScopeForbiddenError: class MockEditScopeForbiddenError extends Error {},
+  MockEditScopeConflictError: class MockEditScopeConflictError extends Error {}
 }));
 
 vi.mock('@/auth', () => ({
@@ -50,6 +53,12 @@ vi.mock('@/config/editplan/bulkanalyzer', () => ({
   analyzeBulk: (...args: unknown[]) => mocks.analyzeBulk(...args)
 }));
 
+vi.mock('@/config/editplan/scopeguard', () => ({
+  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
+  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
+  EditScopeConflictError: mocks.MockEditScopeConflictError
+}));
+
 function buildRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/revisionupload', {
     method: 'POST',
@@ -65,6 +74,7 @@ describe('POST /api/revisionupload', () => {
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.analyzeBulk.mockResolvedValue({ ...EMPTY_BULK_PLAN });
+    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
   });
 
   it('matches View Data export rows by StemGUID and keeps the highest measurement ID as survivor', async () => {

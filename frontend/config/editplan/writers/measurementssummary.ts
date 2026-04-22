@@ -32,15 +32,6 @@ export interface WriterResult {
   validationPending: boolean;
 }
 
-const IDENTITY_FIELDS: ReadonlySet<string> = new Set([
-  'SpeciesCode',
-  'TreeTag',
-  'StemTag',
-  'QuadratName',
-  'StemLocalX',
-  'StemLocalY'
-]);
-
 const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
   'SpeciesCode',
   'TreeTag',
@@ -172,6 +163,21 @@ async function loadStemRow(
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
+async function loadTreeRow(
+  cm: ConnectionManager,
+  schema: string,
+  treeID: number | null,
+  transactionID: string
+): Promise<Record<string, unknown> | null> {
+  if (treeID === null) return null;
+  const rows = await cm.executeQuery(
+    `SELECT * FROM ${schema}.trees WHERE TreeID = ? LIMIT 1`,
+    [treeID],
+    transactionID
+  );
+  return rows.length ? (rows[0] as Record<string, unknown>) : null;
+}
+
 async function loadCmAttributeRows(
   cm: ConnectionManager,
   schema: string,
@@ -195,6 +201,59 @@ function buildStateRow(
   return { table, primaryKey, primaryKeyValue, row };
 }
 
+function hasStateRow(state: EditOperationStateRow[], table: string, primaryKeyValue: string | number): boolean {
+  return state.some(row => row.table === table && String(row.primaryKeyValue) === String(primaryKeyValue));
+}
+
+async function findExistingTreeID(
+  cm: ConnectionManager,
+  schema: string,
+  treeTag: unknown,
+  speciesID: unknown,
+  censusID: unknown,
+  transactionID: string
+): Promise<number | null> {
+  const normalizedSpeciesID = toPositiveNumber(speciesID);
+  const normalizedCensusID = toPositiveNumber(censusID);
+  if (!treeTag || normalizedSpeciesID === null || normalizedCensusID === null) return null;
+
+  const rows = await cm.executeQuery(
+    `SELECT TreeID
+     FROM ${schema}.trees
+     WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
+     ORDER BY TreeID
+     LIMIT 1`,
+    [treeTag, normalizedSpeciesID, normalizedCensusID],
+    transactionID
+  );
+  return rows.length ? toPositiveNumber(rows[0].TreeID) : null;
+}
+
+async function findExactActiveStemGUID(
+  cm: ConnectionManager,
+  schema: string,
+  treeID: unknown,
+  censusID: unknown,
+  stemTag: unknown,
+  quadratID: unknown,
+  transactionID: string
+): Promise<number | null> {
+  const normalizedTreeID = toPositiveNumber(treeID);
+  const normalizedCensusID = toPositiveNumber(censusID);
+  const normalizedQuadratID = toPositiveNumber(quadratID);
+  if (normalizedTreeID === null || normalizedCensusID === null || !stemTag || normalizedQuadratID === null) return null;
+
+  const rows = await cm.executeQuery(
+    `SELECT StemGUID
+     FROM ${schema}.stems
+     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
+     LIMIT 1`,
+    [normalizedTreeID, normalizedCensusID, stemTag, normalizedQuadratID],
+    transactionID
+  );
+  return rows.length ? toPositiveNumber(rows[0].StemGUID) : null;
+}
+
 export async function writeMeasurementsSummary(
   cm: ConnectionManager,
   input: ApplyInTransactionInput,
@@ -215,12 +274,17 @@ export async function writeMeasurementsSummary(
   if (!beforeCoreRow) throw new Error(`measurementssummary writer: coremeasurements ${coreMeasurementID} not found at write time`);
   const beforeStemGUID = beforeCoreRow.StemGUID as number | null;
   const beforeStemRow = await loadStemRow(cm, schema, beforeStemGUID, txID);
+  const beforeTreeID = beforeStemRow ? toPositiveNumber(beforeStemRow.TreeID) : null;
+  const beforeTreeRow = await loadTreeRow(cm, schema, beforeTreeID, txID);
   const beforeCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
 
   const beforeState: EditOperationStateRow[] = [];
   beforeState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, beforeCoreRow));
   if (beforeStemRow && beforeStemGUID !== null) {
     beforeState.push(buildStateRow('stems', 'StemGUID', beforeStemGUID, beforeStemRow));
+  }
+  if (beforeTreeRow && beforeTreeID !== null) {
+    beforeState.push(buildStateRow('trees', 'TreeID', beforeTreeID, beforeTreeRow));
   }
   if (changedFields.has('Attributes')) {
     for (const attrRow of beforeCmAttrRows) {
@@ -286,6 +350,14 @@ export async function writeMeasurementsSummary(
   }
 
   if (shouldResolveTree) {
+    const existingTreeID = await findExistingTreeID(
+      cm,
+      schema,
+      merged.TreeTag ?? current.TreeTag,
+      merged.SpeciesID ?? current.SpeciesID,
+      merged.CensusID ?? current.CensusID,
+      txID
+    );
     merged.TreeID = await resolveMeasurementSummaryTree(
       cm,
       schema,
@@ -296,6 +368,10 @@ export async function writeMeasurementsSummary(
       },
       txID
     );
+    const resolvedTreeIDForState = toPositiveNumber(merged.TreeID);
+    if (existingTreeID === null && resolvedTreeIDForState !== null && !hasStateRow(beforeState, 'trees', resolvedTreeIDForState)) {
+      beforeState.push(buildStateRow('trees', 'TreeID', resolvedTreeIDForState, null));
+    }
   }
 
   const resolvedTreeID = toPositiveNumber(merged.TreeID ?? current.TreeID);
@@ -315,6 +391,16 @@ export async function writeMeasurementsSummary(
     );
     (merged as any).QuadratID = resolvedQuadratID;
 
+    const existingStemGUID = await findExactActiveStemGUID(
+      cm,
+      schema,
+      merged.TreeID ?? current.TreeID,
+      merged.CensusID ?? current.CensusID,
+      merged.StemTag ?? current.StemTag,
+      resolvedQuadratID,
+      txID
+    );
+
     const resolvedStemGUID = await resolveMeasurementSummaryStem(
       cm,
       schema,
@@ -329,6 +415,9 @@ export async function writeMeasurementsSummary(
       },
       txID
     );
+    if (existingStemGUID === null && !hasStateRow(beforeState, 'stems', resolvedStemGUID)) {
+      beforeState.push(buildStateRow('stems', 'StemGUID', resolvedStemGUID, null));
+    }
 
     if (resolvedStemGUID !== merged.StemGUID) {
       await cm.executeQuery(
@@ -525,9 +614,9 @@ export async function writeMeasurementsSummary(
     await cm.executeQuery(resetValidationQuery, [], txID);
   }
 
-  // Refresh derived views so the UI sees the edit immediately.
-  const identityChanged = Array.from(changedFields).some(f => IDENTITY_FIELDS.has(f));
-  if (identityChanged) {
+  // Refresh derived views so the UI sees the edit immediately. Batch callers
+  // can suppress this and refresh the plot/census once after the outer batch.
+  if (changesFound && input.refreshViews !== false) {
     const refreshCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
     const refreshPlotID = Number(merged.PlotID ?? current.PlotID ?? plotID);
     if (refreshCensusID > 0 && refreshPlotID > 0) {
@@ -539,12 +628,17 @@ export async function writeMeasurementsSummary(
   const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
   const afterStemGUID = (afterCoreRow?.StemGUID ?? null) as number | null;
   const afterStemRow = await loadStemRow(cm, schema, afterStemGUID, txID);
+  const afterTreeID = afterStemRow ? toPositiveNumber(afterStemRow.TreeID) : null;
+  const afterTreeRow = await loadTreeRow(cm, schema, afterTreeID, txID);
   const afterCmAttrRows = await loadCmAttributeRows(cm, schema, coreMeasurementID, txID);
 
   const afterState: EditOperationStateRow[] = [];
   afterState.push(buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, afterCoreRow));
   if (afterStemRow && afterStemGUID !== null) {
     afterState.push(buildStateRow('stems', 'StemGUID', afterStemGUID, afterStemRow));
+  }
+  if (afterTreeRow && afterTreeID !== null) {
+    afterState.push(buildStateRow('trees', 'TreeID', afterTreeID, afterTreeRow));
   }
   if (changedFields.has('Attributes')) {
     for (const attrRow of afterCmAttrRows) {

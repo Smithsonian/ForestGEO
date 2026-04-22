@@ -41,6 +41,7 @@ export interface ApplyInput {
   operationType?: 'single-row-edit' | 'bulk-revision-row' | 'revert';
   revertable?: boolean;
   writeLedger?: boolean;
+  refreshViews?: boolean;
   createdBy: string;
 }
 
@@ -94,12 +95,13 @@ export async function applyEditInTransaction(cm: ConnectionManager, input: Apply
 
   let editOperationID: number | null = null;
   if (input.writeLedger !== false) {
-    const operationType = (input.operationType ?? 'single-row-edit') as 'single-row-edit' | 'revert';
+    const operationType = input.operationType ?? 'single-row-edit';
     editOperationID = await writeEditOperation(
       cm,
       input.schema,
       {
         operationType,
+        revertable: input.revertable ?? true,
         dataType: input.dataType,
         targetID: input.targetID,
         plotID: input.plotID,

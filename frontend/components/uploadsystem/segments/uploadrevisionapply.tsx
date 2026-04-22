@@ -6,18 +6,21 @@ import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileRow } from '@/config/macros/formdetails';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
-import { RevisionApplyMatchedRow, RevisionApplyResponse, RevisionDuplicateToDelete } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
+import { RevisionApplyMatchedRow, RevisionApplyNewRow, RevisionApplyResponse, RevisionDuplicateToDelete, RevisionInvalidRow } from '@/config/revisionuploadtypes';
 
 const TRANSITION_DELAY_MS = 2000;
 
 interface UploadRevisionApplyProps {
   matchedRows: RevisionApplyMatchedRow[];
-  newRows: FileRow[];
+  newRows: RevisionApplyNewRow[];
+  invalidRows: RevisionInvalidRow[];
   confirmNewRows: boolean;
   schema: string;
   bulkPlanHash: string;
   setReviewState: (state: ReviewStates) => void;
   setIsDataUnsaved: (unsaved: boolean) => void;
+  onPlanConflict: (freshPlan: BulkEditPlan) => void;
 }
 
 type ApplyStatus = 'applying' | 'success' | 'error';
@@ -53,7 +56,7 @@ function hasRevisionFieldValues(csvRow: FileRow): boolean {
 }
 
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
-  const { matchedRows, newRows, confirmNewRows, schema, bulkPlanHash, setReviewState, setIsDataUnsaved } = props;
+  const { matchedRows, newRows, invalidRows, confirmNewRows, schema, bulkPlanHash, setReviewState, setIsDataUnsaved, onPlanConflict } = props;
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -71,12 +74,14 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
   const requestPayloadRef = useRef({
     matchedRows,
     newRows,
+    invalidRows,
     confirmNewRows
   });
 
   requestPayloadRef.current = {
     matchedRows,
     newRows,
+    invalidRows,
     confirmNewRows
   };
 
@@ -110,6 +115,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
           body: JSON.stringify({
             matchedRows: currentRequestPayload.matchedRows,
             newRows: currentRequestPayload.newRows,
+            invalidRows: currentRequestPayload.invalidRows,
             confirmNewRows: currentRequestPayload.confirmNewRows,
             duplicateMeasurementIDsToDelete,
             schema,
@@ -121,6 +127,11 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+          if (response.status === 409 && errorBody.freshPlan) {
+            onPlanConflict(errorBody.freshPlan as BulkEditPlan);
+            setReviewState(ReviewStates.REVISION_MATCH);
+            return;
+          }
           throw new Error(errorBody.error || `Apply failed with status ${response.status}`);
         }
 
@@ -148,7 +159,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     }
 
     void runApply();
-  }, [applyAttempt, applyStatus, bulkPlanHash, censusID, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
+  }, [applyAttempt, applyStatus, bulkPlanHash, censusID, onPlanConflict, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
 
   function retryApply() {
     setApplyResult(null);

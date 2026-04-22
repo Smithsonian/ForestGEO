@@ -76,8 +76,10 @@ import {
   revertEdit,
   EditOperationNotFoundError,
   AlreadyRevertedError,
-  CannotRevertRevertError
+  CannotRevertRevertError,
+  RevertDriftError
 } from '@/config/editplan/revert';
+import { ScopeLockHeldError } from '@/config/editplan/apply';
 import { readEditOperation } from '@/config/editoperations';
 
 // ---------------------------------------------------------------------------
@@ -280,7 +282,12 @@ describe('revertEdit (integration)', () => {
       expect(revertRecord!.createdBy).toBe(CREATED_BY_REVERT);
     });
 
-    it('restores Attributes (cmattributes rows) to the pre-edit set', async () => {
+    it('restores Attributes (cmattributes rows) to the pre-edit set after the client confirms the destructive restore plan', async () => {
+      // Attribute edits that remove previously-valid codes are always R5 destructive
+      // per spec rule catalog — that applies to the forward edit AND the revert,
+      // because undoing "set to B" means deleting B and re-inserting A;M. Revert
+      // therefore surfaces the plan on the first attempt and only proceeds after
+      // the client re-posts with confirmedPlanHash.
       const NEW_ATTRIBUTES = 'B';
       const applyResult = await applyEdit(cm, {
         dataType: 'measurementssummary',
@@ -300,10 +307,25 @@ describe('revertEdit (integration)', () => {
       );
       expect(attrsAfterEdit.map(r => r.Code)).toEqual(['B']);
 
+      let freshPlanHash: string | null = null;
+      try {
+        await revertEdit(cm, {
+          schema: config.database,
+          editOperationID: originalEditOperationID,
+          createdBy: CREATED_BY_REVERT
+        });
+      } catch (err) {
+        if (!(err instanceof RevertDriftError)) throw err;
+        expect(err.freshPlan.maxSeverity).toBe('destructive');
+        freshPlanHash = err.freshPlan.planHash;
+      }
+      expect(freshPlanHash).not.toBeNull();
+
       await revertEdit(cm, {
         schema: config.database,
         editOperationID: originalEditOperationID,
-        createdBy: CREATED_BY_REVERT
+        createdBy: CREATED_BY_REVERT,
+        confirmedPlanHash: freshPlanHash!
       });
 
       const [attrsAfterRevert] = await connection.query<RowDataPacket[]>(
@@ -400,9 +422,14 @@ describe('revertEdit (integration)', () => {
     });
   });
 
-  describe('drift scenario', () => {
-    it('restores the captured pre-edit state even when the row has moved out-of-band', async () => {
-      // 1. Apply an edit.
+  describe('scope lock contention', () => {
+    // The revert test harness's ConnectionManager mock stubs acquireApplicationLock
+    // to always return true because every other test exercises the happy lock
+    // path. For this test we override the stub to simulate the scope lock being
+    // held by another session (a concurrent apply, validation, or upload).
+    // revertEdit must fail fast with ScopeLockHeldError, roll back the
+    // transaction it just opened, and leave the ledger untouched.
+    it('throws ScopeLockHeldError and does not write a revert ledger row when the scope lock is held elsewhere', async () => {
       const applyResult = await applyEdit(cm, {
         dataType: 'measurementssummary',
         schema: config.database,
@@ -415,7 +442,57 @@ describe('revertEdit (integration)', () => {
       });
       const originalEditOperationID = applyResult.editOperationID!;
 
-      // 2. Mutate the row out-of-band — bypass the edit plan entirely.
+      const originalAcquire = cm.acquireApplicationLock;
+      cm.acquireApplicationLock = async () => false;
+      try {
+        await expect(
+          revertEdit(cm, {
+            schema: config.database,
+            editOperationID: originalEditOperationID,
+            createdBy: CREATED_BY_REVERT
+          })
+        ).rejects.toBeInstanceOf(ScopeLockHeldError);
+      } finally {
+        cm.acquireApplicationLock = originalAcquire;
+      }
+
+      // No revert ledger row written — the original edit is still the last
+      // entry for this target and remains unreverted.
+      const original = await readEditOperation(cm, config.database, originalEditOperationID);
+      expect(original!.revertedByEditOperationID).toBeNull();
+
+      const [ledgerCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE OperationType = 'revert' AND TargetID = ?`,
+        [fixture.coreMeasurementID]
+      );
+      expect(Number(ledgerCountRows[0].cnt)).toBe(0);
+
+      // And the measurement value stays at the post-apply state: the revert
+      // never wrote, so the drift/restore path was fully skipped.
+      const cmRowAfter = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(Number(cmRowAfter.MeasuredDBH)).toBeCloseTo(EDITED_DBH, 2);
+    });
+  });
+
+  describe('drift scenario', () => {
+    // When the out-of-band change only affects a field whose restore carries no
+    // cross-row or destructive ramification (e.g. raw MeasuredDBH), the revert
+    // still proceeds because maxSeverity stays 'info'. This is the low-risk
+    // path: the captured before-state is restored and the drift write is
+    // deliberately overwritten.
+    it('restores the snapshot when the out-of-band drift is benign (info severity only)', async () => {
+      const applyResult = await applyEdit(cm, {
+        dataType: 'measurementssummary',
+        schema: config.database,
+        plotID: fixture.plotID,
+        censusID: fixture.censusID,
+        targetID: fixture.coreMeasurementID,
+        newRow: { MeasuredDBH: EDITED_DBH },
+        expectedPlanHash: null,
+        createdBy: CREATED_BY_APPLY
+      });
+      const originalEditOperationID = applyResult.editOperationID!;
+
       await connection.query('UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?', [
         DRIFT_DBH,
         fixture.coreMeasurementID
@@ -423,9 +500,6 @@ describe('revertEdit (integration)', () => {
       const cmRowAfterDrift = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
       expect(Number(cmRowAfterDrift.MeasuredDBH)).toBeCloseTo(DRIFT_DBH, 2);
 
-      // 3. Revert — the expectedPlanHash is null so the apply runs regardless
-      //    of drift. The restore targets the captured before-state, not the
-      //    current world.
       const revertResult = await revertEdit(cm, {
         schema: config.database,
         editOperationID: originalEditOperationID,
@@ -433,10 +507,105 @@ describe('revertEdit (integration)', () => {
       });
       expect(revertResult.editOperationID).not.toBeNull();
 
-      // 4. MeasuredDBH is now back at the original INITIAL_DBH — the drift
-      //    write is overwritten. The revert restores the snapshot, not a diff.
       const cmRowAfterRevert = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
       expect(Number(cmRowAfterRevert.MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
+
+      const original = await readEditOperation(cm, config.database, originalEditOperationID);
+      expect(original!.revertedByEditOperationID).toBe(revertResult.editOperationID);
+    });
+
+    // When the out-of-band change makes the restore trigger a cross-row effect
+    // (here: someone re-wrote stems.LocalX while our edit was still the most
+    // recent logical state, so restoring StemLocalX now propagates to every
+    // measurement on that stem), revert MUST refuse to blindly overwrite and
+    // return a fresh plan. This is the spec contract at
+    // docs/superpowers/specs/2026-04-21-row-editing-consistency-design.md:230-231.
+    it('refuses to restore and surfaces the fresh plan when drift would cause cross-row effects', async () => {
+      const EDITED_STEM_X = 7.0;
+      const DRIFT_STEM_X = 50.0;
+
+      const applyResult = await applyEdit(cm, {
+        dataType: 'measurementssummary',
+        schema: config.database,
+        plotID: fixture.plotID,
+        censusID: fixture.censusID,
+        targetID: fixture.coreMeasurementID,
+        newRow: { StemLocalX: EDITED_STEM_X },
+        expectedPlanHash: null,
+        createdBy: CREATED_BY_APPLY
+      });
+      const originalEditOperationID = applyResult.editOperationID!;
+
+      const stemRowsAfterEdit = await connection.query<RowDataPacket[]>(
+        'SELECT LocalX FROM stems WHERE StemGUID = ?',
+        [fixture.stemGUID]
+      );
+      expect(Number((stemRowsAfterEdit[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(EDITED_STEM_X, 2);
+
+      await connection.query('UPDATE stems SET LocalX = ? WHERE StemGUID = ?', [DRIFT_STEM_X, fixture.stemGUID]);
+
+      await expect(
+        revertEdit(cm, {
+          schema: config.database,
+          editOperationID: originalEditOperationID,
+          createdBy: CREATED_BY_REVERT
+        })
+      ).rejects.toBeInstanceOf(RevertDriftError);
+
+      const stemRowsAfterRefusal = await connection.query<RowDataPacket[]>(
+        'SELECT LocalX FROM stems WHERE StemGUID = ?',
+        [fixture.stemGUID]
+      );
+      expect(Number((stemRowsAfterRefusal[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(DRIFT_STEM_X, 2);
+
+      const original = await readEditOperation(cm, config.database, originalEditOperationID);
+      expect(original!.revertedByEditOperationID).toBeNull();
+    });
+
+    it('proceeds when the client re-posts revert with confirmedPlanHash matching the fresh plan', async () => {
+      const EDITED_STEM_X = 7.0;
+      const DRIFT_STEM_X = 50.0;
+
+      const applyResult = await applyEdit(cm, {
+        dataType: 'measurementssummary',
+        schema: config.database,
+        plotID: fixture.plotID,
+        censusID: fixture.censusID,
+        targetID: fixture.coreMeasurementID,
+        newRow: { StemLocalX: EDITED_STEM_X },
+        expectedPlanHash: null,
+        createdBy: CREATED_BY_APPLY
+      });
+      const originalEditOperationID = applyResult.editOperationID!;
+
+      await connection.query('UPDATE stems SET LocalX = ? WHERE StemGUID = ?', [DRIFT_STEM_X, fixture.stemGUID]);
+
+      let freshPlanHash: string | null = null;
+      try {
+        await revertEdit(cm, {
+          schema: config.database,
+          editOperationID: originalEditOperationID,
+          createdBy: CREATED_BY_REVERT
+        });
+      } catch (err) {
+        if (!(err instanceof RevertDriftError)) throw err;
+        freshPlanHash = err.freshPlan.planHash;
+      }
+      expect(freshPlanHash).not.toBeNull();
+
+      const revertResult = await revertEdit(cm, {
+        schema: config.database,
+        editOperationID: originalEditOperationID,
+        createdBy: CREATED_BY_REVERT,
+        confirmedPlanHash: freshPlanHash!
+      });
+      expect(revertResult.editOperationID).not.toBeNull();
+
+      const stemRowsAfterRevert = await connection.query<RowDataPacket[]>(
+        'SELECT LocalX FROM stems WHERE StemGUID = ?',
+        [fixture.stemGUID]
+      );
+      expect(Number((stemRowsAfterRevert[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(INITIAL_STEM_X, 2);
 
       const original = await readEditOperation(cm, config.database, originalEditOperationID);
       expect(original!.revertedByEditOperationID).toBe(revertResult.editOperationID);

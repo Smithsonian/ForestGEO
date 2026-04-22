@@ -74,12 +74,55 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockNonRevertableEditOperationError extends Error {
+    editOperationID: number;
+    constructor(editOperationID: number) {
+      super(`edit operation is not revertable: ${editOperationID}`);
+      this.name = 'NonRevertableEditOperationError';
+      this.editOperationID = editOperationID;
+    }
+  }
+
+  class MockRevertDriftError extends Error {
+    freshPlan: unknown;
+    constructor(freshPlan: unknown) {
+      super('revert plan has cross-row or destructive effects; confirmation required');
+      this.name = 'RevertDriftError';
+      this.freshPlan = freshPlan;
+    }
+  }
+
+  class MockEditScopeForbiddenError extends Error {
+    constructor(message = 'scope forbidden') {
+      super(message);
+      this.name = 'EditScopeForbiddenError';
+    }
+  }
+
+  class MockEditScopeConflictError extends Error {
+    constructor(message = 'edit scope is currently busy') {
+      super(message);
+      this.name = 'EditScopeConflictError';
+    }
+  }
+
+  class MockInvalidClearError extends Error {
+    field: string;
+    constructor(field: string) {
+      super(`Field "${field}" cannot be cleared`);
+      this.name = 'InvalidClearError';
+      this.field = field;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
     safeFormatQuery: vi.fn((_schema: string, query: string) => query),
     revertEdit: vi.fn(),
     readEditOperation: vi.fn(),
+    ensureEditOperationsTable: vi.fn(async () => undefined),
+    assertEditScopeAllowed: vi.fn(),
     closeConnection: vi.fn(async () => undefined),
     MockDisallowedFieldError,
     MockTargetNotFoundError,
@@ -88,7 +131,12 @@ const mocks = vi.hoisted(() => {
     MockScopeLockHeldError,
     MockEditOperationNotFoundError,
     MockAlreadyRevertedError,
-    MockCannotRevertRevertError
+    MockCannotRevertRevertError,
+    MockNonRevertableEditOperationError,
+    MockRevertDriftError,
+    MockEditScopeForbiddenError,
+    MockEditScopeConflictError,
+    MockInvalidClearError
   };
 });
 
@@ -127,10 +175,23 @@ vi.mock('@/config/editplan/revert', () => ({
   revertEdit: mocks.revertEdit,
   EditOperationNotFoundError: mocks.MockEditOperationNotFoundError,
   AlreadyRevertedError: mocks.MockAlreadyRevertedError,
-  CannotRevertRevertError: mocks.MockCannotRevertRevertError
+  CannotRevertRevertError: mocks.MockCannotRevertRevertError,
+  NonRevertableEditOperationError: mocks.MockNonRevertableEditOperationError,
+  RevertDriftError: mocks.MockRevertDriftError
+}));
+
+vi.mock('@/config/editplan/scopeguard', () => ({
+  assertEditScopeAllowed: mocks.assertEditScopeAllowed,
+  EditScopeForbiddenError: mocks.MockEditScopeForbiddenError,
+  EditScopeConflictError: mocks.MockEditScopeConflictError
+}));
+
+vi.mock('@/config/editplan/fieldpolicy', () => ({
+  InvalidClearError: mocks.MockInvalidClearError
 }));
 
 vi.mock('@/config/editoperations', () => ({
+  ensureEditOperationsTable: mocks.ensureEditOperationsTable,
   readEditOperation: mocks.readEditOperation
 }));
 
@@ -152,6 +213,7 @@ function buildLedgerRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     editOperationID: 7,
     operationType: 'single-row-edit',
+    revertable: true,
     dataType: 'measurementssummary',
     targetID: 42,
     plotID: 1,
@@ -171,6 +233,8 @@ describe('POST /api/edits/revert', () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ user: { email: 'mason@example.com' } });
     mocks.isValidSchema.mockReturnValue(true);
+    mocks.assertEditScopeAllowed.mockResolvedValue(undefined);
+    mocks.ensureEditOperationsTable.mockResolvedValue(undefined);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.readEditOperation.mockResolvedValue(buildLedgerRow());
   });
@@ -196,6 +260,26 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid schema' });
+    expect(mocks.revertEdit).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the scope guard rejects the requested scope', async () => {
+    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeForbiddenError());
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'scope forbidden' });
+    expect(mocks.ensureEditOperationsTable).not.toHaveBeenCalled();
+    expect(mocks.readEditOperation).not.toHaveBeenCalled();
+    expect(mocks.revertEdit).not.toHaveBeenCalled();
+  });
+
+  it('returns 423 when the scope guard detects active work in the scope', async () => {
+    mocks.assertEditScopeAllowed.mockRejectedValue(new mocks.MockEditScopeConflictError('validation run 9 is active for this plot/census'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(423);
+    await expect(response.json()).resolves.toEqual({ error: 'validation run 9 is active for this plot/census' });
+    expect(mocks.ensureEditOperationsTable).not.toHaveBeenCalled();
+    expect(mocks.readEditOperation).not.toHaveBeenCalled();
     expect(mocks.revertEdit).not.toHaveBeenCalled();
   });
 
@@ -236,6 +320,49 @@ describe('POST /api/edits/revert', () => {
     await expect(response.json()).resolves.toEqual({ error: 'cannot revert a revert operation' });
   });
 
+  it('returns 422 when revertEdit throws NonRevertableEditOperationError', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockNonRevertableEditOperationError(7));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'edit operation is not revertable' });
+  });
+
+  it('returns 409 with freshPlan when revertEdit throws RevertDriftError', async () => {
+    const freshPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [{ field: 'MeasuredDBH', from: 99.9, to: 12.34 }],
+      effects: [{ id: 'R4', severity: 'warn', category: 'cross-row', title: 'drift', detail: '', affectedTable: 'stems', affectedRowCount: 2 }],
+      maxSeverity: 'warn',
+      planHash: 'p'.repeat(64),
+      generatedAt: '2026-04-22T00:00:00.000Z'
+    };
+    mocks.revertEdit.mockRejectedValue(new mocks.MockRevertDriftError(freshPlan));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'revert drift', freshPlan });
+  });
+
+  it('forwards confirmedPlanHash to revertEdit when the client retries after a drift response', async () => {
+    const applyResult = { updatedIDs: { coremeasurements: 42 }, applyErrors: [], editOperationID: 9, validationPending: false };
+    mocks.revertEdit.mockResolvedValue(applyResult);
+    const confirmedPlanHash = 'c'.repeat(64);
+    const response = await POST(buildRequest({ ...VALID_BODY, confirmedPlanHash }));
+    expect(response.status).toBe(200);
+    expect(mocks.revertEdit).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ editOperationID: 7, confirmedPlanHash })
+    );
+  });
+
+  it('returns 400 when confirmedPlanHash is not a 64-char hex string', async () => {
+    const response = await POST(buildRequest({ ...VALID_BODY, confirmedPlanHash: 'too-short' }));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe('bad body');
+    expect(mocks.revertEdit).not.toHaveBeenCalled();
+  });
+
   it('returns 423 when revertEdit throws ScopeLockHeldError', async () => {
     mocks.revertEdit.mockRejectedValue(new mocks.MockScopeLockHeldError());
     const response = await POST(buildRequest(VALID_BODY));
@@ -250,6 +377,13 @@ describe('POST /api/edits/revert', () => {
     await expect(response.json()).resolves.toEqual({ error: 'disallowed fields', fields: ['SpeciesName'] });
   });
 
+  it('returns 422 when revertEdit throws InvalidClearError', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockInvalidClearError('QuadratName'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid clear', field: 'QuadratName' });
+  });
+
   it('returns 200 with ApplyResult on happy path and forwards createdBy', async () => {
     const applyResult = {
       updatedIDs: { coremeasurements: 42 },
@@ -262,6 +396,16 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(applyResult);
+    expect(mocks.assertEditScopeAllowed).toHaveBeenCalledWith(
+      expect.any(Object),
+      { user: { email: 'mason@example.com' } },
+      {
+        schema: 'forestgeo_testing',
+        plotID: 1,
+        censusID: 2
+      }
+    );
+    expect(mocks.ensureEditOperationsTable).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
     expect(mocks.revertEdit).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({

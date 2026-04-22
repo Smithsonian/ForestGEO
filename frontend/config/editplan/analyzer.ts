@@ -4,9 +4,37 @@ import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
-import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface } from './fieldpolicy';
+import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, PER_COLUMN_DECIMAL_PRECISION } from './fieldpolicy';
 import { hashPlan } from './planhash';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+
+// MySQL2 returns DECIMAL columns as strings (e.g. '3.500000') and DATE/DATETIME
+// columns as Date objects. The client sends numbers and 'YYYY-MM-DD' strings.
+// Comparing those raw with Object.is produces spurious fieldChanges that fire
+// cross-row rules (R4) on every revert and edit. Normalize both sides to the
+// same JS shape before diffing.
+function isDateField(field: string): boolean {
+  return field === 'MeasurementDate' || field === 'Date';
+}
+
+function normalizeForDiff(field: string, value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (isDateField(field)) {
+    if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+    return value;
+  }
+  const precision = PER_COLUMN_DECIMAL_PRECISION[field];
+  if (precision !== undefined) {
+    const num = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+    if (Number.isFinite(num)) return Number(num.toFixed(precision));
+  }
+  return value;
+}
+
+function fieldChanged(field: string, from: unknown, to: unknown): boolean {
+  return !Object.is(normalizeForDiff(field, from), normalizeForDiff(field, to));
+}
 
 export class DisallowedFieldError extends Error {
   constructor(public fields: string[]) {
@@ -50,7 +78,7 @@ export async function analyzeEdit(
   const fieldChanges: FieldChange[] = [];
   for (const [field, to] of Object.entries(newRow)) {
     const from = (oldRow as Record<string, unknown>)[field];
-    if (!Object.is(from, to)) {
+    if (fieldChanged(field, from, to)) {
       changedFields.add(field);
       fieldChanges.push({ field, from, to });
     }
@@ -58,10 +86,22 @@ export async function analyzeEdit(
 
   const ctx = { cm, schema, transactionID, dataType, plotID, censusID, oldRow, newRow, changedFields };
   const effects: Effect[] = [];
-  effects.push(...(await applySpeciesRules(ctx)));
-  effects.push(...(await applyTreeStemRules(ctx)));
-  effects.push(...(await applyCoordinateRules(ctx)));
-  effects.push(...(await applyAttributeRules(ctx)));
+
+  // Measurement rules (R1a, R2, R3, R4, R5) surface cross-row and identity
+  // ramifications on fully-resolved coremeasurements rows. Failed measurements
+  // (StemGUID IS NULL) carry no species/tree/stem/cmattributes linkage, so the
+  // rule triggers (SpeciesCode / TreeTag / StemTag / QuadratName / StemLocalX /
+  // StemLocalY / Attributes) do not appear on the failed-row surface at all.
+  // Their edits are genuinely row-local: a failed-row change writes only to
+  // coremeasurements raw columns via writeFailedMeasurements. Skip the rule
+  // dispatch entirely so the contract is explicit, rather than relying on every
+  // rule to silently return [] for a data shape it was never designed to see.
+  if (dataType === 'measurementssummary') {
+    effects.push(...(await applySpeciesRules(ctx)));
+    effects.push(...(await applyTreeStemRules(ctx)));
+    effects.push(...(await applyCoordinateRules(ctx)));
+    effects.push(...(await applyAttributeRules(ctx)));
+  }
 
   const maxSeverity = effects.reduce<Severity>(
     (max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max),
