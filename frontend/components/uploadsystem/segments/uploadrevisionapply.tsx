@@ -15,6 +15,7 @@ interface UploadRevisionApplyProps {
   newRows: FileRow[];
   confirmNewRows: boolean;
   schema: string;
+  bulkPlanHash: string;
   setReviewState: (state: ReviewStates) => void;
   setIsDataUnsaved: (unsaved: boolean) => void;
 }
@@ -52,7 +53,7 @@ function hasRevisionFieldValues(csvRow: FileRow): boolean {
 }
 
 export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyProps>) {
-  const { matchedRows, newRows, confirmNewRows, schema, setReviewState, setIsDataUnsaved } = props;
+  const { matchedRows, newRows, confirmNewRows, schema, bulkPlanHash, setReviewState, setIsDataUnsaved } = props;
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -113,7 +114,8 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
             duplicateMeasurementIDsToDelete,
             schema,
             plotID,
-            censusID
+            censusID,
+            bulkPlanHash
           })
         });
 
@@ -146,7 +148,7 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
     }
 
     void runApply();
-  }, [applyAttempt, applyStatus, censusID, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
+  }, [applyAttempt, applyStatus, bulkPlanHash, censusID, plotID, schema, setIsDataUnsaved, setReviewState, startValidation]);
 
   function retryApply() {
     setApplyResult(null);

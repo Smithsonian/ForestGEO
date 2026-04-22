@@ -29,6 +29,7 @@ describe('UploadRevisionApply', () => {
         newRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
+        bulkPlanHash="plan-hash-test"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
         {...overrides}
@@ -76,6 +77,7 @@ describe('UploadRevisionApply', () => {
       { coreMeasurementID: 55, survivorCoreMeasurementID: 101 },
       { coreMeasurementID: 56, survivorCoreMeasurementID: 101 }
     ]);
+    expect(requestBody.bulkPlanHash).toBe('plan-hash-test');
 
     unmount();
   });
@@ -101,6 +103,7 @@ describe('UploadRevisionApply', () => {
         newRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
+        bulkPlanHash="plan-hash-test"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
       />

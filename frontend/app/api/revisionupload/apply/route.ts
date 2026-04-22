@@ -5,15 +5,16 @@ import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import { FileRow } from '@/config/macros/formdetails';
 import { generateShortBatchID } from '@/config/utils';
-import { isMySQLError } from '@/lib/errorhelpers';
 import ailogger from '@/ailogger';
 import { ACTIVE_UPLOAD_SESSION_STATES, ensureUploadSessionsTable, SESSION_TIMEOUTS } from '@/config/uploadsessiontracker';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
+import { applyEditInTransaction } from '@/config/editplan/apply';
+import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
 
 export const runtime = 'nodejs';
 
-const MYSQL_ER_DUP_ENTRY = 'ER_DUP_ENTRY';
+const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 
 const REVISION_UPLOAD_FILE_ID = 'revision-upload';
 const STALE_VALIDATION_RUN_THRESHOLD_MINUTES = 15;
@@ -23,6 +24,13 @@ class RevisionApplyConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RevisionApplyConflictError';
+  }
+}
+
+class RevisionApplyPlanHashMismatchError extends Error {
+  constructor(public freshPlan: unknown) {
+    super('plan hash mismatch');
+    this.name = 'RevisionApplyPlanHashMismatchError';
   }
 }
 
@@ -44,6 +52,7 @@ interface ApplyRequest {
   schema: string;
   plotID: number;
   censusID: number;
+  bulkPlanHash: string;
 }
 
 interface ApplyError {
@@ -180,154 +189,42 @@ async function verifyMeasurementStillActive(
 }
 
 /**
- * Builds the SET clause and params for a single matched-row UPDATE.
- * Returns null if no CSV fields are non-empty (row should be skipped).
+ * Maps the CSV's lowercase updatable field keys (`dbh`, `hom`, `date`,
+ * `codes`, `comments`) onto the canonical `measurementssummary` surface keys
+ * the bulk analyzer and applyEditInTransaction writer expect. Blank/NULL
+ * placeholders are dropped so the analyzer's diff only sees real intended
+ * writes. `codes` is renamed to `Attributes` so the R5 attribute rule fires
+ * on code changes. `date` values are normalized to YYYY-MM-DD.
  *
- * Fields updated:
- *  - dbh      → MeasuredDBH (parseFloat)
- *  - hom      → MeasuredHOM (parseFloat)
- *  - date     → MeasurementDate (normalized to YYYY-MM-DD)
- *  - codes    → RawCodes (raw string; cmattributes handled separately)
- *  - comments → Description + RawComments (same value to both)
- *
- * UploadFileID and UploadBatchID are never touched — original ingestion
- * provenance is preserved.
+ * This mirrors `buildAnalyzerNewRow` in `app/api/revisionupload/route.ts`
+ * so the apply-time canonical newRow is identical to the one analyzeBulk
+ * saw at match time — otherwise the re-computed plan hash will drift.
  */
-function buildUpdateClause(csvRow: FileRow): { setClauses: string[]; setParams: (string | number | null)[] } | null {
-  const setClauses: string[] = [];
-  const setParams: (string | number | null)[] = [];
+function buildCanonicalNewRow(csvRow: FileRow): Record<string, unknown> {
+  const newRow: Record<string, unknown> = {};
+  for (const field of UPDATABLE_FIELDS) {
+    const value = csvRow[field];
+    if (value === null || value === undefined) continue;
+    const trimmed = String(value).trim();
+    if (trimmed === '' || trimmed.toUpperCase() === 'NULL') continue;
 
-  const dbh = csvRow['dbh'];
-  if (dbh !== null && dbh !== undefined && String(dbh).trim() !== '') {
-    const parsed = parseFloat(String(dbh).trim());
-    if (!isNaN(parsed)) {
-      setClauses.push('MeasuredDBH = ?');
-      setParams.push(parsed);
+    if (field === 'codes') {
+      newRow.Attributes = trimmed;
+    } else if (field === 'dbh') {
+      newRow.MeasuredDBH = trimmed;
+    } else if (field === 'hom') {
+      newRow.MeasuredHOM = trimmed;
+    } else if (field === 'date') {
+      newRow.MeasurementDate = normalizeDateForSQL(trimmed);
+    } else if (field === 'comments') {
+      newRow.Description = trimmed;
     }
   }
-
-  const hom = csvRow['hom'];
-  if (hom !== null && hom !== undefined && String(hom).trim() !== '') {
-    const parsed = parseFloat(String(hom).trim());
-    if (!isNaN(parsed)) {
-      setClauses.push('MeasuredHOM = ?');
-      setParams.push(parsed);
-    }
-  }
-
-  const date = csvRow['date'];
-  if (date !== null && date !== undefined && String(date).trim() !== '') {
-    setClauses.push('MeasurementDate = ?');
-    setParams.push(normalizeDateForSQL(String(date).trim()));
-  }
-
-  const codes = csvRow['codes'];
-  if (codes !== null && codes !== undefined && String(codes).trim() !== '') {
-    setClauses.push('RawCodes = ?');
-    setParams.push(String(codes).trim());
-  }
-
-  const comments = csvRow['comments'];
-  if (comments !== null && comments !== undefined && String(comments).trim() !== '') {
-    const commentValue = String(comments).trim();
-    setClauses.push('Description = ?', 'RawComments = ?');
-    setParams.push(commentValue, commentValue);
-  }
-
-  if (setClauses.length === 0) return null;
-
-  // Always reset validation state when any field changes
-  setClauses.push('IsValidated = NULL');
-
-  return { setClauses, setParams };
+  return newRow;
 }
 
-/**
- * Parses a semicolon-separated codes string into individual attribute codes.
- */
-function parseCodesSemicolon(codesStr: string): string[] {
-  return codesStr
-    .split(';')
-    .map(c => c.trim())
-    .filter(c => c.length > 0);
-}
-
-/**
- * Applies a single matched-row update within an open transaction.
- * Handles TOCTOU re-resolve, UPDATE, cmattributes rebuild, and error log clear.
- *
- * @returns 'updated' | 'skipped' | 'error'
- */
-async function applyMatchedRowUpdate(
-  connectionManager: ConnectionManager,
-  schema: string,
-  plotID: number,
-  censusID: number,
-  row: ApplyMatchedRow,
-  transactionID: string
-): Promise<{ result: 'updated' | 'skipped' | 'error'; applyError?: ApplyError }> {
-  const { coreMeasurementID, csvRow } = row;
-
-  const stillActive = await verifyMeasurementStillActive(connectionManager, schema, coreMeasurementID, censusID, plotID, transactionID);
-  if (!stillActive) {
-    return {
-      result: 'error',
-      applyError: {
-        coreMeasurementID,
-        error: 'Measurement no longer active in this plot/census — may have been deactivated since upload was matched'
-      }
-    };
-  }
-
-  const updateClause = buildUpdateClause(csvRow);
-  if (updateClause === null) {
-    return { result: 'skipped' };
-  }
-
-  const { setClauses, setParams } = updateClause;
-  const updateSQL = safeFormatQuery(schema, `UPDATE ??.coremeasurements SET ${setClauses.join(', ')} WHERE CoreMeasurementID = ?`);
-
-  try {
-    await connectionManager.executeQuery(updateSQL, [...setParams, coreMeasurementID], transactionID);
-  } catch (error: unknown) {
-    if (isMySQLError(error) && error.code === MYSQL_ER_DUP_ENTRY) {
-      return {
-        result: 'error',
-        applyError: {
-          coreMeasurementID,
-          error: `Duplicate measurement constraint violation: ${error.sqlMessage ?? error.message}`
-        }
-      };
-    }
-    throw error;
-  }
-
-  const codesValue = csvRow['codes'];
-  if (codesValue !== null && codesValue !== undefined && String(codesValue).trim() !== '') {
-    const deleteAttributesSQL = safeFormatQuery(schema, 'DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?');
-    await connectionManager.executeQuery(deleteAttributesSQL, [coreMeasurementID], transactionID);
-
-    const parsedCodes = parseCodesSemicolon(String(codesValue).trim());
-    if (parsedCodes.length > 0) {
-      const insertPlaceholders = parsedCodes.map(() => '(?, ?)').join(', ');
-      const insertAttributesSQL = safeFormatQuery(schema, `INSERT IGNORE INTO ??.cmattributes (CoreMeasurementID, Code) VALUES ${insertPlaceholders}`);
-      const insertAttributesParams = parsedCodes.flatMap(code => [coreMeasurementID, code]);
-      await connectionManager.executeQuery(insertAttributesSQL, insertAttributesParams, transactionID);
-    }
-  }
-
-  const clearErrorsSQL = safeFormatQuery(
-    schema,
-    `DELETE mel
-     FROM ??.measurement_error_log mel
-     JOIN ??.measurement_errors me ON me.ErrorID = mel.ErrorID
-     WHERE mel.MeasurementID = ?
-       AND mel.IsResolved = FALSE
-       AND me.ErrorSource = 'validation'`
-  );
-  await connectionManager.executeQuery(clearErrorsSQL, [coreMeasurementID], transactionID);
-
-  return { result: 'updated' };
+function hasAnyCanonicalField(csvRow: FileRow): boolean {
+  return Object.keys(buildCanonicalNewRow(csvRow)).length > 0;
 }
 
 /**
@@ -619,7 +516,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { matchedRows, newRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID } = body;
+  const { matchedRows, newRows, confirmNewRows, duplicateMeasurementIDsToDelete, schema, plotID, censusID, bulkPlanHash } = body;
 
   ailogger.info(
     `${logPrefix} parsed request body in ${Date.now() - requestStartedAt}ms (matchedRows=${Array.isArray(matchedRows) ? matchedRows.length : 'invalid'}, newRows=${Array.isArray(newRows) ? newRows.length : 'invalid'}, confirmNewRows=${confirmNewRows === true})`
@@ -628,6 +525,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!Array.isArray(matchedRows) || !Array.isArray(newRows) || plotID === undefined || censusID === undefined || !schema) {
     return NextResponse.json(
       { error: 'Missing required parameters: matchedRows (array), newRows (array), plotID, censusID, schema' },
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+
+  if (typeof bulkPlanHash !== 'string' || bulkPlanHash.trim() === '') {
+    return NextResponse.json(
+      { error: 'Missing required parameter: bulkPlanHash (string produced by the match endpoint)' },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
@@ -679,24 +583,88 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const transactionStartedAt = Date.now();
     ailogger.info(`${logPrefix} transaction requested for schema=${schema} plot=${normalizedPlotID} census=${normalizedCensusID}`);
+    const createdBy = session.user.email ?? session.user.name ?? 'revision-apply';
     const result = await connectionManager.withTransaction(async (transactionID: string) => {
       ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
+
+      // --- Bulk plan hash check: re-compute the plan inside the outer transaction
+      //     (under the scope lock) and compare against the hash the client sent
+      //     back. Mismatch means the match-time plan has drifted and the user
+      //     must re-review — return 409 with the fresh plan so the UI can
+      //     surface the delta.
+      const bulkInputForHashCheck: BulkInput = {
+        matched: normalizedMatchedRows.matchedRows.map((row, index) => ({
+          rowIndex: index,
+          targetID: row.coreMeasurementID,
+          newRow: buildCanonicalNewRow(row.csvRow)
+        })),
+        newRows: newRows.map((csvRow, index) => ({
+          rowIndex: index,
+          newRow: buildCanonicalNewRow(csvRow)
+        })),
+        invalid: [],
+        duplicateMeasurementIDsToDelete: duplicates.map(d => d.coreMeasurementID)
+      };
+      const freshPlan = await analyzeBulk(
+        connectionManager,
+        schema,
+        'measurementssummary',
+        normalizedPlotID,
+        normalizedCensusID,
+        bulkInputForHashCheck,
+        transactionID
+      );
+      if (freshPlan.planHash !== bulkPlanHash) {
+        ailogger.warn(
+          `${logPrefix} bulk plan hash mismatch (expected=${bulkPlanHash}, fresh=${freshPlan.planHash}) — aborting apply so UI can re-review`
+        );
+        throw new RevisionApplyPlanHashMismatchError(freshPlan);
+      }
 
       let updatedCount = 0;
       let skippedCount = 0;
       const applyErrors: ApplyError[] = [];
 
       for (const row of normalizedMatchedRows.matchedRows) {
-        const applyResult = await applyMatchedRowUpdate(connectionManager, schema, normalizedPlotID, normalizedCensusID, row, transactionID);
-
-        if (applyResult.result === 'updated') {
-          updatedCount++;
-        } else if (applyResult.result === 'skipped') {
-          skippedCount++;
-        } else if (applyResult.result === 'error' && applyResult.applyError) {
-          applyErrors.push(applyResult.applyError);
+        const stillActive = await verifyMeasurementStillActive(
+          connectionManager,
+          schema,
+          row.coreMeasurementID,
+          normalizedCensusID,
+          normalizedPlotID,
+          transactionID
+        );
+        if (!stillActive) {
+          applyErrors.push({
+            coreMeasurementID: row.coreMeasurementID,
+            error: 'Measurement no longer active in this plot/census — may have been deactivated since upload was matched'
+          });
+          continue;
         }
+
+        if (!hasAnyCanonicalField(row.csvRow)) {
+          skippedCount++;
+          continue;
+        }
+
+        const canonicalNewRow = buildCanonicalNewRow(row.csvRow);
+
+        await applyEditInTransaction(connectionManager, {
+          dataType: 'measurementssummary',
+          schema,
+          plotID: normalizedPlotID,
+          censusID: normalizedCensusID,
+          targetID: row.coreMeasurementID,
+          newRow: canonicalNewRow,
+          expectedPlanHash: null,
+          operationType: 'bulk-revision-row',
+          writeLedger: false,
+          createdBy,
+          transactionID
+        });
+
+        updatedCount++;
       }
 
       // --- Delete verified duplicates ---
@@ -743,6 +711,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (error: unknown) {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     ailogger.error(`${logPrefix} request failed after ${Date.now() - requestStartedAt}ms:`, errorObj);
+    if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
+      return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });
+    }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });
   } finally {

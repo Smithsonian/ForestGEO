@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from './route';
 
+const MATCHED_PLAN_HASH = 'plan-hash-matched';
+const DRIFTED_PLAN_HASH = 'plan-hash-drifted';
+
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   isValidSchema: vi.fn(() => true),
   safeFormatQuery: vi.fn((_schema: string, query: string) => query),
   loggerInfo: vi.fn(),
+  loggerWarn: vi.fn(),
   loggerError: vi.fn(),
   ensureUploadSessionsTable: vi.fn(),
   withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
@@ -13,7 +17,22 @@ const mocks = vi.hoisted(() => ({
   executeQuery: vi.fn(async () => []),
   closeConnection: vi.fn(async () => undefined),
   buildMeasurementScopeLockName: vi.fn((schema: string, plotID: number, censusID: number) => `measurement-scope:${schema}:${plotID}:${censusID}`),
-  refreshMeasurementViewsForScope: vi.fn(async () => undefined)
+  refreshMeasurementViewsForScope: vi.fn(async () => undefined),
+  applyEditInTransaction: vi.fn(async () => ({
+    updatedIDs: { CoreMeasurementID: 0 },
+    applyErrors: [],
+    editOperationID: null,
+    validationPending: true
+  })),
+  analyzeBulk: vi.fn(async () => ({
+    dataType: 'measurementssummary',
+    rowCount: 0,
+    rowPlans: [],
+    aggregateEffects: [],
+    maxSeverity: 'info',
+    planHash: 'hash-not-mocked',
+    generatedAt: '2026-04-21T00:00:00Z'
+  }))
 }));
 
 vi.mock('@/auth', () => ({
@@ -42,10 +61,6 @@ vi.mock('@/config/utils', () => ({
   generateShortBatchID: vi.fn(() => 'batch-1')
 }));
 
-vi.mock('@/lib/errorhelpers', () => ({
-  isMySQLError: vi.fn(() => false)
-}));
-
 vi.mock('@/config/connectionmanager', () => ({
   default: {
     getInstance: () => ({
@@ -61,9 +76,18 @@ vi.mock('@/lib/measurementviewrefresh', () => ({
   refreshMeasurementViewsForScope: mocks.refreshMeasurementViewsForScope
 }));
 
+vi.mock('@/config/editplan/apply', () => ({
+  applyEditInTransaction: mocks.applyEditInTransaction
+}));
+
+vi.mock('@/config/editplan/bulkanalyzer', () => ({
+  analyzeBulk: mocks.analyzeBulk
+}));
+
 vi.mock('@/ailogger', () => ({
   default: {
     info: mocks.loggerInfo,
+    warn: mocks.loggerWarn,
     error: mocks.loggerError
   }
 }));
@@ -75,11 +99,37 @@ function buildRequest(body: Record<string, unknown>) {
   }) as any;
 }
 
+function buildValidBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    matchedRows: [],
+    newRows: [],
+    confirmNewRows: false,
+    schema: 'forestgeo_testing',
+    plotID: 1,
+    censusID: 2,
+    bulkPlanHash: MATCHED_PLAN_HASH,
+    ...overrides
+  };
+}
+
+function buildFreshPlan(planHash: string, overrides: Record<string, unknown> = {}) {
+  return {
+    dataType: 'measurementssummary',
+    rowCount: 1,
+    rowPlans: [],
+    aggregateEffects: [],
+    maxSeverity: 'info',
+    planHash,
+    generatedAt: '2026-04-21T00:00:00Z',
+    ...overrides
+  };
+}
+
 describe('POST /api/revisionupload/apply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mocks.auth.mockResolvedValue({ user: { name: 'Mason' } });
+    mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com' } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.ensureUploadSessionsTable.mockResolvedValue(undefined);
     mocks.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
@@ -87,11 +137,16 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
     mocks.refreshMeasurementViewsForScope.mockResolvedValue(undefined);
+    mocks.analyzeBulk.mockResolvedValue(buildFreshPlan(MATCHED_PLAN_HASH));
+    mocks.applyEditInTransaction.mockResolvedValue({
+      updatedIDs: { CoreMeasurementID: 0 },
+      applyErrors: [],
+      editOperationID: null,
+      validationPending: true
+    });
   });
 
-  it('returns 409 when the plot/census measurement scope lock is unavailable', async () => {
-    mocks.acquireApplicationLock.mockResolvedValue(false);
-
+  it('rejects requests missing the bulkPlanHash batch-level guard', async () => {
     const response = await POST(
       buildRequest({
         matchedRows: [],
@@ -102,6 +157,16 @@ describe('POST /api/revisionupload/apply', () => {
         censusID: 2
       })
     );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('bulkPlanHash');
+  });
+
+  it('returns 409 when the plot/census measurement scope lock is unavailable', async () => {
+    mocks.acquireApplicationLock.mockResolvedValue(false);
+
+    const response = await POST(buildRequest(buildValidBody()));
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
@@ -119,16 +184,7 @@ describe('POST /api/revisionupload/apply', () => {
       return [];
     });
 
-    const response = await POST(
-      buildRequest({
-        matchedRows: [],
-        newRows: [],
-        confirmNewRows: false,
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
-    );
+    const response = await POST(buildRequest(buildValidBody()));
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
@@ -147,16 +203,7 @@ describe('POST /api/revisionupload/apply', () => {
       return [];
     });
 
-    const response = await POST(
-      buildRequest({
-        matchedRows: [],
-        newRows: [],
-        confirmNewRows: false,
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
-    );
+    const response = await POST(buildRequest(buildValidBody()));
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
@@ -166,15 +213,12 @@ describe('POST /api/revisionupload/apply', () => {
 
   it('normalizes duplicate deletion IDs before validation so survivor collisions are caught', async () => {
     const response = await POST(
-      buildRequest({
-        matchedRows: [{ coreMeasurementID: 42, csvRow: {} }],
-        newRows: [],
-        confirmNewRows: false,
-        duplicateMeasurementIDsToDelete: [{ coreMeasurementID: '42', survivorCoreMeasurementID: 42 }],
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 42, csvRow: {} }],
+          duplicateMeasurementIDsToDelete: [{ coreMeasurementID: '42', survivorCoreMeasurementID: 42 }]
+        })
+      )
     );
 
     expect(response.status).toBe(400);
@@ -189,14 +233,159 @@ describe('POST /api/revisionupload/apply', () => {
     });
   });
 
+  it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
+    const freshPlan = buildFreshPlan(DRIFTED_PLAN_HASH, { rowCount: 2 });
+    mocks.analyzeBulk.mockResolvedValue(freshPlan);
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }],
+          bulkPlanHash: MATCHED_PLAN_HASH
+        })
+      )
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'plan hash mismatch',
+      freshPlan
+    });
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('calls applyEditInTransaction per matched row with operationType=bulk-revision-row and writeLedger=false', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return [{ ok: 1 }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: 101, csvRow: { dbh: '12.5', codes: 'L;D' } },
+            { coreMeasurementID: 202, csvRow: { hom: '1.3' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.updatedCount).toBe(2);
+    expect(body.skippedCount).toBe(0);
+    expect(body.validationPending).toBe(true);
+
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(2);
+
+    const firstCall = mocks.applyEditInTransaction.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
+    const firstInput = firstCall[1];
+    expect(firstInput).toMatchObject({
+      dataType: 'measurementssummary',
+      schema: 'forestgeo_testing',
+      plotID: 1,
+      censusID: 2,
+      targetID: 101,
+      expectedPlanHash: null,
+      operationType: 'bulk-revision-row',
+      writeLedger: false,
+      transactionID: 'tx-1'
+    });
+    expect(firstInput.newRow).toEqual({ MeasuredDBH: '12.5', Attributes: 'L;D' });
+
+    const secondCall = mocks.applyEditInTransaction.mock.calls[1] as unknown as [unknown, Record<string, unknown>];
+    const secondInput = secondCall[1];
+    expect(secondInput).toMatchObject({
+      targetID: 202,
+      operationType: 'bulk-revision-row',
+      writeLedger: false
+    });
+    expect(secondInput.newRow).toEqual({ MeasuredHOM: '1.3' });
+  });
+
+  it('rolls back the entire batch and surfaces 500 when the writer throws mid-loop', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return [{ ok: 1 }];
+      }
+      return [];
+    });
+
+    const writerError = new Error('writer blew up on row 2');
+    mocks.applyEditInTransaction.mockImplementationOnce(async () => ({
+      updatedIDs: { CoreMeasurementID: 101 },
+      applyErrors: [],
+      editOperationID: null,
+      validationPending: true
+    }));
+    mocks.applyEditInTransaction.mockImplementationOnce(async () => {
+      throw writerError;
+    });
+
+    // Simulate withTransaction: run fn and propagate errors (no commit swallow).
+    mocks.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => {
+      return fn('tx-1');
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { coreMeasurementID: 101, csvRow: { dbh: '12.5' } },
+            { coreMeasurementID: 202, csvRow: { dbh: '13.0' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error).toBe('writer blew up on row 2');
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(2);
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+  });
+
+  it('records an applyError and skips the writer when TOCTOU re-resolve finds the measurement inactive', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return []; // row no longer active
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.updatedCount).toBe(0);
+    expect(body.applyErrors).toEqual([
+      {
+        coreMeasurementID: 101,
+        error: 'Measurement no longer active in this plot/census — may have been deactivated since upload was matched'
+      }
+    ]);
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
   it('deletes denormalized view rows when removing a verified duplicate measurement', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
-      if (query.includes('FROM ??.upload_sessions')) {
-        return [];
-      }
-      if (query.includes('FROM ??.validation_runs')) {
-        return [];
-      }
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
       if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
         return [{ ok: 1 }];
       }
@@ -213,15 +402,12 @@ describe('POST /api/revisionupload/apply', () => {
     });
 
     const response = await POST(
-      buildRequest({
-        matchedRows: [{ coreMeasurementID: 101, csvRow: {} }],
-        newRows: [],
-        confirmNewRows: false,
-        duplicateMeasurementIDsToDelete: [{ coreMeasurementID: 55, survivorCoreMeasurementID: 101 }],
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: {} }],
+          duplicateMeasurementIDsToDelete: [{ coreMeasurementID: 55, survivorCoreMeasurementID: 101 }]
+        })
+      )
     );
 
     expect(response.status).toBe(200);
@@ -234,6 +420,7 @@ describe('POST /api/revisionupload/apply', () => {
       validationPending: true
     });
 
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.measurementssummary WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM ??.viewfulltable WHERE CoreMeasurementID = ?', [55], 'tx-1');
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
@@ -241,12 +428,8 @@ describe('POST /api/revisionupload/apply', () => {
 
   it('refreshes derived measurement views when matched rows are updated', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
-      if (query.includes('FROM ??.upload_sessions')) {
-        return [];
-      }
-      if (query.includes('FROM ??.validation_runs')) {
-        return [];
-      }
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
       if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
         return [{ ok: 1 }];
       }
@@ -254,14 +437,11 @@ describe('POST /api/revisionupload/apply', () => {
     });
 
     const response = await POST(
-      buildRequest({
-        matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }],
-        newRows: [],
-        confirmNewRows: false,
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }]
+        })
+      )
     );
 
     expect(response.status).toBe(200);
@@ -274,17 +454,14 @@ describe('POST /api/revisionupload/apply', () => {
       validationPending: true
     });
 
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
   });
 
   it('does not refresh derived measurement views when apply makes no changes', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
-      if (query.includes('FROM ??.upload_sessions')) {
-        return [];
-      }
-      if (query.includes('FROM ??.validation_runs')) {
-        return [];
-      }
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
       if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
         return [{ ok: 1 }];
       }
@@ -292,14 +469,11 @@ describe('POST /api/revisionupload/apply', () => {
     });
 
     const response = await POST(
-      buildRequest({
-        matchedRows: [{ coreMeasurementID: 101, csvRow: {} }],
-        newRows: [],
-        confirmNewRows: false,
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      })
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: {} }]
+        })
+      )
     );
 
     expect(response.status).toBe(200);
@@ -313,5 +487,6 @@ describe('POST /api/revisionupload/apply', () => {
     });
 
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 });

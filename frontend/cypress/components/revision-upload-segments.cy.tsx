@@ -110,6 +110,7 @@ describe('Revision Upload Segments', () => {
         newRows={[]}
         confirmNewRows={false}
         schema="forestgeo_testing"
+        bulkPlanHash="cypress-plan-hash"
         setReviewState={setReviewState}
         setIsDataUnsaved={setIsDataUnsaved}
       />

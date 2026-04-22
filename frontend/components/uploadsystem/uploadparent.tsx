@@ -368,6 +368,7 @@ function UploadParentInner(props: UploadParentProps) {
             newRows={(revisionMatchResult?.newRows ?? []).map(row => row.csvRow)}
             confirmNewRows={revisionConfirmNewRows}
             schema={currentSite?.schemaName || ''}
+            bulkPlanHash={revisionMatchResult?.bulkPlan?.planHash ?? ''}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
           />
