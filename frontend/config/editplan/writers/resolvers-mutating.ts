@@ -10,6 +10,7 @@
 // cuts the legacy handler over.
 import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 export type TreeStemStateLabel = 'old tree' | 'multi stem' | 'new recruit';
 
@@ -43,17 +44,20 @@ export async function computeTreeStemState(
   transactionID?: string
 ): Promise<TreeStemStateLabel> {
   const prevCensusRows = await connectionManager.executeQuery(
-    `SELECT c_prev.CensusID
-     FROM ${schema}.census c_curr
-     INNER JOIN ${schema}.census c_prev
-       ON c_prev.PlotID = c_curr.PlotID
-       AND c_prev.PlotCensusNumber = c_curr.PlotCensusNumber - 1
-       AND c_prev.IsActive = 1
-     WHERE c_curr.CensusID = ?
-       AND c_curr.PlotID = ?
-       AND c_curr.IsActive = 1
-     ORDER BY c_prev.CensusID DESC
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT c_prev.CensusID
+       FROM ??.census c_curr
+       INNER JOIN ??.census c_prev
+         ON c_prev.PlotID = c_curr.PlotID
+         AND c_prev.PlotCensusNumber = c_curr.PlotCensusNumber - 1
+         AND c_prev.IsActive = 1
+       WHERE c_curr.CensusID = ?
+         AND c_curr.PlotID = ?
+         AND c_curr.IsActive = 1
+       ORDER BY c_prev.CensusID DESC
+       LIMIT 1`
+    ),
     [currentCensusID, plotID],
     transactionID
   );
@@ -65,15 +69,18 @@ export async function computeTreeStemState(
   const previousCensusID = prevCensusRows[0].CensusID;
 
   const prevStemMatch = await connectionManager.executeQuery(
-    `SELECT COUNT(*) AS MatchCount
-     FROM ${schema}.stems s
-     INNER JOIN ${schema}.trees t
-       ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
-     WHERE t.TreeTag = ?
-       AND s.StemTag = ?
-       AND t.CensusID = ?
-       AND t.IsActive = 1
-       AND s.IsActive = 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT COUNT(*) AS MatchCount
+       FROM ??.stems s
+       INNER JOIN ??.trees t
+         ON s.TreeID = t.TreeID AND s.CensusID = t.CensusID
+       WHERE t.TreeTag = ?
+         AND s.StemTag = ?
+         AND t.CensusID = ?
+         AND t.IsActive = 1
+         AND s.IsActive = 1`
+    ),
     [treeTag, stemTag, previousCensusID],
     transactionID
   );
@@ -83,11 +90,14 @@ export async function computeTreeStemState(
   }
 
   const prevTreeMatch = await connectionManager.executeQuery(
-    `SELECT COUNT(*) AS MatchCount
-     FROM ${schema}.trees t
-     WHERE t.TreeTag = ?
-       AND t.CensusID = ?
-       AND t.IsActive = 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT COUNT(*) AS MatchCount
+       FROM ??.trees t
+       WHERE t.TreeTag = ?
+         AND t.CensusID = ?
+         AND t.IsActive = 1`
+    ),
     [treeTag, previousCensusID],
     transactionID
   );
@@ -114,13 +124,16 @@ export async function resolveMeasurementSummaryQuadratID(
   if (!quadratName) throw new Error('Quadrat not found for stem resolution');
 
   const quadratSearchResults = await connectionManager.executeQuery(
-    `SELECT QuadratID
-     FROM ${schema}.quadrats
-     WHERE LOWER(QuadratName) = LOWER(?)
-       AND PlotID = ?
-       AND IsActive = 1
-     ORDER BY QuadratID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT QuadratID
+       FROM ??.quadrats
+       WHERE LOWER(QuadratName) = LOWER(?)
+         AND PlotID = ?
+         AND IsActive = 1
+       ORDER BY QuadratID
+       LIMIT 1`
+    ),
     [quadratName, plotID],
     transactionID
   );
@@ -142,11 +155,14 @@ export async function resolveMeasurementSummaryTree(
   if (normalizedCensusID === null) throw new Error('Census not found for tree resolution');
 
   const matchingTreeRows = await connectionManager.executeQuery(
-    `SELECT TreeID, IsActive
-     FROM ${schema}.trees
-     WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
-     ORDER BY TreeID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT TreeID, IsActive
+       FROM ??.trees
+       WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
+       ORDER BY TreeID
+       LIMIT 1`
+    ),
     [TreeTag, normalizedSpeciesID, normalizedCensusID],
     transactionID
   );
@@ -180,21 +196,27 @@ export async function resolveMeasurementSummaryStem(
   if (normalizedQuadratID === null) throw new Error('Quadrat not found for stem resolution');
 
   const exactActiveStemRows = await connectionManager.executeQuery(
-    `SELECT StemGUID
-     FROM ${schema}.stems
-     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT StemGUID
+       FROM ??.stems
+       WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
+       LIMIT 1`
+    ),
     [normalizedTreeID, normalizedCensusID, StemTag, normalizedQuadratID],
     transactionID
   );
   if (exactActiveStemRows.length > 0) return exactActiveStemRows[0].StemGUID;
 
   const blockingStemRows = await connectionManager.executeQuery(
-    `SELECT StemGUID, QuadratID, IsActive
-     FROM ${schema}.stems
-     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ?
-     ORDER BY StemGUID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT StemGUID, QuadratID, IsActive
+       FROM ??.stems
+       WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ?
+       ORDER BY StemGUID
+       LIMIT 1`
+    ),
     [normalizedTreeID, normalizedCensusID, StemTag],
     transactionID
   );

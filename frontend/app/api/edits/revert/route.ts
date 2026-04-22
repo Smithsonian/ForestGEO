@@ -21,12 +21,7 @@ import {
   RevertDriftError,
   revertEdit
 } from '@/config/editplan/revert';
-import {
-  assertCanEditMeasurementScope,
-  assertNoActiveMeasurementScopeConflict,
-  ScopeAccessError,
-  ScopeBusyError
-} from '@/config/editplan/scopeguard';
+import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { ensureEditOperationsTable, readEditOperation } from '@/config/editoperations';
 import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';

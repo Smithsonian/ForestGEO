@@ -1,4 +1,5 @@
 import ConnectionManager from '@/config/connectionmanager';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 export interface ResolveSpeciesResult {
   speciesID: number | null;
@@ -55,11 +56,14 @@ export async function resolveSpeciesByCode(
   transactionID?: string
 ): Promise<ResolveSpeciesResult> {
   const rows = await connectionManager.executeQuery(
-    `SELECT SpeciesID
-     FROM ${schema}.species
-     WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1
-     ORDER BY SpeciesID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT SpeciesID
+       FROM ??.species
+       WHERE LOWER(SpeciesCode) = LOWER(?) AND IsActive = 1
+       ORDER BY SpeciesID
+       LIMIT 1`
+    ),
     [code],
     transactionID
   );
@@ -73,11 +77,14 @@ export async function planTreeResolution(
   transactionID?: string
 ): Promise<PlanTreeResult> {
   const existingRows = await connectionManager.executeQuery(
-    `SELECT TreeID, IsActive
-     FROM ${schema}.trees
-     WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
-     ORDER BY TreeID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT TreeID, IsActive
+       FROM ??.trees
+       WHERE TreeTag = ? AND SpeciesID = ? AND CensusID = ?
+       ORDER BY TreeID
+       LIMIT 1`
+    ),
     [input.TreeTag, input.SpeciesID, input.CensusID],
     transactionID
   );
@@ -92,9 +99,12 @@ export async function planTreeResolution(
   let sourceTreeRemainingStems = 0;
   if (input.currentTreeID !== null && input.currentTreeID !== existingTreeID) {
     const remaining = await connectionManager.executeQuery(
-      `SELECT COUNT(*) AS cnt
-       FROM ${schema}.stems
-       WHERE TreeID = ? AND IsActive = 1`,
+      safeFormatQuery(
+        schema,
+        `SELECT COUNT(*) AS cnt
+         FROM ??.stems
+         WHERE TreeID = ? AND IsActive = 1`
+      ),
       [input.currentTreeID],
       transactionID
     );
@@ -117,10 +127,13 @@ export async function planStemResolution(
   transactionID?: string
 ): Promise<PlanStemResult> {
   const exactActiveRows = await connectionManager.executeQuery(
-    `SELECT StemGUID
-     FROM ${schema}.stems
-     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT StemGUID
+       FROM ??.stems
+       WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ? AND QuadratID <=> ? AND IsActive = 1
+       LIMIT 1`
+    ),
     [input.TreeID, input.CensusID, input.StemTag, input.QuadratID],
     transactionID
   );
@@ -136,11 +149,14 @@ export async function planStemResolution(
   }
 
   const blockingRows = await connectionManager.executeQuery(
-    `SELECT StemGUID, QuadratID, IsActive
-     FROM ${schema}.stems
-     WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ?
-     ORDER BY StemGUID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT StemGUID, QuadratID, IsActive
+       FROM ??.stems
+       WHERE TreeID = ? AND CensusID = ? AND StemTag <=> ?
+       ORDER BY StemGUID
+       LIMIT 1`
+    ),
     [input.TreeID, input.CensusID, input.StemTag],
     transactionID
   );
@@ -189,11 +205,14 @@ export async function planQuadratResolution(
   transactionID?: string
 ): Promise<PlanQuadratResult> {
   const rows = await connectionManager.executeQuery(
-    `SELECT QuadratID
-     FROM ${schema}.quadrats
-     WHERE LOWER(QuadratName) = LOWER(?) AND PlotID = ? AND IsActive = 1
-     ORDER BY QuadratID
-     LIMIT 1`,
+    safeFormatQuery(
+      schema,
+      `SELECT QuadratID
+       FROM ??.quadrats
+       WHERE LOWER(QuadratName) = LOWER(?) AND PlotID = ? AND IsActive = 1
+       ORDER BY QuadratID
+       LIMIT 1`
+    ),
     [QuadratName.trim(), PlotID],
     transactionID
   );
@@ -209,9 +228,12 @@ async function countSourceStemRemaining(
 ): Promise<number> {
   if (sourceStemGUID === null || sourceStemGUID === destinationStemGUID) return 0;
   const rows = await connectionManager.executeQuery(
-    `SELECT COUNT(*) AS cnt
-     FROM ${schema}.coremeasurements
-     WHERE StemGUID = ?`,
+    safeFormatQuery(
+      schema,
+      `SELECT COUNT(*) AS cnt
+       FROM ??.coremeasurements
+       WHERE StemGUID = ?`
+    ),
     [sourceStemGUID],
     transactionID
   );

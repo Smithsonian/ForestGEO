@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { BulkEditPlan, Effect, EditPlan, FieldChange, RowPlan } from './types';
-import { PER_COLUMN_DECIMAL_PRECISION } from './fieldpolicy';
+import { PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
 
 function normalizeDate(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -15,9 +15,9 @@ function normalizeDecimal(value: unknown, precision: number): unknown {
 
 function normalizeFieldChange(fc: FieldChange): FieldChange {
   const precision = PER_COLUMN_DECIMAL_PRECISION[fc.field];
-  const isDateField = fc.field.endsWith('Date');
-  const from = isDateField ? normalizeDate(fc.from) : precision !== undefined ? normalizeDecimal(fc.from, precision) : fc.from;
-  const to = isDateField ? normalizeDate(fc.to) : precision !== undefined ? normalizeDecimal(fc.to, precision) : fc.to;
+  const asDate = isDateField(fc.field);
+  const from = asDate ? normalizeDate(fc.from) : precision !== undefined ? normalizeDecimal(fc.from, precision) : fc.from;
+  const to = asDate ? normalizeDate(fc.to) : precision !== undefined ? normalizeDecimal(fc.to, precision) : fc.to;
   return { field: fc.field, from, to };
 }
 

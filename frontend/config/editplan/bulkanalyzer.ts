@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { BulkEditPlan, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
-import { AnalyzeEditOptions, RoleForbiddenFieldError, analyzeEdit } from './analyzer';
+import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analyzeEdit } from './analyzer';
 import { applyDuplicateRules } from './rules/duplicates';
 import { hashPlan } from './planhash';
 
@@ -24,13 +24,30 @@ export async function analyzeBulk(
   const rowPlans: RowPlan[] = [];
 
   for (const matched of input.matched) {
-    const plan = await analyzeEdit(cm, schema, dataType, plotID, censusID, matched.targetID, matched.newRow, transactionID, options);
-    rowPlans.push({
-      rowIndex: matched.rowIndex,
-      targetID: matched.targetID,
-      plan,
-      status: plan.fieldChanges.length ? 'matched' : 'unchanged'
-    });
+    // A matched row can become non-existent between match and apply (or be
+    // deactivated while the user reviews). Converting TargetNotFoundError
+    // into an invalid-row entry keeps the whole batch analyzable and forces
+    // a plan-hash drift that the apply endpoint surfaces to the UI.
+    try {
+      const plan = await analyzeEdit(cm, schema, dataType, plotID, censusID, matched.targetID, matched.newRow, transactionID, options);
+      rowPlans.push({
+        rowIndex: matched.rowIndex,
+        targetID: matched.targetID,
+        plan,
+        status: plan.fieldChanges.length ? 'matched' : 'unchanged'
+      });
+    } catch (err) {
+      if (err instanceof TargetNotFoundError) {
+        rowPlans.push({
+          rowIndex: matched.rowIndex,
+          targetID: matched.targetID,
+          status: 'invalid',
+          reason: `Measurement ${matched.targetID} is no longer active in this plot/census`
+        });
+        continue;
+      }
+      throw err;
+    }
   }
 
   for (const newRow of input.newRows) {
@@ -53,10 +70,7 @@ export async function analyzeBulk(
   }
 
   const aggregateEffects = aggregateByRuleID(surfacedEffects);
-  const maxSeverity = aggregateEffects.reduce<Severity>(
-    (max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max),
-    'info'
-  );
+  const maxSeverity = aggregateEffects.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
 
   const plan: BulkEditPlan = {
     dataType,
@@ -93,10 +107,7 @@ function aggregateByRuleID(effects: Effect[]): Effect[] {
   const out: Effect[] = [];
   for (const [id, list] of buckets) {
     const sumRows = list.reduce((acc, e) => acc + e.affectedRowCount, 0);
-    const maxSeverity = list.reduce<Severity>(
-      (m, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[m] ? e.severity : m),
-      'info'
-    );
+    const maxSeverity = list.reduce<Severity>((m, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[m] ? e.severity : m), 'info');
     out.push({
       id,
       severity: maxSeverity,

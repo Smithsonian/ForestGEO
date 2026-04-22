@@ -2,6 +2,7 @@ import type { Session } from 'next-auth';
 import MapperFactory from '@/config/datamapper';
 import type { UserAuthRoles } from '@/config/macros';
 import type { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import ailogger from '@/ailogger';
 
 const USER_AUTH_ROLES = new Set<UserAuthRoles>(['global', 'db admin', 'lead technician', 'field crew', 'pending']);
 
@@ -65,9 +66,21 @@ export function snapshotAuthorization(session: Session): AuthorizationSnapshot |
   };
 }
 
+// One-shot guard so a misconfigured deploy emits a single loud log line on the
+// first edit attempt rather than a silent 401 loop. Subsequent calls continue
+// to throw SessionExpiredError so the route returns 401 and a bad deploy can't
+// silently accept writes.
+let missingAuthURLLogged = false;
+
 export async function fetchAuthoritativeAuthorization(email: string): Promise<AuthorizationSnapshot | null> {
   const authURL = process.env.AUTH_FUNCTIONS_POLL_URL;
   if (!authURL) {
+    if (!missingAuthURLLogged) {
+      missingAuthURLLogged = true;
+      ailogger.error(
+        '[editplan.authorization] AUTH_FUNCTIONS_POLL_URL is not set. All measurement edit/apply/revert requests will fail with 401 until the env var is configured. (Tests should mock createFreshAuthorizationCheck.)'
+      );
+    }
     throw new SessionExpiredError('fresh authorization endpoint is not configured');
   }
 
@@ -95,11 +108,7 @@ export async function fetchAuthoritativeAuthorization(email: string): Promise<Au
   };
 }
 
-export function assertAuthorizationStillFresh(
-  initial: AuthorizationSnapshot | null,
-  fresh: AuthorizationSnapshot | null,
-  scope: EditAuthorizationScope
-): void {
+export function assertAuthorizationStillFresh(initial: AuthorizationSnapshot | null, fresh: AuthorizationSnapshot | null, scope: EditAuthorizationScope): void {
   if (!initial || !fresh) {
     throw new SessionExpiredError('session expired');
   }

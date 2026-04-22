@@ -235,25 +235,14 @@ describe('POST /api/edits/preview', () => {
         censusID: 2
       }
     );
-    expect(mocks.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(
-      expect.any(Object),
-      {
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      }
-    );
-    expect(mocks.analyzeEdit).toHaveBeenCalledWith(
-      expect.any(Object),
-      'forestgeo_testing',
-      'measurementssummary',
-      1,
-      2,
-      42,
-      { MeasuredDBH: 12.5 },
-      undefined,
-      { role: 'field crew' }
-    );
+    expect(mocks.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(expect.any(Object), {
+      schema: 'forestgeo_testing',
+      plotID: 1,
+      censusID: 2
+    });
+    expect(mocks.analyzeEdit).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 'measurementssummary', 1, 2, 42, { MeasuredDBH: 12.5 }, undefined, {
+      role: 'field crew'
+    });
     expect(mocks.closeConnection).toHaveBeenCalled();
   });
 });

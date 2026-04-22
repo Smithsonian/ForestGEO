@@ -11,12 +11,12 @@
 // staging columns and the measurement error log. The writer runs INSIDE an
 // outer transaction and MUST NOT begin, commit, or rollback.
 import ConnectionManager from '@/config/connectionmanager';
-import { format } from 'mysql2/promise';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
 import type { EditOperationStateRow } from '@/config/editoperations';
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import type { WriterResult } from './measurementssummary';
+import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
 function normalizeFailedRowDate(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
@@ -58,14 +58,9 @@ function toOptionalString(value: unknown): string | null {
   return String(value);
 }
 
-async function loadFailedRow(
-  cm: ConnectionManager,
-  schema: string,
-  coreMeasurementID: number,
-  transactionID: string
-): Promise<Record<string, unknown>> {
+async function loadFailedRow(cm: ConnectionManager, schema: string, coreMeasurementID: number, transactionID: string): Promise<Record<string, unknown>> {
   const rows = await cm.executeQuery(
-    `SELECT * FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL LIMIT 1`,
+    safeFormatQuery(schema, `SELECT * FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL LIMIT 1`),
     [coreMeasurementID],
     transactionID
   );
@@ -75,22 +70,12 @@ async function loadFailedRow(
   return rows[0] as Record<string, unknown>;
 }
 
-function buildStateRow(
-  table: string,
-  primaryKey: string,
-  primaryKeyValue: string | number,
-  row: Record<string, unknown> | null
-): EditOperationStateRow {
+function buildStateRow(table: string, primaryKey: string, primaryKeyValue: string | number, row: Record<string, unknown> | null): EditOperationStateRow {
   return { table, primaryKey, primaryKeyValue, row };
 }
 
-export async function writeFailedMeasurements(
-  cm: ConnectionManager,
-  input: ApplyInTransactionInput,
-  plan: EditPlan,
-  txID: string
-): Promise<WriterResult> {
-  const { schema, censusID, targetID, newRow } = input;
+export async function writeFailedMeasurements(cm: ConnectionManager, input: ApplyInTransactionInput, plan: EditPlan, txID: string): Promise<WriterResult> {
+  const { schema, censusID, targetID } = input;
   const coreMeasurementID = Number(targetID);
 
   const changedFields = new Set<string>(plan.fieldChanges.map(fc => fc.field));
@@ -121,21 +106,18 @@ export async function writeFailedMeasurements(
   // below with concatenated error messages.
   const initialDescription = resolvedComments;
 
-  // Incoming file/batch identifiers; COALESCE in SQL preserves existing values
-  // when these are null on the incoming payload.
-  const incomingUploadFileID = newRow.UploadFileID ?? newRow.FileID ?? null;
-  const incomingUploadBatchID = newRow.UploadBatchID ?? newRow.BatchID ?? null;
-
-  const updateQuery = format(
+  // UploadFileID / UploadBatchID are intentionally not in the failedmeasurements
+  // allowlist (fieldpolicy.ts), so rejectDisallowedFields blocks any caller from
+  // supplying them. A failed-measurement edit preserves the original upload
+  // provenance columns untouched.
+  const updateQuery = safeFormatQuery(
+    schema,
     `UPDATE ??.coremeasurements
      SET RawTreeTag = ?, RawStemTag = ?, RawSpCode = ?, RawQuadrat = ?,
          RawX = ?, RawY = ?, MeasuredDBH = ?, MeasuredHOM = ?, MeasurementDate = ?,
          RawCodes = ?, RawComments = ?, Description = ?,
-         UploadFileID = COALESCE(?, UploadFileID),
-         UploadBatchID = COALESCE(?, UploadBatchID),
          IsValidated = FALSE
-     WHERE CoreMeasurementID = ? AND StemGUID IS NULL`,
-    [schema]
+     WHERE CoreMeasurementID = ? AND StemGUID IS NULL`
   );
   await cm.executeQuery(
     updateQuery,
@@ -152,8 +134,6 @@ export async function writeFailedMeasurements(
       resolvedCodes,
       resolvedComments,
       initialDescription,
-      incomingUploadFileID,
-      incomingUploadBatchID,
       coreMeasurementID
     ],
     txID
@@ -183,18 +163,14 @@ export async function writeFailedMeasurements(
 
   if (validationErrors.length > 0) {
     const descriptionText = validationErrors.map(e => e.errorMessage).join('; ');
-    const updateDescQuery = format('UPDATE ??.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?', [schema]);
+    const updateDescQuery = safeFormatQuery(schema, 'UPDATE ??.coremeasurements SET Description = ? WHERE CoreMeasurementID = ?');
     await cm.executeQuery(updateDescQuery, [descriptionText, coreMeasurementID], txID);
   }
 
   const afterRow = await loadFailedRow(cm, schema, coreMeasurementID, txID);
 
-  const beforeState: EditOperationStateRow[] = [
-    buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, beforeRow)
-  ];
-  const afterState: EditOperationStateRow[] = [
-    buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, afterRow)
-  ];
+  const beforeState: EditOperationStateRow[] = [buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, beforeRow)];
+  const afterState: EditOperationStateRow[] = [buildStateRow('coremeasurements', 'CoreMeasurementID', coreMeasurementID, afterRow)];
 
   return {
     updatedIDs: { CoreMeasurementID: coreMeasurementID },

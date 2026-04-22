@@ -5,7 +5,7 @@ import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
 import { applyAttributeRules } from './rules/attributes';
-import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole, PER_COLUMN_DECIMAL_PRECISION } from './fieldpolicy';
+import { canonicalizeEditPayload, rejectDisallowedFields, EditSurface, isFieldEditableByRole, PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
 import { hashPlan } from './planhash';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
@@ -13,11 +13,8 @@ import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 // columns as Date objects. The client sends numbers and 'YYYY-MM-DD' strings.
 // Comparing those raw with Object.is produces spurious fieldChanges that fire
 // cross-row rules (R4) on every revert and edit. Normalize both sides to the
-// same JS shape before diffing.
-function isDateField(field: string): boolean {
-  return field === 'MeasurementDate' || field === 'Date';
-}
-
+// same JS shape before diffing. isDateField is sourced from fieldpolicy so the
+// planhash uses the same classification.
 function normalizeForDiff(field: string, value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (isDateField(field)) {
@@ -162,10 +159,7 @@ export async function analyzeEdit(
     effects.push(...(await applyAttributeRules(ctx)));
   }
 
-  const maxSeverity = effects.reduce<Severity>(
-    (max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max),
-    'info'
-  );
+  const maxSeverity = effects.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
 
   const plan: EditPlan = {
     dataType,

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalizeEditPayload, InvalidClearError, isFieldEditableByRole, normalizeFieldValue, rejectDisallowedFields } from './fieldpolicy';
+import {
+  canonicalizeEditPayload,
+  InvalidClearError,
+  isFieldEditableByRole,
+  isFieldEditableOnSurface,
+  normalizeFieldValue,
+  rejectDisallowedFields
+} from './fieldpolicy';
 
 describe('fieldpolicy', () => {
   describe('rejectDisallowedFields', () => {
@@ -12,9 +19,7 @@ describe('fieldpolicy', () => {
     });
 
     it('returns null for canonical failedmeasurements keys', () => {
-      expect(
-        rejectDisallowedFields('failedmeasurements', { Tag: '100', SpCode: 'AA', X: 1.0, Y: 2.0, DBH: 12, HOM: 1.3, Date: '2026-01-01' })
-      ).toBeNull();
+      expect(rejectDisallowedFields('failedmeasurements', { Tag: '100', SpCode: 'AA', X: 1.0, Y: 2.0, DBH: 12, HOM: 1.3, Date: '2026-01-01' })).toBeNull();
     });
 
     it('rejects unknown keys on failedmeasurements', () => {
@@ -78,9 +83,11 @@ describe('fieldpolicy', () => {
 
   describe('canonicalizeEditPayload', () => {
     it('maps camelCase grid keys to canonical measurementssummary names', () => {
-      expect(
-        canonicalizeEditPayload('measurementssummary', { speciesCode: 'aa', measuredDBH: 12.3, description: '  hello  ' })
-      ).toEqual({ SpeciesCode: 'aa', MeasuredDBH: 12.3, Description: 'hello' });
+      expect(canonicalizeEditPayload('measurementssummary', { speciesCode: 'aa', measuredDBH: 12.3, description: '  hello  ' })).toEqual({
+        SpeciesCode: 'aa',
+        MeasuredDBH: 12.3,
+        Description: 'hello'
+      });
     });
 
     it('maps failed-row raw aliases (rawSpCode, RawTreeTag, etc.) to canonical names', () => {
@@ -96,6 +103,46 @@ describe('fieldpolicy', () => {
     it('propagates InvalidClearError when an identity field is blanked', () => {
       expect(() => canonicalizeEditPayload('measurementssummary', { speciesCode: '' })).toThrow(InvalidClearError);
       expect(() => canonicalizeEditPayload('failedmeasurements', { rawSpCode: 'NULL' })).toThrow(InvalidClearError);
+    });
+  });
+
+  describe('isFieldEditableOnSurface', () => {
+    // The grid's isCellEditable delegates here so the client stays in lockstep
+    // with the server allowlist. Adding/removing a surface field in
+    // EDITABLE_FIELDS_BY_SURFACE must automatically flip these assertions.
+    it('returns true for camelCase aliases of an allowlisted measurement field', () => {
+      expect(isFieldEditableOnSurface('measurementssummary', 'speciesCode')).toBe(true);
+      expect(isFieldEditableOnSurface('measurementssummary', 'measuredDBH')).toBe(true);
+      expect(isFieldEditableOnSurface('measurementssummary', 'attributes')).toBe(true);
+    });
+
+    it('returns true for canonical field names too', () => {
+      expect(isFieldEditableOnSurface('measurementssummary', 'SpeciesCode')).toBe(true);
+      expect(isFieldEditableOnSurface('measurementssummary', 'Attributes')).toBe(true);
+    });
+
+    it('returns false for internal ID columns on the measurement grid', () => {
+      expect(isFieldEditableOnSurface('measurementssummary', 'coreMeasurementID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'speciesID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'treeID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'stemGUID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'quadratID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'plotID')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'censusID')).toBe(false);
+    });
+
+    it('returns false for read-only taxonomy display fields', () => {
+      expect(isFieldEditableOnSurface('measurementssummary', 'speciesName')).toBe(false);
+      expect(isFieldEditableOnSurface('measurementssummary', 'subspeciesName')).toBe(false);
+    });
+
+    it('maps failedmeasurements grid aliases to the canonical allowlist', () => {
+      expect(isFieldEditableOnSurface('failedmeasurements', 'tag')).toBe(true);
+      expect(isFieldEditableOnSurface('failedmeasurements', 'spCode')).toBe(true);
+      expect(isFieldEditableOnSurface('failedmeasurements', 'dbh')).toBe(true);
+      expect(isFieldEditableOnSurface('failedmeasurements', 'comments')).toBe(true);
+      expect(isFieldEditableOnSurface('failedmeasurements', 'failedMeasurementID')).toBe(false);
+      expect(isFieldEditableOnSurface('failedmeasurements', 'currentFailureReasons')).toBe(false);
     });
   });
 

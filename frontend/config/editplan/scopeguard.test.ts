@@ -110,9 +110,7 @@ describe('assertNoActiveMeasurementScopeConflict', () => {
 
   it('rejects fresh running validation runs in the requested scope', async () => {
     const cm = makeConnectionManager();
-    cm.executeQuery
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ RunID: 99, StartedAt: new Date().toISOString() }]);
+    cm.executeQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([{ RunID: 99, StartedAt: new Date().toISOString() }]);
 
     await expect(
       assertNoActiveMeasurementScopeConflict(cm, {

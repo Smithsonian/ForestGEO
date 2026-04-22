@@ -182,5 +182,26 @@ export default [
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/no-var-requires': 'off'
     }
+  },
+
+  // EditPlan planner/apply split: the analyzer and the per-rule modules must
+  // stay read-only. Only writer modules (and apply.ts) are allowed to import
+  // the mutating resolvers. Regressions here break the no-write preview
+  // guarantee.
+  {
+    files: ['config/editplan/analyzer.ts', 'config/editplan/rules/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/config/editplan/writers/*', './writers/*', '../writers/*', '../../writers/*'],
+              message: 'Analyzer and rule modules must not import writers. Preview must stay read-only.'
+            }
+          ]
+        }
+      ]
+    }
   }
 ];

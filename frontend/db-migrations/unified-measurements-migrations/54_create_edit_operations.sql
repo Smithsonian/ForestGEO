@@ -4,7 +4,10 @@ CREATE TABLE IF NOT EXISTS edit_operations (
   OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL,
   Revertable BOOLEAN NOT NULL DEFAULT TRUE,
   DataType ENUM('measurementssummary', 'failedmeasurements') NOT NULL,
-  TargetID BIGINT NOT NULL,
+  -- Nullable because bulk-revision-row ledger entries summarize a whole batch
+  -- and carry the full ID list in BeforeState JSON. Single-row and revert
+  -- entries always set this to the CoreMeasurementID they operated on.
+  TargetID BIGINT NULL,
   PlotID INT NOT NULL,
   CensusID INT NOT NULL,
   PlanHash CHAR(64) NOT NULL,

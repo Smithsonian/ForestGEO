@@ -287,9 +287,7 @@ describe('applyEditInTransaction', () => {
       generatedAt: '2026-04-21T00:00:00Z'
     });
 
-    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', role: 'field crew' })).rejects.toBeInstanceOf(
-      RoleForbiddenFieldError
-    );
+    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', role: 'field crew' })).rejects.toBeInstanceOf(RoleForbiddenFieldError);
 
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
     expect(editOps.writeEditOperation).not.toHaveBeenCalled();

@@ -11,12 +11,7 @@ import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
 import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
-import {
-  assertCanEditMeasurementScope,
-  assertNoActiveMeasurementScopeConflict,
-  ScopeAccessError,
-  ScopeBusyError
-} from '@/config/editplan/scopeguard';
+import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { InvalidClearError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 

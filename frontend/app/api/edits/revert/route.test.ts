@@ -383,10 +383,7 @@ describe('POST /api/edits/revert', () => {
     const confirmedPlanHash = 'c'.repeat(64);
     const response = await POST(buildRequest({ ...VALID_BODY, confirmedPlanHash }));
     expect(response.status).toBe(200);
-    expect(mocks.revertEdit).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ editOperationID: 7, confirmedPlanHash })
-    );
+    expect(mocks.revertEdit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ editOperationID: 7, confirmedPlanHash }));
   });
 
   it('returns 400 when confirmedPlanHash is not a 64-char hex string', async () => {
@@ -453,14 +450,11 @@ describe('POST /api/edits/revert', () => {
         censusID: 2
       }
     );
-    expect(mocks.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(
-      expect.any(Object),
-      {
-        schema: 'forestgeo_testing',
-        plotID: 1,
-        censusID: 2
-      }
-    );
+    expect(mocks.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(expect.any(Object), {
+      schema: 'forestgeo_testing',
+      plotID: 1,
+      censusID: 2
+    });
     expect(mocks.ensureEditOperationsTable).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
     expect(mocks.revertEdit).toHaveBeenCalledWith(
       expect.any(Object),

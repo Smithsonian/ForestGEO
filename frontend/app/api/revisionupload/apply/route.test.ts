@@ -453,7 +453,9 @@ describe('POST /api/revisionupload/apply', () => {
       operationType: 'bulk-revision-row',
       revertable: false,
       dataType: 'measurementssummary',
-      targetID: 101,
+      // Bulk ledger rows set TargetID null because no single CoreMeasurementID
+      // represents the batch; affected IDs live in BeforeState JSON.
+      targetID: null,
       plotID: 1,
       censusID: 2,
       planHash: MATCHED_PLAN_HASH

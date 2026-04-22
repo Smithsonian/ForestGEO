@@ -6,9 +6,7 @@ const base: EditPlan = {
   dataType: 'measurementssummary',
   targetID: 1,
   fieldChanges: [{ field: 'MeasuredDBH', from: 10, to: 12 }],
-  effects: [
-    { id: 'R4', severity: 'warn', category: 'cross-row', title: 't', detail: 'd', affectedTable: 'stems', affectedRowCount: 3 }
-  ],
+  effects: [{ id: 'R4', severity: 'warn', category: 'cross-row', title: 't', detail: 'd', affectedTable: 'stems', affectedRowCount: 3 }],
   maxSeverity: 'warn',
   planHash: '',
   generatedAt: '2026-04-21T00:00:00Z'
@@ -135,9 +133,7 @@ describe('hashPlan', () => {
       ...bulkA,
       planHash: 'b',
       generatedAt: '2030-01-01T00:00:00Z',
-      rowPlans: [
-        { rowIndex: 0, targetID: 1, status: 'matched', plan: { ...base, planHash: 'nested', generatedAt: '2030-01-01T00:00:00Z' } }
-      ]
+      rowPlans: [{ rowIndex: 0, targetID: 1, status: 'matched', plan: { ...base, planHash: 'nested', generatedAt: '2030-01-01T00:00:00Z' } }]
     };
     expect(hashPlan(bulkA)).toBe(hashPlan(bulkB));
   });

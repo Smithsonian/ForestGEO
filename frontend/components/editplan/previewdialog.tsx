@@ -1,20 +1,7 @@
 'use client';
 
 import React from 'react';
-import {
-  Box,
-  Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  Modal,
-  ModalDialog,
-  Sheet,
-  Stack,
-  Table,
-  Typography
-} from '@mui/joy';
+import { Box, Button, DialogActions, DialogContent, DialogTitle, Divider, Modal, ModalDialog, Sheet, Stack, Table, Typography } from '@mui/joy';
 import { EditPlan, Effect, SEVERITY_RANK, Severity } from '@/config/editplan/types';
 import EditEffectRow from './editeffectrow';
 

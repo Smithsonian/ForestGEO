@@ -139,7 +139,12 @@ function isBlankOrNullPlaceholder(value: unknown): boolean {
 
 function speciesCodesDiffer(csvValue: unknown, dbValue: unknown): boolean {
   if (isBlankOrNullPlaceholder(csvValue)) return false;
-  return String(csvValue).trim().toLowerCase() !== String(dbValue ?? '').trim().toLowerCase();
+  return (
+    String(csvValue).trim().toLowerCase() !==
+    String(dbValue ?? '')
+      .trim()
+      .toLowerCase()
+  );
 }
 
 async function loadCurrentSpeciesCode(
@@ -733,16 +738,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const normalizedMatchedRows = normalizeMatchedRows(matchedRows);
   const normalizedNewRows = normalizeNewRows(newRows);
   const normalizedInvalidRows = normalizeInvalidRows(invalidRows);
-  const normalizationErrors = [
-    ...normalizedMatchedRows.applyErrors,
-    ...normalizedNewRows.applyErrors,
-    ...normalizedInvalidRows.applyErrors
-  ];
+  const normalizationErrors = [...normalizedMatchedRows.applyErrors, ...normalizedNewRows.applyErrors, ...normalizedInvalidRows.applyErrors];
   if (normalizationErrors.length > 0) {
-    return NextResponse.json(
-      { error: 'Revision rows failed validation', applyErrors: normalizationErrors },
-      { status: HTTPResponses.INVALID_REQUEST }
-    );
+    return NextResponse.json({ error: 'Revision rows failed validation', applyErrors: normalizationErrors }, { status: HTTPResponses.INVALID_REQUEST });
   }
 
   // Pre-flight validation of duplicate deletion requests (before opening a transaction)
@@ -873,9 +871,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
       assertBulkPlanCanApply(freshPlan);
       if (freshPlan.planHash !== bulkPlanHash) {
-        ailogger.warn(
-          `${logPrefix} bulk plan hash mismatch (expected=${bulkPlanHash}, fresh=${freshPlan.planHash}) — aborting apply so UI can re-review`
-        );
+        ailogger.warn(`${logPrefix} bulk plan hash mismatch (expected=${bulkPlanHash}, fresh=${freshPlan.planHash}) — aborting apply so UI can re-review`);
         throw new RevisionApplyPlanHashMismatchError(freshPlan);
       }
 
@@ -971,8 +967,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // One batch-level ledger entry summarizes the whole apply. Row-level
       // state is intentionally NOT captured since bulk rows are not
       // revertable through the single-row revert path.
+      //
+      // TargetID is null for bulk rows: the batch has no single "target"
+      // measurement. The affected CoreMeasurementIDs are captured in
+      // BeforeState JSON, which is where filters/audit should read them from.
       if (updatedCount > 0 || deletedDuplicateCount > 0) {
-        const ledgerTargetID = updatedCoreMeasurementIDs[0] ?? deletedDuplicateIDs[0] ?? 0;
         await writeEditOperation(
           connectionManager,
           schema,
@@ -980,7 +979,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             operationType: 'bulk-revision-row',
             revertable: false,
             dataType: 'measurementssummary',
-            targetID: ledgerTargetID,
+            targetID: null,
             plotID: normalizedPlotID,
             censusID: normalizedCensusID,
             planHash: bulkPlanHash,

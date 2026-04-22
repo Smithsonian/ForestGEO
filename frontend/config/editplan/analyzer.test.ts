@@ -134,16 +134,14 @@ describe('analyzeEdit', () => {
 
   it('throws TargetNotFoundError when loadCurrentRow returns no row (unknown id or out of scope)', async () => {
     const cm = makeConnectionManager(null);
-    await expect(
-      analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { MeasuredDBH: 16 })
-    ).rejects.toBeInstanceOf(TargetNotFoundError);
+    await expect(analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { MeasuredDBH: 16 })).rejects.toBeInstanceOf(
+      TargetNotFoundError
+    );
   });
 
   it('binds plotID and censusID into the lookup query so out-of-scope targets are rejected', async () => {
     const cm = makeConnectionManager(null);
-    await expect(
-      analyzeEdit(cm, SCHEMA, 'measurementssummary', 999, 888, TARGET_ID, { MeasuredDBH: 16 })
-    ).rejects.toBeInstanceOf(TargetNotFoundError);
+    await expect(analyzeEdit(cm, SCHEMA, 'measurementssummary', 999, 888, TARGET_ID, { MeasuredDBH: 16 })).rejects.toBeInstanceOf(TargetNotFoundError);
     const callParams = cm.executeQuery.mock.calls[0][1];
     expect(callParams).toEqual([TARGET_ID, 888, 999]);
   });
@@ -216,17 +214,7 @@ describe('analyzeEdit', () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
     vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
 
-    const plan = await analyzeEdit(
-      cm,
-      SCHEMA,
-      'measurementssummary',
-      PLOT_ID,
-      CENSUS_ID,
-      TARGET_ID,
-      { SpeciesCode: 'BB' },
-      undefined,
-      { role: 'field crew' }
-    );
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, { SpeciesCode: 'BB' }, undefined, { role: 'field crew' });
 
     expect(plan.canApply).toBe(false);
     expect(plan.maxSeverity).toBe('destructive');
@@ -245,17 +233,7 @@ describe('analyzeEdit', () => {
   it('marks failed-measurement SpCode edits as blocking for lead technicians', async () => {
     const cm = makeConnectionManager(FAILED_OLD_ROW);
 
-    const plan = await analyzeEdit(
-      cm,
-      SCHEMA,
-      'failedmeasurements',
-      PLOT_ID,
-      CENSUS_ID,
-      99,
-      { SpCode: 'BB' },
-      undefined,
-      { role: 'lead technician' }
-    );
+    const plan = await analyzeEdit(cm, SCHEMA, 'failedmeasurements', PLOT_ID, CENSUS_ID, 99, { SpCode: 'BB' }, undefined, { role: 'lead technician' });
 
     expect(plan.canApply).toBe(false);
     expect(plan.errors?.[0]).toMatchObject({ field: 'SpCode', role: 'lead technician' });
@@ -380,12 +358,36 @@ describe('analyzeBulk', () => {
     expect(bulkPlan.errors?.[0]).toMatchObject({ field: 'SpeciesCode', rowIndex: 4 });
   });
 
+  it('converts TargetNotFoundError from a matched row into an invalid-row entry (does not crash the batch)', async () => {
+    // Second matched row's loadCurrentRow returns empty → TargetNotFoundError.
+    // analyzeBulk must catch it and mark that row invalid, letting the rest
+    // of the batch continue. This is the drift path between match and apply.
+    const cm = {
+      executeQuery: vi.fn().mockResolvedValueOnce([MEASUREMENT_OLD_ROW]).mockResolvedValueOnce([])
+    } as any;
+
+    const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
+      matched: [
+        { rowIndex: 0, targetID: 42, newRow: { MeasuredDBH: 16 } },
+        { rowIndex: 9, targetID: 999, newRow: { MeasuredDBH: 17 } }
+      ],
+      newRows: [],
+      invalid: [],
+      duplicateMeasurementIDsToDelete: []
+    });
+
+    expect(bulkPlan.rowPlans).toHaveLength(2);
+    const missing = bulkPlan.rowPlans.find(rp => rp.rowIndex === 9);
+    expect(missing?.status).toBe('invalid');
+    expect(missing?.targetID).toBe(999);
+    expect(missing?.reason).toMatch(/no longer active/i);
+    const kept = bulkPlan.rowPlans.find(rp => rp.rowIndex === 0);
+    expect(kept?.status).toBe('matched');
+  });
+
   it('aggregates affectedRowCount across repeated effect ids using max severity', async () => {
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
-    const calls: Array<ReturnType<typeof makeEffect>[]> = [
-      [makeEffect('R4', 'info', 3)],
-      [makeEffect('R4', 'warn', 5)]
-    ];
+    const calls: Array<ReturnType<typeof makeEffect>[]> = [[makeEffect('R4', 'info', 3)], [makeEffect('R4', 'warn', 5)]];
     vi.mocked(applyCoordinateRules).mockImplementation(async () => calls.shift() ?? []);
 
     const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {

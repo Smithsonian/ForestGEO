@@ -7,7 +7,13 @@ import { FileRow } from '@/config/macros/formdetails';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
 import { BulkEditPlan } from '@/config/editplan/types';
-import { RevisionApplyMatchedRow, RevisionApplyNewRow, RevisionApplyResponse, RevisionDuplicateToDelete, RevisionInvalidRow } from '@/config/revisionuploadtypes';
+import {
+  RevisionApplyMatchedRow,
+  RevisionApplyNewRow,
+  RevisionApplyResponse,
+  RevisionDuplicateToDelete,
+  RevisionInvalidRow
+} from '@/config/revisionuploadtypes';
 
 const TRANSITION_DELAY_MS = 2000;
 

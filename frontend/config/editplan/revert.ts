@@ -15,13 +15,7 @@ import type { UserAuthRoles } from '@/config/macros';
 import { ApplyResult, EditPlan, EditPlanDataType, SEVERITY_RANK } from './types';
 import { analyzeEdit, assertEditPlanCanApply } from './analyzer';
 import { applyEditInTransaction, ScopeLockHeldError } from './apply';
-import {
-  EditOperationRecord,
-  EditOperationStateRow,
-  ensureEditOperationsTable,
-  markEditOperationReverted,
-  readEditOperation
-} from '@/config/editoperations';
+import { EditOperationRecord, EditOperationStateRow, ensureEditOperationsTable, markEditOperationReverted, readEditOperation } from '@/config/editoperations';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
@@ -91,6 +85,14 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
   if (!original.revertable) {
     throw new NonRevertableEditOperationError(original.editOperationID);
   }
+  // Defense-in-depth: revertable single-row-edit rows always have a real
+  // TargetID; only bulk-revision-row entries (which are non-revertable) write
+  // null. If both guards disagree, treat it as non-revertable rather than
+  // dereference a null target through the analyzer.
+  if (original.targetID === null) {
+    throw new NonRevertableEditOperationError(original.editOperationID);
+  }
+  const targetID = original.targetID;
 
   const newRow = reconstructNewRow(original);
 
@@ -105,24 +107,13 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       throw new ScopeLockHeldError('scope locked');
     }
 
-    const restorePlan = await analyzeEdit(
-      cm,
-      input.schema,
-      original.dataType,
-      original.plotID,
-      original.censusID,
-      original.targetID,
-      newRow,
-      txID,
-      { role: input.role }
-    );
+    const restorePlan = await analyzeEdit(cm, input.schema, original.dataType, original.plotID, original.censusID, targetID, newRow, txID, {
+      role: input.role
+    });
 
     assertEditPlanCanApply(restorePlan);
 
-    if (
-      SEVERITY_RANK[restorePlan.maxSeverity] > SEVERITY_RANK.info &&
-      input.confirmedPlanHash !== restorePlan.planHash
-    ) {
+    if (SEVERITY_RANK[restorePlan.maxSeverity] > SEVERITY_RANK.info && input.confirmedPlanHash !== restorePlan.planHash) {
       throw new RevertDriftError(restorePlan);
     }
 
@@ -131,7 +122,7 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       schema: input.schema,
       plotID: original.plotID,
       censusID: original.censusID,
-      targetID: original.targetID,
+      targetID,
       newRow,
       expectedPlanHash: restorePlan.planHash,
       operationType: 'revert',
@@ -139,7 +130,11 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
       createdBy: input.createdBy,
       role: input.role,
       assertAuthorizationFresh: input.assertAuthorizationFresh,
-      transactionID: txID
+      transactionID: txID,
+      // ensureEditOperationsTable already ran pre-transaction above; passing
+      // schemaEnsured: true skips the per-call DDL inside the tx, which
+      // MySQL treats as an implicit commit even when the table already exists.
+      schemaEnsured: true
     });
 
     if (result.editOperationID !== null) {
@@ -180,12 +175,7 @@ function afterRowsCreatedByOriginal(record: EditOperationRecord, table: string):
   });
 }
 
-async function removeCreatedAfterStateSideEffects(
-  cm: ConnectionManager,
-  schema: string,
-  record: EditOperationRecord,
-  transactionID: string
-): Promise<void> {
+async function removeCreatedAfterStateSideEffects(cm: ConnectionManager, schema: string, record: EditOperationRecord, transactionID: string): Promise<void> {
   for (const stemState of afterRowsCreatedByOriginal(record, 'stems')) {
     await cm.executeQuery(
       safeFormatQuery(

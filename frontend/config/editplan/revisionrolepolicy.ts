@@ -33,11 +33,7 @@ function buildRevisionRoleEffect(error: PreviewError): Effect {
   };
 }
 
-export function applyRevisionRolePolicy(
-  plan: BulkEditPlan,
-  role: UserAuthRoles | null | undefined,
-  candidates: RevisionRoleFieldCandidate[]
-): BulkEditPlan {
+export function applyRevisionRolePolicy(plan: BulkEditPlan, role: UserAuthRoles | null | undefined, candidates: RevisionRoleFieldCandidate[]): BulkEditPlan {
   const errors = candidates.filter(candidate => !isFieldEditableByRole(candidate.field, role)).map(candidate => buildRevisionRoleError(candidate, role));
 
   if (errors.length === 0) {

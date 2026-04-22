@@ -87,6 +87,7 @@ import ailogger from '@/ailogger';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
+import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
@@ -710,12 +711,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  const createNewRowPost = async (
-    gridType: string,
-    schemaName: string | undefined,
-    newRow: GridRowModel,
-    oldRow: GridRowModel
-  ): Promise<GridRowModel> => {
+  const createNewRowPost = async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
     newRow.measurementDate = moment(newRow.measurementDate).format('YYYY-MM-DD');
@@ -1566,18 +1562,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
             isCellEditable={params => {
               if (locked) return false;
-              const readOnlyFields = new Set([
-                'coreMeasurementID',
-                'speciesID',
-                'treeID',
-                'stemGUID',
-                'quadratID',
-                'plotID',
-                'censusID',
-                'speciesName',
-                'subspeciesName'
-              ]);
-              return !readOnlyFields.has(params.field);
+              // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
+              // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
+              // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
+              // lockstep with the server's rejectDisallowedFields check.
+              return isFieldEditableOnSurface('measurementssummary', params.field);
             }}
           />
         </Box>

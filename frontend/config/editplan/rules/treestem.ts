@@ -28,11 +28,7 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<Effect[]> {
       const currentTreeID = Number(ctx.oldRow.TreeID);
       const movedAway = planned.sourceTreeID !== null && planned.sourceTreeID !== planned.existingTreeID;
       if (movedAway) {
-        const destLabel = planned.existingTreeID
-          ? `tree T#${planned.existingTreeID}`
-          : planned.wouldCreate
-            ? 'a new tree'
-            : 'unresolved tree';
+        const destLabel = planned.existingTreeID ? `tree T#${planned.existingTreeID}` : planned.wouldCreate ? 'a new tree' : 'unresolved tree';
         const severity = planned.sourceTreeRemainingStems === 0 ? 'destructive' : 'warn';
         effects.push({
           id: 'R2',
@@ -74,11 +70,7 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<Effect[]> {
       const movedAway = planned.sourceStemGUID !== null && planned.sourceStemGUID !== planned.existingStemGUID;
       if (movedAway) {
         const severity = planned.sourceStemRemainingMeasurements === 0 ? 'destructive' : 'warn';
-        const destinationStemLabel = planned.existingStemGUID
-          ? `stem S#${planned.existingStemGUID}`
-          : planned.wouldCreate
-            ? 'a new stem'
-            : 'unresolved stem';
+        const destinationStemLabel = planned.existingStemGUID ? `stem S#${planned.existingStemGUID}` : planned.wouldCreate ? 'a new stem' : 'unresolved stem';
         effects.push({
           id: 'R3',
           severity,
@@ -88,9 +80,7 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<Effect[]> {
           affectedTable: 'stems',
           affectedRowCount: 1,
           references: {
-            stemGUIDs: planned.existingStemGUID
-              ? [Number(planned.sourceStemGUID), Number(planned.existingStemGUID)]
-              : [Number(planned.sourceStemGUID)]
+            stemGUIDs: planned.existingStemGUID ? [Number(planned.sourceStemGUID), Number(planned.existingStemGUID)] : [Number(planned.sourceStemGUID)]
           }
         });
       }

@@ -18,7 +18,7 @@ import { analyzeEdit, assertEditPlanCanApply } from './analyzer';
 import { writeMeasurementsSummary } from './writers/measurementssummary';
 import { writeFailedMeasurements } from './writers/failedmeasurements';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
-import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
+import { ensureEditOperationsTable, writeEditOperation, EditOperationType } from '@/config/editoperations';
 
 export { SessionExpiredError } from './authorization';
 
@@ -41,7 +41,7 @@ export interface ApplyInput {
   targetID: number;
   newRow: Record<string, unknown>;
   expectedPlanHash: string | null;
-  operationType?: 'single-row-edit' | 'bulk-revision-row' | 'revert';
+  operationType?: EditOperationType;
   revertable?: boolean;
   writeLedger?: boolean;
   refreshViews?: boolean;
@@ -89,17 +89,9 @@ export async function applyEditInTransaction(cm: ConnectionManager, input: Apply
     await ensureEditOperationsTable(cm, input.schema, input.transactionID);
   }
 
-  const freshPlan = await analyzeEdit(
-    cm,
-    input.schema,
-    input.dataType,
-    input.plotID,
-    input.censusID,
-    input.targetID,
-    input.newRow,
-    input.transactionID,
-    { role: input.role }
-  );
+  const freshPlan = await analyzeEdit(cm, input.schema, input.dataType, input.plotID, input.censusID, input.targetID, input.newRow, input.transactionID, {
+    role: input.role
+  });
 
   assertEditPlanCanApply(freshPlan);
 

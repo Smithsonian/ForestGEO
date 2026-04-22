@@ -1240,12 +1240,7 @@ export default function ErrorsExplorer() {
         </Sheet>
       </Sheet>
       {editFlow.dialogState.open && editFlow.dialogState.plan && (
-        <PreviewDialog
-          plan={editFlow.dialogState.plan}
-          busy={editFlow.dialogState.busy}
-          onConfirm={editFlow.confirmDialog}
-          onCancel={editFlow.cancelDialog}
-        />
+        <PreviewDialog plan={editFlow.dialogState.plan} busy={editFlow.dialogState.busy} onConfirm={editFlow.confirmDialog} onCancel={editFlow.cancelDialog} />
       )}
       {undoToastOperationID !== null && (
         <UndoToast

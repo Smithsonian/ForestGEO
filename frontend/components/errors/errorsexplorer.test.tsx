@@ -424,9 +424,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     const ErrorsExplorer = mod.default;
     rerender(<ErrorsExplorer />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('preview-dialog').getAttribute('data-plan-hash')).toBe(TEST_PLAN_HASH_REFRESH)
-    );
+    await waitFor(() => expect(screen.getByTestId('preview-dialog').getAttribute('data-plan-hash')).toBe(TEST_PLAN_HASH_REFRESH));
   });
 
   it('wires the PreviewDialog Apply button to the flow.confirmDialog callback', async () => {

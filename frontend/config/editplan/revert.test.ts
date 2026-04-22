@@ -143,9 +143,7 @@ describe('revertEdit', () => {
     const driftedPlan = buildRestorePlan({ maxSeverity: 'warn' });
     mocks.analyzeEdit.mockResolvedValue(driftedPlan);
 
-    await expect(
-      revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })
-    ).rejects.toBeInstanceOf(RevertDriftError);
+    await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(RevertDriftError);
 
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
     expect(mocks.markEditOperationReverted).not.toHaveBeenCalled();
@@ -159,9 +157,7 @@ describe('revertEdit', () => {
     const driftedPlan = buildRestorePlan({ maxSeverity: 'destructive' });
     mocks.analyzeEdit.mockResolvedValue(driftedPlan);
 
-    await expect(
-      revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })
-    ).rejects.toBeInstanceOf(RevertDriftError);
+    await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(RevertDriftError);
   });
 
   it('proceeds when a non-info restore plan hash is explicitly confirmed', async () => {
@@ -183,10 +179,7 @@ describe('revertEdit', () => {
       confirmedPlanHash: warnPlan.planHash
     });
 
-    expect(mocks.applyEditInTransaction).toHaveBeenCalledWith(
-      cm,
-      expect.objectContaining({ expectedPlanHash: warnPlan.planHash })
-    );
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledWith(cm, expect.objectContaining({ expectedPlanHash: warnPlan.planHash }));
     expect(cm.commitTransaction).toHaveBeenCalledWith('tx');
   });
 
@@ -195,9 +188,9 @@ describe('revertEdit', () => {
     cm.acquireApplicationLock = vi.fn(async () => false);
     mocks.readEditOperation.mockResolvedValue(buildOperation());
 
-    await expect(
-      revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })
-    ).rejects.toBeInstanceOf(ScopeLockHeldError);
+    await expect(revertEdit(cm, { schema: 'forestgeo_testing', editOperationID: 7, createdBy: 'mason@example.com' })).rejects.toBeInstanceOf(
+      ScopeLockHeldError
+    );
 
     // No analyzer pass, no writer call, no ledger marking — and the tx is rolled back, not committed.
     expect(mocks.analyzeEdit).not.toHaveBeenCalled();

@@ -210,10 +210,7 @@ function isBlankOrNullPlaceholder(value: unknown): boolean {
   return trimmed === '' || trimmed.toUpperCase() === 'NULL';
 }
 
-function buildRevisionRoleFieldCandidates(
-  matchedRows: RevisionMatchedRow[],
-  newRows: RevisionNewRowCandidate[]
-): RevisionRoleFieldCandidate[] {
+function buildRevisionRoleFieldCandidates(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[]): RevisionRoleFieldCandidate[] {
   const candidates: RevisionRoleFieldCandidate[] = [];
   matchedRows.forEach((row, index) => {
     if (row.ignoredEdits?.spcode) {
@@ -566,11 +563,7 @@ function buildAnalyzerNewRow(csvRow: FileRow): Record<string, unknown> {
   return newRow;
 }
 
-function buildBulkInput(
-  matchedRows: RevisionMatchedRow[],
-  newRows: RevisionNewRowCandidate[],
-  invalidRows: RevisionInvalidRow[]
-): BulkInput {
+function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[], invalidRows: RevisionInvalidRow[]): BulkInput {
   const allDuplicateIDs: number[] = [];
   for (const row of matchedRows) {
     if (row.duplicateMeasurementIDsToDelete) {
@@ -814,11 +807,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       undefined,
       { role: session.user.userStatus }
     );
-    const bulkPlan = applyRevisionRolePolicy(
-      baseBulkPlan,
-      session.user.userStatus,
-      buildRevisionRoleFieldCandidates(matchedRows, newRows)
-    );
+    const bulkPlan = applyRevisionRolePolicy(baseBulkPlan, session.user.userStatus, buildRevisionRoleFieldCandidates(matchedRows, newRows));
 
     const response: RevisionUploadResponse = {
       matchedRows,

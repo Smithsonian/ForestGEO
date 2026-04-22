@@ -13,12 +13,7 @@ import { format } from 'mysql2/promise';
 import { EditPlan } from '../types';
 import type { ApplyInTransactionInput } from '../apply';
 import type { EditOperationStateRow } from '@/config/editoperations';
-import {
-  computeTreeStemState,
-  resolveMeasurementSummaryQuadratID,
-  resolveMeasurementSummaryStem,
-  resolveMeasurementSummaryTree
-} from './resolvers-mutating';
+import { computeTreeStemState, resolveMeasurementSummaryQuadratID, resolveMeasurementSummaryStem, resolveMeasurementSummaryTree } from './resolvers-mutating';
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
@@ -152,33 +147,15 @@ async function loadCoreMeasurementRow(
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-async function loadStemRow(
-  cm: ConnectionManager,
-  schema: string,
-  stemGUID: number | null,
-  transactionID: string
-): Promise<Record<string, unknown> | null> {
+async function loadStemRow(cm: ConnectionManager, schema: string, stemGUID: number | null, transactionID: string): Promise<Record<string, unknown> | null> {
   if (stemGUID === null) return null;
-  const rows = await cm.executeQuery(
-    safeFormatQuery(schema, `SELECT * FROM ??.stems WHERE StemGUID = ? LIMIT 1`),
-    [stemGUID],
-    transactionID
-  );
+  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.stems WHERE StemGUID = ? LIMIT 1`), [stemGUID], transactionID);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
-async function loadTreeRow(
-  cm: ConnectionManager,
-  schema: string,
-  treeID: number | null,
-  transactionID: string
-): Promise<Record<string, unknown> | null> {
+async function loadTreeRow(cm: ConnectionManager, schema: string, treeID: number | null, transactionID: string): Promise<Record<string, unknown> | null> {
   if (treeID === null) return null;
-  const rows = await cm.executeQuery(
-    safeFormatQuery(schema, `SELECT * FROM ??.trees WHERE TreeID = ? LIMIT 1`),
-    [treeID],
-    transactionID
-  );
+  const rows = await cm.executeQuery(safeFormatQuery(schema, `SELECT * FROM ??.trees WHERE TreeID = ? LIMIT 1`), [treeID], transactionID);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
@@ -196,12 +173,7 @@ async function loadCmAttributeRows(
   return rows as Array<Record<string, unknown>>;
 }
 
-function buildStateRow(
-  table: string,
-  primaryKey: string,
-  primaryKeyValue: string | number,
-  row: Record<string, unknown> | null
-): EditOperationStateRow {
+function buildStateRow(table: string, primaryKey: string, primaryKeyValue: string | number, row: Record<string, unknown> | null): EditOperationStateRow {
   return { table, primaryKey, primaryKeyValue, row };
 }
 
@@ -264,12 +236,7 @@ async function findExactActiveStemGUID(
   return rows.length ? toPositiveNumber(rows[0].StemGUID) : null;
 }
 
-export async function writeMeasurementsSummary(
-  cm: ConnectionManager,
-  input: ApplyInTransactionInput,
-  plan: EditPlan,
-  txID: string
-): Promise<WriterResult> {
+export async function writeMeasurementsSummary(cm: ConnectionManager, input: ApplyInTransactionInput, plan: EditPlan, txID: string): Promise<WriterResult> {
   const { schema, plotID, censusID, targetID } = input;
   const coreMeasurementID = Number(targetID);
 
@@ -315,8 +282,7 @@ export async function writeMeasurementsSummary(
 
   const previousTreeID = toPositiveNumber(current.TreeID);
   const shouldResolveTree = changedFields.has('SpeciesCode') || changedFields.has('TreeTag');
-  const needsFullStemResolution =
-    changedFields.has('TreeTag') || changedFields.has('QuadratName') || changedFields.has('StemTag');
+  const needsFullStemResolution = changedFields.has('TreeTag') || changedFields.has('QuadratName') || changedFields.has('StemTag');
 
   let changesFound = false;
 
@@ -434,12 +400,7 @@ export async function writeMeasurementsSummary(
 
     if (resolvedStemGUID !== merged.StemGUID) {
       await cm.executeQuery(
-        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-          `${schema}.coremeasurements`,
-          { StemGUID: resolvedStemGUID },
-          'CoreMeasurementID',
-          coreMeasurementID
-        ]),
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.coremeasurements`, { StemGUID: resolvedStemGUID }, 'CoreMeasurementID', coreMeasurementID]),
         [],
         txID
       );
@@ -463,11 +424,7 @@ export async function writeMeasurementsSummary(
         txID
       );
       const rawUDF = existingUDFRows?.[0]?.UserDefinedFields;
-      const currentFields: Record<string, unknown> = rawUDF
-        ? typeof rawUDF === 'string'
-          ? JSON.parse(rawUDF)
-          : rawUDF
-        : {};
+      const currentFields: Record<string, unknown> = rawUDF ? (typeof rawUDF === 'string' ? JSON.parse(rawUDF) : rawUDF) : {};
       currentFields.treestemstate = treeStemState;
 
       await cm.executeQuery(
@@ -491,12 +448,7 @@ export async function writeMeasurementsSummary(
     const yValue = changedFields.has('StemLocalY') ? toOptionalNumber(newValues.StemLocalY) : toOptionalNumber(merged.StemLocalY);
     if (merged.StemGUID !== null && merged.StemGUID !== undefined) {
       await cm.executeQuery(
-        format(`UPDATE ?? SET ? WHERE ?? = ?`, [
-          `${schema}.stems`,
-          { LocalX: xValue, LocalY: yValue },
-          'StemGUID',
-          merged.StemGUID
-        ]),
+        format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.stems`, { LocalX: xValue, LocalY: yValue }, 'StemGUID', merged.StemGUID]),
         [],
         txID
       );
@@ -531,11 +483,7 @@ export async function writeMeasurementsSummary(
       .split(';')
       .map(code => code.trim())
       .filter(Boolean);
-    await cm.executeQuery(
-      `DELETE FROM ?? WHERE ?? = ?`,
-      [`${schema}.cmattributes`, `CoreMeasurementID`, coreMeasurementID],
-      txID
-    );
+    await cm.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, coreMeasurementID], txID);
     for (const code of parsedCodes) {
       await handleUpsert<CMAttributesResult>(
         cm,

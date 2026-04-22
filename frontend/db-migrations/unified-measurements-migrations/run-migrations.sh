@@ -66,6 +66,7 @@ ORDERED_MIGRATIONS=(
     "53_reapply_validation14_rawcodes_replay.sql"
     "54_create_edit_operations.sql"
     "55_extend_edit_operations_bulk_rows.sql"
+    "56_relax_edit_operations_target_id.sql"
 )
 
 # ---------------------------------------------------------------------------

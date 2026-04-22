@@ -17,7 +17,9 @@ export interface EditOperationRecord {
   operationType: EditOperationType;
   revertable: boolean;
   dataType: EditOperationDataType;
-  targetID: number;
+  // null on bulk-revision-row entries because a batch has no single "target"
+  // measurement. Affected CoreMeasurementIDs live inside BeforeState JSON.
+  targetID: number | null;
   plotID: number;
   censusID: number;
   planHash: string;
@@ -32,7 +34,7 @@ export interface EditOperationWriteInput {
   operationType: EditOperationType;
   revertable?: boolean;
   dataType: EditOperationDataType;
-  targetID: number;
+  targetID: number | null;
   plotID: number;
   censusID: number;
   planHash: string;
@@ -48,7 +50,7 @@ const CREATE_EDIT_OPERATIONS_TABLE_SQL = `
     OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL,
     Revertable BOOLEAN NOT NULL DEFAULT TRUE,
     DataType ENUM('measurementssummary', 'failedmeasurements') NOT NULL,
-    TargetID BIGINT NOT NULL,
+    TargetID BIGINT NULL,
     PlotID INT NOT NULL,
     CensusID INT NOT NULL,
     PlanHash CHAR(64) NOT NULL,
@@ -123,6 +125,34 @@ async function ensureRevertableColumn(
   );
 }
 
+async function ensureTargetIDNullable(
+  connectionManager: ConnectionManager,
+  schema: string,
+  transactionID?: string
+): Promise<void> {
+  const rows = await connectionManager.executeQuery(
+    `SELECT IS_NULLABLE AS isNullable
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ?
+       AND TABLE_NAME = 'edit_operations'
+       AND COLUMN_NAME = 'TargetID'
+     LIMIT 1`,
+    [schema],
+    transactionID
+  );
+
+  const isNullable = Array.isArray(rows) && rows.length > 0 ? String((rows[0] as Record<string, unknown>).isNullable ?? '') : '';
+  if (isNullable === 'YES') {
+    return;
+  }
+
+  await connectionManager.executeQuery(
+    safeFormatQuery(schema, `ALTER TABLE ??.edit_operations MODIFY COLUMN TargetID BIGINT NULL`),
+    undefined,
+    transactionID
+  );
+}
+
 async function ensureEditOperationsSchemaUpgrades(
   connectionManager: ConnectionManager,
   schema: string,
@@ -130,6 +160,7 @@ async function ensureEditOperationsSchemaUpgrades(
 ): Promise<void> {
   await ensureOperationTypeColumn(connectionManager, schema, transactionID);
   await ensureRevertableColumn(connectionManager, schema, transactionID);
+  await ensureTargetIDNullable(connectionManager, schema, transactionID);
 }
 
 export async function ensureEditOperationsTable(
@@ -300,12 +331,15 @@ function mapRowToEditOperationRecord(row: Record<string, unknown>): EditOperatio
   const revertedByRaw = row.RevertedByEditOperationID;
   const revertedBy = revertedByRaw === null || revertedByRaw === undefined ? null : Number(revertedByRaw);
 
+  const targetIDRaw = row.TargetID;
+  const targetID = targetIDRaw === null || targetIDRaw === undefined ? null : Number(targetIDRaw);
+
   return {
     editOperationID: Number(row.EditOperationID),
     operationType: row.OperationType as EditOperationType,
     revertable: toBoolean(row.Revertable, true),
     dataType: row.DataType as EditOperationDataType,
-    targetID: Number(row.TargetID),
+    targetID,
     plotID: Number(row.PlotID),
     censusID: Number(row.CensusID),
     planHash: String(row.PlanHash),

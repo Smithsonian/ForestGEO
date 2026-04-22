@@ -24,10 +24,7 @@ export async function applyAttributeRules(ctx: RuleContext): Promise<Effect[]> {
       id: 'R5',
       severity,
       category: severity === 'destructive' ? 'destructive' : 'field',
-      title:
-        severity === 'destructive'
-          ? `Attribute codes ${dropped.join(', ')} will be removed`
-          : 'Attribute codes will be rebuilt',
+      title: severity === 'destructive' ? `Attribute codes ${dropped.join(', ')} will be removed` : 'Attribute codes will be rebuilt',
       detail: `cmattributes rows for this measurement are deleted and re-inserted for the new code set.`,
       affectedTable: 'cmattributes',
       affectedRowCount: Math.max(oldCodes.size, newCodes.size)

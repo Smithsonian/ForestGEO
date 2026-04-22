@@ -112,6 +112,15 @@ export const PER_COLUMN_DECIMAL_PRECISION: Record<string, number> = {
   Y: 2
 };
 
+// Date-shaped fields across both surfaces. Analyzer diff and planhash
+// normalization both key off this set — keeping them in lockstep so
+// `from`/`to` comparisons and hash inputs agree for any new date column.
+export const DATE_FIELDS: ReadonlySet<string> = new Set(['MeasurementDate', 'Date']);
+
+export function isDateField(field: string): boolean {
+  return DATE_FIELDS.has(field);
+}
+
 export class InvalidClearError extends Error {
   constructor(public field: string) {
     super(`Field "${field}" cannot be cleared`);
@@ -168,4 +177,15 @@ export function rejectDisallowedFields(surface: EditSurface, newRow: Record<stri
     if (!allowed.has(key)) disallowed.push(key);
   }
   return disallowed.length ? disallowed : null;
+}
+
+// Grid-side predicate: given a raw column field key (any case / alias form),
+// does it resolve to a field that the server allowlist marks as editable?
+// Importing this from `measurementscommons.tsx` keeps the client grid's
+// readonly behavior synchronized with the server allowlist; no separate
+// local read-only list to drift silently.
+export function isFieldEditableOnSurface(surface: EditSurface, fieldName: string): boolean {
+  const aliases = FIELD_ALIASES_BY_SURFACE[surface];
+  const canonical = aliases[fieldName] ?? fieldName;
+  return EDITABLE_FIELDS_BY_SURFACE[surface].has(canonical);
 }
