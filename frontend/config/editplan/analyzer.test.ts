@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from './analyzer';
-import { analyzeBulk } from './bulkanalyzer';
+import { analyzeEdit, assertEditPlanCanApply, DisallowedFieldError, EditPlanUnapplicableError, RoleForbiddenFieldError, TargetNotFoundError } from './analyzer';
+import { analyzeBulk, assertBulkPlanCanApply, BulkPlanUnapplicableError } from './bulkanalyzer';
 import { applyDuplicateRules } from './rules/duplicates';
 import { DuplicateDeletion, Effect } from './types';
 
@@ -547,6 +547,189 @@ describe('analyzeBulk', () => {
     expect(bulkPlan.duplicateDeletions).toEqual(DUPLICATE_PAIRS);
     // Confirm it's a copy, not the same reference
     expect(bulkPlan.duplicateDeletions).not.toBe(DUPLICATE_PAIRS);
+  });
+});
+
+describe('assertEditPlanCanApply', () => {
+  const ROLE_ERROR: import('./types').RoleForbiddenFieldPreviewError = {
+    kind: 'RoleForbiddenField',
+    field: 'SpeciesCode',
+    role: 'field crew',
+    message: 'SpeciesCode can only be edited by global or db admin users.',
+    severity: 'destructive',
+    blocking: true
+  };
+
+  const TREESTEM_ERROR: import('./types').TreeStemResolutionPreviewError = {
+    kind: 'TreeStemResolution',
+    subject: 'tree',
+    reason: 'missing',
+    field: 'TreeTag',
+    message: 'Tree T-99 not found in plot/census.',
+    severity: 'destructive',
+    blocking: true
+  };
+
+  it('throws RoleForbiddenFieldError when plan has only role errors', () => {
+    const plan: import('./types').EditPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [],
+      effects: [],
+      errors: [ROLE_ERROR],
+      canApply: false,
+      maxSeverity: 'destructive',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString()
+    };
+    expect(() => assertEditPlanCanApply(plan)).toThrow(RoleForbiddenFieldError);
+  });
+
+  it('throws EditPlanUnapplicableError when plan has only treestem errors', () => {
+    const plan: import('./types').EditPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [],
+      effects: [],
+      errors: [TREESTEM_ERROR],
+      canApply: false,
+      maxSeverity: 'destructive',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString()
+    };
+    expect(() => assertEditPlanCanApply(plan)).toThrow(EditPlanUnapplicableError);
+    try {
+      assertEditPlanCanApply(plan);
+    } catch (err) {
+      expect(err).toBeInstanceOf(EditPlanUnapplicableError);
+      expect((err as EditPlanUnapplicableError).blockingErrors).toEqual([TREESTEM_ERROR]);
+    }
+  });
+
+  it('throws RoleForbiddenFieldError (role priority) when plan has both role and treestem errors', () => {
+    const plan: import('./types').EditPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [],
+      effects: [],
+      errors: [ROLE_ERROR, TREESTEM_ERROR],
+      canApply: false,
+      maxSeverity: 'destructive',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString()
+    };
+    expect(() => assertEditPlanCanApply(plan)).toThrow(RoleForbiddenFieldError);
+  });
+
+  it('throws EditPlanUnapplicableError with empty blockingErrors when canApply is false and errors array is empty', () => {
+    const plan: import('./types').EditPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [],
+      effects: [],
+      errors: [],
+      canApply: false,
+      maxSeverity: 'info',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString()
+    };
+    try {
+      assertEditPlanCanApply(plan);
+      expect.fail('Expected assertEditPlanCanApply to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(EditPlanUnapplicableError);
+      expect((err as EditPlanUnapplicableError).blockingErrors).toEqual([]);
+    }
+  });
+
+  it('passes silently when canApply is not false and errors is empty', () => {
+    const plan: import('./types').EditPlan = {
+      dataType: 'measurementssummary',
+      targetID: 42,
+      fieldChanges: [],
+      effects: [],
+      errors: [],
+      canApply: true,
+      maxSeverity: 'info',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString()
+    };
+    expect(() => assertEditPlanCanApply(plan)).not.toThrow();
+  });
+});
+
+describe('assertBulkPlanCanApply', () => {
+  const ROLE_ERROR: import('./types').RoleForbiddenFieldPreviewError = {
+    kind: 'RoleForbiddenField',
+    field: 'SpeciesCode',
+    role: 'field crew',
+    message: 'SpeciesCode can only be edited by global or db admin users.',
+    severity: 'destructive',
+    blocking: true,
+    rowIndex: 0
+  };
+
+  const TREESTEM_ERROR: import('./types').TreeStemResolutionPreviewError = {
+    kind: 'TreeStemResolution',
+    subject: 'tree',
+    reason: 'missing',
+    field: 'TreeTag',
+    message: 'Tree T-99 not found in plot/census.',
+    severity: 'destructive',
+    blocking: true,
+    rowIndex: 1
+  };
+
+  function makeMinimalBulkPlan(errors: import('./types').PreviewError[], canApply: boolean): import('./types').BulkEditPlan {
+    return {
+      dataType: 'measurementssummary',
+      rowCount: 2,
+      rowPlans: [],
+      aggregateEffects: [],
+      errors,
+      canApply,
+      maxSeverity: 'destructive',
+      planHash: 'abc',
+      generatedAt: new Date().toISOString(),
+      duplicateDeletions: []
+    };
+  }
+
+  it('throws RoleForbiddenFieldError when bulk plan has only role errors', () => {
+    const plan = makeMinimalBulkPlan([ROLE_ERROR], false);
+    expect(() => assertBulkPlanCanApply(plan)).toThrow(RoleForbiddenFieldError);
+  });
+
+  it('throws BulkPlanUnapplicableError when bulk plan has only treestem errors', () => {
+    const plan = makeMinimalBulkPlan([TREESTEM_ERROR], false);
+    expect(() => assertBulkPlanCanApply(plan)).toThrow(BulkPlanUnapplicableError);
+    try {
+      assertBulkPlanCanApply(plan);
+    } catch (err) {
+      expect(err).toBeInstanceOf(BulkPlanUnapplicableError);
+      expect((err as BulkPlanUnapplicableError).blockingErrors).toEqual([TREESTEM_ERROR]);
+    }
+  });
+
+  it('throws RoleForbiddenFieldError (role priority) when bulk plan has both role and treestem errors', () => {
+    const plan = makeMinimalBulkPlan([ROLE_ERROR, TREESTEM_ERROR], false);
+    expect(() => assertBulkPlanCanApply(plan)).toThrow(RoleForbiddenFieldError);
+  });
+
+  it('throws BulkPlanUnapplicableError with empty blockingErrors when canApply is false and errors array is empty', () => {
+    const plan = makeMinimalBulkPlan([], false);
+    try {
+      assertBulkPlanCanApply(plan);
+      expect.fail('Expected assertBulkPlanCanApply to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BulkPlanUnapplicableError);
+      expect((err as BulkPlanUnapplicableError).blockingErrors).toEqual([]);
+    }
+  });
+
+  it('passes silently when canApply is not false and errors is empty', () => {
+    const plan = makeMinimalBulkPlan([], true);
+    expect(() => assertBulkPlanCanApply(plan)).not.toThrow();
   });
 });
 
