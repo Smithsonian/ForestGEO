@@ -15,6 +15,26 @@ const mocks = vi.hoisted(() => {
       this.role = role;
     }
   }
+
+  class MockBulkPlanUnapplicableError extends Error {
+    blockingErrors: unknown[];
+    constructor(blockingErrors: unknown[]) {
+      super(`Bulk edit plan has ${blockingErrors.length} blocking error(s)`);
+      this.name = 'BulkPlanUnapplicableError';
+      this.blockingErrors = blockingErrors;
+    }
+  }
+
+  class MockMeasurementResolutionError extends Error {
+    subject: string;
+    reason: string;
+    constructor(subject: string, reason: string, message: string) {
+      super(message);
+      this.name = 'MeasurementResolutionError';
+      this.subject = subject;
+      this.reason = reason;
+    }
+  }
   const assertAuthorizationFresh = vi.fn(async () => undefined);
   return {
     auth: vi.fn(),
@@ -60,7 +80,9 @@ const mocks = vi.hoisted(() => {
       generatedAt: '2026-04-21T00:00:00Z',
       duplicateDeletions: []
     })),
-    assertBulkPlanCanApply: vi.fn()
+    assertBulkPlanCanApply: vi.fn(),
+    MockBulkPlanUnapplicableError,
+    MockMeasurementResolutionError
   };
 });
 
@@ -113,7 +135,12 @@ vi.mock('@/config/editplan/apply', () => ({
 
 vi.mock('@/config/editplan/bulkanalyzer', () => ({
   analyzeBulk: mocks.analyzeBulk,
-  assertBulkPlanCanApply: mocks.assertBulkPlanCanApply
+  assertBulkPlanCanApply: mocks.assertBulkPlanCanApply,
+  BulkPlanUnapplicableError: mocks.MockBulkPlanUnapplicableError
+}));
+
+vi.mock('@/config/editplan/writers/resolvers-mutating', () => ({
+  MeasurementResolutionError: mocks.MockMeasurementResolutionError
 }));
 
 vi.mock('@/config/editplan/analyzer', () => ({
@@ -615,6 +642,55 @@ describe('POST /api/revisionupload/apply', () => {
 
     expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
     expect(mocks.refreshMeasurementViewsForScope).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing', 1, 2, 'tx-1');
+  });
+
+  it('returns 422 with structured blockingErrors payload when assertBulkPlanCanApply throws BulkPlanUnapplicableError', async () => {
+    const blockingErrors = [
+      { kind: 'role-forbidden', subject: 'SpeciesCode', reason: 'field crew cannot edit this field', blocking: true },
+      { kind: 'validation', subject: 'MeasuredDBH', reason: 'value exceeds species maximum', blocking: true }
+    ];
+    mocks.assertBulkPlanCanApply.mockImplementation(() => {
+      throw new mocks.MockBulkPlanUnapplicableError(blockingErrors);
+    });
+
+    const response = await POST(buildRequest(buildValidBody()));
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({ error: 'plan not applicable', blockingErrors });
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 422 with subject and reason when a mutating resolver throws MeasurementResolutionError', async () => {
+    mocks.applyEditInTransaction.mockRejectedValue(
+      new mocks.MockMeasurementResolutionError('quadrat', 'missing', 'Quadrat not found for stem resolution')
+    );
+
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
+        return [{ ok: 1 }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [{ coreMeasurementID: 101, csvRow: { dbh: '12.5' } }]
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: 'Quadrat not found for stem resolution',
+      subject: 'quadrat',
+      reason: 'missing'
+    });
+    expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
   });
 
   it('does not refresh derived measurement views when apply makes no changes', async () => {

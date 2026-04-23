@@ -11,7 +11,8 @@ import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from
 import { ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS, STALE_VALIDATION_RUN_THRESHOLD_MINUTES } from '@/config/measurementscopepolicy';
 import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { applyEditInTransaction, ScopeLockHeldError, SessionExpiredError } from '@/config/editplan/apply';
-import { analyzeBulk, assertBulkPlanCanApply, BulkInput } from '@/config/editplan/bulkanalyzer';
+import { analyzeBulk, assertBulkPlanCanApply, BulkInput, BulkPlanUnapplicableError } from '@/config/editplan/bulkanalyzer';
+import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
@@ -1006,6 +1007,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof RevisionApplyPlanHashMismatchError) {
       return NextResponse.json({ error: 'plan hash mismatch', freshPlan: errorObj.freshPlan }, { status: HTTPResponses.CONFLICT });
+    }
+    if (errorObj instanceof BulkPlanUnapplicableError) {
+      return NextResponse.json({ error: 'plan not applicable', blockingErrors: errorObj.blockingErrors }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof MeasurementResolutionError) {
+      return NextResponse.json({ error: errorObj.message, subject: errorObj.subject, reason: errorObj.reason }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });

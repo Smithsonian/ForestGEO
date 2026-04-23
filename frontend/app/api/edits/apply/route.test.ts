@@ -86,6 +86,26 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockEditPlanUnapplicableError extends Error {
+    blockingErrors: unknown[];
+    constructor(blockingErrors: unknown[]) {
+      super(`Edit plan has ${blockingErrors.length} blocking error(s)`);
+      this.name = 'EditPlanUnapplicableError';
+      this.blockingErrors = blockingErrors;
+    }
+  }
+
+  class MockMeasurementResolutionError extends Error {
+    subject: string;
+    reason: string;
+    constructor(subject: string, reason: string, message: string) {
+      super(message);
+      this.name = 'MeasurementResolutionError';
+      this.subject = subject;
+      this.reason = reason;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
@@ -102,7 +122,9 @@ const mocks = vi.hoisted(() => {
     MockRoleForbiddenFieldError,
     MockScopeAccessError,
     MockScopeBusyError,
-    MockInvalidClearError
+    MockInvalidClearError,
+    MockEditPlanUnapplicableError,
+    MockMeasurementResolutionError
   };
 });
 
@@ -125,8 +147,13 @@ vi.mock('@/config/connectionmanager', () => ({
 
 vi.mock('@/config/editplan/analyzer', () => ({
   DisallowedFieldError: mocks.MockDisallowedFieldError,
+  EditPlanUnapplicableError: mocks.MockEditPlanUnapplicableError,
   RoleForbiddenFieldError: mocks.MockRoleForbiddenFieldError,
   TargetNotFoundError: mocks.MockTargetNotFoundError
+}));
+
+vi.mock('@/config/editplan/writers/resolvers-mutating', () => ({
+  MeasurementResolutionError: mocks.MockMeasurementResolutionError
 }));
 
 vi.mock('@/config/editplan/rules/context', () => ({
@@ -287,6 +314,33 @@ describe('POST /api/edits/apply', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'target not found' });
+  });
+
+  it('returns 422 with blockingErrors payload when applyEdit throws EditPlanUnapplicableError', async () => {
+    const blockingErrors = [
+      { kind: 'validation', subject: 'MeasuredDBH', reason: 'value below species minimum', blocking: true }
+    ];
+    mocks.applyEdit.mockRejectedValue(new mocks.MockEditPlanUnapplicableError(blockingErrors));
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'plan not applicable', blockingErrors });
+  });
+
+  it('returns 422 with subject and reason when applyEdit propagates MeasurementResolutionError from a mutating resolver', async () => {
+    mocks.applyEdit.mockRejectedValue(
+      new mocks.MockMeasurementResolutionError('species', 'missing', 'Species not found for tree resolution')
+    );
+
+    const response = await POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Species not found for tree resolution',
+      subject: 'species',
+      reason: 'missing'
+    });
   });
 
   it('returns 200 with ApplyResult on happy path and forwards the session email as createdBy', async () => {

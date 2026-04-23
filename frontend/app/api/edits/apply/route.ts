@@ -9,7 +9,8 @@ import { auth } from '@/auth';
 import ConnectionManager from '@/config/connectionmanager';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
-import { DisallowedFieldError, RoleForbiddenFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
+import { DisallowedFieldError, EditPlanUnapplicableError, RoleForbiddenFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
+import { MeasurementResolutionError } from '@/config/editplan/writers/resolvers-mutating';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { applyEdit, HashDriftError, ScopeLockHeldError, SessionExpiredError } from '@/config/editplan/apply';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
@@ -104,6 +105,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof RoleForbiddenFieldError) {
       return NextResponse.json({ error: 'role forbidden field', fields: err.fields, role: err.role }, { status: HTTPResponses.FORBIDDEN });
+    }
+    if (err instanceof EditPlanUnapplicableError) {
+      return NextResponse.json({ error: 'plan not applicable', blockingErrors: err.blockingErrors }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (err instanceof MeasurementResolutionError) {
+      return NextResponse.json({ error: err.message, subject: err.subject, reason: err.reason }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     if (err instanceof DisallowedFieldError) {
       return NextResponse.json({ error: 'disallowed fields', fields: err.fields }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
