@@ -28,7 +28,7 @@ describe('canonicalizeRowForHash', () => {
       expect(out.StemTag).toBe('S1');
       expect(out.SpeciesCode).toBe('abc');
       expect(out.QuadratName).toBe('Q1');
-      expect(out.StemLocalX).toBeCloseTo(1.23456);
+      expect(out.StemLocalX).toBe(1.23); // precision-2 rounds 1.23456 → 1.23
       expect(out.StemLocalY).toBe(2);
       expect(out.MeasuredDBH).toBe(10);
       expect(out.MeasurementDate).toBe('2026-04-22');
@@ -109,6 +109,15 @@ describe('canonicalizeRowForHash', () => {
     it('produces null for date that is NULL placeholder', () => {
       const out = canonicalizeRowForHash({ date: 'NULL' }, 'revision-update');
       expect(out.MeasurementDate).toBeNull();
+    });
+
+    it('passes unparseable date strings through unchanged', () => {
+      // Intentional hash-parity with the apply-path write (normalizeDateForSQL in
+      // apply/route.ts), which also falls through to the raw string for NaN dates
+      // rather than coercing to null. Changing this to null would silently break
+      // hash comparison between the plan and the applied record.
+      const out = canonicalizeRowForHash({ date: 'not-a-date' }, 'revision-update');
+      expect(out.MeasurementDate).toBe('not-a-date');
     });
 
     it('accepts numeric values directly without string conversion', () => {
