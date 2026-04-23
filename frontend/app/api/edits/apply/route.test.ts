@@ -317,9 +317,7 @@ describe('POST /api/edits/apply', () => {
   });
 
   it('returns 422 with blockingErrors payload when applyEdit throws EditPlanUnapplicableError', async () => {
-    const blockingErrors = [
-      { kind: 'validation', subject: 'MeasuredDBH', reason: 'value below species minimum', blocking: true }
-    ];
+    const blockingErrors = [{ kind: 'validation', subject: 'MeasuredDBH', reason: 'value below species minimum', blocking: true }];
     mocks.applyEdit.mockRejectedValue(new mocks.MockEditPlanUnapplicableError(blockingErrors));
 
     const response = await POST(buildRequest(VALID_BODY));
@@ -329,9 +327,7 @@ describe('POST /api/edits/apply', () => {
   });
 
   it('returns 422 with subject and reason when applyEdit propagates MeasurementResolutionError from a mutating resolver', async () => {
-    mocks.applyEdit.mockRejectedValue(
-      new mocks.MockMeasurementResolutionError('species', 'missing', 'Species not found for tree resolution')
-    );
+    mocks.applyEdit.mockRejectedValue(new mocks.MockMeasurementResolutionError('species', 'missing', 'Species not found for tree resolution'));
 
     const response = await POST(buildRequest(VALID_BODY));
 

@@ -662,9 +662,7 @@ describe('POST /api/revisionupload/apply', () => {
   });
 
   it('returns 422 with subject and reason when a mutating resolver throws MeasurementResolutionError', async () => {
-    mocks.applyEditInTransaction.mockRejectedValue(
-      new mocks.MockMeasurementResolutionError('quadrat', 'missing', 'Quadrat not found for stem resolution')
-    );
+    mocks.applyEditInTransaction.mockRejectedValue(new mocks.MockMeasurementResolutionError('quadrat', 'missing', 'Quadrat not found for stem resolution'));
 
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
