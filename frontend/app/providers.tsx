@@ -7,6 +7,8 @@ import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
 import { initializeAppInsights } from '@/applicationinsights';
 import { AnimationCacheProvider } from '@/app/contexts/animationcacheprovider';
+import { SWRConfig } from 'swr';
+import { defaultFetcher, QueryError } from '@/lib/query/fetcher';
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -34,9 +36,24 @@ export function Providers({ children }: Readonly<ProvidersProps>) {
   return (
     <ThemeRegistry>
       <SessionProvider>
-        <AnimationCacheProvider>
-          <LocalizationProvider dateAdapter={AdapterMoment}>{children}</LocalizationProvider>
-        </AnimationCacheProvider>
+        <SWRConfig
+          value={{
+            fetcher: defaultFetcher,
+            revalidateOnFocus: true,
+            revalidateOnReconnect: true,
+            dedupingInterval: 2000,
+            errorRetryCount: 2,
+            onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
+              if (error instanceof QueryError && error.status >= 400 && error.status < 500) return;
+              if (retryCount >= 2) return;
+              setTimeout(() => revalidate({ retryCount }), 1000 * 2 ** retryCount);
+            }
+          }}
+        >
+          <AnimationCacheProvider>
+            <LocalizationProvider dateAdapter={AdapterMoment}>{children}</LocalizationProvider>
+          </AnimationCacheProvider>
+        </SWRConfig>
       </SessionProvider>
     </ThemeRegistry>
   );
