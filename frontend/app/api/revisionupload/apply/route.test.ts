@@ -326,12 +326,12 @@ describe('POST /api/revisionupload/apply', () => {
       2,
       {
         matched: [
-          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: '12.5' } },
+          { rowIndex: 0, targetID: 101, newRow: { MeasuredDBH: 12.5 } },
           { rowIndex: 1, targetID: 202, newRow: {} }
         ],
-        newRows: [{ rowIndex: 5, newRow: { MeasuredDBH: '1.2' } }],
+        newRows: [{ rowIndex: 5, newRow: { TreeTag: 'T2', MeasuredDBH: 1.2 } }],
         invalid: [{ rowIndex: 7, reason: 'duplicate stemid' }],
-        duplicateMeasurementIDsToDelete: [303]
+        duplicateMeasurementIDsToDelete: [{ coreMeasurementID: 303, survivorCoreMeasurementID: 202 }]
       },
       'tx-1',
       { role: 'global' }
@@ -432,7 +432,7 @@ describe('POST /api/revisionupload/apply', () => {
       refreshViews: false,
       transactionID: 'tx-1'
     });
-    expect(firstInput.newRow).toEqual({ MeasuredDBH: '12.5', Attributes: 'L;D' });
+    expect(firstInput.newRow).toEqual({ MeasuredDBH: 12.5, Attributes: 'L;D' });
 
     const secondCall = mocks.applyEditInTransaction.mock.calls[1] as unknown as [unknown, Record<string, unknown>];
     const secondInput = secondCall[1];
@@ -443,7 +443,7 @@ describe('POST /api/revisionupload/apply', () => {
       writeLedger: false,
       refreshViews: false
     });
-    expect(secondInput.newRow).toEqual({ MeasuredHOM: '1.3' });
+    expect(secondInput.newRow).toEqual({ MeasuredHOM: 1.3 });
 
     // Exactly one ledger entry for the whole batch, summarizing all IDs.
     expect(mocks.writeEditOperation).toHaveBeenCalledTimes(1);

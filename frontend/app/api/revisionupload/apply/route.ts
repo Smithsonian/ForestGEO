@@ -17,10 +17,9 @@ import { RoleForbiddenFieldError } from '@/config/editplan/analyzer';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
+import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
 
 export const runtime = 'nodejs';
-
-const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
 
 const REVISION_UPLOAD_FILE_ID = 'revision-upload';
 
@@ -381,43 +380,8 @@ async function verifyMeasurementStillActive(
   return rows.length > 0;
 }
 
-/**
- * Maps the CSV's lowercase updatable field keys (`dbh`, `hom`, `date`,
- * `codes`, `comments`) onto the canonical `measurementssummary` surface keys
- * the bulk analyzer and applyEditInTransaction writer expect. Blank/NULL
- * placeholders are dropped so the analyzer's diff only sees real intended
- * writes. `codes` is renamed to `Attributes` so the R5 attribute rule fires
- * on code changes. `date` values are normalized to YYYY-MM-DD.
- *
- * This mirrors `buildAnalyzerNewRow` in `app/api/revisionupload/route.ts`
- * so the apply-time canonical newRow is identical to the one analyzeBulk
- * saw at match time — otherwise the re-computed plan hash will drift.
- */
-function buildCanonicalNewRow(csvRow: FileRow): Record<string, unknown> {
-  const newRow: Record<string, unknown> = {};
-  for (const field of UPDATABLE_FIELDS) {
-    const value = csvRow[field];
-    if (value === null || value === undefined) continue;
-    const trimmed = String(value).trim();
-    if (trimmed === '' || trimmed.toUpperCase() === 'NULL') continue;
-
-    if (field === 'codes') {
-      newRow.Attributes = trimmed;
-    } else if (field === 'dbh') {
-      newRow.MeasuredDBH = trimmed;
-    } else if (field === 'hom') {
-      newRow.MeasuredHOM = trimmed;
-    } else if (field === 'date') {
-      newRow.MeasurementDate = trimmed;
-    } else if (field === 'comments') {
-      newRow.Description = trimmed;
-    }
-  }
-  return newRow;
-}
-
 function hasAnyCanonicalField(csvRow: FileRow): boolean {
-  return Object.keys(buildCanonicalNewRow(csvRow)).length > 0;
+  return Object.keys(canonicalizeRowForHash(csvRow, 'revision-update')).length > 0;
 }
 
 /**
@@ -834,17 +798,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         matched: normalizedMatchedRows.matchedRows.map((row, index) => ({
           rowIndex: index,
           targetID: row.coreMeasurementID,
-          newRow: buildCanonicalNewRow(row.csvRow)
+          newRow: canonicalizeRowForHash(row.csvRow, 'revision-update')
         })),
         newRows: normalizedNewRows.newRows.map(row => ({
           rowIndex: row.csvIndex,
-          newRow: buildCanonicalNewRow(row.csvRow)
+          newRow: canonicalizeRowForHash(row.csvRow, 'revision-insert')
         })),
         invalid: normalizedInvalidRows.invalidRows.map(row => ({
           rowIndex: row.csvIndex,
           reason: row.reason
         })),
-        duplicateMeasurementIDsToDelete: duplicates.map(d => d.coreMeasurementID)
+        duplicateMeasurementIDsToDelete: duplicates
       };
       const baseFreshPlan = await analyzeBulk(
         connectionManager,
@@ -902,7 +866,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           continue;
         }
 
-        const canonicalNewRow = buildCanonicalNewRow(row.csvRow);
+        const canonicalNewRow = canonicalizeRowForHash(row.csvRow, 'revision-update');
 
         // Per-row ledger entries are suppressed: bulk rows are revertable:false,
         // so the full beforeState/afterState JSON would be pure audit cost.
