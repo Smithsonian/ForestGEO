@@ -604,6 +604,131 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // Clearable field NULL-write tests
+  //
+  // These tests verify that explicitly clearing a nullable field writes NULL
+  // to the DB — NOT the stale current value. Each test seeds a row with a
+  // non-null value, issues a plan change with `to: null`, then asserts the
+  // DB column is NULL after apply.
+  // -----------------------------------------------------------------------
+  describe('explicit field clears write NULL to DB', () => {
+    it('clears Description to NULL when the user removes it', async () => {
+      const plan = buildPlan(
+        [{ field: 'Description', from: 'initial comment', to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Description: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.Description).toBeNull();
+      expect(cmRow.RawComments).toBeNull();
+    });
+
+    it('clears Attributes to NULL and removes all cmattributes rows', async () => {
+      const attrCountBefore = await countCmAttributes(connection, fixture.coreMeasurementID);
+      expect(attrCountBefore).toBeGreaterThan(0);
+
+      const plan = buildPlan(
+        [{ field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Attributes: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.RawCodes).toBeNull();
+
+      const attrCountAfter = await countCmAttributes(connection, fixture.coreMeasurementID);
+      expect(attrCountAfter).toBe(0);
+    });
+
+    it('clears MeasuredDBH to NULL when the user removes it', async () => {
+      const plan = buildPlan(
+        [{ field: 'MeasuredDBH', from: INITIAL_DBH, to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredDBH: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.MeasuredDBH).toBeNull();
+    });
+
+    it('clears MeasuredHOM to NULL when the user removes it', async () => {
+      const plan = buildPlan(
+        [{ field: 'MeasuredHOM', from: INITIAL_HOM, to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredHOM: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.MeasuredHOM).toBeNull();
+    });
+
+    it('clears StemLocalX to NULL when the user removes it', async () => {
+      const plan = buildPlan(
+        [{ field: 'StemLocalX', from: INITIAL_STEM_X, to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemLocalX: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.RawX).toBeNull();
+    });
+
+    it('clears StemLocalY to NULL when the user removes it', async () => {
+      const plan = buildPlan(
+        [{ field: 'StemLocalY', from: INITIAL_STEM_Y, to: null }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemLocalY: null });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.RawY).toBeNull();
+    });
+
+    it('preserves current Description when it is not in the plan (regression: no stale-clear)', async () => {
+      // Only change DBH — Description must remain 'initial comment', not become NULL.
+      const NEW_DBH = 20.0;
+      const plan = buildPlan(
+        [{ field: 'MeasuredDBH', from: INITIAL_DBH, to: NEW_DBH }],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredDBH: NEW_DBH });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.Description).toBe('initial comment');
+      expect(cmRow.RawComments).toBe('initial comment');
+    });
+  });
+
   describe('beforeState / afterState snapshots', () => {
     it('captures coremeasurements + stems + cmattributes state on both sides for attribute + identity change', async () => {
       const newAttributes = `${ATTR_CODE_BROKEN}`;

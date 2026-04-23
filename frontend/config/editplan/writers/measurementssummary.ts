@@ -502,6 +502,18 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // --- Sync Raw* / measurement fields on coremeasurements whenever any
   //     user-visible editable field changed. Mirrors the legacy PATCH sync
   //     block so View Data and the failed-measurements explorer stay aligned.
+
+  // For clearable fields we must distinguish "field was not changed — keep
+  // current DB value" from "field was explicitly set to null — write NULL".
+  // The ?? fallback used for identity fields (TreeTag etc.) conflates the two
+  // cases, so clearable fields are routed through effective() instead.
+  // Identity fields keep the ?? fallback because treestem rules reject identity
+  // clears upstream — a null merged.TreeTag means the field was not changed.
+  const effective = <K extends keyof LoadedCoreMeasurementRow>(field: K): LoadedCoreMeasurementRow[K] =>
+    changedFields.has(field as string)
+      ? (merged as LoadedCoreMeasurementRow)[field]
+      : (current as LoadedCoreMeasurementRow)[field];
+
   const shouldSyncRaw = Array.from(changedFields).some(f => RAW_SYNC_TRIGGER_FIELDS.has(f));
   if (shouldSyncRaw) {
     changesFound = true;
@@ -513,14 +525,14 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
           RawStemTag: merged.StemTag ?? current.StemTag ?? null,
           RawSpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
           RawQuadrat: merged.QuadratName ?? current.QuadratName ?? null,
-          RawX: toOptionalNumber(merged.StemLocalX ?? current.StemLocalX),
-          RawY: toOptionalNumber(merged.StemLocalY ?? current.StemLocalY),
-          RawCodes: merged.Attributes ?? current.Attributes ?? null,
-          RawComments: merged.Description ?? current.Description ?? null,
-          Description: merged.Description ?? current.Description ?? null,
+          RawX: toOptionalNumber(effective('StemLocalX')),
+          RawY: toOptionalNumber(effective('StemLocalY')),
+          RawCodes: effective('Attributes') ?? null,
+          RawComments: effective('Description') ?? null,
+          Description: effective('Description') ?? null,
           MeasurementDate: normalizedMeasurementDate,
-          MeasuredDBH: toOptionalNumber(merged.MeasuredDBH ?? current.MeasuredDBH),
-          MeasuredHOM: toOptionalNumber(merged.MeasuredHOM ?? current.MeasuredHOM)
+          MeasuredDBH: toOptionalNumber(effective('MeasuredDBH')),
+          MeasuredHOM: toOptionalNumber(effective('MeasuredHOM'))
         },
         'CoreMeasurementID',
         coreMeasurementID
@@ -544,13 +556,13 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
           StemTag: merged.StemTag ?? current.StemTag ?? null,
           SpCode: merged.SpeciesCode ?? current.SpeciesCode ?? null,
           Quadrat: merged.QuadratName ?? current.QuadratName ?? null,
-          X: toOptionalNumber(merged.StemLocalX ?? current.StemLocalX),
-          Y: toOptionalNumber(merged.StemLocalY ?? current.StemLocalY),
-          DBH: toOptionalNumber(merged.MeasuredDBH ?? current.MeasuredDBH),
-          HOM: toOptionalNumber(merged.MeasuredHOM ?? current.MeasuredHOM),
+          X: toOptionalNumber(effective('StemLocalX')),
+          Y: toOptionalNumber(effective('StemLocalY')),
+          DBH: toOptionalNumber(effective('MeasuredDBH')),
+          HOM: toOptionalNumber(effective('MeasuredHOM')),
           Date: normalizedMeasurementDate,
-          Codes: merged.Attributes ?? current.Attributes ?? null,
-          Comments: merged.Description ?? current.Description ?? null
+          Codes: effective('Attributes') ?? null,
+          Comments: effective('Description') ?? null
         },
         txID
       );
