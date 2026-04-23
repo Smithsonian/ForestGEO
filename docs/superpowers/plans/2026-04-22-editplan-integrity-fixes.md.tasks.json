@@ -4,41 +4,41 @@
     {
       "id": 1,
       "subject": "Task 1: Shared canonicalrow module",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Introduce `canonicalrow.ts` that normalizes a CSV row into the stable, hashable shape the analyzer and apply path both consume, with distinct modes for matched updates and new inserts.\n\n**Files:**\n- Create: `frontend/config/editplan/canonicalrow.ts`\n- Create: `frontend/config/editplan/canonicalrow.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/canonicalrow.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/canonicalrow.ts\",\"frontend/config/editplan/canonicalrow.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/canonicalrow.test.ts\",\"acceptanceCriteria\":[\"two modes with correct field sets\",\"alias expansion\",\"normalization rules\",\"idempotence\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: P1 types + planhash canonicalization",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "**Goal:** Introduce `DuplicateDeletion`, attach `canonicalNewRow?` to `RowPlan`, add `duplicateDeletions` to `BulkEditPlan`, canonicalize into the bulk plan hash.\n\n**Files:**\n- Modify: `frontend/config/editplan/types.ts`\n- Modify: `frontend/config/editplan/planhash.ts`\n- Modify: `frontend/config/editplan/planhash.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/planhash.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/types.ts\",\"frontend/config/editplan/planhash.ts\",\"frontend/config/editplan/planhash.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/planhash.test.ts\",\"acceptanceCriteria\":[\"DuplicateDeletion exported\",\"RowPlan.canonicalNewRow\",\"BulkEditPlan.duplicateDeletions\",\"sort by both fields\",\"no dedupe\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: bulkanalyzer populates canonicalNewRow and duplicateDeletions",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** `analyzeBulk` canonicalizes new rows via the shared module (insert mode) onto each `RowPlan`, and emits `DuplicateDeletion[]` onto the plan.\n\n**Files:**\n- Modify: `frontend/config/editplan/bulkanalyzer.ts`\n- Modify: `frontend/config/editplan/rules/duplicates.ts`\n- Modify: `frontend/config/editplan/analyzer.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/bulkanalyzer.ts\",\"frontend/config/editplan/rules/duplicates.ts\",\"frontend/config/editplan/analyzer.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/\",\"acceptanceCriteria\":[\"structured duplicate array\",\"canonicalNewRow on new rowplans\",\"duplicateDeletions on plan\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Match route uses shared canonicalizer and structured duplicates",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "**Goal:** Retire `buildAnalyzerNewRow`; build `DuplicateDeletion[]` per-matched-row; canonicalize matched (update mode) and new (insert mode) rows via shared module.\n\n**Files:**\n- Modify: `frontend/app/api/revisionupload/route.ts`\n- Modify: `frontend/app/api/revisionupload/route.test.ts`\n\n**Verify:** `cd frontend && npx vitest run app/api/revisionupload/route.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/app/api/revisionupload/route.ts\",\"frontend/app/api/revisionupload/route.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run app/api/revisionupload/route.test.ts\",\"acceptanceCriteria\":[\"shared canonicalizer used\",\"structured duplicate pairs\",\"buildAnalyzerNewRow deleted\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: Apply route uses shared canonicalizer and structured duplicates",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "**Goal:** Retire `buildCanonicalNewRow`; use `canonicalizeRowForHash` with correct modes; pass structured duplicates to `bulkInputForHashCheck`.\n\n**Files:**\n- Modify: `frontend/app/api/revisionupload/apply/route.ts`\n- Modify: `frontend/app/api/revisionupload/apply/route.test.ts`\n\n**Verify:** `cd frontend && npx vitest run app/api/revisionupload/apply/route.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/app/api/revisionupload/apply/route.ts\",\"frontend/app/api/revisionupload/apply/route.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run app/api/revisionupload/apply/route.test.ts\",\"acceptanceCriteria\":[\"buildCanonicalNewRow deleted\",\"shared canonicalizer used at 3 call sites\",\"structured duplicates piped through\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: P1 integration test — hash drift",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4, 5],
       "description": "**Goal:** End-to-end coverage: tampered new-row content and swapped duplicate survivor both produce 409 plan-hash drift.\n\n**Files:**\n- Create: `frontend/tests/integration/editplan-integrity.integration.test.ts`\n\n**Verify:** `cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/tests/integration/editplan-integrity.integration.test.ts\"],\"verifyCommand\":\"cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts\",\"acceptanceCriteria\":[\"tampered new-row content returns 409\",\"swapped duplicate pair returns 409\"]}\n```"
     },
@@ -104,5 +104,5 @@
       "description": "**Goal:** Entire suite green, production build succeeds.\n\n**Files:** None (verification only).\n\n**Verify:** `cd frontend && npm run test:unit && npm run test:integration && npm run lint && npm run build`.\n\n```json:metadata\n{\"files\":[],\"verifyCommand\":\"cd frontend && npm run test:unit && npm run test:integration && npm run lint && npm run build\",\"acceptanceCriteria\":[\"all tests pass\",\"build succeeds\",\"lint clean\"]}\n```"
     }
   ],
-  "lastUpdated": "2026-04-22T00:00:00.000Z"
+  "lastUpdated": "2026-04-23T07:58:00.000Z"
 }
