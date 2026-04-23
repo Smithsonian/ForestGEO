@@ -238,6 +238,58 @@ describe('analyzeEdit', () => {
     expect(plan.canApply).toBe(false);
     expect(plan.errors?.[0]).toMatchObject({ field: 'SpCode', role: 'lead technician' });
   });
+
+  it('maxSeverity is destructive when errors contain a blocking TreeStemResolution error and effects array is empty', async () => {
+    // This is the gap identified in Task 9: a plan with only treestem errors
+    // (no destructive effect) was reporting maxSeverity: 'info' while
+    // simultaneously setting canApply: false. The reducer must fold errors in.
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const treeStemError: import('./types').TreeStemResolutionPreviewError = {
+      kind: 'TreeStemResolution',
+      subject: 'tree',
+      reason: 'missing',
+      field: 'TreeTag',
+      message: 'Tree T-99 not found in plot/census.',
+      severity: 'destructive',
+      blocking: true
+    };
+    vi.mocked(applyTreeStemRules).mockResolvedValueOnce({ effects: [], errors: [treeStemError] });
+
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, {
+      TreeTag: 'T-99'
+    });
+
+    expect(plan.effects).toHaveLength(0);
+    expect(plan.errors).toHaveLength(1);
+    expect(plan.canApply).toBe(false);
+    // maxSeverity must reflect the error severity, not just the (empty) effects list
+    expect(plan.maxSeverity).toBe('destructive');
+  });
+
+  it('maxSeverity uses highest severity across both errors and effects', async () => {
+    // Confirm precedence: if effects have 'warn' and errors have 'destructive',
+    // the result is 'destructive', and vice versa.
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const treeStemError: import('./types').TreeStemResolutionPreviewError = {
+      kind: 'TreeStemResolution',
+      subject: 'stem',
+      reason: 'inactive',
+      field: 'StemTag',
+      message: 'Stem S-1 is inactive.',
+      severity: 'destructive',
+      blocking: true
+    };
+    vi.mocked(applyTreeStemRules).mockResolvedValueOnce({ effects: [], errors: [treeStemError] });
+    vi.mocked(applySpeciesRules).mockResolvedValueOnce([makeEffect('R1a', 'warn')]);
+
+    const plan = await analyzeEdit(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, TARGET_ID, {
+      StemTag: 'S-99'
+    });
+
+    expect(plan.effects).toHaveLength(1);
+    expect(plan.errors).toHaveLength(1);
+    expect(plan.maxSeverity).toBe('destructive');
+  });
 });
 
 describe('applyDuplicateRules (R6)', () => {
@@ -427,6 +479,37 @@ describe('analyzeBulk', () => {
     expect(newRowPlan?.status).toBe('new');
     expect(newRowPlan?.canonicalNewRow).toBeDefined();
     expect(newRowPlan?.canonicalNewRow).toMatchObject({ TreeTag: 'T99', StemTag: 'S99', MeasuredDBH: 12.5, MeasurementDate: '2026-04-22' });
+  });
+
+  it('maxSeverity is destructive when a row plan has only a TreeStemResolution error and no destructive effect', async () => {
+    // Regression for Task 9: bulk maxSeverity was computed only from
+    // aggregateEffects. A row with only blocking errors (no effects) produced
+    // canApply:false but maxSeverity:'info' — a visible UX inconsistency.
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const treeStemError: import('./types').TreeStemResolutionPreviewError = {
+      kind: 'TreeStemResolution',
+      subject: 'tree',
+      reason: 'missing',
+      field: 'TreeTag',
+      message: 'Tree T-99 not found in plot/census.',
+      severity: 'destructive',
+      blocking: true
+    };
+    vi.mocked(applyTreeStemRules).mockResolvedValueOnce({ effects: [], errors: [treeStemError] });
+
+    const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
+      matched: [{ rowIndex: 0, targetID: 42, newRow: { TreeTag: 'T-99' } }],
+      newRows: [],
+      invalid: [],
+      duplicateMeasurementIDsToDelete: []
+    });
+
+    expect(bulkPlan.aggregateEffects).toHaveLength(0);
+    expect(bulkPlan.errors).toHaveLength(1);
+    expect(bulkPlan.errors?.[0]).toMatchObject({ kind: 'TreeStemResolution', rowIndex: 0 });
+    expect(bulkPlan.canApply).toBe(false);
+    // The key assertion: errors must drive maxSeverity, not just effects
+    expect(bulkPlan.maxSeverity).toBe('destructive');
   });
 
   it('does not populate canonicalNewRow on invalid RowPlans', async () => {

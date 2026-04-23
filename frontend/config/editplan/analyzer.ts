@@ -173,7 +173,9 @@ export async function analyzeEdit(
     effects.push(...(await applyAttributeRules(ctx)));
   }
 
-  const maxSeverity = effects.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
+  const effectSeverity = effects.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
+  const errorSeverity = errors.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
+  const maxSeverity: Severity = SEVERITY_RANK[errorSeverity] > SEVERITY_RANK[effectSeverity] ? errorSeverity : effectSeverity;
 
   const plan: EditPlan = {
     dataType,
