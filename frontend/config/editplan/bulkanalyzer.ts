@@ -1,14 +1,15 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { BulkEditPlan, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
+import { BulkEditPlan, DuplicateDeletion, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
 import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analyzeEdit } from './analyzer';
 import { applyDuplicateRules } from './rules/duplicates';
+import { canonicalizeRowForHash } from './canonicalrow';
 import { hashPlan } from './planhash';
 
 export interface BulkInput {
   matched: Array<{ rowIndex: number; targetID: number; newRow: Record<string, unknown> }>;
   newRows: Array<{ rowIndex: number; newRow: Record<string, unknown> }>;
   invalid: Array<{ rowIndex: number; reason: string }>;
-  duplicateMeasurementIDsToDelete: number[];
+  duplicateMeasurementIDsToDelete: DuplicateDeletion[];
 }
 
 export async function analyzeBulk(
@@ -51,7 +52,11 @@ export async function analyzeBulk(
   }
 
   for (const newRow of input.newRows) {
-    rowPlans.push({ rowIndex: newRow.rowIndex, status: 'new' });
+    rowPlans.push({
+      rowIndex: newRow.rowIndex,
+      status: 'new',
+      canonicalNewRow: canonicalizeRowForHash(newRow.newRow, 'revision-insert')
+    });
   }
 
   for (const invalid of input.invalid) {
@@ -59,7 +64,7 @@ export async function analyzeBulk(
   }
 
   const surfacedEffects: Effect[] = [];
-  surfacedEffects.push(...applyDuplicateRules(input.duplicateMeasurementIDsToDelete.length));
+  surfacedEffects.push(...applyDuplicateRules(input.duplicateMeasurementIDsToDelete));
   const errors: PreviewError[] = [];
   for (const rowPlan of rowPlans) {
     if (rowPlan.status === 'invalid') continue;
@@ -82,7 +87,7 @@ export async function analyzeBulk(
     maxSeverity,
     planHash: '',
     generatedAt: new Date().toISOString(),
-    duplicateDeletions: []
+    duplicateDeletions: [...input.duplicateMeasurementIDsToDelete]
   };
   plan.planHash = hashPlan(plan);
   return plan;

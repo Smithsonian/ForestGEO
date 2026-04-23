@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from './analyzer';
 import { analyzeBulk } from './bulkanalyzer';
 import { applyDuplicateRules } from './rules/duplicates';
-import { Effect } from './types';
+import { DuplicateDeletion, Effect } from './types';
 
 vi.mock('./rules/species', () => ({
   applySpeciesRules: vi.fn(async () => [])
@@ -241,13 +241,17 @@ describe('analyzeEdit', () => {
 });
 
 describe('applyDuplicateRules (R6)', () => {
-  it('returns [] when count <= 0', () => {
-    expect(applyDuplicateRules(0)).toEqual([]);
-    expect(applyDuplicateRules(-1)).toEqual([]);
+  it('returns [] when given an empty array', () => {
+    expect(applyDuplicateRules([])).toEqual([]);
   });
 
-  it('returns a single destructive R6 effect when count > 0', () => {
-    const effects = applyDuplicateRules(3);
+  it('returns a single destructive R6 effect whose affectedRowCount equals the number of pairs', () => {
+    const pairs: DuplicateDeletion[] = [
+      { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
+      { coreMeasurementID: 20, survivorCoreMeasurementID: 1 },
+      { coreMeasurementID: 30, survivorCoreMeasurementID: 1 }
+    ];
+    const effects = applyDuplicateRules(pairs);
     expect(effects).toHaveLength(1);
     expect(effects[0]).toMatchObject({
       id: 'R6',
@@ -275,7 +279,10 @@ describe('analyzeBulk', () => {
       ],
       newRows: [{ rowIndex: 2, newRow: { MeasuredDBH: 18 } }],
       invalid: [{ rowIndex: 3, reason: 'ambiguous match key' }],
-      duplicateMeasurementIDsToDelete: [101, 102]
+      duplicateMeasurementIDsToDelete: [
+        { coreMeasurementID: 101, survivorCoreMeasurementID: 42 },
+        { coreMeasurementID: 102, survivorCoreMeasurementID: 43 }
+      ]
     });
 
     expect(bulkPlan.rowCount).toBe(4);
@@ -404,6 +411,59 @@ describe('analyzeBulk', () => {
     expect(r4).toBeTruthy();
     expect(r4!.affectedRowCount).toBe(8);
     expect(r4!.severity).toBe('warn');
+  });
+
+  it('populates canonicalNewRow on new-status RowPlans using revision-insert mode', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+
+    const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
+      matched: [],
+      newRows: [{ rowIndex: 5, newRow: { tag: 'T99', stemtag: 'S99', dbh: '12.5', date: '2026-04-22' } }],
+      invalid: [],
+      duplicateMeasurementIDsToDelete: []
+    });
+
+    const newRowPlan = bulkPlan.rowPlans.find(rp => rp.rowIndex === 5);
+    expect(newRowPlan?.status).toBe('new');
+    expect(newRowPlan?.canonicalNewRow).toBeDefined();
+    expect(newRowPlan?.canonicalNewRow).toMatchObject({ TreeTag: 'T99', StemTag: 'S99', MeasuredDBH: 12.5, MeasurementDate: '2026-04-22' });
+  });
+
+  it('does not populate canonicalNewRow on invalid RowPlans', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+
+    const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
+      matched: [],
+      newRows: [],
+      invalid: [{ rowIndex: 3, reason: 'bad key' }],
+      duplicateMeasurementIDsToDelete: []
+    });
+
+    const invalidPlan = bulkPlan.rowPlans.find(rp => rp.rowIndex === 3);
+    expect(invalidPlan?.status).toBe('invalid');
+    expect(invalidPlan?.canonicalNewRow).toBeUndefined();
+  });
+
+  it('propagates structured duplicate pairs onto BulkEditPlan.duplicateDeletions as an immutable copy', async () => {
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+    const DUPLICATE_PAIRS: DuplicateDeletion[] = [
+      { coreMeasurementID: 101, survivorCoreMeasurementID: 42 },
+      { coreMeasurementID: 102, survivorCoreMeasurementID: 43 }
+    ];
+
+    const bulkPlan = await analyzeBulk(cm, SCHEMA, 'measurementssummary', PLOT_ID, CENSUS_ID, {
+      matched: [
+        { rowIndex: 0, targetID: 42, newRow: { MeasuredDBH: 16 } },
+        { rowIndex: 1, targetID: 43, newRow: { MeasuredDBH: 17 } }
+      ],
+      newRows: [],
+      invalid: [],
+      duplicateMeasurementIDsToDelete: DUPLICATE_PAIRS
+    });
+
+    expect(bulkPlan.duplicateDeletions).toEqual(DUPLICATE_PAIRS);
+    // Confirm it's a copy, not the same reference
+    expect(bulkPlan.duplicateDeletions).not.toBe(DUPLICATE_PAIRS);
   });
 });
 
