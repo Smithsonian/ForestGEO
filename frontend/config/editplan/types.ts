@@ -56,12 +56,18 @@ export interface EditPlan {
   generatedAt: string;
 }
 
+export interface DuplicateDeletion {
+  coreMeasurementID: number;
+  survivorCoreMeasurementID: number;
+}
+
 export interface RowPlan {
   rowIndex: number;
   targetID?: number;
   plan?: EditPlan;
   status: 'matched' | 'new' | 'invalid' | 'unchanged';
   reason?: string;
+  canonicalNewRow?: Record<string, unknown>;
 }
 
 export interface BulkEditPlan {
@@ -74,6 +80,7 @@ export interface BulkEditPlan {
   maxSeverity: Severity;
   planHash: string;
   generatedAt: string;
+  duplicateDeletions: DuplicateDeletion[];
 }
 
 export interface ApplyResult {

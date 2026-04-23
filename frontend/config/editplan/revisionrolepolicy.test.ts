@@ -9,7 +9,8 @@ const basePlan: BulkEditPlan = {
   aggregateEffects: [],
   maxSeverity: 'info',
   planHash: 'base-plan-hash',
-  generatedAt: '2026-04-22T00:00:00.000Z'
+  generatedAt: '2026-04-22T00:00:00.000Z',
+  duplicateDeletions: []
 };
 
 describe('applyRevisionRolePolicy', () => {

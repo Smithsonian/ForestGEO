@@ -74,12 +74,16 @@ function canonicalizeRowPlan(rowPlan: RowPlan): unknown {
 export function canonicalizePlan(plan: EditPlan | BulkEditPlan): unknown {
   if ('rowPlans' in plan) {
     const { planHash: _planHash, generatedAt: _generatedAt, ...rest } = plan;
+    const sortedDuplicates = [...plan.duplicateDeletions].sort(
+      (a, b) => a.coreMeasurementID - b.coreMeasurementID || a.survivorCoreMeasurementID - b.survivorCoreMeasurementID
+    );
     return sortKeys({
       ...rest,
       rowPlans: plan.rowPlans
         .map(canonicalizeRowPlan)
         .sort((a, b) => Number((a as { rowIndex: number }).rowIndex) - Number((b as { rowIndex: number }).rowIndex)),
-      aggregateEffects: sortEffects(plan.aggregateEffects).map(effect => sortKeys(effect))
+      aggregateEffects: sortEffects(plan.aggregateEffects).map(effect => sortKeys(effect)),
+      duplicateDeletions: sortedDuplicates
     });
   }
 

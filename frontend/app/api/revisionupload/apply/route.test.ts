@@ -57,7 +57,8 @@ const mocks = vi.hoisted(() => {
       aggregateEffects: [],
       maxSeverity: 'info',
       planHash: 'hash-not-mocked',
-      generatedAt: '2026-04-21T00:00:00Z'
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
     })),
     assertBulkPlanCanApply: vi.fn()
   };
@@ -173,6 +174,7 @@ function buildFreshPlan(planHash: string, overrides: Record<string, unknown> = {
     maxSeverity: 'info',
     planHash,
     generatedAt: '2026-04-21T00:00:00Z',
+    duplicateDeletions: [],
     ...overrides
   };
 }

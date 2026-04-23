@@ -81,7 +81,8 @@ export async function analyzeBulk(
     canApply: errors.length === 0,
     maxSeverity,
     planHash: '',
-    generatedAt: new Date().toISOString()
+    generatedAt: new Date().toISOString(),
+    duplicateDeletions: []
   };
   plan.planHash = hashPlan(plan);
   return plan;

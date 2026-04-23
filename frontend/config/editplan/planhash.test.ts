@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { canonicalizePlan, hashPlan } from './planhash';
-import { BulkEditPlan, EditPlan } from './types';
+import { BulkEditPlan, DuplicateDeletion, EditPlan } from './types';
+
+function buildBulkPlanShell(overrides: Partial<BulkEditPlan> = {}): BulkEditPlan {
+  return {
+    dataType: 'measurementssummary',
+    rowCount: 0,
+    rowPlans: [],
+    aggregateEffects: [],
+    errors: [],
+    canApply: true,
+    maxSeverity: 'info',
+    planHash: '',
+    generatedAt: '2026-04-22T00:00:00.000Z',
+    duplicateDeletions: [],
+    ...overrides
+  };
+}
 
 const base: EditPlan = {
   dataType: 'measurementssummary',
@@ -127,7 +143,8 @@ describe('hashPlan', () => {
       aggregateEffects: [],
       maxSeverity: 'info',
       planHash: 'a',
-      generatedAt: '2026-04-21T00:00:00Z'
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
     };
     const bulkB: BulkEditPlan = {
       ...bulkA,
@@ -157,7 +174,8 @@ describe('hashPlan', () => {
       aggregateEffects: [],
       maxSeverity: 'warn',
       planHash: '',
-      generatedAt: '2026-04-21T00:00:00Z'
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
     };
     const bulkB: BulkEditPlan = {
       ...bulkA,
@@ -167,5 +185,46 @@ describe('hashPlan', () => {
       ]
     };
     expect(hashPlan(bulkA)).toBe(hashPlan(bulkB));
+  });
+});
+
+describe('planhash - bulk duplicateDeletions', () => {
+  it('hashes same pairs regardless of input order', () => {
+    const a = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [
+        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
+        { coreMeasurementID: 20, survivorCoreMeasurementID: 2 }
+      ]
+    }));
+    const b = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [
+        { coreMeasurementID: 20, survivorCoreMeasurementID: 2 },
+        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
+      ]
+    }));
+    expect(a).toBe(b);
+  });
+
+  it('changes hash when survivor ID swaps', () => {
+    const a = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
+    }));
+    const b = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 2 }]
+    }));
+    expect(a).not.toBe(b);
+  });
+
+  it('changes hash when a pair is duplicated (no dedupe)', () => {
+    const single = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
+    }));
+    const doubled = hashPlan(buildBulkPlanShell({
+      duplicateDeletions: [
+        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
+        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
+      ]
+    }));
+    expect(single).not.toBe(doubled);
   });
 });

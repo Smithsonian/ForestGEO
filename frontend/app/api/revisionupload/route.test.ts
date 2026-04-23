@@ -9,7 +9,8 @@ const EMPTY_BULK_PLAN: BulkEditPlan = {
   aggregateEffects: [],
   maxSeverity: 'info',
   planHash: 'test-plan-hash-empty',
-  generatedAt: '2026-04-20T00:00:00.000Z'
+  generatedAt: '2026-04-20T00:00:00.000Z',
+  duplicateDeletions: []
 };
 
 const mocks = vi.hoisted(() => ({
@@ -885,7 +886,8 @@ describe('POST /api/revisionupload', () => {
       aggregateEffects: [],
       maxSeverity: 'info',
       planHash: 'captured-plan-hash',
-      generatedAt: '2026-04-20T00:00:00.000Z'
+      generatedAt: '2026-04-20T00:00:00.000Z',
+      duplicateDeletions: []
     };
     mocks.analyzeBulk.mockResolvedValue(capturedBulkPlan);
     mocks.executeQuery.mockResolvedValue([]);
@@ -997,7 +999,8 @@ describe('POST /api/revisionupload', () => {
       aggregateEffects: [R5_EFFECT],
       maxSeverity: 'destructive',
       planHash: 'r5-plan-hash',
-      generatedAt: '2026-04-20T00:00:00.000Z'
+      generatedAt: '2026-04-20T00:00:00.000Z',
+      duplicateDeletions: []
     } as BulkEditPlan);
 
     const response = await POST(
@@ -1110,7 +1113,8 @@ describe('POST /api/revisionupload', () => {
       aggregateEffects: [R6_EFFECT],
       maxSeverity: 'destructive',
       planHash: 'r6-plan-hash',
-      generatedAt: '2026-04-20T00:00:00.000Z'
+      generatedAt: '2026-04-20T00:00:00.000Z',
+      duplicateDeletions: []
     } as BulkEditPlan);
 
     const response = await POST(
