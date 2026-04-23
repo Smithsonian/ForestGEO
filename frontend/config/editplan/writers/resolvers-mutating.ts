@@ -12,6 +12,17 @@ import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
+export class MeasurementResolutionError extends Error {
+  constructor(
+    public readonly subject: 'species' | 'quadrat' | 'tree' | 'stem',
+    public readonly reason: 'missing' | 'inactive' | 'different_quadrat',
+    message: string
+  ) {
+    super(message);
+    this.name = 'MeasurementResolutionError';
+  }
+}
+
 export type TreeStemStateLabel = 'old tree' | 'multi stem' | 'new recruit';
 
 export interface MeasurementSummaryStructure {

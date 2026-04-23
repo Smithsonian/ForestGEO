@@ -34,7 +34,7 @@ export interface FieldChange {
   to: unknown;
 }
 
-export interface PreviewError {
+export interface RoleForbiddenFieldPreviewError {
   kind: 'RoleForbiddenField';
   field: string;
   role: UserAuthRoles | 'unknown';
@@ -43,6 +43,19 @@ export interface PreviewError {
   blocking: true;
   rowIndex?: number;
 }
+
+export interface TreeStemResolutionPreviewError {
+  kind: 'TreeStemResolution';
+  subject: 'species' | 'quadrat' | 'tree' | 'stem';
+  reason: 'missing' | 'inactive' | 'different_quadrat' | 'cannot_create';
+  field: 'SpeciesCode' | 'QuadratName' | 'TreeTag' | 'StemTag';
+  message: string;
+  severity: 'destructive';
+  blocking: true;
+  rowIndex?: number;
+}
+
+export type PreviewError = RoleForbiddenFieldPreviewError | TreeStemResolutionPreviewError;
 
 export interface EditPlan {
   dataType: EditPlanDataType;

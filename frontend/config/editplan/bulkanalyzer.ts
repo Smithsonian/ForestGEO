@@ -1,9 +1,16 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { BulkEditPlan, DuplicateDeletion, EditPlanDataType, Effect, PreviewError, RowPlan, SEVERITY_RANK, Severity } from './types';
-import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analyzeEdit } from './analyzer';
+import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analyzeEdit, isRoleForbiddenPreviewError } from './analyzer';
 import { applyDuplicateRules } from './rules/duplicates';
 import { canonicalizeRowForHash } from './canonicalrow';
 import { hashPlan } from './planhash';
+
+export class BulkPlanUnapplicableError extends Error {
+  constructor(public readonly blockingErrors: PreviewError[]) {
+    super(`Bulk edit plan has ${blockingErrors.length} blocking error(s)`);
+    this.name = 'BulkPlanUnapplicableError';
+  }
+}
 
 export interface BulkInput {
   matched: Array<{ rowIndex: number; targetID: number; newRow: Record<string, unknown> }>;
@@ -94,7 +101,7 @@ export async function analyzeBulk(
 }
 
 export function assertBulkPlanCanApply(plan: BulkEditPlan): void {
-  const roleErrors = (plan.errors ?? []).filter(error => error.kind === 'RoleForbiddenField' && error.blocking);
+  const roleErrors = (plan.errors ?? []).filter(isRoleForbiddenPreviewError).filter(error => error.blocking);
   if (roleErrors.length > 0 || plan.canApply === false) {
     throw new RoleForbiddenFieldError(
       roleErrors.map(error => error.field),

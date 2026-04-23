@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import type { UserAuthRoles } from '@/config/macros';
-import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, SEVERITY_RANK, Severity } from './types';
+import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, RoleForbiddenFieldPreviewError, SEVERITY_RANK, Severity } from './types';
 import { applySpeciesRules } from './rules/species';
 import { applyTreeStemRules } from './rules/treestem';
 import { applyCoordinateRules } from './rules/coordinates';
@@ -65,6 +65,13 @@ export class RoleForbiddenFieldError extends Error {
   }
 }
 
+export class EditPlanUnapplicableError extends Error {
+  constructor(public readonly blockingErrors: PreviewError[]) {
+    super(`Edit plan has ${blockingErrors.length} blocking error(s)`);
+    this.name = 'EditPlanUnapplicableError';
+  }
+}
+
 export interface AnalyzeEditOptions {
   role?: UserAuthRoles | null;
 }
@@ -97,8 +104,12 @@ function buildRoleForbiddenEffect(error: PreviewError): Effect {
   };
 }
 
+export function isRoleForbiddenPreviewError(error: PreviewError): error is RoleForbiddenFieldPreviewError {
+  return error.kind === 'RoleForbiddenField';
+}
+
 export function assertEditPlanCanApply(plan: EditPlan): void {
-  const roleErrors = (plan.errors ?? []).filter(error => error.kind === 'RoleForbiddenField' && error.blocking);
+  const roleErrors = (plan.errors ?? []).filter(isRoleForbiddenPreviewError).filter(error => error.blocking);
   if (roleErrors.length > 0 || plan.canApply === false) {
     throw new RoleForbiddenFieldError(
       roleErrors.map(error => error.field),
