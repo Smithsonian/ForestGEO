@@ -131,8 +131,8 @@ export async function resolveMeasurementSummaryQuadratID(
 
   const plotID = toPositiveNumber(quadratData.PlotID);
   const quadratName = quadratData.QuadratName?.trim();
-  if (!plotID) throw new Error('Plot not found for quadrat lookup');
-  if (!quadratName) throw new Error('Quadrat not found for stem resolution');
+  if (!plotID) throw new MeasurementResolutionError('quadrat', 'missing', 'Plot not found for quadrat lookup');
+  if (!quadratName) throw new MeasurementResolutionError('quadrat', 'missing', 'Quadrat not found for stem resolution');
 
   const quadratSearchResults = await connectionManager.executeQuery(
     safeFormatQuery(
@@ -148,7 +148,7 @@ export async function resolveMeasurementSummaryQuadratID(
     [quadratName, plotID],
     transactionID
   );
-  if (quadratSearchResults.length === 0) throw new Error('Quadrat not found');
+  if (quadratSearchResults.length === 0) throw new MeasurementResolutionError('quadrat', 'missing', 'Quadrat not found');
   return quadratSearchResults[0].QuadratID;
 }
 
@@ -159,10 +159,10 @@ export async function resolveMeasurementSummaryTree(
   transactionID?: string
 ): Promise<number> {
   const { TreeTag, SpeciesID, CensusID } = treeData;
-  if (!TreeTag) throw new Error('TreeTag not found for tree resolution');
+  if (!TreeTag) throw new MeasurementResolutionError('tree', 'missing', 'TreeTag not found for tree resolution');
   const normalizedSpeciesID = toPositiveNumber(SpeciesID);
   const normalizedCensusID = toPositiveNumber(CensusID);
-  if (normalizedSpeciesID === null) throw new Error('Species not found for tree resolution');
+  if (normalizedSpeciesID === null) throw new MeasurementResolutionError('species', 'missing', 'Species not found for tree resolution');
   if (normalizedCensusID === null) throw new Error('Census not found for tree resolution');
 
   const matchingTreeRows = await connectionManager.executeQuery(
@@ -179,7 +179,8 @@ export async function resolveMeasurementSummaryTree(
   );
   if (matchingTreeRows.length > 0) {
     const matchingTree = matchingTreeRows[0];
-    if (!matchingTree.IsActive) throw new Error(`Tree resolution failed: matching tree exists but is inactive for TreeTag "${TreeTag}"`);
+    if (!matchingTree.IsActive)
+      throw new MeasurementResolutionError('tree', 'inactive', `Tree resolution failed: matching tree exists but is inactive for TreeTag "${TreeTag}"`);
     return matchingTree.TreeID;
   }
 
@@ -203,8 +204,8 @@ export async function resolveMeasurementSummaryStem(
   const normalizedQuadratID = toPositiveNumber(QuadratID);
   if (normalizedTreeID === null) throw new Error('Tree not found for stem resolution');
   if (normalizedCensusID === null) throw new Error('Census not found for stem resolution');
-  if (!StemTag) throw new Error('StemTag not found for stem resolution');
-  if (normalizedQuadratID === null) throw new Error('Quadrat not found for stem resolution');
+  if (!StemTag) throw new MeasurementResolutionError('stem', 'missing', 'StemTag not found for stem resolution');
+  if (normalizedQuadratID === null) throw new MeasurementResolutionError('quadrat', 'missing', 'Quadrat not found for stem resolution');
 
   const exactActiveStemRows = await connectionManager.executeQuery(
     safeFormatQuery(
@@ -234,10 +235,16 @@ export async function resolveMeasurementSummaryStem(
   if (blockingStemRows.length > 0) {
     const blockingStem = blockingStemRows[0];
     if (!blockingStem.IsActive) {
-      throw new Error(`Stem resolution failed: matching TreeID ${normalizedTreeID} / StemTag "${StemTag}" exists but is inactive for this census`);
+      throw new MeasurementResolutionError(
+        'stem',
+        'inactive',
+        `Stem resolution failed: matching TreeID ${normalizedTreeID} / StemTag "${StemTag}" exists but is inactive for this census`
+      );
     }
     if (blockingStem.QuadratID !== normalizedQuadratID) {
-      throw new Error(
+      throw new MeasurementResolutionError(
+        'stem',
+        'different_quadrat',
         `Stem resolution failed: TreeTag "${TreeTag ?? normalizedTreeID}" / StemTag "${StemTag}" already exists in a different quadrat for this census`
       );
     }
