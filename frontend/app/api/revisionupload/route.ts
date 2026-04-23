@@ -10,6 +10,8 @@ import { analyzeBulk, BulkInput } from '@/config/editplan/bulkanalyzer';
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
+import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
+import { DuplicateDeletion } from '@/config/editplan/types';
 
 export const runtime = 'nodejs';
 
@@ -534,40 +536,13 @@ async function loadMeasurementsByTagStemTag(
   return groupedRows;
 }
 
-/**
- * Maps the CSV's lowercase updatable field keys (`dbh`, `hom`, `date`,
- * `codes`, `comments`) onto the canonical `measurementssummary` surface keys
- * the bulk analyzer expects. Blank/NULL placeholders are dropped so the
- * analyzer's diff only sees real intended writes. `codes` is renamed to
- * `Attributes` so the R5 attribute rule fires on code changes.
- */
-function buildAnalyzerNewRow(csvRow: FileRow): Record<string, unknown> {
-  const newRow: Record<string, unknown> = {};
-  for (const field of UPDATABLE_FIELDS) {
-    const value = csvRow[field];
-    if (isBlankOrNullPlaceholder(value)) continue;
-    const trimmed = String(value).trim();
-
-    if (field === 'codes') {
-      newRow.Attributes = trimmed;
-    } else if (field === 'dbh') {
-      newRow.MeasuredDBH = trimmed;
-    } else if (field === 'hom') {
-      newRow.MeasuredHOM = trimmed;
-    } else if (field === 'date') {
-      newRow.MeasurementDate = trimmed;
-    } else if (field === 'comments') {
-      newRow.Description = trimmed;
-    }
-  }
-  return newRow;
-}
-
 function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[], invalidRows: RevisionInvalidRow[]): BulkInput {
-  const allDuplicateIDs: number[] = [];
+  const duplicateDeletions: DuplicateDeletion[] = [];
   for (const row of matchedRows) {
     if (row.duplicateMeasurementIDsToDelete) {
-      allDuplicateIDs.push(...row.duplicateMeasurementIDsToDelete);
+      for (const duplicateID of row.duplicateMeasurementIDsToDelete) {
+        duplicateDeletions.push({ coreMeasurementID: duplicateID, survivorCoreMeasurementID: row.coreMeasurementID });
+      }
     }
   }
 
@@ -575,17 +550,17 @@ function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewR
     matched: matchedRows.map((row, index) => ({
       rowIndex: index,
       targetID: row.coreMeasurementID,
-      newRow: buildAnalyzerNewRow(row.csvRow)
+      newRow: canonicalizeRowForHash(row.csvRow, 'revision-update')
     })),
     newRows: newRows.map(row => ({
       rowIndex: row.csvIndex,
-      newRow: buildAnalyzerNewRow(row.csvRow)
+      newRow: canonicalizeRowForHash(row.csvRow, 'revision-insert')
     })),
     invalid: invalidRows.map(row => ({
       rowIndex: row.csvIndex,
       reason: row.reason
     })),
-    duplicateMeasurementIDsToDelete: allDuplicateIDs
+    duplicateMeasurementIDsToDelete: duplicateDeletions
   };
 }
 

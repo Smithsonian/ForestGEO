@@ -1128,7 +1128,7 @@ describe('POST /api/revisionupload', () => {
 
     expect(response.status).toBe(200);
     const bulkInput = mocks.analyzeBulk.mock.calls[0][5];
-    expect(bulkInput.duplicateMeasurementIDsToDelete).toEqual([600]);
+    expect(bulkInput.duplicateMeasurementIDsToDelete).toEqual([{ coreMeasurementID: 600, survivorCoreMeasurementID: 601 }]);
 
     const body = await response.json();
     const r6 = body.bulkPlan.aggregateEffects.find((e: { id: string }) => e.id === 'R6');
