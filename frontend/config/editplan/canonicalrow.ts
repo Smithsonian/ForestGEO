@@ -38,9 +38,11 @@ const CSV_ALIAS_TO_CANONICAL: Record<string, CanonicalField> = {
 };
 
 const ALL_CANONICAL_FIELD_SET: ReadonlySet<string> = new Set<string>(INSERT_FIELDS);
+const UPDATE_FIELD_SET: ReadonlySet<CanonicalField> = new Set(UPDATE_FIELDS);
+const INSERT_FIELD_SET: ReadonlySet<CanonicalField> = new Set(INSERT_FIELDS);
 
 function toCanonicalKey(key: string): CanonicalField | null {
-  if (key in CSV_ALIAS_TO_CANONICAL) return CSV_ALIAS_TO_CANONICAL[key];
+  if (Object.prototype.hasOwnProperty.call(CSV_ALIAS_TO_CANONICAL, key)) return CSV_ALIAS_TO_CANONICAL[key];
   if (ALL_CANONICAL_FIELD_SET.has(key)) return key as CanonicalField;
   return null;
 }
@@ -94,8 +96,7 @@ function normalizeDecimal(value: unknown, precision: number): number | null {
  * calling it twice with the same mode yields the same result.
  */
 export function canonicalizeRowForHash(row: Record<string, unknown>, mode: RowMode): Record<string, unknown> {
-  const allowedFields = mode === 'revision-insert' ? INSERT_FIELDS : UPDATE_FIELDS;
-  const allowedSet = new Set<CanonicalField>(allowedFields);
+  const allowedSet = mode === 'revision-insert' ? INSERT_FIELD_SET : UPDATE_FIELD_SET;
   const out: Record<string, unknown> = {};
 
   for (const [rawKey, rawValue] of Object.entries(row)) {
