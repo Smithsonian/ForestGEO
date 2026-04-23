@@ -146,10 +146,11 @@ export async function analyzeEdit(
     }
   }
 
-  const errors = fieldChanges
+  const roleErrors = fieldChanges
     .filter(change => !isFieldEditableByRole(change.field, options.role))
     .map(change => buildRoleForbiddenError(change.field, options.role));
-  const roleForbiddenEffects = errors.map(buildRoleForbiddenEffect);
+  const roleForbiddenEffects = roleErrors.map(buildRoleForbiddenEffect);
+  const errors: PreviewError[] = [...roleErrors];
 
   const ctx = { cm, schema, transactionID, dataType, plotID, censusID, oldRow, newRow, changedFields };
   const effects: Effect[] = [...roleForbiddenEffects];
@@ -163,9 +164,11 @@ export async function analyzeEdit(
   // coremeasurements raw columns via writeFailedMeasurements. Skip the rule
   // dispatch entirely so the contract is explicit, rather than relying on every
   // rule to silently return [] for a data shape it was never designed to see.
-  if (dataType === 'measurementssummary' && errors.length === 0) {
+  if (dataType === 'measurementssummary' && roleErrors.length === 0) {
     effects.push(...(await applySpeciesRules(ctx)));
-    effects.push(...(await applyTreeStemRules(ctx)));
+    const treeStem = await applyTreeStemRules(ctx);
+    effects.push(...treeStem.effects);
+    errors.push(...treeStem.errors);
     effects.push(...(await applyCoordinateRules(ctx)));
     effects.push(...(await applyAttributeRules(ctx)));
   }

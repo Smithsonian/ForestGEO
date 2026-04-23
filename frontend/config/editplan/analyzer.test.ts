@@ -8,7 +8,7 @@ vi.mock('./rules/species', () => ({
   applySpeciesRules: vi.fn(async () => [])
 }));
 vi.mock('./rules/treestem', () => ({
-  applyTreeStemRules: vi.fn(async () => [])
+  applyTreeStemRules: vi.fn(async () => ({ effects: [], errors: [] }))
 }));
 vi.mock('./rules/coordinates', () => ({
   applyCoordinateRules: vi.fn(async () => [])
@@ -67,7 +67,7 @@ function makeConnectionManager(oldRow: Record<string, unknown> | null) {
 
 beforeEach(() => {
   vi.mocked(applySpeciesRules).mockResolvedValue([]);
-  vi.mocked(applyTreeStemRules).mockResolvedValue([]);
+  vi.mocked(applyTreeStemRules).mockResolvedValue({ effects: [], errors: [] });
   vi.mocked(applyCoordinateRules).mockResolvedValue([]);
   vi.mocked(applyAttributeRules).mockResolvedValue([]);
 });
@@ -176,7 +176,7 @@ describe('analyzeEdit', () => {
     // them; dispatching would be misleading. Assert the dispatch is gated.
     const cm = makeConnectionManager(FAILED_OLD_ROW);
     vi.mocked(applySpeciesRules).mockResolvedValue([makeEffect('R1a', 'warn', 1)]);
-    vi.mocked(applyTreeStemRules).mockResolvedValue([makeEffect('R2', 'destructive', 1)]);
+    vi.mocked(applyTreeStemRules).mockResolvedValue({ effects: [makeEffect('R2', 'destructive', 1)], errors: [] });
     vi.mocked(applyCoordinateRules).mockResolvedValue([makeEffect('R4', 'warn', 1)]);
     vi.mocked(applyAttributeRules).mockResolvedValue([makeEffect('R5', 'destructive', 1)]);
 
