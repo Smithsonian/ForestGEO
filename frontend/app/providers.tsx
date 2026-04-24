@@ -43,11 +43,7 @@ export function Providers({ children }: Readonly<ProvidersProps>) {
             revalidateOnReconnect: true,
             dedupingInterval: 2000,
             errorRetryCount: 2,
-            onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
-              if (error instanceof QueryError && error.status >= 400 && error.status < 500) return;
-              if (retryCount >= 2) return;
-              setTimeout(() => revalidate({ retryCount }), 1000 * 2 ** retryCount);
-            }
+            shouldRetryOnError: (error: Error) => !(error instanceof QueryError && error.status >= 400 && error.status < 500)
           }}
         >
           <AnimationCacheProvider>
