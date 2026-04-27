@@ -17,6 +17,7 @@ export function PrefetchLink({ prefetchKey: prefetchKeyValue, prefetchURL, child
   }, [prefetchKeyValue, prefetchURL]);
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Next <Link> renders a native <a>, but the wrapper props confuse the rule.
     <Link {...linkProps} onMouseEnter={handle} onFocus={handle}>
       {children}
     </Link>

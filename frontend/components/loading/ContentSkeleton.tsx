@@ -77,15 +77,7 @@ function DashboardCardSkeleton() {
 }
 
 function AutocompleteSkeleton() {
-  return (
-    <Input
-      data-testid="skeleton-autocomplete-input"
-      disabled
-      placeholder="Loading…"
-      aria-busy="true"
-      sx={{ opacity: 0.6 }}
-    />
-  );
+  return <Input data-testid="skeleton-autocomplete-input" disabled placeholder="Loading…" aria-label="Loading" aria-busy="true" sx={{ opacity: 0.6 }} />;
 }
 
 function FormRowSkeleton() {
