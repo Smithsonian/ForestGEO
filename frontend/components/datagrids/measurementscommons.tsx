@@ -45,6 +45,7 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
   CellItemContainer,
   createDeleteQuery,
+  createFetchQuery,
   createPostPatchQuery,
   createQFFetchQuery,
   EditToolbarCustomProps,
@@ -57,6 +58,9 @@ import {
   sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
+import { useForestQuery, queryKey, QueryNamespace, QueryScope } from '@/lib/query';
+import { defaultFetcher, QueryError } from '@/lib/query/fetcher';
+import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useRouter } from 'next/navigation';
@@ -80,7 +84,7 @@ import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core
 import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
-import { debounce, EditToolbar } from '../client/datagridelements';
+import { EditToolbar } from '../client/datagridelements';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
@@ -258,8 +262,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   });
 
-  const PAGE_CACHE_TTL_MS = 30_000;
-  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
   const previousValidationStatusRef = useRef(backgroundValidationStatus);
 
   const refreshMeasurementsSummaryView = useCallback(async () => {
@@ -365,105 +367,87 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const fetchPaginatedDataCore = useCallback(
-    async (pageToFetch: number) => {
-      if (!currentSite || !currentPlot || !currentCensus) {
-        ailogger.warn('Missing necessary context for fetchPaginatedData');
-        return;
-      }
+  const hasFilter =
+    (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
 
-      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
-      const cached = pageCacheRef.current.get(cacheKey);
-      const now = Date.now();
-
-      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
-        setRows(cached.rows);
-        setRowCount(cached.totalCount);
-        if (isNewRowAdded && pageToFetch === newLastPage) {
-          addNewRowToGrid();
-        }
-        return;
-      }
-
-      setLoading(true);
-      const paginatedQuery = createQFFetchQuery(
-        currentSite?.schemaName ?? '',
-        gridType,
-        pageToFetch,
-        paginationModel.pageSize,
-        currentPlot?.plotID,
-        currentCensus?.plotCensusNumber
-      );
-
-      try {
-        // Filter to only include valid, complete filter items (Bug #1 fix)
-        const validItems =
-          filterModel.items?.filter(item => {
-            // Field and operator are always required
-            if (!item.field || item.field === '' || !item.operator || item.operator === '') {
-              return false;
-            }
-            // isEmpty/isNotEmpty operators don't require a value
-            if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
-              return true;
-            }
-            // All other operators require a value
-            return item.value !== undefined && item.value !== null && item.value !== '';
-          }) ?? [];
-
-        const sanitizedFilterModel = {
-          ...filterModel,
-          items: validItems
-        };
-
-        const response = await fetch(paginatedQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel: sanitizedFilterModel })
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Error fetching data');
-
-        setRows(data.output);
-        setRowCount(data.totalCount);
-        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
-
-        if (isNewRowAdded && pageToFetch === newLastPage) {
-          addNewRowToGrid();
-        }
-      } catch (error: unknown) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error('Error fetching data:', errorObj);
-        setSnackbar({ children: 'Error fetching data', severity: 'error' });
-      } finally {
-        setLoading(false);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      filterModel,
-      currentSite,
-      currentPlot,
-      currentCensus,
+  const fetchUrl = React.useMemo(() => {
+    if (!currentSite?.schemaName) return null;
+    const buildQuery = hasFilter ? createQFFetchQuery : createFetchQuery;
+    return buildQuery(
+      currentSite.schemaName,
+      gridType,
       paginationModel.page,
       paginationModel.pageSize,
-      isNewRowAdded,
-      newLastPage,
-      gridType,
-      addNewRowToGrid
-    ]
+      currentPlot?.plotID,
+      currentCensus?.plotCensusNumber,
+      undefined
+    );
+  }, [
+    currentSite?.schemaName,
+    gridType,
+    paginationModel.page,
+    paginationModel.pageSize,
+    currentPlot?.plotID,
+    currentCensus?.plotCensusNumber,
+    hasFilter
+  ]);
+
+  const queryScope: QueryScope = {
+    siteSchema: currentSite?.schemaName,
+    plotID: currentPlot?.plotID,
+    censusID: currentCensus?.dateRanges?.[0]?.censusID
+  };
+
+  const gridQueryKey = fetchUrl
+    ? queryKey(`grid:${gridType}` as QueryNamespace, queryScope, {
+        page: paginationModel.page,
+        pageSize: paginationModel.pageSize,
+        filterModel,
+        sortModel
+      })
+    : null;
+
+  const filterBodyFetcher = React.useCallback(
+    async (u: string): Promise<{ output: any[]; totalCount: number }> => {
+      if (!hasFilter) {
+        return defaultFetcher<{ output: any[]; totalCount: number }>(u);
+      }
+      const res = await fetch(u, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel, sortModel })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => undefined);
+        throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
+      }
+      return res.json() as Promise<{ output: any[]; totalCount: number }>;
+    },
+    [hasFilter, filterModel, sortModel]
   );
 
-  const debouncedFetchPaginatedData = useMemo(
-    () =>
-      debounce((pageToFetch: number) => {
-        fetchPaginatedDataCore(pageToFetch);
-      }, 250),
-    [fetchPaginatedDataCore]
-  );
+  const {
+    data: gridData,
+    isLoading,
+    isValidating,
+    error: gridError,
+    refetch
+  } = useForestQuery<{ output: any[]; totalCount: number }>(gridQueryKey, fetchUrl, { fetcher: filterBodyFetcher });
 
-  const fetchPaginatedData = fetchPaginatedDataCore;
+  useEffect(() => {
+    if (gridData) {
+      setRows(gridData.output);
+      setRowCount(gridData.totalCount);
+    }
+  }, [gridData, setRows, setRowCount]);
+
+  useEffect(() => {
+    if (gridError) {
+      ailogger.error('Error fetching data:', gridError);
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
+    }
+  }, [gridError]);
 
   const fetchValidationErrors = useCallback(async () => {
     try {
@@ -517,8 +501,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
-    await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
-  }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
+    await Promise.all([refetch(), fetchValidationErrors()]);
+  }, [refetch, fetchValidationErrors]);
 
   useEffect(() => {
     setFilterModel(prevModel =>
@@ -534,7 +518,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   useEffect(() => {
     if (!refresh || isRefreshing.current) return;
     isRefreshing.current = true;
-    pageCacheRef.current.clear();
 
     Promise.all([runFetchPaginated(), refreshCounts()])
       .catch(ailogger.error)
@@ -730,7 +713,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'New row added!', severity: 'success' });
       setIsNewRowAdded(false);
       setShouldAddRowAfterFetch(false);
-      await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
+      await Promise.all([refetch(), fetchValidationErrors()]);
       return newRow;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -906,7 +889,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       } finally {
         setLoading(false);
       }
-      await fetchPaginatedData(paginationModel.page);
+      await refetch();
     }
   };
 
@@ -925,23 +908,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     },
     [locked, openConfirmationDialog]
   );
-
-  // Fetch on pagination, sort, or context changes (no debounce)
-  useEffect(() => {
-    if (currentPlot && currentCensus && paginationModel.page >= 0) {
-      runFetchPaginated().catch(ailogger.error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPlot, currentCensus, paginationModel.page, sortModel]);
-
-  // Debounce fetches triggered by filter model changes (rapid typing in search)
-  useEffect(() => {
-    pageCacheRef.current.clear();
-    if (currentPlot && currentCensus && paginationModel.page >= 0) {
-      debouncedFetchPaginatedData(paginationModel.page);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterModel]);
 
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
@@ -1463,7 +1429,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           }
         }}
       >
-        <Box sx={{ width: '100%', flexDirection: 'column' }}>
+        <Box sx={{ width: '100%', flexDirection: 'column', position: 'relative' }}>
+          <LoadingBar active={isValidating && !!gridData} />
+          {isLoading && !gridData ? (
+            <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
+          ) : (
           <StyledDataGrid
             apiRef={apiRef}
             sx={{ width: '100%' }}
@@ -1475,7 +1445,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
             processRowUpdate={processRowUpdate}
-            loading={refresh}
+            loading={false}
             paginationMode="server"
             filterMode="server"
             onPaginationModelChange={newPaginationModel => {
@@ -1569,6 +1539,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               return isFieldEditableOnSurface('measurementssummary', params.field);
             }}
           />
+          )}
         </Box>
         {!!snackbar && (
           <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
