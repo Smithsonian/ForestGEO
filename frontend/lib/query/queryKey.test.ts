@@ -14,6 +14,11 @@ describe('stableStringify', () => {
     expect(stableStringify({ xs: [3, 1, 2] })).toBe('{"xs":[3,1,2]}');
   });
 
+  it('recursively sorts keys through arrays containing nested objects', () => {
+    const input = { z: { y: [{ b: 2, a: 1 }, { d: 4, c: 3 }] }, a: 1 };
+    expect(stableStringify(input)).toBe('{"a":1,"z":{"y":[{"a":1,"b":2},{"c":3,"d":4}]}}');
+  });
+
   it('handles primitives', () => {
     expect(stableStringify(null)).toBe('null');
     expect(stableStringify(42)).toBe('42');
@@ -32,6 +37,13 @@ describe('queryKey', () => {
 
   it('treats missing scope fields as empty string', () => {
     expect(queryKey('grid:errors', {})).toEqual(['grid:errors', '||', undefined]);
+  });
+
+  it('distinguishes omitted params from empty-object params', () => {
+    const omitted = queryKey('grid:errors', { siteSchema: 's' });
+    const empty = queryKey('grid:errors', { siteSchema: 's' }, {});
+    expect(omitted[2]).toBeUndefined();
+    expect(empty[2]).toBe('{}');
   });
 
   it('serializes params deterministically', () => {
