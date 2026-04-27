@@ -93,4 +93,42 @@ describe('useForestQuery', () => {
     expect(result.current.data).toEqual({ v: 2 });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it('passes the URL string (not the tuple key) to defaultFetcher / fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(
+      () => useForestQuery<{ ok: true }>(queryKey('grid:measurements', { siteSchema: 's' }), '/api/probe'),
+      { wrapper: ({ children }) => (
+          <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, revalidateOnFocus: false, shouldRetryOnError: false }}>
+            {children}
+          </SWRConfig>
+        )
+      }
+    );
+    await waitFor(() => expect(result.current.data).toEqual({ ok: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/probe');
+    expect(fetchMock.mock.calls[0][1]).toEqual({ credentials: 'include' });
+    vi.unstubAllGlobals();
+  });
+
+  it('opts.fetcher override receives the URL string and is preferred over the ambient fetcher', async () => {
+    const ambient = vi.fn().mockResolvedValue({ from: 'ambient' });
+    const override = vi.fn().mockResolvedValue({ from: 'override' });
+    const { result } = renderHook(
+      () => useForestQuery<{ from: string }>(
+        queryKey('grid:measurements', { siteSchema: 's' }),
+        '/api/over',
+        { fetcher: override as (u: string) => Promise<{ from: string }> }
+      ),
+      { wrapper: wrapperFor(ambient) }
+    );
+    await waitFor(() => expect(result.current.data).toEqual({ from: 'override' }));
+    expect(override).toHaveBeenCalledTimes(1);
+    expect(override.mock.calls[0][0]).toBe('/api/over');
+    expect(ambient).not.toHaveBeenCalled();
+  });
 });
