@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SWRConfig } from 'swr';
 import IsolatedDataGridCommons from './isolateddatagridcommons';
 
 const mockFetch = vi.fn();
@@ -169,7 +170,7 @@ describe('IsolatedDataGridCommons', () => {
     global.fetch = mockFetch as any;
   });
 
-  it('invalidates the cached page before refetching after a confirmed save', async () => {
+  it('refetches from the server after a confirmed save, bypassing the SWR cache', async () => {
     const originalRow = {
       id: 1,
       failedMeasurementID: 123,
@@ -203,18 +204,20 @@ describe('IsolatedDataGridCommons', () => {
     });
 
     render(
-      <IsolatedDataGridCommons
-        gridType="failedmeasurements"
-        gridColumns={[
-          { field: 'id', editable: false },
-          { field: 'spCode', editable: true }
-        ]}
-        refresh={false}
-        setRefresh={vi.fn()}
-        dynamicButtons={[]}
-        initialRow={originalRow}
-        onDataUpdate={vi.fn().mockResolvedValue(undefined)}
-      />
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="failedmeasurements"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'spCode', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+        />
+      </SWRConfig>
     );
 
     await waitFor(() => {
