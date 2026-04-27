@@ -347,6 +347,7 @@ export default function DashboardPage() {
       setOpenDeleteCensusModal(false);
 
       const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, loadingMessage);
       const startTime = Date.now();
 
@@ -410,6 +411,7 @@ export default function DashboardPage() {
 
     isCreatingCensusRef.current = true;
     setError(null);
+    // destructive mutation — global overlay blocks UI for the duration of the API call
     setLoading(true, 'Creating new census...', undefined, 'processing');
     const startTime = Date.now();
 

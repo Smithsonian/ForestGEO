@@ -31,6 +31,16 @@ const LoadingContext = createContext<LoadingContextType>({
   isOperationActive: () => false
 });
 
+/**
+ * GlobalLoadingProvider renders the full-screen blocking overlay.
+ *
+ * CONTRACT (post Phase 1 unified-loading migration): use only for destructive/blocking
+ * mutations — delete, bulk upload, census creation, long-running reingest.
+ * Reads (grid fetches, dashboard cards, autocompletes, selectors) must use
+ * <LoadingBar/> or <ContentSkeleton/> from @/components/loading instead.
+ * The 750ms minimum-display remains in place here to prevent overlay flicker on fast
+ * destructive calls; it is deliberately absent from <LoadingBar/>.
+ */
 export function LoadingProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [activeOperations, setActiveOperations] = useState<LoadingOperation[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -262,4 +272,5 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
   return <LoadingContext.Provider value={contextValue}>{children}</LoadingContext.Provider>;
 }
 
+/** Use only for destructive/blocking mutations. See LoadingProvider for the full contract. */
 export const useLoading = () => useContext(LoadingContext);

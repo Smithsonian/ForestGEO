@@ -106,16 +106,10 @@ export default function PostValidationPage() {
   }
 
   useEffect(() => {
-    setLoading(true);
-    loadPostValidations()
-      .catch(error => {
-        ailogger.error(error);
-        // Still set loading to false on error
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [setLoading, loadPostValidations]);
+    loadPostValidations().catch(error => {
+      ailogger.error(error);
+    });
+  }, [loadPostValidations]);
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -179,6 +173,7 @@ export default function PostValidationPage() {
                 alert('Please select at least one statistic to run.');
                 return;
               }
+              // destructive mutation — global overlay blocks UI for the duration of the API call
               setLoading(true, 'Running validations...');
               for (const postValidation of selectedResults) {
                 await fetchValidationResults(postValidation);

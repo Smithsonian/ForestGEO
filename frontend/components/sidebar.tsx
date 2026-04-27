@@ -253,6 +253,7 @@ export default function Sidebar(props: SidebarProps) {
 
       setIsDeletingCensus(true);
       const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, loadingMessage);
       setIsClearDropdownOpen(false);
 
@@ -736,12 +737,7 @@ export default function Sidebar(props: SidebarProps) {
       '/errors': () => preloadKey(errorsKey, errorsURL),
       '/attributes': () => preloadKey(attributesKey, attributesURL)
     };
-  }, [
-    currentSite?.schemaName,
-    currentPlot?.plotID,
-    currentCensus?.plotCensusNumber,
-    currentCensus?.dateRanges
-  ]);
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentCensus?.dateRanges]);
 
   const shouldApplyTooltip = (item: SiteConfigProps, linkHref?: string): boolean => {
     if (linkHref) {

@@ -268,6 +268,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
 
     if (manualReset) {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Manual refresh beginning...');
 
       clearContexts()

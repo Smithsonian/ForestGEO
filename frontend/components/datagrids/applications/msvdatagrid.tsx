@@ -135,6 +135,7 @@ export default function MeasurementsSummaryViewDataGrid({
 
   async function reloadMSV() {
     try {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Refreshing Measurements View...');
       const body =
         currentPlot?.plotID != null && currentCensus?.dateRanges?.[0]?.censusID != null

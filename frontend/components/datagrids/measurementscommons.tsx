@@ -367,8 +367,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const hasFilter =
-    (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
+  const hasFilter = (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
 
   const fetchUrl = React.useMemo(() => {
     if (!currentSite?.schemaName) return null;
@@ -382,15 +381,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       currentCensus?.plotCensusNumber,
       undefined
     );
-  }, [
-    currentSite?.schemaName,
-    gridType,
-    paginationModel.page,
-    paginationModel.pageSize,
-    currentPlot?.plotID,
-    currentCensus?.plotCensusNumber,
-    hasFilter
-  ]);
+  }, [currentSite?.schemaName, gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber, hasFilter]);
 
   const queryScope: QueryScope = {
     siteSchema: currentSite?.schemaName,
@@ -784,6 +775,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const performSaveAction = async (id: GridRowId) => {
     if (locked || !promiseArguments) return;
+    // destructive mutation — global overlay blocks UI for the duration of the API call
     setLoading(true, 'Saving changes...');
     try {
       const updatedRow = promiseArguments.oldRow.isNew
@@ -846,6 +838,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
       return;
     }
+    // destructive mutation — global overlay blocks UI for the duration of the API call
     setLoading(true, 'Deleting...');
     const deletionID = rows.find(row => String(row.id) === String(id))?.id;
     if (!deletionID) return;
@@ -882,6 +875,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
+        // destructive mutation — global overlay blocks UI for the duration of the API call
         setLoading(true, 'Refreshing Measurements Summary View...');
         await refreshMeasurementsSummaryView();
       } catch (e: unknown) {
@@ -919,6 +913,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>((resolve, reject) => {
+        // destructive mutation — global overlay blocks UI for the duration of the API call
         setLoading(true, 'Processing changes...');
         if (newRow.id === '') {
           setLoading(false);
@@ -1354,6 +1349,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (!shouldRefresh || !currentSite?.schemaName) return;
 
     try {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Refreshing Measurements Summary View...');
       await refreshMeasurementsSummaryView();
     } catch (e: unknown) {
@@ -1371,6 +1367,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
 
     try {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Resetting validation states...');
 
       const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
@@ -1436,111 +1433,112 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           {isLoading && !gridData ? (
             <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
           ) : (
-          <StyledDataGrid
-            apiRef={apiRef}
-            sx={{ width: '100%' }}
-            rows={rows}
-            columns={filteredColumns}
-            editMode="row"
-            rowModesModel={rowModesModel}
-            disableColumnSelector
-            onRowModesModelChange={handleRowModesModelChange}
-            onRowEditStop={handleRowEditStop}
-            processRowUpdate={processRowUpdate}
-            loading={false}
-            paginationMode="server"
-            filterMode="server"
-            onPaginationModelChange={newPaginationModel => {
-              if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
-                return;
-              }
-              setPaginationModel(newPaginationModel);
-            }}
-            onProcessRowUpdateError={(error: Error) => {
-              ailogger.error('Row update error:', error);
-              setSnackbar({
-                children: 'Error updating row',
-                severity: 'error'
-              });
-            }}
-            onCellKeyDown={(params, event) => {
-              if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event).then(() => {});
-              }
-            }}
-            paginationModel={paginationModel}
-            rowCount={rowCount}
-            onRowCountChange={handleRowCountChange}
-            pageSizeOptions={[10, 25, 50, 100]}
-            sortModel={sortModel}
-            onSortModelChange={handleSortModelChange}
-            filterModel={filterModel}
-            onFilterModelChange={newFilterModel => {
-              setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
-            }}
-            ignoreDiacritics
-            initialState={{
-              columns: {
-                columnVisibilityModel: getColumnVisibilityModel(gridType)
-              }
-            }}
-            slots={{
-              toolbar: EditToolbar
-            }}
-            slotProps={{
-              toolbar: {
-                locked: locked,
-                handleAddNewRow: handleAddNewRow,
-                handleRefresh: async () => setRefresh(true),
-                handleExport: fetchRowsForExport,
-                showToolbarActions: showToolbarActions,
-                handleQuickFilterChange: onQuickFilterChange,
-                filterModel: filterModel,
-                gridColumns: gridColumns,
-                gridType: FormType.measurements,
-                dynamicButtons: dynamicButtons,
-                validationMenu: (
-                  <ValidationActionsMenu
-                    onRunValidations={() => setIsValidationModalOpen(true)}
-                    onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
-                    onResetValidations={() => setIsResetValidationModalOpen(true)}
-                    onRefreshView={async () => {
-                      if (!currentSite?.schemaName) return;
-                      setLoading(true, 'Refreshing Measurements Summary View...');
-                      try {
-                        await refreshMeasurementsSummaryView();
-                      } finally {
-                        setLoading(false);
-                        setRefresh(true);
-                      }
-                    }}
-                    pendingCount={pendingCount}
-                    errorCount={validationErrorCount}
-                  />
-                ),
-                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
-                validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
-                pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
-                otControls: { show: showOT, toggle: setShowOT, count: otCount },
-                msControls: { show: showMS, toggle: setShowMS, count: msCount },
-                nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
-                hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty
-              } as GridToolbarProps & Partial<EditToolbarCustomProps>
-            }}
-            showToolbar
-            getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
-            getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
-            rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
-            isCellEditable={params => {
-              if (locked) return false;
-              // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
-              // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
-              // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
-              // lockstep with the server's rejectDisallowedFields check.
-              return isFieldEditableOnSurface('measurementssummary', params.field);
-            }}
-          />
+            <StyledDataGrid
+              apiRef={apiRef}
+              sx={{ width: '100%' }}
+              rows={rows}
+              columns={filteredColumns}
+              editMode="row"
+              rowModesModel={rowModesModel}
+              disableColumnSelector
+              onRowModesModelChange={handleRowModesModelChange}
+              onRowEditStop={handleRowEditStop}
+              processRowUpdate={processRowUpdate}
+              loading={false}
+              paginationMode="server"
+              filterMode="server"
+              onPaginationModelChange={newPaginationModel => {
+                if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
+                  return;
+                }
+                setPaginationModel(newPaginationModel);
+              }}
+              onProcessRowUpdateError={(error: Error) => {
+                ailogger.error('Row update error:', error);
+                setSnackbar({
+                  children: 'Error updating row',
+                  severity: 'error'
+                });
+              }}
+              onCellKeyDown={(params, event) => {
+                if (event.key === 'Enter') {
+                  handleEnterKeyNavigation(params, event).then(() => {});
+                }
+              }}
+              paginationModel={paginationModel}
+              rowCount={rowCount}
+              onRowCountChange={handleRowCountChange}
+              pageSizeOptions={[10, 25, 50, 100]}
+              sortModel={sortModel}
+              onSortModelChange={handleSortModelChange}
+              filterModel={filterModel}
+              onFilterModelChange={newFilterModel => {
+                setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
+              }}
+              ignoreDiacritics
+              initialState={{
+                columns: {
+                  columnVisibilityModel: getColumnVisibilityModel(gridType)
+                }
+              }}
+              slots={{
+                toolbar: EditToolbar
+              }}
+              slotProps={{
+                toolbar: {
+                  locked: locked,
+                  handleAddNewRow: handleAddNewRow,
+                  handleRefresh: async () => setRefresh(true),
+                  handleExport: fetchRowsForExport,
+                  showToolbarActions: showToolbarActions,
+                  handleQuickFilterChange: onQuickFilterChange,
+                  filterModel: filterModel,
+                  gridColumns: gridColumns,
+                  gridType: FormType.measurements,
+                  dynamicButtons: dynamicButtons,
+                  validationMenu: (
+                    <ValidationActionsMenu
+                      onRunValidations={() => setIsValidationModalOpen(true)}
+                      onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
+                      onResetValidations={() => setIsResetValidationModalOpen(true)}
+                      onRefreshView={async () => {
+                        if (!currentSite?.schemaName) return;
+                        // destructive mutation — global overlay blocks UI for the duration of the API call
+                        setLoading(true, 'Refreshing Measurements Summary View...');
+                        try {
+                          await refreshMeasurementsSummaryView();
+                        } finally {
+                          setLoading(false);
+                          setRefresh(true);
+                        }
+                      }}
+                      pendingCount={pendingCount}
+                      errorCount={validationErrorCount}
+                    />
+                  ),
+                  errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
+                  validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
+                  pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
+                  otControls: { show: showOT, toggle: setShowOT, count: otCount },
+                  msControls: { show: showMS, toggle: setShowMS, count: msCount },
+                  nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
+                  hidingEmpty: hidingEmpty,
+                  setHidingEmpty: setHidingEmpty
+                } as GridToolbarProps & Partial<EditToolbarCustomProps>
+              }}
+              showToolbar
+              getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
+              getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
+              rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
+              isCellEditable={params => {
+                if (locked) return false;
+                // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
+                // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
+                // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
+                // lockstep with the server's rejectDisallowedFields check.
+                return isFieldEditableOnSurface('measurementssummary', params.field);
+              }}
+            />
           )}
         </Box>
         {!!snackbar && (
