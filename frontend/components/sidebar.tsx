@@ -1,6 +1,9 @@
 'use client';
 import * as React from 'react';
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { preloadKey } from '@/lib/query/preload';
+import { queryKey } from '@/lib/query';
+import { createFetchQuery } from '@/config/servergridhelpers';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -711,6 +714,35 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
 
+  const navPreloadHandlers: Record<string, () => void> = React.useMemo(() => {
+    const schema = currentSite?.schemaName;
+    const plotID = currentPlot?.plotID;
+    const plotCensusNumber = currentCensus?.plotCensusNumber;
+    const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+    if (!schema) return {} as Record<string, () => void>;
+
+    const scope = { siteSchema: schema, plotID, censusID };
+    const PAGE_ZERO = 0;
+    const DEFAULT_PAGE_SIZE = 10;
+    const summaryKey = queryKey('grid:measurementssummary', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
+    const summaryURL = createFetchQuery(schema, 'measurementssummary', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
+    const errorsKey = queryKey('grid:failedmeasurements', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
+    const errorsURL = createFetchQuery(schema, 'failedmeasurements', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
+    const attributesKey = queryKey('grid:attributes', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
+    const attributesURL = createFetchQuery(schema, 'attributes', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
+
+    return {
+      '/summary': () => preloadKey(summaryKey, summaryURL),
+      '/errors': () => preloadKey(errorsKey, errorsURL),
+      '/attributes': () => preloadKey(attributesKey, attributesURL)
+    };
+  }, [
+    currentSite?.schemaName,
+    currentPlot?.plotID,
+    currentCensus?.plotCensusNumber,
+    currentCensus?.dateRanges
+  ]);
+
   const shouldApplyTooltip = (item: SiteConfigProps, linkHref?: string): boolean => {
     if (linkHref) {
       // Check for sub-links
@@ -1117,6 +1149,8 @@ export default function Sidebar(props: SidebarProps) {
                                                 selected={pathname === item.href + link.href}
                                                 color={pathname === item.href + link.href ? 'primary' : undefined}
                                                 disabled={isLinkDisabled}
+                                                onMouseEnter={navPreloadHandlers[link.href]}
+                                                onFocus={navPreloadHandlers[link.href]}
                                                 onClick={async () => {
                                                   if (link.href === '/postvalidation') {
                                                     const response = await fetch(
@@ -1187,6 +1221,8 @@ export default function Sidebar(props: SidebarProps) {
                                               disabled={
                                                 currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
                                               }
+                                              onMouseEnter={navPreloadHandlers[link.href]}
+                                              onFocus={navPreloadHandlers[link.href]}
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);
