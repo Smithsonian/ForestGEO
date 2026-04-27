@@ -1,4 +1,3 @@
-'use client';
 import { mutate } from 'swr';
 import { QueryNamespace, QueryScope, queryKey } from './queryKey';
 
