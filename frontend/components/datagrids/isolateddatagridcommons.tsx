@@ -112,7 +112,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     page: 0,
     pageSize: 10
   });
-  const [_isMutating, setIsMutating] = useState(false);
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [_shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [_newLastPage, setNewLastPage] = useState<number | null>(null);
@@ -282,7 +281,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, [rows]); // Only depend on rows - rowModesModel accessed via functional update
 
   const fetchFullData = useCallback(async () => {
-    setIsMutating(true);
     try {
       const tempQuery = createQFFetchQuery(
         currentSite?.schemaName ?? '',
@@ -327,13 +325,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     } catch (error: unknown) {
       ailogger.error('Error fetching full data:', error instanceof Error ? error : new Error(String(error)));
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
-    } finally {
-      setIsMutating(false);
     }
   }, [filterModel, currentPlot, currentCensus, currentSite, gridType, paginationModel.page, paginationModel.pageSize]);
 
   const exportAllCSV = useCallback(async () => {
-    setIsMutating(true);
     try {
       switch (gridType) {
         case 'attributes':
@@ -508,8 +503,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     } catch (error: any) {
       ailogger.error('Error exporting CSV:', error);
       setSnackbar({ children: 'Error exporting data', severity: 'error' });
-    } finally {
-      setIsMutating(false);
     }
   }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData, setSnackbar]);
 
@@ -554,7 +547,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID);
       if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
       try {
-        setIsMutating(true);
         const response = await fetch(fetchProcessQuery, {
           method: oldRow.isNew ? 'POST' : 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -587,8 +579,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const message = error instanceof Error ? error.message : String(error);
         setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(newRow);
-      } finally {
-        setIsMutating(false);
       }
     },
     [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
@@ -598,7 +588,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     async (id: GridRowId, confirmedRow: GridRowModel) => {
       if (locked || !promiseArguments) return;
 
-      setIsMutating(true);
       try {
         // Confirmation-driven saves already persist via updateRow below. When the
         // row mode flips back to view, MUI will invoke processRowUpdate; skip the
@@ -632,8 +621,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
       } catch (error) {
         promiseArguments.reject(error);
-      } finally {
-        setIsMutating(false);
       }
 
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
@@ -659,8 +646,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const performDeleteAction = useCallback(
     async (id: GridRowId) => {
       if (locked) return;
-
-      setIsMutating(true);
 
       const rowToDelete = rows.find(row => String(row.id) === String(id));
       if (!rowToDelete) return;
@@ -705,8 +690,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           children: `Error: ${message}`,
           severity: 'error'
         });
-      } finally {
-        setIsMutating(false);
       }
     },
     [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch]
@@ -850,8 +833,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         return oldRow;
       }
 
-      setIsMutating(true);
-
       if (newRow.isNew || !newRow.id) {
         setPromiseArguments({
           resolve: async (confirmedRow: GridRowModel) => {
@@ -872,12 +853,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               const message = error instanceof Error ? error.message : String(error);
               setSnackbar({ children: `Error: ${message}`, severity: 'error' });
               return Promise.reject(error);
-            } finally {
-              setIsMutating(false);
             }
           },
           reject: reason => {
-            setIsMutating(false);
             return Promise.reject(reason);
           },
           oldRow,
@@ -907,8 +885,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const message = error instanceof Error ? error.message : String(error);
         setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(error);
-      } finally {
-        setIsMutating(false);
       }
     },
     [
