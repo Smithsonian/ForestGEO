@@ -7,11 +7,12 @@
 
 'use client';
 
-import { Card, Box, Typography, Avatar, Skeleton } from '@mui/joy';
+import { Card, Box, Typography, Avatar } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import React, { ReactNode } from 'react';
+import { ContentSkeleton } from '@/components/loading';
 
 export interface MetricCardProps {
   title: string;
@@ -209,35 +210,8 @@ export default React.memo(MetricCard, (prevProps, nextProps) => {
 });
 
 /**
- * Skeleton loader for metric cards
+ * Skeleton loader for metric cards — delegates to the shared ContentSkeleton primitive.
  */
 export function MetricCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: '160px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Box sx={{ flex: 1 }}>
-          <Skeleton variant="text" width="60%" height={20} sx={{ mb: 2 }} />
-          <Skeleton variant="text" width="80%" height={40} />
-        </Box>
-        <Skeleton variant="circular" width={56} height={56} />
-      </Box>
-
-      <Skeleton variant="text" width="40%" height={20} />
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }

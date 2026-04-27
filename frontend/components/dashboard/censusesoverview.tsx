@@ -8,7 +8,8 @@
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Skeleton, LinearProgress, IconButton } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, IconButton } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { OrgCensusRDS, CensusDateRange } from '@/config/sqlrdsdefinitions/timekeeping';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import TimelineIcon from '@mui/icons-material/Timeline';
@@ -52,33 +53,7 @@ export interface CensusesOverviewProps {
 }
 
 function CensusCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: 180,
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant="circular" width={48} height={48} />
-          <Skeleton variant="rectangular" width={90} height={24} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="text" width="50%" height={24} sx={{ mb: 0.5 }} />
-        <Skeleton variant="text" width="70%" height={18} sx={{ mb: 1.5 }} />
-        <Box sx={{ display: 'flex', gap: 0.5, mb: 1.5 }}>
-          <Skeleton variant="rectangular" width={70} height={20} sx={{ borderRadius: 'sm' }} />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 // Determine census status based on date ranges

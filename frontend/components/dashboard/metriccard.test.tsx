@@ -150,11 +150,9 @@ describe('MetricCard Component', () => {
 
   describe('Loading State', () => {
     it('should render skeleton when isLoading is true', () => {
-      const { container } = render(<MetricCard title="Test" value={100} icon={<ParkIcon />} isLoading={true} />);
+      render(<MetricCard title="Test" value={100} icon={<ParkIcon />} isLoading={true} />);
 
-      // Should render MetricCardSkeleton instead
-      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
-      expect(skeletons.length).toBeGreaterThan(0);
+      expect(screen.getByTestId('skeleton-dashboard-card')).toBeInTheDocument();
     });
 
     it('should render content when isLoading is false', () => {
@@ -236,26 +234,17 @@ describe('MetricCard Component', () => {
 });
 
 describe('MetricCardSkeleton Component', () => {
-  it('should render skeleton placeholders', () => {
+  it('should render the shared dashboard-card skeleton', () => {
+    render(<MetricCardSkeleton />);
+
+    expect(screen.getByTestId('skeleton-dashboard-card')).toBeInTheDocument();
+  });
+
+  it('should render skeleton placeholders inside the dashboard-card skeleton', () => {
     const { container } = render(<MetricCardSkeleton />);
 
     const skeletons = container.querySelectorAll('.MuiSkeleton-root');
     expect(skeletons.length).toBeGreaterThan(0);
-  });
-
-  it('should have shimmer animation keyframes defined', () => {
-    const { container } = render(<MetricCardSkeleton />);
-
-    const card = container.querySelector('.MuiCard-root');
-    // Card should exist with animation class
-    expect(card).toBeInTheDocument();
-  });
-
-  it('should match card dimensions', () => {
-    const { container } = render(<MetricCardSkeleton />);
-
-    const card = container.querySelector('.MuiCard-root');
-    expect(card).toBeInTheDocument();
   });
 
   it('should render circular skeleton for icon', () => {

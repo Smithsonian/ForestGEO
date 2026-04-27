@@ -8,7 +8,8 @@
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Skeleton } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import ForestIcon from '@mui/icons-material/Forest';
 import ParkIcon from '@mui/icons-material/Park';
@@ -43,33 +44,7 @@ export interface SitesOverviewProps {
 }
 
 function SiteCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: 180,
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant="circular" width={48} height={48} />
-          <Skeleton variant="rectangular" width={80} height={24} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="text" width="70%" height={24} sx={{ mb: 1 }} />
-        <Skeleton variant="text" width="50%" height={18} sx={{ mb: 2 }} />
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Skeleton variant="rectangular" width={100} height={22} sx={{ borderRadius: 'sm' }} />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 interface SiteCardProps {

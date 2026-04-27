@@ -11,7 +11,8 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, Tooltip, IconButton, Skeleton, Divider } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, Tooltip, IconButton, Divider } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { designTokens } from '@/config/design-tokens';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -188,28 +189,7 @@ function QueryListItem({ query }: { query: PostValidationQueriesRDS }) {
 }
 
 function DataQualitySkeleton() {
-  return (
-    <Card variant="outlined">
-      <CardContent sx={{ p: 2.5 }}>
-        <Stack direction="row" spacing={2} alignItems="flex-start">
-          <Skeleton variant="circular" width={48} height={48} />
-          <Box sx={{ flex: 1 }}>
-            <Skeleton variant="text" width="60%" height={24} />
-            <Skeleton variant="text" width="40%" height={18} sx={{ mt: 0.5 }} />
-          </Box>
-          <Skeleton variant="rectangular" width={80} height={28} sx={{ borderRadius: 'sm' }} />
-        </Stack>
-        <Box sx={{ mt: 2 }}>
-          <Skeleton variant="rectangular" width="100%" height={8} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-          <Skeleton variant="rectangular" width={70} height={22} sx={{ borderRadius: 'sm' }} />
-          <Skeleton variant="rectangular" width={70} height={22} sx={{ borderRadius: 'sm' }} />
-          <Skeleton variant="rectangular" width={70} height={22} sx={{ borderRadius: 'sm' }} />
-        </Stack>
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 // ============================================================================
