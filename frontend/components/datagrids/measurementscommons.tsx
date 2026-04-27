@@ -58,7 +58,7 @@ import {
   sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
-import { useForestQuery, queryKey, QueryNamespace, QueryScope } from '@/lib/query';
+import { useForestQuery, queryKey, QueryNamespace, QueryScope, invalidateAfter } from '@/lib/query';
 import { defaultFetcher, QueryError } from '@/lib/query/fetcher';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
@@ -836,6 +836,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     } finally {
       setLoading(false);
     }
+    await invalidateAfter('save-edit-plan', queryScope);
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -890,6 +891,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         setLoading(false);
       }
       await refetch();
+      await invalidateAfter('delete-measurement', queryScope);
     }
   };
 

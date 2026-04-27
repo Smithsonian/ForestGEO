@@ -6,6 +6,7 @@ import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileRow } from '@/config/macros/formdetails';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
+import { invalidateAfter } from '@/lib/query';
 import { BulkEditPlan } from '@/config/editplan/types';
 import {
   RevisionApplyMatchedRow,
@@ -145,6 +146,8 @@ export default function UploadRevisionApply(props: Readonly<UploadRevisionApplyP
         setApplyResult(result);
         setApplyStatus('success');
         setIsDataUnsaved(false);
+
+        await invalidateAfter('save-edit-plan', { siteSchema: schema, plotID, censusID });
 
         if (result.validationPending && schema && plotID && censusID) {
           startValidation({ schema, plotID, censusID });

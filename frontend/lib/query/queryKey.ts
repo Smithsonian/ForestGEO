@@ -1,5 +1,6 @@
 export type QueryNamespace =
   | 'grid:measurements'
+  | 'grid:measurementssummary'
   | 'grid:measurementssummary_staging'
   | 'grid:summary'
   | 'grid:quadrats'

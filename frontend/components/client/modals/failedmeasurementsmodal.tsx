@@ -20,6 +20,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'reac
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import ailogger from '@/ailogger';
+import { invalidateAfter } from '@/lib/query';
 
 interface FailedMeasurementsModalProps {
   open: boolean;
@@ -167,6 +168,12 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
 
       const result = await response.json();
       ailogger.info('Reingestion result:', result);
+
+      await invalidateAfter('reingest', {
+        siteSchema: currentSite.schemaName,
+        plotID: currentPlot.plotID,
+        censusID: currentCensus.dateRanges?.[0].censusID
+      });
 
       // Close the failed measurements modal
       await handleCloseModal();

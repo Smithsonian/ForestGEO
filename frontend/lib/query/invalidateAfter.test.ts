@@ -14,45 +14,97 @@ const scope = { siteSchema: 's', plotID: 1, censusID: 2 };
 describe('invalidateAfter', () => {
   beforeEach(() => { calls.length = 0; });
 
-  it('delete-measurement fans out to measurements, summary, dashboard:metrics', async () => {
+  it('delete-measurement fans out to all affected measurement grids and dashboard prefixes', async () => {
     await invalidateAfter('delete-measurement', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:measurements', 'grid:summary', 'dashboard:metrics'])
+      new Set([
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'grid:failedmeasurements',
+        'grid:summary',
+        'grid:errors',
+        'grid:unifiedchangelog',
+        'dashboard:metrics',
+        'dashboard:dataquality',
+        'dashboard:progress'
+      ])
     );
   });
 
-  it('reingest fans out to errors, measurements, dashboard:metrics', async () => {
+  it('reingest fans out to failed measurements, errors, measurement grids, changelog, and dashboard prefixes', async () => {
     await invalidateAfter('reingest', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:errors', 'grid:measurements', 'dashboard:metrics'])
+      new Set([
+        'grid:failedmeasurements',
+        'grid:errors',
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'grid:unifiedchangelog',
+        'dashboard:metrics',
+        'dashboard:dataquality',
+        'dashboard:progress'
+      ])
     );
   });
 
-  it('save-edit-plan fans out to measurements, errors, dashboard:metrics', async () => {
+  it('save-edit-plan fans out to all measurement grids, errors, failed, changelog, and dashboard prefixes', async () => {
     await invalidateAfter('save-edit-plan', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:measurements', 'grid:errors', 'dashboard:metrics'])
+      new Set([
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'grid:errors',
+        'grid:failedmeasurements',
+        'grid:unifiedchangelog',
+        'dashboard:metrics',
+        'dashboard:dataquality'
+      ])
     );
   });
 
-  it('delete-quadrat fans out to quadrats, measurements, dashboard:metrics', async () => {
+  it('delete-quadrat fans out to quadrats, quadratpersonnel, measurement grids, and dashboard:metrics', async () => {
     await invalidateAfter('delete-quadrat', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:quadrats', 'grid:measurements', 'dashboard:metrics'])
+      new Set([
+        'grid:quadrats',
+        'grid:quadratpersonnel',
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'dashboard:metrics'
+      ])
     );
   });
 
-  it('delete-attribute fans out to attributes, measurements, dashboard:metrics', async () => {
+  it('delete-attribute fans out to attributes, measurement grids, and dashboard:metrics', async () => {
     await invalidateAfter('delete-attribute', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:attributes', 'grid:measurements', 'dashboard:metrics'])
+      new Set([
+        'grid:attributes',
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'dashboard:metrics'
+      ])
     );
   });
 
-  it('delete-taxonomy fans out to taxonomies, measurements, dashboard:metrics', async () => {
+  it('delete-taxonomy fans out to taxonomy grids, trees, measurement grids, and dashboard:metrics', async () => {
     await invalidateAfter('delete-taxonomy', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set(['grid:taxonomies', 'grid:measurements', 'dashboard:metrics'])
+      new Set([
+        'grid:taxonomies',
+        'grid:alltaxonomiesview',
+        'grid:stemtaxonomiesview',
+        'grid:trees',
+        'grid:measurements',
+        'grid:measurementssummary',
+        'grid:measurementssummary_staging',
+        'dashboard:metrics'
+      ])
     );
   });
 
@@ -60,6 +112,7 @@ describe('invalidateAfter', () => {
     await invalidateAfter('census-creation', scope);
     const fired = new Set(calls.map(c => c.prefix));
     expect(fired.has('grid:measurements')).toBe(true);
+    expect(fired.has('grid:measurementssummary')).toBe(true);
     expect(fired.has('grid:summary')).toBe(true);
     expect(fired.has('grid:errors')).toBe(true);
     expect(fired.has('grid:quadrats')).toBe(true);

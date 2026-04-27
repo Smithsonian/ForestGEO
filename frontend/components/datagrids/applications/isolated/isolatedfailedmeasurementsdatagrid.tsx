@@ -15,6 +15,7 @@ import moment from 'moment/moment';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
+import { invalidateAfter } from '@/lib/query';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
@@ -241,6 +242,12 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             const errorData = await reingestResponse.json().catch(() => ({ message: `HTTP ${reingestResponse.status}` }));
             throw new Error(errorData.message || `Failed to reingest row: ${reingestResponse.status}`);
           }
+
+          await invalidateAfter('reingest', {
+            siteSchema: currentSite?.schemaName,
+            plotID: currentPlot?.plotID,
+            censusID: currentCensus?.dateRanges?.[0]?.censusID
+          });
 
           await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
 

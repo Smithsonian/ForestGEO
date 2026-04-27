@@ -51,7 +51,7 @@ import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
-import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, QueryError } from '@/lib/query';
+import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, QueryError, invalidateAfter, MutationKind } from '@/lib/query';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -82,6 +82,16 @@ export type IsolatedDataGridCommonsHandle = {
   fetchPaginatedData: () => Promise<void>;
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
+
+const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
+const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
+
+function resolveDeleteMutationKind(gridType: string): MutationKind | null {
+  if (QUADRAT_GRID_TYPES.has(gridType)) return 'delete-quadrat';
+  if (gridType === 'attributes') return 'delete-attribute';
+  if (TAXONOMY_GRID_TYPES.has(gridType)) return 'delete-taxonomy';
+  return null;
+}
 
 const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommonsInner(
   props: Readonly<IsolatedDataGridCommonProps>,
@@ -683,6 +693,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
           await refetch();
+          const deleteMutationKind = resolveDeleteMutationKind(gridType);
+          if (deleteMutationKind) {
+            await invalidateAfter(deleteMutationKind, queryScope);
+          } else {
+            ailogger.info(`no fan-out wired for gridType ${gridType}`);
+          }
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Deletion failed';
@@ -692,7 +708,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         });
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch]
+    [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope]
   );
 
   const handleConfirmAction = useCallback(
