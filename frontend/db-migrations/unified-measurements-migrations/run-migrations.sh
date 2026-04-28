@@ -67,6 +67,7 @@ ORDERED_MIGRATIONS=(
     "54_create_edit_operations.sql"
     "55_extend_edit_operations_bulk_rows.sql"
     "56_relax_edit_operations_target_id.sql"
+    "57_backfill_measurementssummary_stemguid.sql"
 )
 
 # ---------------------------------------------------------------------------
