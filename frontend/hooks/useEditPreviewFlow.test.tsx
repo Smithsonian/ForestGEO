@@ -7,8 +7,7 @@ const BASE_ARGS: UseEditPreviewFlowArgs = {
   schema: 'forestgeo_testing',
   plotID: 1,
   censusID: 2,
-  dataType: 'measurementssummary',
-  surface: 'measurements'
+  dataType: 'measurementssummary'
 };
 
 const INFO_PLAN: EditPlan = {
@@ -98,6 +97,31 @@ describe('useEditPreviewFlow', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(requestBody(fetchMock, 2).planHash).toBe(FRESH_PLAN.planHash);
     expect(result.current.dialogState.open).toBe(false);
+  });
+
+  it('uses a per-call dataType override for both preview and apply', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...INFO_PLAN, dataType: 'failedmeasurements' })).mockResolvedValueOnce(jsonResponse(APPLY_RESULT));
+
+    const { result } = renderHook(() => useEditPreviewFlow(BASE_ARGS));
+
+    let editResult!: ApplyResult;
+    await act(async () => {
+      editResult = await result.current.beginEdit(42, { SpCode: 'NEWSP' }, { dataType: 'failedmeasurements' });
+    });
+
+    expect(editResult).toEqual(APPLY_RESULT);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestBody(fetchMock, 0)).toMatchObject({
+      dataType: 'failedmeasurements',
+      targetID: 42,
+      newRow: { SpCode: 'NEWSP' }
+    });
+    expect(requestBody(fetchMock, 1)).toMatchObject({
+      dataType: 'failedmeasurements',
+      targetID: 42,
+      newRow: { SpCode: 'NEWSP' },
+      planHash: INFO_PLAN.planHash
+    });
   });
 
   it('opens review instead of auto-applying an info-severity plan with blocking errors', async () => {

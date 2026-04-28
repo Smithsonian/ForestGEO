@@ -3,18 +3,20 @@ import { canonicalizeRowForHash } from './canonicalrow';
 
 describe('canonicalizeRowForHash', () => {
   describe('revision-update mode', () => {
-    it('keeps only updatable fields and drops identity keys', () => {
-      const out = canonicalizeRowForHash(
-        { dbh: '10', tag: 'T1', spcode: 'ABC', codes: 'M' },
-        'revision-update'
-      );
-      expect(out).toEqual({ MeasuredDBH: 10, Attributes: 'M' });
-      expect(out).not.toHaveProperty('TreeTag');
-      expect(out).not.toHaveProperty('SpeciesCode');
+    it('keeps row-local and identity fields together (Phase 2)', () => {
+      const out = canonicalizeRowForHash({ dbh: '10', tag: 'T1', spcode: 'ABC', codes: 'M' }, 'revision-update');
+      expect(out).toEqual({ MeasuredDBH: 10, TreeTag: 'T1', SpeciesCode: 'ABC', Attributes: 'M' });
     });
+
     it('accepts canonical keys as input', () => {
       const out = canonicalizeRowForHash({ MeasuredDBH: 10, Attributes: 'M' }, 'revision-update');
       expect(out).toEqual({ MeasuredDBH: 10, Attributes: 'M' });
+    });
+
+    it('keeps coordinate edits in revision-update mode', () => {
+      const out = canonicalizeRowForHash({ lx: '3.14159', ly: '2.71828' }, 'revision-update');
+      expect(out.StemLocalX).toBe(3.14);
+      expect(out.StemLocalY).toBe(2.72);
     });
   });
 
@@ -34,7 +36,7 @@ describe('canonicalizeRowForHash', () => {
       expect(out.MeasurementDate).toBe('2026-04-22');
     });
 
-    it('excludes identity fields when only update-surface fields are supplied', () => {
+    it('omits identity keys that are not supplied in the input', () => {
       const out = canonicalizeRowForHash({ dbh: '5', hom: '1.3' }, 'revision-insert');
       expect(out).toEqual({ MeasuredDBH: 5, MeasuredHOM: 1.3 });
       expect(out).not.toHaveProperty('TreeTag');

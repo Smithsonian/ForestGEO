@@ -15,9 +15,21 @@ type CanonicalField =
   | 'Attributes'
   | 'Description';
 
-const UPDATE_FIELDS: readonly CanonicalField[] = ['MeasuredDBH', 'MeasuredHOM', 'MeasurementDate', 'Attributes', 'Description'];
+const UPDATE_FIELDS: readonly CanonicalField[] = [
+  'MeasuredDBH',
+  'MeasuredHOM',
+  'MeasurementDate',
+  'Attributes',
+  'Description',
+  'TreeTag',
+  'StemTag',
+  'SpeciesCode',
+  'QuadratName',
+  'StemLocalX',
+  'StemLocalY'
+];
 
-const INSERT_FIELDS: readonly CanonicalField[] = [...UPDATE_FIELDS, 'TreeTag', 'StemTag', 'SpeciesCode', 'QuadratName', 'StemLocalX', 'StemLocalY'];
+const INSERT_FIELDS: readonly CanonicalField[] = [...UPDATE_FIELDS];
 
 // Maps CSV lowercase alias keys onto their canonical field names.
 // These come from the `revision-row-local` and `revision-identity` surfaces
@@ -82,14 +94,13 @@ function normalizeDecimal(value: unknown, precision: number): number | null {
  * Normalizes a CSV row into the stable, hashable shape the editplan analyzer
  * and apply path both consume.
  *
- * `revision-update` — only the five fields actually written by matched-row
- * updates: `MeasuredDBH`, `MeasuredHOM`, `MeasurementDate`, `Attributes`,
- * `Description`. Identity/coordinate keys in the input are dropped so the
- * hash does not surface phantom effects for matched rows.
- *
- * `revision-insert` — the full insert surface: update fields plus
- * `TreeTag`, `StemTag`, `SpeciesCode`, `QuadratName`, `StemLocalX`,
- * `StemLocalY`.
+ * Both modes accept the full editable surface — row-local fields
+ * (`MeasuredDBH`, `MeasuredHOM`, `MeasurementDate`, `Attributes`,
+ * `Description`) plus identity/coordinate fields (`TreeTag`, `StemTag`,
+ * `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`). Phase 2 of the
+ * revision-upload work removed the row-local-only restriction on
+ * `revision-update` so identity edits flow through the same analyzer + writer
+ * as the single-row PATCH path.
  *
  * Keys absent in the input are absent in the output (no `undefined`
  * pollution). Unknown keys are silently dropped. The function is idempotent:

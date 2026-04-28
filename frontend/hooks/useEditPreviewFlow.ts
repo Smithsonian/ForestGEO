@@ -7,20 +7,24 @@ const PREVIEW_ENDPOINT = '/api/edits/preview';
 const APPLY_ENDPOINT = '/api/edits/apply';
 const HASH_DRIFT_STATUS = 409;
 
-export type EditSurface = 'measurements' | 'failedmeasurements' | 'errorsexplorer' | 'bulk';
-
 export interface UseEditPreviewFlowArgs {
   schema: string;
   plotID: number;
   censusID: number;
   dataType: EditPlanDataType;
-  surface: EditSurface;
   onSuccess?: (result: ApplyResult, plan: EditPlan) => void;
   onError?: (error: Error) => void;
 }
 
+export interface BeginEditOptions {
+  // Per-call override for dataType. Required when a single grid mixes
+  // measurementssummary and failedmeasurements rows (e.g. ErrorsExplorer).
+  // When omitted, the hook falls back to the dataType passed at hook init.
+  dataType?: EditPlanDataType;
+}
+
 export interface UseEditPreviewFlowReturn {
-  beginEdit: (targetID: number, newRow: Record<string, unknown>) => Promise<ApplyResult>;
+  beginEdit: (targetID: number, newRow: Record<string, unknown>, options?: BeginEditOptions) => Promise<ApplyResult>;
   dialogState: DialogState;
   cancelDialog: () => void;
   confirmDialog: () => Promise<void>;
@@ -30,6 +34,11 @@ export interface DialogState {
   open: boolean;
   plan: EditPlan | null;
   busy: boolean;
+  // True when the dialog is showing a fresh plan that replaced an earlier
+  // one because of a 409 hash-drift response. Resets to false on each new
+  // beginEdit. PreviewDialog uses this to render a banner and reset the
+  // typed-confirm input.
+  wasRefreshed: boolean;
 }
 
 export class PreviewRequestError extends Error {
@@ -97,31 +106,37 @@ async function postApply(body: Record<string, unknown>): Promise<ApplyResponseSu
 interface PendingEditRef {
   targetID: number;
   newRow: Record<string, unknown>;
+  dataType: EditPlanDataType;
   resolve: (result: ApplyResult) => void;
   reject: (err: Error) => void;
 }
 
 export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreviewFlowReturn {
   const { schema, plotID, censusID, dataType, onSuccess, onError } = args;
-  const [dialogState, setDialogState] = useState<DialogState>({ open: false, plan: null, busy: false });
+  const [dialogState, setDialogState] = useState<DialogState>({ open: false, plan: null, busy: false, wasRefreshed: false });
   const pendingRef = useRef<PendingEditRef | null>(null);
 
   const buildRequestBody = useCallback(
-    (targetID: number, newRow: Record<string, unknown>, planHash?: string) => ({
+    (targetID: number, newRow: Record<string, unknown>, callDataType: EditPlanDataType, planHash?: string) => ({
       schema,
       plotID,
       censusID,
-      dataType,
+      dataType: callDataType,
       targetID,
       newRow,
       ...(planHash ? { planHash } : {})
     }),
-    [schema, plotID, censusID, dataType]
+    [schema, plotID, censusID]
   );
 
   const executeApply = useCallback(
-    async (plan: EditPlan, targetID: number, newRow: Record<string, unknown>): Promise<ApplyResponseSuccess | ApplyResponseConflict> => {
-      return postApply(buildRequestBody(targetID, newRow, plan.planHash));
+    async (
+      plan: EditPlan,
+      targetID: number,
+      newRow: Record<string, unknown>,
+      callDataType: EditPlanDataType
+    ): Promise<ApplyResponseSuccess | ApplyResponseConflict> => {
+      return postApply(buildRequestBody(targetID, newRow, callDataType, plan.planHash));
     },
     [buildRequestBody]
   );
@@ -129,7 +144,7 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
   const cancelDialog = useCallback(() => {
     const pending = pendingRef.current;
     pendingRef.current = null;
-    setDialogState({ open: false, plan: null, busy: false });
+    setDialogState({ open: false, plan: null, busy: false, wasRefreshed: false });
     if (pending) {
       pending.reject(new Error('cancelled'));
     }
@@ -143,35 +158,37 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
 
     setDialogState(prev => ({ ...prev, busy: true }));
     try {
-      const applyResponse = await executeApply(currentPlan, pending.targetID, pending.newRow);
+      const applyResponse = await executeApply(currentPlan, pending.targetID, pending.newRow, pending.dataType);
       if (applyResponse.kind === 'conflict') {
-        setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false });
+        setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false, wasRefreshed: true });
         return;
       }
 
       const { result } = applyResponse;
       pendingRef.current = null;
-      setDialogState({ open: false, plan: null, busy: false });
+      setDialogState({ open: false, plan: null, busy: false, wasRefreshed: false });
       if (onSuccess) onSuccess(result, currentPlan);
       pending.resolve(result);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       pendingRef.current = null;
-      setDialogState({ open: false, plan: null, busy: false });
+      setDialogState({ open: false, plan: null, busy: false, wasRefreshed: false });
       if (onError) onError(error);
       pending.reject(error);
     }
   }, [dialogState.plan, executeApply, onError, onSuccess]);
 
   const beginEdit = useCallback(
-    async (targetID: number, newRow: Record<string, unknown>): Promise<ApplyResult> => {
+    async (targetID: number, newRow: Record<string, unknown>, options?: BeginEditOptions): Promise<ApplyResult> => {
       if (pendingRef.current) {
         throw new Error('an edit is already pending');
       }
 
+      const callDataType: EditPlanDataType = options?.dataType ?? dataType;
+
       let plan: EditPlan;
       try {
-        plan = await postPreview(buildRequestBody(targetID, newRow));
+        plan = await postPreview(buildRequestBody(targetID, newRow, callDataType));
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (onError) onError(error);
@@ -180,11 +197,11 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
 
       if (plan.maxSeverity === 'info' && plan.canApply !== false) {
         try {
-          const applyResponse = await executeApply(plan, targetID, newRow);
+          const applyResponse = await executeApply(plan, targetID, newRow, callDataType);
           if (applyResponse.kind === 'conflict') {
             return new Promise<ApplyResult>((resolve, reject) => {
-              pendingRef.current = { targetID, newRow, resolve, reject };
-              setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false });
+              pendingRef.current = { targetID, newRow, dataType: callDataType, resolve, reject };
+              setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false, wasRefreshed: true });
             });
           }
 
@@ -199,11 +216,11 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
       }
 
       return new Promise<ApplyResult>((resolve, reject) => {
-        pendingRef.current = { targetID, newRow, resolve, reject };
-        setDialogState({ open: true, plan, busy: false });
+        pendingRef.current = { targetID, newRow, dataType: callDataType, resolve, reject };
+        setDialogState({ open: true, plan, busy: false, wasRefreshed: false });
       });
     },
-    [buildRequestBody, executeApply, onError, onSuccess]
+    [buildRequestBody, dataType, executeApply, onError, onSuccess]
   );
 
   return { beginEdit, dialogState, cancelDialog, confirmDialog };

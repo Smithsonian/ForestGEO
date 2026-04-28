@@ -78,14 +78,58 @@ describe('PreviewDialog', () => {
       expect(screen.getByTestId('edit-preview-apply')).toBeInTheDocument();
     });
 
-    it('renders no typed-confirm input on single-row edits even for destructive severity', () => {
+    it('renders a severity chip in the title that reflects plan.maxSeverity', () => {
+      const safe = makePlan({ maxSeverity: 'info' });
+      const { rerender } = render(<PreviewDialog plan={safe} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.getByTestId('edit-preview-severity-info')).toBeInTheDocument();
+
+      rerender(<PreviewDialog plan={makePlan({ maxSeverity: 'warn' })} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.getByTestId('edit-preview-severity-warn')).toBeInTheDocument();
+
+      rerender(<PreviewDialog plan={makePlan({ maxSeverity: 'destructive' })} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.getByTestId('edit-preview-severity-destructive')).toBeInTheDocument();
+    });
+
+    it('renders typed-confirm input on destructive single-row edits', () => {
       const plan = makePlan({
         maxSeverity: 'destructive',
         effects: [makeEffect({ id: 'destr', severity: 'destructive', title: 'Destructive action' })]
       });
       render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
 
-      expect(screen.queryByPlaceholderText(/APPLY/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('edit-preview-typed-confirm')).toBeInTheDocument();
+      expect(screen.getByTestId('edit-preview-typed-confirm-input')).toBeInTheDocument();
+    });
+
+    it('hides typed-confirm input when plan is destructive but blocked by role', () => {
+      const plan = makePlan({
+        canApply: false,
+        maxSeverity: 'destructive',
+        errors: [
+          {
+            kind: 'RoleForbiddenField',
+            field: 'SpeciesCode',
+            role: 'field crew',
+            message: 'SpeciesCode can only be edited by global or db admin users.',
+            severity: 'destructive',
+            blocking: true
+          }
+        ],
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.queryByTestId('edit-preview-typed-confirm')).not.toBeInTheDocument();
+    });
+
+    it('does not render typed-confirm input on warn or info severity', () => {
+      const warnPlan = makePlan({ maxSeverity: 'warn', effects: [makeEffect({ severity: 'warn' })] });
+      const { rerender } = render(<PreviewDialog plan={warnPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.queryByTestId('edit-preview-typed-confirm')).not.toBeInTheDocument();
+
+      const infoPlan = makePlan({ maxSeverity: 'info' });
+      rerender(<PreviewDialog plan={infoPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+      expect(screen.queryByTestId('edit-preview-typed-confirm')).not.toBeInTheDocument();
     });
   });
 
@@ -180,6 +224,80 @@ describe('PreviewDialog', () => {
       await user.click(screen.getByTestId('edit-preview-apply'));
 
       expect(onConfirm).not.toHaveBeenCalled();
+    });
+
+    // Symmetric guard with destructive duplicate deletion in revisions match —
+    // single-cell destructive edits must require a deliberate keystroke before
+    // the Apply button enables.
+    it('disables Apply on destructive plans until the user types APPLY', async () => {
+      const user = userEvent.setup();
+      const plan = makePlan({
+        maxSeverity: 'destructive',
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      const applyButton = screen.getByTestId('edit-preview-apply');
+      const input = screen.getByTestId('edit-preview-typed-confirm-input');
+
+      expect(applyButton).toBeDisabled();
+
+      await user.type(input, 'apply'); // case-insensitive
+      expect(applyButton).not.toBeDisabled();
+
+      await user.click(applyButton);
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps Apply disabled on destructive plans when typed text is wrong', async () => {
+      const user = userEvent.setup();
+      const plan = makePlan({
+        maxSeverity: 'destructive',
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      render(<PreviewDialog plan={plan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      const applyButton = screen.getByTestId('edit-preview-apply');
+      const input = screen.getByTestId('edit-preview-typed-confirm-input');
+
+      await user.type(input, 'YES');
+      expect(applyButton).toBeDisabled();
+    });
+
+    it('resets typed-confirm when the plan hash changes (drift replay)', async () => {
+      const user = userEvent.setup();
+      const initialPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: 'a'.repeat(64),
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      const { rerender } = render(<PreviewDialog plan={initialPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      await user.type(screen.getByTestId('edit-preview-typed-confirm-input'), 'APPLY');
+      expect(screen.getByTestId('edit-preview-apply')).not.toBeDisabled();
+
+      // 409 drift: replace plan with a new hash. The user must re-type to
+      // confirm — otherwise they'd be approving effects they never read.
+      const refreshedPlan = makePlan({
+        maxSeverity: 'destructive',
+        planHash: 'b'.repeat(64),
+        effects: [makeEffect({ id: 'destr', severity: 'destructive' })]
+      });
+      rerender(<PreviewDialog plan={refreshedPlan} onConfirm={onConfirm} onCancel={onCancel} busy={false} wasRefreshed={true} />);
+
+      expect(screen.getByTestId('edit-preview-apply')).toBeDisabled();
+    });
+
+    it('renders the drift-replay banner when wasRefreshed is true', () => {
+      render(<PreviewDialog plan={makePlan({ maxSeverity: 'warn' })} onConfirm={onConfirm} onCancel={onCancel} busy={false} wasRefreshed={true} />);
+
+      expect(screen.getByTestId('edit-preview-refreshed-banner')).toBeInTheDocument();
+    });
+
+    it('does not render the drift-replay banner on the first preview', () => {
+      render(<PreviewDialog plan={makePlan()} onConfirm={onConfirm} onCancel={onCancel} busy={false} />);
+
+      expect(screen.queryByTestId('edit-preview-refreshed-banner')).not.toBeInTheDocument();
     });
   });
 
