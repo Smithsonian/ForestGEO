@@ -21,6 +21,9 @@ vi.mock('@/config/connectionmanager', () => {
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
+      if (query.includes('??')) {
+        throw new Error(`ConnectionManager mock: query contains unformatted identifier placeholders: ${query}`);
+      }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(
           `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
@@ -414,6 +417,64 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
+  describe('StemTag change', () => {
+    it('creates a new stem on the same tree/quadrat and rewires the measurement', async () => {
+      const newStemTag = 'WS9';
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+      const stemCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
+
+      const plan = buildPlan([{ field: 'StemTag', from: STEM_TAG_S1, to: newStemTag }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: newStemTag });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const stemCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
+      expect(stemCountAfter).toBe(stemCountBefore + 1);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.StemGUID).not.toBe(stemGUIDBefore);
+      expect(cmRow.RawStemTag).toBe(newStemTag);
+
+      const newStem = await loadStem(connection, Number(cmRow.StemGUID));
+      expect(newStem?.StemTag).toBe(newStemTag);
+      expect(newStem?.TreeID).toBe(fixture.treeIDs[TREE_TAG_T1]);
+      expect(newStem?.QuadratID).toBe(fixture.quadratIDs[QUADRAT_NAME_A]);
+    });
+  });
+
+  describe('row-local measurement fields', () => {
+    it('updates MeasurementDate and Description without moving tree/stem identity', async () => {
+      const newDate = '2024-08-09';
+      const newDescription = 'field check complete';
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+      const plan = buildPlan(
+        [
+          { field: 'MeasurementDate', from: INITIAL_DATE, to: newDate },
+          { field: 'Description', from: 'initial comment', to: newDescription }
+        ],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, {
+        MeasurementDate: newDate,
+        Description: newDescription
+      });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      const storedDate = cmRow.MeasurementDate;
+      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
+      expect(storedDateAsIso).toBe(newDate);
+      expect(cmRow.Description).toBe(newDescription);
+      expect(cmRow.RawComments).toBe(newDescription);
+      expect(cmRow.StemGUID).toBe(stemGUIDBefore);
+    });
+  });
+
   describe('SpeciesCode re-link', () => {
     it('updates coremeasurements.SpeciesID (via tree rewire) but does NOT mutate the species row', async () => {
       const querSpeciesID = fixture.speciesIDs[SPECIES_CODE_QUERCO];
@@ -465,6 +526,84 @@ describe('writeMeasurementsSummary (integration)', () => {
       expect(codes.sort()).toEqual([ATTR_CODE_ALIVE, ATTR_CODE_BROKEN].sort());
       // Verify the old M code is gone.
       expect(codes).not.toContain(ATTR_CODE_MISSING);
+    });
+  });
+
+  describe('all editable fields together', () => {
+    it('applies species/tree/stem/quadrat/coordinate/measurement/comment/attribute changes in one transaction', async () => {
+      const allFieldStemTag = 'WSA';
+      const newDate = '2024-09-10';
+      const newDescription = 'all field edit';
+      const newDBH = 33.33;
+      const newHOM = 2.22;
+      const newX = 11.11;
+      const newY = 12.12;
+      const newAttributes = ATTR_CODE_BROKEN;
+      const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
+
+      const plan = buildPlan(
+        [
+          { field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_QUERCO },
+          { field: 'TreeTag', from: TREE_TAG_T1, to: TREE_TAG_NEW },
+          { field: 'StemTag', from: STEM_TAG_S1, to: allFieldStemTag },
+          { field: 'QuadratName', from: QUADRAT_NAME_A, to: QUADRAT_NAME_B },
+          { field: 'StemLocalX', from: INITIAL_STEM_X, to: newX },
+          { field: 'StemLocalY', from: INITIAL_STEM_Y, to: newY },
+          { field: 'MeasurementDate', from: INITIAL_DATE, to: newDate },
+          { field: 'MeasuredDBH', from: INITIAL_DBH, to: newDBH },
+          { field: 'MeasuredHOM', from: INITIAL_HOM, to: newHOM },
+          { field: 'Description', from: 'initial comment', to: newDescription },
+          { field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: newAttributes }
+        ],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, {
+        SpeciesCode: SPECIES_CODE_QUERCO,
+        TreeTag: TREE_TAG_NEW,
+        StemTag: allFieldStemTag,
+        QuadratName: QUADRAT_NAME_B,
+        StemLocalX: newX,
+        StemLocalY: newY,
+        MeasurementDate: newDate,
+        MeasuredDBH: newDBH,
+        MeasuredHOM: newHOM,
+        Description: newDescription,
+        Attributes: newAttributes
+      });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(cmRow.StemGUID).not.toBe(stemGUIDBefore);
+      expect(Number(cmRow.MeasuredDBH)).toBeCloseTo(newDBH, 2);
+      expect(Number(cmRow.MeasuredHOM)).toBeCloseTo(newHOM, 2);
+      expect(cmRow.RawTreeTag).toBe(TREE_TAG_NEW);
+      expect(cmRow.RawStemTag).toBe(allFieldStemTag);
+      expect(cmRow.RawSpCode).toBe(SPECIES_CODE_QUERCO);
+      expect(cmRow.RawQuadrat).toBe(QUADRAT_NAME_B);
+      expect(Number(cmRow.RawX)).toBeCloseTo(newX, 2);
+      expect(Number(cmRow.RawY)).toBeCloseTo(newY, 2);
+      expect(cmRow.RawCodes).toBe(newAttributes);
+      expect(cmRow.RawComments).toBe(newDescription);
+
+      const storedDate = cmRow.MeasurementDate;
+      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
+      expect(storedDateAsIso).toBe(newDate);
+
+      const newStem = await loadStem(connection, Number(cmRow.StemGUID));
+      expect(newStem?.StemTag).toBe(allFieldStemTag);
+      expect(newStem?.QuadratID).toBe(fixture.quadratIDs[QUADRAT_NAME_B]);
+      expect(Number(newStem?.LocalX)).toBeCloseTo(newX, 2);
+      expect(Number(newStem?.LocalY)).toBeCloseTo(newY, 2);
+
+      const [treeRows] = await connection.query<RowDataPacket[]>('SELECT TreeTag, SpeciesID FROM trees WHERE TreeID = ?', [newStem?.TreeID]);
+      expect(treeRows[0].TreeTag).toBe(TREE_TAG_NEW);
+      expect(treeRows[0].SpeciesID).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
+
+      const [attrRows] = await connection.query<RowDataPacket[]>('SELECT Code FROM cmattributes WHERE CoreMeasurementID = ?', [fixture.coreMeasurementID]);
+      expect(attrRows.map(r => r.Code)).toEqual([ATTR_CODE_BROKEN]);
     });
   });
 

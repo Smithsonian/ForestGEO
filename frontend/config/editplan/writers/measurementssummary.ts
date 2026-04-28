@@ -483,7 +483,7 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
       .split(';')
       .map(code => code.trim())
       .filter(Boolean);
-    await cm.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, coreMeasurementID], txID);
+    await cm.executeQuery(safeFormatQuery(schema, `DELETE FROM ??.cmattributes WHERE CoreMeasurementID = ?`), [coreMeasurementID], txID);
     for (const code of parsedCodes) {
       await handleUpsert<CMAttributesResult>(
         cm,

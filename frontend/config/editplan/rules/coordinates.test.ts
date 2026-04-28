@@ -10,7 +10,7 @@ function makeCtx(overrides: Partial<Parameters<typeof applyCoordinateRules>[0]> 
   } as any;
   return {
     cm,
-    schema: 's',
+    schema: 'forestgeo_testing',
     dataType: 'measurementssummary' as const,
     plotID: 1,
     censusID: 1,
@@ -85,7 +85,7 @@ describe('applyCoordinateRules', () => {
     const ctx = makeCtx();
     await applyCoordinateRules(ctx);
     const callArgs = (ctx.cm as any).executeQuery.mock.calls[0];
-    expect(callArgs[0]).toContain('s.coremeasurements');
+    expect(callArgs[0]).toContain('`forestgeo_testing`.coremeasurements');
     expect(callArgs[0]).toContain('StemGUID = ?');
     expect(callArgs[1]).toEqual([STEM_GUID]);
   });

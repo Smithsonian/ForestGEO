@@ -21,6 +21,9 @@ vi.mock('@/config/connectionmanager', () => {
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
+      if (query.includes('??')) {
+        throw new Error(`ConnectionManager mock: query contains unformatted identifier placeholders: ${query}`);
+      }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
         throw new Error(
           `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
@@ -375,6 +378,64 @@ describe('writeFailedMeasurements (integration)', () => {
     });
   });
 
+  describe('all editable raw fields together', () => {
+    it('updates every failedmeasurements editable field while preserving failed-row shape', async () => {
+      const newValues = {
+        Tag: NEW_TREE_TAG,
+        StemTag: NEW_STEM_TAG,
+        SpCode: 'RSP99',
+        Quadrat: 'RQ99',
+        X: 12.5,
+        Y: 13.75,
+        DBH: 22.25,
+        HOM: 2.5,
+        Date: NEW_DATE_ISO,
+        Codes: 'D2',
+        Comments: 'updated failed row'
+      };
+      const plan = buildPlan(
+        [
+          { field: 'Tag', from: INITIAL_RAW_TREE_TAG, to: newValues.Tag },
+          { field: 'StemTag', from: INITIAL_RAW_STEM_TAG, to: newValues.StemTag },
+          { field: 'SpCode', from: INITIAL_RAW_SPCODE, to: newValues.SpCode },
+          { field: 'Quadrat', from: INITIAL_RAW_QUADRAT, to: newValues.Quadrat },
+          { field: 'X', from: INITIAL_RAW_X, to: newValues.X },
+          { field: 'Y', from: INITIAL_RAW_Y, to: newValues.Y },
+          { field: 'DBH', from: INITIAL_DBH, to: newValues.DBH },
+          { field: 'HOM', from: INITIAL_HOM, to: newValues.HOM },
+          { field: 'Date', from: INITIAL_DATE, to: newValues.Date },
+          { field: 'Codes', from: INITIAL_RAW_CODES, to: newValues.Codes },
+          { field: 'Comments', from: INITIAL_RAW_COMMENTS, to: newValues.Comments }
+        ],
+        fixture.coreMeasurementID
+      );
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, newValues);
+
+      const txID = await cm.beginTransaction();
+      await writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(afterCm.StemGUID).toBeNull();
+      expect(afterCm.RawTreeTag).toBe(newValues.Tag);
+      expect(afterCm.RawStemTag).toBe(newValues.StemTag);
+      expect(afterCm.RawSpCode).toBe(newValues.SpCode);
+      expect(afterCm.RawQuadrat).toBe(newValues.Quadrat);
+      expect(Number(afterCm.RawX)).toBeCloseTo(newValues.X, 2);
+      expect(Number(afterCm.RawY)).toBeCloseTo(newValues.Y, 2);
+      expect(Number(afterCm.MeasuredDBH)).toBeCloseTo(newValues.DBH, 2);
+      expect(Number(afterCm.MeasuredHOM)).toBeCloseTo(newValues.HOM, 2);
+      expect(afterCm.RawCodes).toBe(newValues.Codes);
+      expect(afterCm.RawComments).toBe(newValues.Comments);
+      expect(afterCm.UploadFileID).toBe(INITIAL_UPLOAD_FILE_ID);
+      expect(afterCm.UploadBatchID).toBe(INITIAL_UPLOAD_BATCH_ID);
+
+      const storedDate = afterCm.MeasurementDate;
+      const storedDateAsIso = storedDate instanceof Date ? storedDate.toISOString().split('T')[0] : String(storedDate).split('T')[0].split(' ')[0];
+      expect(storedDateAsIso).toBe(NEW_DATE_YMD);
+    });
+  });
+
   describe('UploadFileID / UploadBatchID COALESCE', () => {
     it('preserves existing UploadFileID/UploadBatchID when newRow does not include them', async () => {
       const plan = buildPlan([{ field: 'DBH', from: INITIAL_DBH, to: INITIAL_DBH + 1 }], fixture.coreMeasurementID);
@@ -391,7 +452,7 @@ describe('writeFailedMeasurements (integration)', () => {
       expect(afterCm.UploadBatchID).toBe(INITIAL_UPLOAD_BATCH_ID);
     });
 
-    it('overwrites UploadFileID/UploadBatchID when newRow provides replacements', async () => {
+    it('preserves UploadFileID/UploadBatchID even when a bypassed caller provides replacements', async () => {
       const NEW_FILE_ID = 'file-replacement';
       const NEW_BATCH_ID = 'batch-replacement';
       const plan = buildPlan([{ field: 'DBH', from: INITIAL_DBH, to: INITIAL_DBH + 2 }], fixture.coreMeasurementID);
@@ -406,8 +467,8 @@ describe('writeFailedMeasurements (integration)', () => {
       await cm.commitTransaction(txID);
 
       const afterCm = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-      expect(afterCm.UploadFileID).toBe(NEW_FILE_ID);
-      expect(afterCm.UploadBatchID).toBe(NEW_BATCH_ID);
+      expect(afterCm.UploadFileID).toBe(INITIAL_UPLOAD_FILE_ID);
+      expect(afterCm.UploadBatchID).toBe(INITIAL_UPLOAD_BATCH_ID);
     });
   });
 
