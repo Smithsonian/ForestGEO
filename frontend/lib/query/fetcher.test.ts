@@ -15,9 +15,10 @@ describe('defaultFetcher', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('returns JSON on a 2xx response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ rows: [1, 2] }), { status: 200, headers: { 'content-type': 'application/json' } })
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ rows: [1, 2] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    );
     const result = await defaultFetcher('/api/x');
     expect(result).toEqual({ rows: [1, 2] });
   });
@@ -30,9 +31,10 @@ describe('defaultFetcher', () => {
   });
 
   it('throws QueryError with parsed body on a JSON 404', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ reason: 'missing' }), { status: 404, headers: { 'content-type': 'application/json' } })
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ reason: 'missing' }), { status: 404, headers: { 'content-type': 'application/json' } }))
+    );
     await expect(defaultFetcher('/api/x')).rejects.toMatchObject({
       status: 404,
       body: { reason: 'missing' }

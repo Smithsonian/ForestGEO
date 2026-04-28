@@ -43,11 +43,7 @@ export function stableStringify(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-export function queryKey(
-  namespace: QueryNamespace,
-  scope: QueryScope,
-  params?: Record<string, unknown>
-): QueryKey {
+export function queryKey(namespace: QueryNamespace, scope: QueryScope, params?: Record<string, unknown>): QueryKey {
   const scopeKey = `${scope.siteSchema ?? ''}|${scope.plotID ?? ''}|${scope.censusID ?? ''}`;
   const paramKey = params ? stableStringify(params) : undefined;
   return [namespace, scopeKey, paramKey] as const;

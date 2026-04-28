@@ -1,14 +1,7 @@
 import { QueryNamespace, QueryScope } from './queryKey';
 import { mutateKey } from './mutateKey';
 
-export type MutationKind =
-  | 'delete-measurement'
-  | 'reingest'
-  | 'save-edit-plan'
-  | 'delete-quadrat'
-  | 'delete-attribute'
-  | 'delete-taxonomy'
-  | 'census-creation';
+export type MutationKind = 'delete-measurement' | 'reingest' | 'save-edit-plan' | 'delete-quadrat' | 'delete-attribute' | 'delete-taxonomy' | 'census-creation';
 
 const FAN_OUT: Record<MutationKind, readonly QueryNamespace[]> = {
   'delete-measurement': [
@@ -52,13 +45,7 @@ const FAN_OUT: Record<MutationKind, readonly QueryNamespace[]> = {
     'grid:measurementssummary_staging',
     'dashboard:metrics'
   ],
-  'delete-attribute': [
-    'grid:attributes',
-    'grid:measurements',
-    'grid:measurementssummary',
-    'grid:measurementssummary_staging',
-    'dashboard:metrics'
-  ],
+  'delete-attribute': ['grid:attributes', 'grid:measurements', 'grid:measurementssummary', 'grid:measurementssummary_staging', 'dashboard:metrics'],
   'delete-taxonomy': [
     'grid:taxonomies',
     'grid:alltaxonomiesview',

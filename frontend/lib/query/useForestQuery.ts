@@ -13,11 +13,7 @@ export interface UseForestQueryResult<T> {
 
 type StringFetcher<T> = (url: string) => Promise<T>;
 
-export function useForestQuery<T>(
-  key: QueryKey | null,
-  url: string | null,
-  opts?: SWRConfiguration<T>
-): UseForestQueryResult<T> {
+export function useForestQuery<T>(key: QueryKey | null, url: string | null, opts?: SWRConfiguration<T>): UseForestQueryResult<T> {
   const enabled = key !== null && url !== null;
   const swrKey = enabled ? ([...(key as QueryKey), url as string] as const) : null;
 

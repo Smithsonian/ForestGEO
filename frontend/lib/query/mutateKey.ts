@@ -6,10 +6,7 @@ export interface MutateKeyOptions {
   revalidate?: boolean;
 }
 
-export async function mutateKey(
-  prefix: QueryNamespace,
-  opts: MutateKeyOptions = {}
-): Promise<void> {
+export async function mutateKey(prefix: QueryNamespace, opts: MutateKeyOptions = {}): Promise<void> {
   const { scope, revalidate = true } = opts;
   const targetScopeKey = scope ? queryKey(prefix, scope)[1] : undefined;
 

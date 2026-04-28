@@ -15,7 +15,15 @@ describe('stableStringify', () => {
   });
 
   it('recursively sorts keys through arrays containing nested objects', () => {
-    const input = { z: { y: [{ b: 2, a: 1 }, { d: 4, c: 3 }] }, a: 1 };
+    const input = {
+      z: {
+        y: [
+          { b: 2, a: 1 },
+          { d: 4, c: 3 }
+        ]
+      },
+      a: 1
+    };
     expect(stableStringify(input)).toBe('{"a":1,"z":{"y":[{"a":1,"b":2},{"c":3,"d":4}]}}');
   });
 
@@ -28,11 +36,7 @@ describe('stableStringify', () => {
 
 describe('queryKey', () => {
   it('returns the 3-tuple with a canonical scope key', () => {
-    expect(queryKey('grid:measurements', { siteSchema: 'foo', plotID: 1, censusID: 2 })).toEqual([
-      'grid:measurements',
-      'foo|1|2',
-      undefined
-    ]);
+    expect(queryKey('grid:measurements', { siteSchema: 'foo', plotID: 1, censusID: 2 })).toEqual(['grid:measurements', 'foo|1|2', undefined]);
   });
 
   it('treats missing scope fields as empty string', () => {

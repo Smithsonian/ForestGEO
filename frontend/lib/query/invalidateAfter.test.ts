@@ -12,7 +12,9 @@ import { invalidateAfter } from './invalidateAfter';
 const scope = { siteSchema: 's', plotID: 1, censusID: 2 };
 
 describe('invalidateAfter', () => {
-  beforeEach(() => { calls.length = 0; });
+  beforeEach(() => {
+    calls.length = 0;
+  });
 
   it('delete-measurement fans out to all affected measurement grids and dashboard prefixes', async () => {
     await invalidateAfter('delete-measurement', scope);
@@ -82,13 +84,7 @@ describe('invalidateAfter', () => {
   it('delete-attribute fans out to attributes, measurement grids, and dashboard:metrics', async () => {
     await invalidateAfter('delete-attribute', scope);
     expect(new Set(calls.map(c => c.prefix))).toEqual(
-      new Set([
-        'grid:attributes',
-        'grid:measurements',
-        'grid:measurementssummary',
-        'grid:measurementssummary_staging',
-        'dashboard:metrics'
-      ])
+      new Set(['grid:attributes', 'grid:measurements', 'grid:measurementssummary', 'grid:measurementssummary_staging', 'dashboard:metrics'])
     );
   });
 
