@@ -725,16 +725,14 @@ export default function Sidebar(props: SidebarProps) {
     const scope = { siteSchema: schema, plotID, censusID };
     const PAGE_ZERO = 0;
     const DEFAULT_PAGE_SIZE = 10;
-    const summaryKey = queryKey('grid:measurementssummary', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
-    const summaryURL = createFetchQuery(schema, 'measurementssummary', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
-    const errorsKey = queryKey('grid:failedmeasurements', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
-    const errorsURL = createFetchQuery(schema, 'failedmeasurements', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
+    // /summary and /errors are intentionally NOT prefetched here: the live grids fetch via
+    // POST /api/fixeddatafilter with a filterModel/sortModel body, and their query keys
+    // include those models, so a GET /api/fixeddata prefetch can never warm the right cache
+    // (and measurementssummary/failedmeasurements are not even valid GET dataTypes — 400).
     const attributesKey = queryKey('grid:attributes', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
     const attributesURL = createFetchQuery(schema, 'attributes', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
 
     return {
-      '/summary': () => preloadKey(summaryKey, summaryURL),
-      '/errors': () => preloadKey(errorsKey, errorsURL),
       '/attributes': () => preloadKey(attributesKey, attributesURL)
     };
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentCensus?.dateRanges]);
