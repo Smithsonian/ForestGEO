@@ -93,7 +93,12 @@ BEGIN
                         ) AS Errors
                  FROM measurement_error_log mel
                           JOIN measurement_errors me ON me.ErrorID = mel.ErrorID
-                          LEFT JOIN sitespecificvalidations vp ON me.ErrorCode = CAST(vp.ValidationID AS CHAR)
+                          -- COLLATE forces the CAST result to match me.ErrorCode's
+                          -- column collation. Without it, the JOIN fails on schemas
+                          -- where the procedure was created under a different
+                          -- collation_connection than the column collation.
+                          LEFT JOIN sitespecificvalidations vp
+                                 ON me.ErrorCode = CAST(vp.ValidationID AS CHAR) COLLATE utf8mb4_0900_ai_ci
                  WHERE mel.IsResolved = FALSE
                  GROUP BY mel.MeasurementID
              ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID;
