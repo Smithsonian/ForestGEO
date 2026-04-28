@@ -45,7 +45,6 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
   CellItemContainer,
   createDeleteQuery,
-  createFetchQuery,
   createPostPatchQuery,
   createQFFetchQuery,
   EditToolbarCustomProps,
@@ -59,7 +58,7 @@ import {
   VisibleFilter
 } from '@/config/datagridhelpers';
 import { useForestQuery, queryKey, QueryNamespace, QueryScope, invalidateAfter } from '@/lib/query';
-import { defaultFetcher, QueryError } from '@/lib/query/fetcher';
+import { QueryError } from '@/lib/query/fetcher';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
@@ -97,7 +96,7 @@ import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
   arePaginationModelsEqual,
-  buildEditableFieldsDiff,
+  buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
@@ -256,7 +255,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     plotID: currentPlot?.plotID ?? 0,
     censusID: activeCensusID ?? 0,
     dataType: 'measurementssummary',
-    surface: 'measurements',
     onError: error => {
       setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
     }
@@ -367,12 +365,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const hasFilter = (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
-
   const fetchUrl = React.useMemo(() => {
     if (!currentSite?.schemaName) return null;
-    const buildQuery = hasFilter ? createQFFetchQuery : createFetchQuery;
-    return buildQuery(
+    return createQFFetchQuery(
       currentSite.schemaName,
       gridType,
       paginationModel.page,
@@ -381,7 +376,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       currentCensus?.plotCensusNumber,
       undefined
     );
-  }, [currentSite?.schemaName, gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber, hasFilter]);
+  }, [currentSite?.schemaName, gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const queryScope: QueryScope = {
     siteSchema: currentSite?.schemaName,
@@ -400,9 +395,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const filterBodyFetcher = React.useCallback(
     async (u: string): Promise<{ output: any[]; totalCount: number }> => {
-      if (!hasFilter) {
-        return defaultFetcher<{ output: any[]; totalCount: number }>(u);
-      }
       const res = await fetch(u, {
         method: 'POST',
         credentials: 'include',
@@ -415,7 +407,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       }
       return res.json() as Promise<{ output: any[]; totalCount: number }>;
     },
-    [hasFilter, filterModel, sortModel]
+    [filterModel, sortModel]
   );
 
   const {
@@ -494,6 +486,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const runFetchPaginated = useCallback(async () => {
     await Promise.all([refetch(), fetchValidationErrors()]);
   }, [refetch, fetchValidationErrors]);
+
+  useEffect(() => {
+    if (!currentPlot || !currentCensus || paginationModel.page < 0) return;
+    fetchValidationErrors().catch(ailogger.error);
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel, fetchValidationErrors]);
 
   useEffect(() => {
     setFilterModel(prevModel =>
@@ -719,9 +716,21 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: missing CoreMeasurementID for edit', severity: 'error' });
       return Promise.reject(new Error('missing CoreMeasurementID'));
     }
-    const editableDiff = buildEditableFieldsDiff(newRow, oldRow);
+    const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, 'measurementssummary');
     if (Object.keys(editableDiff).length === 0) {
+      if (roundedNoOpFields.length > 0) {
+        setSnackbar({
+          children: `No change saved: ${roundedNoOpFields.join(', ')} rounded to the existing value (server stores at fixed precision).`,
+          severity: 'info'
+        });
+      }
       return newRow;
+    }
+    if (roundedNoOpFields.length > 0) {
+      setSnackbar({
+        children: `${roundedNoOpFields.join(', ')} rounded to the existing value and was not changed; other edits applied.`,
+        severity: 'info'
+      });
     }
     const result = await editFlow.beginEdit(coreMeasurementID, editableDiff);
     if (result.editOperationID !== null) {
@@ -1553,6 +1562,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           <PreviewDialog
             plan={editFlow.dialogState.plan}
             busy={editFlow.dialogState.busy}
+            wasRefreshed={editFlow.dialogState.wasRefreshed}
             onConfirm={editFlow.confirmDialog}
             onCancel={editFlow.cancelDialog}
           />

@@ -1,11 +1,34 @@
 import { GridFilterItem, GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
-import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE } from '@/config/editplan/fieldpolicy';
+import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
 
-export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: GridRowModel, surface: EditSurface): Record<string, unknown> {
+// Numeric edits that round to the existing value at server precision are
+// detected here so the client can (a) skip the API roundtrip and (b) tell the
+// user their typing didn't change anything. Without this, typing 1.234 over
+// 1.23 in a DBH cell silently disappears (server normalizes both to 1.23).
+function findRoundedNoOpField(canonicalField: string, newValue: unknown, oldValue: unknown): boolean {
+  const precision = PER_COLUMN_DECIMAL_PRECISION[canonicalField];
+  if (precision === undefined) return false;
+  const newNum = Number(newValue);
+  const oldNum = Number(oldValue);
+  if (!Number.isFinite(newNum) || !Number.isFinite(oldNum)) return false;
+  if (newNum === oldNum) return false;
+  return newNum.toFixed(precision) === oldNum.toFixed(precision);
+}
+
+export interface EditableFieldsDiffResult {
+  diff: Record<string, unknown>;
+  // Canonical field names whose typed value rounded to the existing value at
+  // server precision. Caller surfaces a hint snackbar so the user knows their
+  // edit was a no-op (rather than wondering why nothing happened).
+  roundedNoOpFields: string[];
+}
+
+export function buildEditableFieldsDiffWithMetaForSurface(newRow: GridRowModel, oldRow: GridRowModel, surface: EditSurface): EditableFieldsDiffResult {
   const editableFields = EDITABLE_FIELDS_BY_SURFACE[surface];
   const aliases = FIELD_ALIASES_BY_SURFACE[surface];
   const diff: Record<string, unknown> = {};
+  const roundedNoOpFields: string[] = [];
   for (const [rawKey, newValue] of Object.entries(newRow)) {
     const canonicalField = aliases[rawKey] ?? rawKey;
     if (!editableFields.has(canonicalField)) continue;
@@ -16,9 +39,17 @@ export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: 
       const oldTime = oldValue instanceof Date ? oldValue.getTime() : oldValue;
       if (newTime === oldTime) continue;
     }
+    if (findRoundedNoOpField(canonicalField, newValue, oldValue)) {
+      roundedNoOpFields.push(canonicalField);
+      continue;
+    }
     diff[canonicalField] = newValue;
   }
-  return diff;
+  return { diff, roundedNoOpFields };
+}
+
+export function buildEditableFieldsDiffForSurface(newRow: GridRowModel, oldRow: GridRowModel, surface: EditSurface): Record<string, unknown> {
+  return buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, surface).diff;
 }
 
 export function buildEditableFieldsDiff(newRow: GridRowModel, oldRow: GridRowModel): Record<string, unknown> {

@@ -104,7 +104,6 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     plotID: currentPlot?.plotID ?? 0,
     censusID: activeCensusID ?? 0,
     dataType: 'failedmeasurements',
-    surface: 'failedmeasurements',
     onError: error => {
       setEditFlowError(error.message);
     }
@@ -465,7 +464,13 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         editFlowOverride={applyEditViaPreviewFlow}
       />
       {editFlow.dialogState.open && editFlow.dialogState.plan && (
-        <PreviewDialog plan={editFlow.dialogState.plan} busy={editFlow.dialogState.busy} onConfirm={editFlow.confirmDialog} onCancel={editFlow.cancelDialog} />
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          wasRefreshed={editFlow.dialogState.wasRefreshed}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
       )}
       {undoToastOperationID !== null && (
         <UndoToast

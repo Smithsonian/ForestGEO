@@ -25,18 +25,11 @@ export function LoadingBar({ active, label = 'Refreshing data' }: LoadingBarProp
   if (!visible) return null;
 
   return (
-    <Box
-      role="status"
-      aria-live="polite"
-      sx={{ position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' }}
-    >
-      <LinearProgress
-        variant="soft"
-        determinate={reducedMotion}
-        value={reducedMotion ? 100 : undefined}
-        sx={{ '--LinearProgress-thickness': '2px' }}
-      />
-      <Box component="span" sx={visuallyHidden}>{label}</Box>
+    <Box role="status" aria-live="polite" sx={{ position: 'absolute', top: 0, left: 0, right: 0, pointerEvents: 'none' }}>
+      <LinearProgress variant="soft" determinate={reducedMotion} value={reducedMotion ? 100 : undefined} sx={{ '--LinearProgress-thickness': '2px' }} />
+      <Box component="span" sx={visuallyHidden}>
+        {label}
+      </Box>
     </Box>
   );
 }

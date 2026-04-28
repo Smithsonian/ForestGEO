@@ -3,6 +3,7 @@ import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
   buildEditableFieldsDiff,
+  buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
@@ -244,6 +245,53 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
         Description: 'new desc',
         Attributes: 'L;M'
       });
+    });
+  });
+
+  describe('Edit preview flow: rounded-no-op detection', () => {
+    const OLD_ROW = {
+      coreMeasurementID: 101,
+      speciesCode: 'ACRU',
+      treeTag: 'T-1',
+      stemTag: 'S-1',
+      quadratName: '0101',
+      stemLocalX: 1.23,
+      stemLocalY: 4.56,
+      measurementDate: '2026-01-01',
+      measuredDBH: 12.34,
+      measuredHOM: 1.5,
+      description: 'desc',
+      attributes: 'L'
+    };
+
+    it('treats a typed value that rounds to the existing value at server precision as a rounded no-op', () => {
+      // PER_COLUMN_DECIMAL_PRECISION.MeasuredDBH = 2 — typing 12.341 over
+      // 12.34 normalizes to "12.34" both ways, so the diff should not include
+      // MeasuredDBH and the field should appear in roundedNoOpFields.
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.341 }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({});
+      expect(result.roundedNoOpFields).toEqual(['MeasuredDBH']);
+    });
+
+    it('keeps real changes in the diff and reports rounded fields separately', () => {
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.342, measuredHOM: 2.0 }, OLD_ROW, 'measurementssummary');
+      // 2.0 vs 1.5 is a real change. 12.342 vs 12.34 both round to "12.34".
+      expect(result.diff).toEqual({ MeasuredHOM: 2.0 });
+      expect(result.roundedNoOpFields).toEqual(['MeasuredDBH']);
+    });
+
+    it('does not flag rounded-no-op when the typed value crosses the precision boundary', () => {
+      // 12.355 → "12.36" (V8 rounding); 12.34 stays "12.34". They differ, so
+      // this is a real change, not a rounded no-op.
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.355 }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({ MeasuredDBH: 12.355 });
+      expect(result.roundedNoOpFields).toEqual([]);
+    });
+
+    it('ignores non-numeric fields — they are never rounded no-ops', () => {
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, description: 'desc' }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({});
+      expect(result.roundedNoOpFields).toEqual([]);
     });
   });
 

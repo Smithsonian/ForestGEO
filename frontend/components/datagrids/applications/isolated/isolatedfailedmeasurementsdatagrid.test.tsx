@@ -421,14 +421,13 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       });
     }
 
-    it('configures useEditPreviewFlow with failedmeasurements dataType and surface', async () => {
+    it('configures useEditPreviewFlow with failedmeasurements dataType', async () => {
       await mountGridWithOptions();
       expect(mockEditFlowArgs).toMatchObject({
-        dataType: 'failedmeasurements',
-        surface: 'failedmeasurements'
+        dataType: 'failedmeasurements'
       });
       // Schema/plot/census may or may not be wired through the mocked contexts in unit tests;
-      // what matters for Task 15 is that the hook is configured with the correct dataType + surface.
+      // what matters for Task 15 is that the hook is configured with the correct dataType.
       expect(mockEditFlowArgs).toHaveProperty('schema');
       expect(mockEditFlowArgs).toHaveProperty('plotID');
       expect(mockEditFlowArgs).toHaveProperty('censusID');

@@ -7,9 +7,7 @@ vi.mock('@/lib/query/preload', () => ({
 }));
 
 vi.mock('next/link', () => ({
-  default: ({ children, ...p }: { children: React.ReactNode; [k: string]: unknown }) => (
-    <a {...(p as Record<string, unknown>)}>{children}</a>
-  )
+  default: ({ children, ...p }: { children: React.ReactNode; [k: string]: unknown }) => <a {...(p as Record<string, unknown>)}>{children}</a>
 }));
 
 import { PrefetchLink } from './PrefetchLink';
@@ -46,7 +44,11 @@ describe('PrefetchLink', () => {
   });
 
   it('is a no-op when only prefetchURL is provided without prefetchKey', () => {
-    render(<PrefetchLink href="/x" prefetchURL="/api/x">go</PrefetchLink>);
+    render(
+      <PrefetchLink href="/x" prefetchURL="/api/x">
+        go
+      </PrefetchLink>
+    );
     fireEvent.mouseEnter(screen.getByText('go'));
     expect(preloadSpy).not.toHaveBeenCalled();
   });
