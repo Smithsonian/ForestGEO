@@ -444,6 +444,52 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
   });
 
+  describe('regression: post-stem-resolution snapshot reload', () => {
+    // Without the post-resolution reload, `current` stays joined through the
+    // OLD StemGUID. A StemTag-only edit that lands on a pre-existing stem
+    // with different LocalX/LocalY then writes RawX/RawY from the OLD stem,
+    // not the stem the row now points to.
+    it('writes Raw X/Y for the new stem when StemTag-only edit lands on a pre-existing stem with different coords', async () => {
+      const PREEXISTING_STEM_TAG = 'WSE';
+      const PREEXISTING_STEM_X = 99.5;
+      const PREEXISTING_STEM_Y = 88.25;
+
+      const [preexistingRes] = await connection.query<ResultSetHeader>(
+        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [
+          fixture.treeIDs[TREE_TAG_T1],
+          fixture.quadratIDs[QUADRAT_NAME_A],
+          fixture.censusID,
+          PREEXISTING_STEM_TAG,
+          PREEXISTING_STEM_X,
+          PREEXISTING_STEM_Y
+        ]
+      );
+      const preexistingStemGUID = preexistingRes.insertId;
+
+      const stemCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
+
+      const plan = buildPlan([{ field: 'StemTag', from: STEM_TAG_S1, to: PREEXISTING_STEM_TAG }], fixture.coreMeasurementID);
+      const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: PREEXISTING_STEM_TAG });
+
+      const txID = await cm.beginTransaction();
+      await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
+      await cm.commitTransaction(txID);
+
+      const stemCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
+      expect(stemCountAfter).toBe(stemCountBefore);
+
+      const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
+      expect(Number(cmRow.StemGUID)).toBe(preexistingStemGUID);
+      expect(cmRow.RawStemTag).toBe(PREEXISTING_STEM_TAG);
+      expect(Number(cmRow.RawX)).toBeCloseTo(PREEXISTING_STEM_X, 2);
+      expect(Number(cmRow.RawY)).toBeCloseTo(PREEXISTING_STEM_Y, 2);
+      expect(Number(cmRow.RawX)).not.toBeCloseTo(INITIAL_STEM_X, 2);
+      expect(Number(cmRow.RawY)).not.toBeCloseTo(INITIAL_STEM_Y, 2);
+    });
+  });
+
   describe('row-local measurement fields', () => {
     it('updates MeasurementDate and Description without moving tree/stem identity', async () => {
       const newDate = '2024-08-09';

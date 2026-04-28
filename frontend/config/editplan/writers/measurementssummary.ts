@@ -352,7 +352,9 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // Start from a freshly-joined current snapshot and overlay the plan's new
   // values so downstream resolvers see the merged shape (the old PATCH code
   // worked on a mapped new-row, we synthesize it here from the DB + plan).
-  const current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID);
+  // `current` is reassigned after stem resolution so unchanged fields reflect
+  // the new stem rather than the previous one.
+  let current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID);
   const merged: LoadedCoreMeasurementRow = { ...current };
   for (const field of Object.keys(newValues)) {
     (merged as unknown as Record<string, unknown>)[field] = newValues[field];
@@ -517,6 +519,20 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
         [],
         txID
       );
+    }
+
+    // Reload the joined snapshot so unchanged fields (StemLocalX/Y, QuadratName,
+    // TreeTag, SpeciesCode, etc.) reflect the post-resolution stem rather than
+    // the previous one. Overlay user-edited values back onto `merged` so the
+    // downstream Raw* sync sees user input where the user changed something
+    // and the new ground truth everywhere else.
+    current = await loadCurrentJoinedRow(cm, schema, coreMeasurementID, txID);
+    const mergedAsRecord = merged as unknown as Record<string, unknown>;
+    const currentAsRecord = current as unknown as Record<string, unknown>;
+    for (const field of Object.keys(currentAsRecord)) {
+      if (!changedFields.has(field)) {
+        mergedAsRecord[field] = currentAsRecord[field];
+      }
     }
   }
 
