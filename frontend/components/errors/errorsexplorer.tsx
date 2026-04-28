@@ -310,7 +310,7 @@ export default function ErrorsExplorer() {
   }, [filters, storageKey]);
 
   const fetchRows = useCallback(
-    async (scopeOverride?: ExplorerScope | null) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingRows(true);
@@ -319,6 +319,7 @@ export default function ErrorsExplorer() {
         const response = await fetch('/api/errors/explorer/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             schema: scope.schema,
             plotID: scope.plotID,
@@ -337,17 +338,18 @@ export default function ErrorsExplorer() {
           setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
         }
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingRows(false);
+        if (!signal?.aborted) setLoadingRows(false);
       }
     },
     [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]
   );
 
   const fetchFacets = useCallback(
-    async (scopeOverride?: ExplorerScope | null) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingFacets(true);
@@ -355,6 +357,7 @@ export default function ErrorsExplorer() {
         const response = await fetch('/api/errors/explorer/facets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             schema: scope.schema,
             plotID: scope.plotID,
@@ -368,17 +371,18 @@ export default function ErrorsExplorer() {
         }
         setFacets(data);
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingFacets(false);
+        if (!signal?.aborted) setLoadingFacets(false);
       }
     },
     [filters, resolveExplorerScope]
   );
 
   const fetchDetails = useCallback(
-    async (measurementID: number, scopeOverride?: ExplorerScope | null) => {
+    async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingDetails(true);
@@ -391,17 +395,18 @@ export default function ErrorsExplorer() {
         if (filters.contradictionTypes.length === 1) {
           searchParams.set('activeContradictionType', filters.contradictionTypes[0]);
         }
-        const response = await fetch(`/api/errors/explorer/details/${measurementID}?${searchParams.toString()}`);
+        const response = await fetch(`/api/errors/explorer/details/${measurementID}?${searchParams.toString()}`, { signal });
         const data = (await response.json()) as ErrorExplorerDetailsResponse | { error: string };
         if (!response.ok || 'error' in data) {
           throw new Error('error' in data ? data.error : 'Failed to load row details');
         }
         setDetails(data);
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingDetails(false);
+        if (!signal?.aborted) setLoadingDetails(false);
       }
     },
     [filters.contradictionTypes, resolveExplorerScope]
@@ -473,11 +478,15 @@ export default function ErrorsExplorer() {
   }, []);
 
   useEffect(() => {
-    fetchRows().catch(() => undefined);
+    const controller = new AbortController();
+    fetchRows(undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchRows]);
 
   useEffect(() => {
-    fetchFacets().catch(() => undefined);
+    const controller = new AbortController();
+    fetchFacets(undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchFacets]);
 
   useEffect(() => {
@@ -485,7 +494,9 @@ export default function ErrorsExplorer() {
       setDetails(null);
       return;
     }
-    fetchDetails(selectedMeasurementID).catch(() => undefined);
+    const controller = new AbortController();
+    fetchDetails(selectedMeasurementID, undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchDetails, selectedMeasurementID]);
 
   useEffect(() => {
