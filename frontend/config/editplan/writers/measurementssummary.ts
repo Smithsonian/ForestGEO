@@ -15,7 +15,7 @@ import type { ApplyInTransactionInput } from '../apply';
 import type { EditOperationStateRow } from '@/config/editoperations';
 import { computeTreeStemState, resolveMeasurementSummaryQuadratID, resolveMeasurementSummaryStem, resolveMeasurementSummaryTree } from './resolvers-mutating';
 import { refreshIngestionErrorsForMeasurement } from '@/config/measurementerrors';
-import { refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
+import { refreshMeasurementViewsForCoreMeasurements, refreshMeasurementViewsForScope } from '@/lib/measurementviewrefresh';
 import { handleUpsert } from '@/config/utils';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
@@ -42,10 +42,90 @@ const RAW_SYNC_TRIGGER_FIELDS: ReadonlySet<string> = new Set([
   'Attributes'
 ]);
 
+const STEM_NEIGHBOR_REFRESH_FIELDS: ReadonlySet<string> = new Set(['SpeciesCode', 'TreeTag', 'StemTag', 'QuadratName', 'StemLocalX', 'StemLocalY']);
+
+export type MeasurementViewRefreshTargetDecision =
+  | { mode: 'targeted'; coreMeasurementIDs: number[] }
+  | { mode: 'scope'; reason: 'invalid-target-id' | 'invalid-scope' | 'unsupported-field' };
+
 function toPositiveNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toPositiveInteger(value: unknown): number | null {
+  const parsed = toPositiveNumber(value);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
+}
+
+function changedFieldsIncludeAny(changedFields: ReadonlySet<string>, fields: ReadonlySet<string>): boolean {
+  for (const field of changedFields) {
+    if (fields.has(field)) return true;
+  }
+  return false;
+}
+
+function addPositiveInteger(values: Set<number>, value: unknown): void {
+  const parsed = toPositiveInteger(value);
+  if (parsed !== null) values.add(parsed);
+}
+
+export async function resolveMeasurementViewRefreshTargets(
+  cm: ConnectionManager,
+  schema: string,
+  input: {
+    coreMeasurementID: number;
+    plotID: number;
+    censusID: number;
+    changedFields: ReadonlySet<string>;
+    beforeStemGUID: number | null;
+    afterStemGUID: number | null;
+    transactionID: string;
+  }
+): Promise<MeasurementViewRefreshTargetDecision> {
+  const coreMeasurementID = toPositiveInteger(input.coreMeasurementID);
+  if (coreMeasurementID === null) return { mode: 'scope', reason: 'invalid-target-id' };
+
+  for (const field of input.changedFields) {
+    if (!RAW_SYNC_TRIGGER_FIELDS.has(field)) return { mode: 'scope', reason: 'unsupported-field' };
+  }
+
+  const affectedIDs = new Set<number>([coreMeasurementID]);
+  if (!changedFieldsIncludeAny(input.changedFields, STEM_NEIGHBOR_REFRESH_FIELDS)) {
+    return { mode: 'targeted', coreMeasurementIDs: Array.from(affectedIDs) };
+  }
+
+  const plotID = toPositiveInteger(input.plotID);
+  const censusID = toPositiveInteger(input.censusID);
+  if (plotID === null || censusID === null) return { mode: 'scope', reason: 'invalid-scope' };
+
+  const stemGUIDs = new Set<number>();
+  addPositiveInteger(stemGUIDs, input.beforeStemGUID);
+  addPositiveInteger(stemGUIDs, input.afterStemGUID);
+  if (stemGUIDs.size === 0) return { mode: 'targeted', coreMeasurementIDs: Array.from(affectedIDs) };
+
+  const stemGUIDList = Array.from(stemGUIDs).sort((a, b) => a - b);
+  const placeholders = stemGUIDList.map(() => '?').join(', ');
+  const rows = await cm.executeQuery(
+    safeFormatQuery(
+      schema,
+      `SELECT cm.CoreMeasurementID
+       FROM ??.coremeasurements cm
+       JOIN ??.census c ON c.CensusID = cm.CensusID
+       WHERE cm.StemGUID IN (${placeholders})
+         AND c.PlotID = ?
+         AND cm.CensusID = ?
+       ORDER BY cm.CoreMeasurementID`
+    ),
+    [...stemGUIDList, plotID, censusID],
+    input.transactionID
+  );
+  for (const row of rows as Array<{ CoreMeasurementID?: unknown }>) {
+    addPositiveInteger(affectedIDs, row.CoreMeasurementID);
+  }
+
+  return { mode: 'targeted', coreMeasurementIDs: Array.from(affectedIDs).sort((a, b) => a - b) };
 }
 
 function normalizeMeasurementSummaryDate(value: unknown): string | null {
@@ -510,9 +590,7 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   // Identity fields keep the ?? fallback because treestem rules reject identity
   // clears upstream — a null merged.TreeTag means the field was not changed.
   const effective = <K extends keyof LoadedCoreMeasurementRow>(field: K): LoadedCoreMeasurementRow[K] =>
-    changedFields.has(field as string)
-      ? (merged as LoadedCoreMeasurementRow)[field]
-      : (current as LoadedCoreMeasurementRow)[field];
+    changedFields.has(field as string) ? (merged as LoadedCoreMeasurementRow)[field] : (current as LoadedCoreMeasurementRow)[field];
 
   const shouldSyncRaw = Array.from(changedFields).some(f => RAW_SYNC_TRIGGER_FIELDS.has(f));
   if (shouldSyncRaw) {
@@ -587,16 +665,6 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
     await cm.executeQuery(resetValidationQuery, [], txID);
   }
 
-  // Refresh derived views so the UI sees the edit immediately. Batch callers
-  // can suppress this and refresh the plot/census once after the outer batch.
-  if (changesFound && input.refreshViews !== false) {
-    const refreshCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
-    const refreshPlotID = Number(merged.PlotID ?? current.PlotID ?? plotID);
-    if (refreshCensusID > 0 && refreshPlotID > 0) {
-      await refreshMeasurementViewsForScope(cm, schema, refreshPlotID, refreshCensusID, txID);
-    }
-  }
-
   // Capture after-state for exact-revert support.
   const afterCoreRow = await loadCoreMeasurementRow(cm, schema, coreMeasurementID, txID);
   const afterStemGUID = (afterCoreRow?.StemGUID ?? null) as number | null;
@@ -616,6 +684,33 @@ export async function writeMeasurementsSummary(cm: ConnectionManager, input: App
   if (changedFields.has('Attributes')) {
     for (const attrRow of afterCmAttrRows) {
       afterState.push(buildStateRow('cmattributes', 'CMAID', Number(attrRow.CMAID), attrRow));
+    }
+  }
+
+  // Refresh derived views so the UI sees the edit immediately. Batch callers
+  // can suppress this and refresh the plot/census once after the outer batch.
+  // This must run AFTER the post-validation block above: measurementssummary's
+  // validation_errors LEFT JOIN reads measurementerrorlogs, so refreshing
+  // earlier would project pre-validation error counts into the view.
+  if (changesFound && input.refreshViews !== false) {
+    const refreshCensusID = Number(merged.CensusID ?? current.CensusID ?? censusID);
+    const refreshPlotID = Number(merged.PlotID ?? current.PlotID ?? plotID);
+    if (refreshCensusID > 0 && refreshPlotID > 0) {
+      const refreshTargets = await resolveMeasurementViewRefreshTargets(cm, schema, {
+        coreMeasurementID,
+        plotID: refreshPlotID,
+        censusID: refreshCensusID,
+        changedFields,
+        beforeStemGUID: toPositiveNumber(beforeStemGUID),
+        afterStemGUID: toPositiveNumber(afterStemGUID),
+        transactionID: txID
+      });
+
+      if (refreshTargets.mode === 'targeted') {
+        await refreshMeasurementViewsForCoreMeasurements(cm, schema, refreshTargets.coreMeasurementIDs, txID);
+      } else {
+        await refreshMeasurementViewsForScope(cm, schema, refreshPlotID, refreshCensusID, txID);
+      }
     }
   }
 

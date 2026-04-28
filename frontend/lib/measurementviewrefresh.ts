@@ -1,19 +1,21 @@
 import type ConnectionManager from '@/config/connectionmanager';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 
-export async function refreshMeasurementsSummaryForScope(
-  connectionManager: ConnectionManager,
-  schema: string,
-  plotID: number,
-  censusID: number,
-  transactionID?: string
-): Promise<void> {
-  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE PlotID = ? AND CensusID = ?');
-  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
+function normalizeCoreMeasurementIDs(coreMeasurementIDs: readonly number[]): number[] {
+  const unique = new Set<number>();
+  for (const value of coreMeasurementIDs) {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed > 0) unique.add(parsed);
+  }
+  return Array.from(unique).sort((a, b) => a - b);
+}
 
-  const insertQuery = safeFormatQuery(
-    schema,
-    `INSERT IGNORE INTO ??.measurementssummary (CoreMeasurementID,
+function buildPlaceholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
+function buildMeasurementsSummaryInsertSelect(whereClause: string): string {
+  return `INSERT IGNORE INTO ??.measurementssummary (CoreMeasurementID,
                                                 StemGUID,
                                                 TreeID,
                                                 SpeciesID,
@@ -90,26 +92,11 @@ export async function refreshMeasurementsSummaryForScope(
                   WHERE mel.IsResolved = FALSE
                   GROUP BY mel.MeasurementID
               ) validation_errors ON validation_errors.MeasurementID = cm.CoreMeasurementID
-     WHERE c.PlotID = ?
-       AND cm.CensusID = ?`
-  );
-
-  await connectionManager.executeQuery(insertQuery, [plotID, censusID], transactionID);
+     WHERE ${whereClause}`;
 }
 
-export async function refreshViewFullTableForScope(
-  connectionManager: ConnectionManager,
-  schema: string,
-  plotID: number,
-  censusID: number,
-  transactionID?: string
-): Promise<void> {
-  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.viewfulltable WHERE PlotID = ? AND CensusID = ?');
-  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
-
-  const insertQuery = safeFormatQuery(
-    schema,
-    `INSERT IGNORE INTO ??.viewfulltable (CoreMeasurementID,
+function buildViewFullTableInsertSelect(whereClause: string): string {
+  return `INSERT IGNORE INTO ??.viewfulltable (CoreMeasurementID,
                                           MeasurementDate,
                                           MeasuredDBH,
                                           MeasuredHOM,
@@ -236,11 +223,69 @@ export async function refreshViewFullTableForScope(
                   FROM ??.cmattributes ca
                   GROUP BY ca.CoreMeasurementID
               ) view_attrs ON view_attrs.CoreMeasurementID = cm.CoreMeasurementID
-     WHERE c.PlotID = ?
-       AND cm.CensusID = ?`
-  );
+     WHERE ${whereClause}`;
+}
 
+export async function refreshMeasurementsSummaryForScope(
+  connectionManager: ConnectionManager,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  transactionID?: string
+): Promise<void> {
+  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.measurementssummary WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
+
+  const insertQuery = safeFormatQuery(schema, buildMeasurementsSummaryInsertSelect('c.PlotID = ?\n       AND cm.CensusID = ?'));
   await connectionManager.executeQuery(insertQuery, [plotID, censusID], transactionID);
+}
+
+export async function refreshMeasurementsSummaryForCoreMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  coreMeasurementIDs: readonly number[],
+  transactionID?: string
+): Promise<void> {
+  const normalizedIDs = normalizeCoreMeasurementIDs(coreMeasurementIDs);
+  if (normalizedIDs.length === 0) return;
+
+  const placeholders = buildPlaceholders(normalizedIDs.length);
+  const deleteQuery = safeFormatQuery(schema, `DELETE FROM ??.measurementssummary WHERE CoreMeasurementID IN (${placeholders})`);
+  await connectionManager.executeQuery(deleteQuery, normalizedIDs, transactionID);
+
+  const insertQuery = safeFormatQuery(schema, buildMeasurementsSummaryInsertSelect(`cm.CoreMeasurementID IN (${placeholders})`));
+  await connectionManager.executeQuery(insertQuery, normalizedIDs, transactionID);
+}
+
+export async function refreshViewFullTableForScope(
+  connectionManager: ConnectionManager,
+  schema: string,
+  plotID: number,
+  censusID: number,
+  transactionID?: string
+): Promise<void> {
+  const deleteQuery = safeFormatQuery(schema, 'DELETE FROM ??.viewfulltable WHERE PlotID = ? AND CensusID = ?');
+  await connectionManager.executeQuery(deleteQuery, [plotID, censusID], transactionID);
+
+  const insertQuery = safeFormatQuery(schema, buildViewFullTableInsertSelect('c.PlotID = ?\n       AND cm.CensusID = ?'));
+  await connectionManager.executeQuery(insertQuery, [plotID, censusID], transactionID);
+}
+
+export async function refreshViewFullTableForCoreMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  coreMeasurementIDs: readonly number[],
+  transactionID?: string
+): Promise<void> {
+  const normalizedIDs = normalizeCoreMeasurementIDs(coreMeasurementIDs);
+  if (normalizedIDs.length === 0) return;
+
+  const placeholders = buildPlaceholders(normalizedIDs.length);
+  const deleteQuery = safeFormatQuery(schema, `DELETE FROM ??.viewfulltable WHERE CoreMeasurementID IN (${placeholders})`);
+  await connectionManager.executeQuery(deleteQuery, normalizedIDs, transactionID);
+
+  const insertQuery = safeFormatQuery(schema, buildViewFullTableInsertSelect(`cm.CoreMeasurementID IN (${placeholders})`));
+  await connectionManager.executeQuery(insertQuery, normalizedIDs, transactionID);
 }
 
 export async function refreshMeasurementViewsForScope(
@@ -252,4 +297,17 @@ export async function refreshMeasurementViewsForScope(
 ): Promise<void> {
   await refreshMeasurementsSummaryForScope(connectionManager, schema, plotID, censusID, transactionID);
   await refreshViewFullTableForScope(connectionManager, schema, plotID, censusID, transactionID);
+}
+
+export async function refreshMeasurementViewsForCoreMeasurements(
+  connectionManager: ConnectionManager,
+  schema: string,
+  coreMeasurementIDs: readonly number[],
+  transactionID?: string
+): Promise<void> {
+  const normalizedIDs = normalizeCoreMeasurementIDs(coreMeasurementIDs);
+  if (normalizedIDs.length === 0) return;
+
+  await refreshMeasurementsSummaryForCoreMeasurements(connectionManager, schema, normalizedIDs, transactionID);
+  await refreshViewFullTableForCoreMeasurements(connectionManager, schema, normalizedIDs, transactionID);
 }
