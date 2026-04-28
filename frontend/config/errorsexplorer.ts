@@ -60,6 +60,9 @@ export interface ErrorExplorerRow extends MeasurementsSummaryRDS {
   relatedMeasurementIDs: number[];
   uploadFileID?: string | null;
   uploadBatchID?: string | null;
+  // Authoritative failure flag derived from coremeasurements.StemGUID — must be
+  // computed server-side because measurementssummary.StemGUID can drift stale.
+  isFailedRow: boolean;
 }
 
 export interface ErrorExplorerSummary {

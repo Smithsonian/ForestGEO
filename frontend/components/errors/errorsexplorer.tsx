@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   Alert,
   Autocomplete,
@@ -52,7 +53,8 @@ import { loadSelectableOptions } from '@/components/client/clientmacros';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
-import { buildEditableFieldsDiff } from '@/components/datagrids/measurementscommonsutils';
+import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
+import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -104,7 +106,8 @@ function stripRowForUpdate(row: ErrorExplorerRow) {
     isValidated: row.isValidated,
     description: row.description,
     attributes: row.attributes,
-    userDefinedFields: row.userDefinedFields
+    userDefinedFields: row.userDefinedFields,
+    isFailedRow: row.isFailedRow
   };
 }
 
@@ -228,7 +231,13 @@ export default function ErrorsExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { data: session } = useSession();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  // Keep the grid affordances aligned with editplan authorization: pending
+  // users cannot edit, and species-code edits stay admin-only.
+  const userStatus = session?.user?.userStatus;
+  const canEditRows = Boolean(userStatus && userStatus !== 'pending');
+  const canEditSpeciesCode = isFieldEditableByRole('SpeciesCode', userStatus);
   const storageKey = useMemo(
     () => getFilterStorageKey(currentSite?.schemaName, currentPlot?.plotID, activeCensusID),
     [currentSite?.schemaName, currentPlot?.plotID, activeCensusID]
@@ -271,7 +280,6 @@ export default function ErrorsExplorer() {
     plotID: currentPlot?.plotID ?? 0,
     censusID: activeCensusID ?? 0,
     dataType: 'measurementssummary',
-    surface: 'errorsexplorer',
     onError: error => {
       setErrorMessage(error.message);
     }
@@ -512,12 +520,21 @@ export default function ErrorsExplorer() {
         throw new Error('Missing CoreMeasurementID for edit');
       }
 
-      const editableDiff = buildEditableFieldsDiff(newRow, oldRow);
+      // Failed rows (cm.StemGUID IS NULL) live in the failedmeasurements edit
+      // surface — its canonical fields and writer differ from measurementssummary.
+      // Branch per-row so editing a hard-failed row doesn't 404 in loadCurrentRow.
+      const isFailedRow = Boolean((oldRow as ErrorExplorerRow).isFailedRow);
+      const surface = isFailedRow ? 'failedmeasurements' : 'measurementssummary';
+
+      const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, surface);
       if (Object.keys(editableDiff).length === 0) {
+        if (roundedNoOpFields.length > 0) {
+          setErrorMessage(`No change saved: ${roundedNoOpFields.join(', ')} rounded to the existing value (server stores at fixed precision).`);
+        }
         return newRow;
       }
 
-      const applyResult = await editFlow.beginEdit(coreMeasurementID, editableDiff);
+      const applyResult = await editFlow.beginEdit(coreMeasurementID, editableDiff, { dataType: surface });
 
       const updatedRow = { ...(newRow as ErrorExplorerRow) };
       if (updatedRow.attributes !== (oldRow as ErrorExplorerRow).attributes) {
@@ -571,39 +588,43 @@ export default function ErrorsExplorer() {
 
   const columns = useMemo<GridColDef[]>(
     () => [
-      {
-        field: 'actions',
-        type: 'actions',
-        headerName: 'Actions',
-        width: 74,
-        getActions: ({ id }) => {
-          const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
-          if (isInEditMode) {
-            return [
-              <GridActionsCellItem
-                key="save"
-                icon={<SaveIcon />}
-                label="Save"
-                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View } }))}
-              />,
-              <GridActionsCellItem
-                key="cancel"
-                icon={<CancelIcon />}
-                label="Cancel"
-                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))}
-              />
-            ];
-          }
-          return [
-            <GridActionsCellItem
-              key="edit"
-              icon={<EditIcon />}
-              label="Edit"
-              onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.Edit } }))}
-            />
-          ];
-        }
-      },
+      ...(canEditRows
+        ? [
+            {
+              field: 'actions',
+              type: 'actions',
+              headerName: 'Actions',
+              width: 74,
+              getActions: ({ id }: { id: string | number }) => {
+                const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
+                if (isInEditMode) {
+                  return [
+                    <GridActionsCellItem
+                      key="save"
+                      icon={<SaveIcon />}
+                      label="Save"
+                      onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View } }))}
+                    />,
+                    <GridActionsCellItem
+                      key="cancel"
+                      icon={<CancelIcon />}
+                      label="Cancel"
+                      onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))}
+                    />
+                  ];
+                }
+                return [
+                  <GridActionsCellItem
+                    key="edit"
+                    icon={<EditIcon />}
+                    label="Edit"
+                    onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.Edit } }))}
+                  />
+                ];
+              }
+            } satisfies GridColDef
+          ]
+        : []),
       {
         field: 'hasContradiction',
         headerName: 'Conflict',
@@ -676,7 +697,7 @@ export default function ErrorsExplorer() {
         headerName: 'Species',
         minWidth: 110,
         flex: 0.7,
-        editable: true,
+        editable: canEditSpeciesCode,
         headerAlign: 'left',
         align: 'left'
       },
@@ -793,7 +814,7 @@ export default function ErrorsExplorer() {
         )
       }
     ],
-    [rowModesModel, selectableOpts]
+    [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
   );
 
   return (
@@ -804,6 +825,12 @@ export default function ErrorsExplorer() {
           Review unresolved validation and ingestion errors, filter by exact message, and inspect contradiction-linked rows within the active census.
         </Typography>
       </Stack>
+
+      {!canEditRows && (
+        <Alert color="neutral" data-testid="errorsexplorer-readonly-banner">
+          Read-only view — your role can&apos;t edit these rows.
+        </Alert>
+      )}
 
       {errorMessage && (
         <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />}>
@@ -1240,7 +1267,13 @@ export default function ErrorsExplorer() {
         </Sheet>
       </Sheet>
       {editFlow.dialogState.open && editFlow.dialogState.plan && (
-        <PreviewDialog plan={editFlow.dialogState.plan} busy={editFlow.dialogState.busy} onConfirm={editFlow.confirmDialog} onCancel={editFlow.cancelDialog} />
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          wasRefreshed={editFlow.dialogState.wasRefreshed}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
       )}
       {undoToastOperationID !== null && (
         <UndoToast

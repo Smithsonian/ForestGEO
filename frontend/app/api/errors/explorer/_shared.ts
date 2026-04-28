@@ -23,6 +23,10 @@ interface RawErrorOccurrenceRow {
   QuadratID?: number | null;
   TreeID?: number | null;
   StemGUID?: number | null;
+  // Authoritative coremeasurements.StemGUID. Distinct from ms.StemGUID (which
+  // can be stale): null means the row failed ingestion and lives in the
+  // failedmeasurements edit surface.
+  CoreStemGUID: number | null;
   SpeciesID?: number | null;
   TreeTag?: string | null;
   StemTag?: string | null;
@@ -145,6 +149,7 @@ function buildRawErrorsQuery(schema: string): string {
             ms.QuadratID,
             ms.TreeID,
             ms.StemGUID,
+            cm.StemGUID AS CoreStemGUID,
             ms.SpeciesID,
             ms.TreeTag,
             ms.StemTag,
@@ -318,7 +323,8 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
           : null,
         relatedMeasurementIDs: visibleContradictions.relatedMeasurementIDs,
         uploadFileID: rawRow.UploadFileID ?? null,
-        uploadBatchID: rawRow.UploadBatchID ?? null
+        uploadBatchID: rawRow.UploadBatchID ?? null,
+        isFailedRow: rawRow.CoreStemGUID === null
       };
       grouped.set(measurementID, {
         baseRow,

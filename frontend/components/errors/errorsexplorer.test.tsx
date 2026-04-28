@@ -131,7 +131,8 @@ const GRID_ROW: Record<string, unknown> = {
   contradictionTypes: [],
   contradictionType: null,
   contradictionGroupKey: null,
-  relatedMeasurementIDs: []
+  relatedMeasurementIDs: [],
+  isFailedRow: false
 };
 
 function makePlan(overrides: Partial<EditPlan> = {}): EditPlan {
@@ -151,7 +152,7 @@ const mockBeginEdit = vi.fn();
 const mockConfirmDialog = vi.fn();
 const mockCancelDialog = vi.fn();
 
-let currentDialogState: UseEditPreviewFlowReturn['dialogState'] = { open: false, plan: null, busy: false };
+let currentDialogState: UseEditPreviewFlowReturn['dialogState'] = { open: false, plan: null, busy: false, wasRefreshed: false };
 let lastEditFlowArgs: Record<string, unknown> | null = null;
 
 function setDialogState(nextState: UseEditPreviewFlowReturn['dialogState']) {
@@ -162,6 +163,11 @@ vi.mock('@/app/contexts/compat-hooks', () => ({
   useSiteContext: () => ({ schemaName: TEST_SCHEMA }),
   usePlotContext: () => ({ plotID: TEST_PLOT_ID }),
   useOrgCensusContext: () => ({ dateRanges: [{ censusID: TEST_CENSUS_ID }] })
+}));
+
+let mockSessionUserStatus: string = 'global';
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { userStatus: mockSessionUserStatus } } })
 }));
 
 vi.mock('@/components/client/clientmacros', () => ({
@@ -183,8 +189,20 @@ vi.mock('@mui/x-data-grid', () => ({
 }));
 
 vi.mock('@/components/editplan/previewdialog', () => ({
-  default: ({ plan, onConfirm, onCancel, busy }: { plan: EditPlan; onConfirm: () => void; onCancel: () => void; busy: boolean }) => (
-    <div data-testid="preview-dialog" data-plan-hash={plan.planHash} data-busy={String(busy)}>
+  default: ({
+    plan,
+    onConfirm,
+    onCancel,
+    busy,
+    wasRefreshed
+  }: {
+    plan: EditPlan;
+    onConfirm: () => void;
+    onCancel: () => void;
+    busy: boolean;
+    wasRefreshed?: boolean;
+  }) => (
+    <div data-testid="preview-dialog" data-plan-hash={plan.planHash} data-busy={String(busy)} data-refreshed={String(Boolean(wasRefreshed))}>
       <button type="button" data-testid="preview-confirm" onClick={onConfirm}>
         Apply
       </button>
@@ -239,6 +257,7 @@ vi.mock('@/config/styleddatagrid', async () => {
     return (
       <div data-testid="styled-grid">
         <div data-testid="row-state">{JSON.stringify(rows)}</div>
+        <div data-testid="column-editability">{JSON.stringify(Object.fromEntries(columns.map((col: any) => [col.field, Boolean(col.editable)])))}</div>
         {rows.map(row => {
           const actionColumn = columns.find((col: any) => typeof col.getActions === 'function');
           if (!actionColumn) return null;
@@ -266,8 +285,9 @@ async function mountExplorer() {
 describe('ErrorsExplorer — row edit via shared preview flow', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    currentDialogState = { open: false, plan: null, busy: false };
+    currentDialogState = { open: false, plan: null, busy: false, wasRefreshed: false };
     lastEditFlowArgs = null;
+    mockSessionUserStatus = 'global';
 
     const { loadSelectableOptions } = await import('@/components/client/clientmacros');
     (loadSelectableOptions as any).mockImplementation(async () => undefined);
@@ -327,15 +347,14 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     delete (globalThis as any).__triggerRowUpdate;
   });
 
-  it('configures the edit flow with the current scope and surface identifier', async () => {
+  it('configures the edit flow with the current scope and default data type', async () => {
     await mountExplorer();
     await waitFor(() => expect(lastEditFlowArgs).not.toBeNull());
     expect(lastEditFlowArgs).toMatchObject({
       schema: TEST_SCHEMA,
       plotID: TEST_PLOT_ID,
       censusID: TEST_CENSUS_ID,
-      dataType: 'measurementssummary',
-      surface: 'errorsexplorer'
+      dataType: 'measurementssummary'
     });
   });
 
@@ -392,6 +411,62 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(Object.keys(diff)).not.toContain('CoreMeasurementID');
   });
 
+  // Regression: hard-failed rows (cm.StemGUID IS NULL) must route to the
+  // failedmeasurements edit surface — not measurementssummary, whose analyzer
+  // filters cm.StemGUID IS NOT NULL and would 404.
+  it('routes failed rows to the failedmeasurements dataType with canonical SpCode/Tag/Codes field names', async () => {
+    mockBeginEdit.mockResolvedValue({
+      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+      applyErrors: [],
+      editOperationID: TEST_EDIT_OPERATION_ID,
+      validationPending: false
+    });
+
+    const FAILED_ROW = { ...GRID_ROW, isFailedRow: true };
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/errors/explorer/query')) {
+        return {
+          ok: true,
+          json: async () => ({
+            rows: [FAILED_ROW],
+            totalRows: 1,
+            summary: { total: 1, validation: 0, ingestion: 1, contradictions: 0, duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      if (url.includes('/api/errors/explorer/facets')) {
+        return {
+          ok: true,
+          json: async () => ({
+            messages: [],
+            fields: [],
+            sourceCounts: { validation: 0, ingestion: 1 },
+            contradictionCounts: { duplicateTagStem: 0, sameBatchConflict: 0 }
+          })
+        } as Response;
+      }
+      if (url.includes('/api/refreshviews/')) return { ok: true, json: async () => ({}) } as Response;
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"isFailedRow":true'));
+
+    // Edit speciesCode + measuredDBH + attributes on a failed row. Canonical
+    // names on the failedmeasurements surface are SpCode, DBH, Codes (not
+    // SpeciesCode, MeasuredDBH, Attributes).
+    const editedRow = { ...FAILED_ROW, speciesCode: 'NEWSP', measuredDBH: 14, attributes: 'L;DEAD' };
+    await act(async () => {
+      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
+    });
+
+    expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+    const [, diff, options] = mockBeginEdit.mock.calls[0];
+    expect(diff).toEqual({ SpCode: 'NEWSP', DBH: 14, Codes: 'L;DEAD' });
+    expect(options).toEqual({ dataType: 'failedmeasurements' });
+  });
+
   it('shows the UndoToast after a successful edit and no-ops if the edit returned no operation ID', async () => {
     mockBeginEdit.mockResolvedValueOnce({
       updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
@@ -412,23 +487,25 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
   it('renders the PreviewDialog using the current dialogState and refreshes the fresh plan on 409 drift', async () => {
     // Simulate the flow needing confirmation: open the dialog with an initial plan.
-    currentDialogState = { open: true, plan: makePlan({ planHash: TEST_PLAN_HASH_INITIAL }), busy: false };
+    currentDialogState = { open: true, plan: makePlan({ planHash: TEST_PLAN_HASH_INITIAL }), busy: false, wasRefreshed: false };
 
     const { rerender } = await mountExplorer();
     await waitFor(() => expect(screen.getByTestId('preview-dialog')).toBeInTheDocument());
     expect(screen.getByTestId('preview-dialog').getAttribute('data-plan-hash')).toBe(TEST_PLAN_HASH_INITIAL);
+    expect(screen.getByTestId('preview-dialog').getAttribute('data-refreshed')).toBe('false');
 
     // A 409 conflict causes the hook to swap in a fresh plan (different planHash).
-    currentDialogState = { open: true, plan: makePlan({ planHash: TEST_PLAN_HASH_REFRESH }), busy: false };
+    currentDialogState = { open: true, plan: makePlan({ planHash: TEST_PLAN_HASH_REFRESH }), busy: false, wasRefreshed: true };
     const mod = await import('./errorsexplorer');
     const ErrorsExplorer = mod.default;
     rerender(<ErrorsExplorer />);
 
     await waitFor(() => expect(screen.getByTestId('preview-dialog').getAttribute('data-plan-hash')).toBe(TEST_PLAN_HASH_REFRESH));
+    expect(screen.getByTestId('preview-dialog').getAttribute('data-refreshed')).toBe('true');
   });
 
   it('wires the PreviewDialog Apply button to the flow.confirmDialog callback', async () => {
-    currentDialogState = { open: true, plan: makePlan(), busy: false };
+    currentDialogState = { open: true, plan: makePlan(), busy: false, wasRefreshed: false };
     await mountExplorer();
 
     fireEvent.click(screen.getByTestId('preview-confirm'));
@@ -470,6 +547,48 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
         editOperationID: TEST_EDIT_OPERATION_ID
       });
     });
+  });
+
+  // Pending users should not see edit affordances. Server-side authorization
+  // still backstops this; the gate is UX so users don't click Edit only to fail
+  // at the server round-trip.
+  it('hides the actions column and shows a read-only banner for pending users', async () => {
+    mockSessionUserStatus = 'pending';
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    expect(screen.getByTestId('errorsexplorer-readonly-banner')).toBeInTheDocument();
+    // The mocked grid renders action buttons via the actions column's getActions —
+    // when the column is gated out, no Edit/Save/Cancel button appears.
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument();
+    expect(screen.queryByText('Save')).not.toBeInTheDocument();
+  });
+
+  it('shows the actions column for global / db admin / lead technician / field crew', async () => {
+    for (const status of ['global', 'db admin', 'lead technician', 'field crew']) {
+      mockSessionUserStatus = status;
+      const { unmount } = await mountExplorer();
+      await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+      expect(screen.queryByTestId('errorsexplorer-readonly-banner')).not.toBeInTheDocument();
+      expect(screen.getByText('Edit')).toBeInTheDocument();
+
+      unmount();
+    }
+  });
+
+  it('keeps species-code cells editable only for admin roles', async () => {
+    mockSessionUserStatus = 'field crew';
+    const firstRender = await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    expect(JSON.parse(screen.getByTestId('column-editability').textContent ?? '{}').speciesCode).toBe(false);
+    firstRender.unmount();
+
+    mockSessionUserStatus = 'db admin';
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+    expect(JSON.parse(screen.getByTestId('column-editability').textContent ?? '{}').speciesCode).toBe(true);
   });
 
   it('skips the preview flow entirely when the diff is empty', async () => {
