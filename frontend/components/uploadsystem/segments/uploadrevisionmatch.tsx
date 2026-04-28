@@ -16,6 +16,10 @@ interface UploadRevisionMatchProps {
   schema: string;
   plotID: number;
   censusID: number;
+  // Pre-flight role warning surfaced by uploadparent at parse time when the
+  // CSV contains role-restricted columns (currently spcode for non-admins).
+  // null when no warning applies.
+  preflightWarning?: string | null;
   setReviewState: (state: ReviewStates) => void;
   onApply: (confirmNewRows: boolean) => void;
   handleReturnToStart: () => Promise<void>;
@@ -23,9 +27,19 @@ interface UploadRevisionMatchProps {
 
 const NEW_ROW_DISPLAY_FIELDS = ['tag', 'stemtag', 'spcode', 'quadrat', 'dbh', 'date'] as const;
 
+const IDENTITY_FIELDS: ReadonlySet<string> = new Set(['spcode', 'tag', 'stemtag', 'quadrat', 'lx', 'ly']);
+
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '—';
   return String(value);
+}
+
+function isIdentityField(field: string): boolean {
+  return IDENTITY_FIELDS.has(field);
+}
+
+function hasIdentityChanges(row: RevisionMatchedRow): boolean {
+  return Object.keys(row.changes).some(isIdentityField);
 }
 
 function formatRowIdentifier(csvRow: RevisionMatchedRow['csvRow'] | RevisionInvalidRow['csvRow']): string {
@@ -56,20 +70,16 @@ function hasDuplicateCleanup(row: RevisionMatchedRow): boolean {
   return (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0;
 }
 
-function hasIgnoredEdits(row: RevisionMatchedRow): boolean {
-  return row.ignoredEdits !== undefined && Object.keys(row.ignoredEdits).length > 0;
-}
-
 export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchProps>) {
-  const { matchedRows, newRows, invalidRows, counts, bulkPlan, onApply, handleReturnToStart } = props;
+  const { matchedRows, newRows, invalidRows, counts, bulkPlan, preflightWarning, onApply, handleReturnToStart } = props;
 
   const [confirmNewRows, setConfirmNewRows] = useState(false);
   const [impactSummaryOpen, setImpactSummaryOpen] = useState(false);
 
   const rowsWithChanges = matchedRows.filter(r => Object.keys(r.changes).length > 0);
   const rowsWithDuplicateCleanupOnly = matchedRows.filter(r => Object.keys(r.changes).length === 0 && hasDuplicateCleanup(r));
-  const rowsNoChanges = matchedRows.filter(r => Object.keys(r.changes).length === 0 && !hasDuplicateCleanup(r) && !hasIgnoredEdits(r));
-  const rowsWithIgnoredEdits = matchedRows.filter(r => hasIgnoredEdits(r));
+  const rowsNoChanges = matchedRows.filter(r => Object.keys(r.changes).length === 0 && !hasDuplicateCleanup(r));
+  const rowsWithIdentityChanges = rowsWithChanges.filter(hasIdentityChanges);
   const stemIdNotFoundCount = newRows.filter(r => r.reason === 'stemid-not-found').length;
   const actionableMatchedRowCount = rowsWithChanges.length + rowsWithDuplicateCleanupOnly.length;
   const planBlocked = bulkPlan?.canApply === false || (bulkPlan?.errors ?? []).some(error => error.blocking);
@@ -106,28 +116,33 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
             {counts.invalid} invalid rows
           </Chip>
         )}
-        {rowsWithIgnoredEdits.length > 0 && (
-          <Chip color="warning" variant="soft" size="lg">
-            {rowsWithIgnoredEdits.length} {rowsWithIgnoredEdits.length === 1 ? 'row' : 'rows'} with ignored edits
+        {rowsWithIdentityChanges.length > 0 && (
+          <Chip color="warning" variant="soft" size="lg" data-testid="revision-identity-edit-chip">
+            {rowsWithIdentityChanges.length} {rowsWithIdentityChanges.length === 1 ? 'row includes' : 'rows include'} identity edits
           </Chip>
         )}
       </Stack>
 
-      {rowsWithIgnoredEdits.length > 0 && (
-        <Alert color="warning" variant="soft">
+      {rowsWithIdentityChanges.length > 0 && (
+        <Alert color="warning" variant="soft" data-testid="revision-identity-edit-alert">
           <Stack spacing={0.5}>
             <Typography level="body-sm" fontWeight="lg">
-              {rowsWithIgnoredEdits.length} {rowsWithIgnoredEdits.length === 1 ? 'row has' : 'rows have'} edits on columns that revision upload cannot update in
-              this phase.
+              {rowsWithIdentityChanges.length} {rowsWithIdentityChanges.length === 1 ? 'row edits' : 'rows edit'} identity columns (<code>spcode</code>,{' '}
+              <code>tag</code>, <code>stemtag</code>, <code>quadrat</code>, <code>lx</code>, <code>ly</code>).
             </Typography>
             <Typography level="body-sm">
-              Fields like <code>spcode</code>, <code>quadrat</code>, <code>lx</code>, <code>ly</code>, <code>tag</code>, and <code>stemtag</code> are used for
-              matching but are not written back. See the &ldquo;Ignored Edits&rdquo; tab for details. If you need to change these values, use the appropriate
-              upload type (species, quadrats, stems) or the data grid editor instead.
+              These edits will be applied to the matched rows and may propagate to other measurements that share the same tree, stem, or quadrat. Review the
+              impact preview before applying to see downstream effects.
             </Typography>
           </Stack>
         </Alert>
       )}
+
+      {preflightWarning ? (
+        <Alert color="warning" variant="soft" data-testid="revision-preflight-warning">
+          {preflightWarning}
+        </Alert>
+      ) : null}
 
       {planBlocked ? (
         <Alert color="danger" variant="soft" data-testid="revision-role-blocked">
@@ -141,7 +156,6 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
           {rowsWithDuplicateCleanupOnly.length > 0 && <Tab value="duplicates">Duplicate Cleanup ({rowsWithDuplicateCleanupOnly.length})</Tab>}
           {newRows.length > 0 && <Tab value="new">New Rows ({newRows.length})</Tab>}
           {invalidRows.length > 0 && <Tab value="invalid">Invalid ({invalidRows.length})</Tab>}
-          {rowsWithIgnoredEdits.length > 0 && <Tab value="ignored">Ignored Edits ({rowsWithIgnoredEdits.length})</Tab>}
           {rowsNoChanges.length > 0 && <Tab value="unchanged">Unchanged ({rowsNoChanges.length})</Tab>}
         </TabList>
 
@@ -166,7 +180,18 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
                     Object.entries(row.changes).map(([field, diff]) => (
                       <tr key={`${row.coreMeasurementID}-${field}`}>
                         <td>{row.coreMeasurementID}</td>
-                        <td>{field}</td>
+                        <td>
+                          {isIdentityField(field) ? (
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography level="body-sm">{field}</Typography>
+                              <Chip color="warning" variant="soft" size="sm">
+                                identity
+                              </Chip>
+                            </Stack>
+                          ) : (
+                            field
+                          )}
+                        </td>
                         <td>{formatValue(diff.from)}</td>
                         <td>
                           <Typography color="success" level="body-sm" fontWeight="lg">
@@ -303,44 +328,6 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
                 </tbody>
               </Table>
             </Sheet>
-          </TabPanel>
-        )}
-
-        {rowsWithIgnoredEdits.length > 0 && (
-          <TabPanel value="ignored">
-            <Stack spacing={2}>
-              <Typography level="body-md" color="neutral">
-                These rows had edits on columns that revision upload does not write back. The edits will not be applied.
-              </Typography>
-              <Sheet variant="outlined" sx={{ borderRadius: 'sm', overflow: 'auto', maxHeight: 480 }}>
-                <Table stickyHeader hoverRow size="sm">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 140 }}>Measurement ID</th>
-                      <th style={{ width: 120 }}>Field</th>
-                      <th>Current Value (DB)</th>
-                      <th>Ignored Edit (CSV)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rowsWithIgnoredEdits.flatMap(row =>
-                      Object.entries(row.ignoredEdits ?? {}).map(([field, diff]) => (
-                        <tr key={`${row.coreMeasurementID}-ignored-${field}`}>
-                          <td>{row.coreMeasurementID}</td>
-                          <td>{field}</td>
-                          <td>{formatValue(diff.from)}</td>
-                          <td>
-                            <Typography color="warning" level="body-sm" fontWeight="lg">
-                              {formatValue(diff.to)}
-                            </Typography>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </Table>
-              </Sheet>
-            </Stack>
           </TabPanel>
         )}
 

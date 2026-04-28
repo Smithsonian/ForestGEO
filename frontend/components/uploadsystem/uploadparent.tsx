@@ -94,6 +94,11 @@ function UploadParentInner(props: UploadParentProps) {
   const [isReingestionMode, setIsReingestionMode] = useState(false);
   const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
   const [revisionConfirmNewRows, setRevisionConfirmNewRows] = useState(false);
+  // Pre-flight: when a non-admin user uploads a revisions CSV containing
+  // taxonomic-identity columns (spcode), the apply phase will hit
+  // revisionRolePolicy and block. Surface this at the parse step so the user
+  // doesn't reach the match review only to fail at Apply.
+  const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -228,6 +233,33 @@ function UploadParentInner(props: UploadParentProps) {
         setParsedData(stagedParsedData);
         setRevisionMatchResult(null);
         setRevisionConfirmNewRows(false);
+
+        // Pre-flight role check: if the file contains spcode and the user is
+        // not allowed to edit taxonomic identity, surface a warning before
+        // we even hit the match endpoint. Server-side enforcement still
+        // backstops at apply.
+        const userStatus = session?.user?.userStatus;
+        const canEditSpecies = userStatus === 'global' || userStatus === 'db admin';
+        if (!canEditSpecies) {
+          const filesWithSpCode: string[] = [];
+          for (const [fileName, rows] of Object.entries(stagedParsedData)) {
+            const firstRow = Object.values(rows)[0];
+            if (firstRow && Object.prototype.hasOwnProperty.call(firstRow, 'spcode')) {
+              filesWithSpCode.push(fileName);
+            }
+          }
+          if (filesWithSpCode.length > 0) {
+            setRevisionRolePreflightWarning(
+              `Heads up: ${filesWithSpCode.length === 1 ? `${filesWithSpCode[0]} contains` : `${filesWithSpCode.length} files contain`} a "spcode" column. ` +
+                `Species-code changes require global or db admin role and will be blocked at Apply. Other fields will still be applied.`
+            );
+          } else {
+            setRevisionRolePreflightWarning(null);
+          }
+        } else {
+          setRevisionRolePreflightWarning(null);
+        }
+
         uploadState.setReviewState(ReviewStates.REVISION_MATCH);
       } catch (err: unknown) {
         const errorObj = err instanceof Error ? err : new Error(String(err));
@@ -375,6 +407,7 @@ function UploadParentInner(props: UploadParentProps) {
             schema={currentSite?.schemaName || ''}
             plotID={currentPlotID ?? 0}
             censusID={currentCensusID ?? 0}
+            preflightWarning={revisionRolePreflightWarning}
             setReviewState={uploadState.setReviewState}
             onApply={confirmNew => {
               setRevisionConfirmNewRows(confirmNew);

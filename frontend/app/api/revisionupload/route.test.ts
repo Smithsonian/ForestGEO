@@ -523,7 +523,7 @@ describe('POST /api/revisionupload', () => {
     expect(body.matchedRows[0].changes).toEqual({});
   });
 
-  it('surfaces edits to non-updatable columns (spcode, ly) as ignoredEdits rather than silently dropping them', async () => {
+  it('promotes identity edits (spcode, ly) into changes so they flow through the bulk plan analyzer', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -558,7 +558,7 @@ describe('POST /api/revisionupload', () => {
       buildRequest({
         files: [
           {
-            fileName: 'ignored-edits.csv',
+            fileName: 'identity-edits.csv',
             rows: [
               {
                 stemid: '5283365',
@@ -586,14 +586,13 @@ describe('POST /api/revisionupload', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.matchedRows).toHaveLength(1);
-    expect(body.matchedRows[0].changes).toEqual({});
-    expect(body.matchedRows[0].ignoredEdits).toEqual({
+    expect(body.matchedRows[0].changes).toEqual({
       spcode: { from: 'SLOATE', to: 'AAAAAA' },
-      ly: { from: 2.4, to: '1111' }
+      ly: { from: '2.4', to: '1111' }
     });
   });
 
-  it('tolerates leading-zero differences on quadrat/tag/stemtag so spreadsheet-mangled round-trips do not produce fake ignored edits', async () => {
+  it('tolerates leading-zero differences on quadrat/tag/stemtag so spreadsheet-mangled round-trips do not produce fake changes', async () => {
     // Simulates Numbers/Excel stripping leading zeros: DB has '0101'/'10063'/'10063',
     // CSV re-upload has '101'/'10063'/'10063'. Only quadrat was mangled; tag/stemtag
     // happen to be digit-only too and should tolerate the same coercion. spcode is
@@ -658,10 +657,13 @@ describe('POST /api/revisionupload', () => {
     );
 
     const body = await response.json();
-    expect(body.matchedRows[0].ignoredEdits).toBeUndefined();
+    // Identity fields flow through `changes`, but the leading-zero tolerance
+    // still applies — none of the identity columns in this CSV genuinely
+    // differ from the DB after digit-string normalization.
+    expect(body.matchedRows[0].changes).toEqual({});
   });
 
-  it('still reports ignored edits for long digit-only tags that differ beyond JS safe integer range', async () => {
+  it('reports tag changes for long digit-only tags that differ beyond JS safe integer range', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -707,12 +709,12 @@ describe('POST /api/revisionupload', () => {
     );
 
     const body = await response.json();
-    expect(body.matchedRows[0].ignoredEdits).toEqual({
+    expect(body.matchedRows[0].changes).toEqual({
       tag: { from: '9007199254740993', to: '9007199254740992' }
     });
   });
 
-  it('still reports a quadrat ignored edit when CSV value is genuinely different, not just leading-zero mangled', async () => {
+  it('reports a quadrat change when CSV value is genuinely different, not just leading-zero mangled', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -758,12 +760,12 @@ describe('POST /api/revisionupload', () => {
     );
 
     const body = await response.json();
-    expect(body.matchedRows[0].ignoredEdits).toEqual({
+    expect(body.matchedRows[0].changes).toEqual({
       quadrat: { from: '0101', to: '999' }
     });
   });
 
-  it('keeps spcode comparison strict so alphanumeric species codes like CRUD02 vs CRUD2 are still flagged as ignored edits', async () => {
+  it('keeps spcode comparison strict so alphanumeric species codes like CRUD02 vs CRUD2 are flagged as changes', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -809,12 +811,12 @@ describe('POST /api/revisionupload', () => {
     );
 
     const body = await response.json();
-    expect(body.matchedRows[0].ignoredEdits).toEqual({
+    expect(body.matchedRows[0].changes).toEqual({
       spcode: { from: 'CRUD02', to: 'CRUD2' }
     });
   });
 
-  it('does not report ignoredEdits when CSV and DB values for non-updatable columns agree', async () => {
+  it('does not report changes when CSV and DB values for identity columns agree', async () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('cm.StemGUID IN')) {
         return [
@@ -875,7 +877,7 @@ describe('POST /api/revisionupload', () => {
     );
 
     const body = await response.json();
-    expect(body.matchedRows[0].ignoredEdits).toBeUndefined();
+    expect(body.matchedRows[0].changes).toEqual({});
   });
 
   it('includes a bulkPlan in the response shaped as a BulkEditPlan with rowPlans, aggregateEffects, maxSeverity and a planHash', async () => {

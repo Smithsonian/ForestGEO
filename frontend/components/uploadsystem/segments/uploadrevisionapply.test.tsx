@@ -153,7 +153,8 @@ describe('UploadRevisionApply', () => {
       aggregateEffects: [],
       maxSeverity: 'warn',
       planHash: 'fresh-hash',
-      generatedAt: '2026-04-21T00:00:00Z'
+      generatedAt: '2026-04-21T00:00:00Z',
+      duplicateDeletions: []
     };
     fetchMock.mockResolvedValue({
       ok: false,

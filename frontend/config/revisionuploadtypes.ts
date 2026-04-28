@@ -13,14 +13,14 @@ export interface RevisionMatchedRow {
     rawCodes: string | null;
     description: string | null;
   };
-  changes: Record<string, { from: unknown; to: unknown }>;
   /**
-   * Edits detected on columns that are present in the revision CSV but not
-   * updatable through revision upload in Phase 1 (e.g. spcode, lx, ly,
-   * quadrat, tag, stemtag). These are surfaced in the UI so the user knows
-   * their edits were dropped rather than silently applied.
+   * Per-field diff of CSV value vs current DB value. Phase 2 of revision
+   * upload promoted identity columns (spcode, tag, stemtag, quadrat, lx, ly)
+   * into this set, so identity edits flow through the same analyzer + writer
+   * as the single-row PATCH path and surface R1a/R2/R3/R4 effects in the
+   * bulk plan.
    */
-  ignoredEdits?: Record<string, { from: unknown; to: unknown }>;
+  changes: Record<string, { from: unknown; to: unknown }>;
 }
 
 export type RevisionNewRowReason = 'no-match-key-in-db' | 'stemid-not-found';

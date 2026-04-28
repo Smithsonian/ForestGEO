@@ -18,11 +18,56 @@ function buildBulkPlan(overrides: Partial<BulkEditPlan> = {}, effects: Effect[] 
     }, 'info'),
     planHash: 'test-plan-hash',
     generatedAt: '2026-04-20T00:00:00.000Z',
-    ...overrides
+    ...overrides,
+    duplicateDeletions: overrides.duplicateDeletions ?? []
   };
 }
 
 describe('UploadRevisionMatch', () => {
+  // Pre-flight role warning: when uploadparent detects a non-admin user is
+  // about to upload a revisions file with an spcode column, it passes a
+  // warning string that the match screen surfaces above the role-blocked
+  // banner. This is the early signal — server-side enforcement still backstops
+  // at apply.
+  it('renders the preflight warning banner when uploadparent supplies one', () => {
+    render(
+      <UploadRevisionMatch
+        matchedRows={[]}
+        newRows={[]}
+        invalidRows={[]}
+        counts={EMPTY_REVISION_MATCH_COUNTS}
+        preflightWarning='File "fix.csv" contains a "spcode" column. Species-code changes require global or db admin role.'
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={vi.fn<(state: ReviewStates) => void>()}
+        onApply={vi.fn()}
+        handleReturnToStart={vi.fn(async () => undefined)}
+      />
+    );
+    const banner = screen.getByTestId('revision-preflight-warning');
+    expect(banner).toBeInTheDocument();
+    expect(banner.textContent).toContain('spcode');
+  });
+
+  it('omits the preflight warning banner when none is supplied', () => {
+    render(
+      <UploadRevisionMatch
+        matchedRows={[]}
+        newRows={[]}
+        invalidRows={[]}
+        counts={EMPTY_REVISION_MATCH_COUNTS}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={vi.fn<(state: ReviewStates) => void>()}
+        onApply={vi.fn()}
+        handleReturnToStart={vi.fn(async () => undefined)}
+      />
+    );
+    expect(screen.queryByTestId('revision-preflight-warning')).not.toBeInTheDocument();
+  });
+
   it('treats duplicate-only survivor rows as actionable revisions', async () => {
     const onApply = vi.fn();
     const handleReturnToStart = vi.fn(async () => undefined);
@@ -227,7 +272,7 @@ describe('UploadRevisionMatch', () => {
     expect(onApply).toHaveBeenCalledWith(false);
   });
 
-  it('surfaces ignored edits with a summary chip, alert, and dedicated tab so non-updatable column edits are not silently dropped', async () => {
+  it('renders identity-field edits in the Changes tab so spcode/ly edits flow through the bulk plan', async () => {
     const onApply = vi.fn();
     const handleReturnToStart = vi.fn(async () => undefined);
     const setReviewState = vi.fn<(state: ReviewStates) => void>();
@@ -242,10 +287,9 @@ describe('UploadRevisionMatch', () => {
           rawCodes: 'Q;L',
           description: 'Broken and leaning'
         },
-        changes: {},
-        ignoredEdits: {
+        changes: {
           spcode: { from: 'SLOATE', to: 'AAAAAA' },
-          ly: { from: 2.4, to: '1111' }
+          ly: { from: '2.4', to: '1111' }
         }
       }
     ];
@@ -255,7 +299,7 @@ describe('UploadRevisionMatch', () => {
         matchedRows={matchedRows}
         newRows={[]}
         invalidRows={[]}
-        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, matched: 1, total: 1 }}
+        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, matched: 1, matchedWithChanges: 1, total: 1 }}
         schema="forestgeo_testing"
         plotID={1}
         censusID={2}
@@ -265,17 +309,14 @@ describe('UploadRevisionMatch', () => {
       />
     );
 
-    expect(screen.getByText('1 row with ignored edits')).toBeInTheDocument();
-    expect(screen.getByText(/edits on columns that revision upload cannot update/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ignored edits/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Ignored Edits/i })).not.toBeInTheDocument();
 
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', { name: 'Ignored Edits (1)' }));
-
-    const ignoredTab = screen.getByRole('tabpanel', { name: 'Ignored Edits (1)' });
-    expect(within(ignoredTab).getByText('spcode')).toBeInTheDocument();
-    expect(within(ignoredTab).getByText('SLOATE')).toBeInTheDocument();
-    expect(within(ignoredTab).getByText('AAAAAA')).toBeInTheDocument();
-    expect(within(ignoredTab).getByText('ly')).toBeInTheDocument();
-    expect(within(ignoredTab).getByText('1111')).toBeInTheDocument();
+    const changesTab = screen.getByRole('tabpanel', { name: /Changes \(1\)/i });
+    expect(within(changesTab).getByText('spcode')).toBeInTheDocument();
+    expect(within(changesTab).getByText('SLOATE')).toBeInTheDocument();
+    expect(within(changesTab).getByText('AAAAAA')).toBeInTheDocument();
+    expect(within(changesTab).getByText('ly')).toBeInTheDocument();
+    expect(within(changesTab).getByText('1111')).toBeInTheDocument();
   });
 });

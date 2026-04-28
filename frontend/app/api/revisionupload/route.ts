@@ -16,62 +16,57 @@ import { DuplicateDeletion } from '@/config/editplan/types';
 export const runtime = 'nodejs';
 
 /**
- * Phase 1 scope for the revision-upload bulk plan:
- * UPDATABLE_FIELDS below (`dbh`, `hom`, `date`, `codes`, `comments`) are the
- * only fields written back to the DB. The bulk plan therefore only surfaces
- * R5 (cmattributes rebuild from `codes`/`Attributes` changes) and R6
- * (duplicate survivor cleanup from `duplicateMeasurementIDsToDelete`).
- * Identity edits (`spcode`, `tag`, `stemtag`, `quadrat`, `lx`, `ly`) listed in
- * IGNORED_EDIT_FIELDS are intentionally not propagated into `analyzeBulk`;
- * they are already surfaced to the user via `ignoredEdits` on each matched
- * row, which the review screen renders as ignored-edit warnings rather than
- * plan effects.
+ * Bulk-revision update surface (Phase 2): all 11 editable measurement fields,
+ * matching the single-row PATCH path. Identity edits (`spcode`, `tag`,
+ * `stemtag`, `quadrat`, `lx`, `ly`) are flagged in `changes` and propagated
+ * into `analyzeBulk`, so the bulk plan surfaces R1a/R2/R3/R4 effects (species
+ * re-link, tree/stem reassignment, coordinate cross-row propagation) in
+ * addition to the row-local R5/R6 effects from Phase 1.
  */
-const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments'] as const;
+const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
 const REQUIRED_INSERT_FIELDS = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'] as const;
-/**
- * Fields that the CSV may contain and that appear in the canonical header
- * alias table, but that revision upload does NOT write back in Phase 1.
- * Edits on these fields against matched rows are surfaced to the user as
- * ignored edits so they are not silently dropped.
- */
-const IGNORED_EDIT_FIELDS = ['spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
 const LOOKUP_CHUNK_SIZE = 1000;
 const TAG_STEMTAG_LOOKUP_CHUNK_SIZE = 250;
 
 type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
-type IgnoredEditField = (typeof IGNORED_EDIT_FIELDS)[number];
 type MatchStrategy = 'stemid' | 'tag_stemtag';
-
-const CSV_FIELD_TO_DB_COLUMN: Record<UpdatableField, string> = {
-  dbh: 'MeasuredDBH',
-  hom: 'MeasuredHOM',
-  date: 'MeasurementDate',
-  codes: 'RawCodes',
-  comments: 'Description'
-};
 
 /**
  * Kind of DB value we're comparing against — controls how we normalize both
- * sides before the equality check (numeric tolerance vs case-insensitive
- * string comparison).
+ * sides before the equality check.
  *
- * `numeric-or-string-ci` normalizes purely digit strings by stripping
- * leading zeros before comparing them; otherwise it falls back to
- * case-insensitive string equality. This is specifically to tolerate
- * leading-zero stripping when a researcher opens the CSV in Numbers or
- * Excel — those apps coerce `'0101'` to `'101'` on save, producing fake
- * ignored-edit warnings on unchanged rows without risking numeric precision
- * loss on long identifiers.
+ * `numeric` parses both sides as floats and compares numerically (used for
+ * `dbh`, `hom`, `lx`, `ly`).
+ *
+ * `numeric-or-string-ci` normalizes purely digit strings by stripping leading
+ * zeros before comparing them; otherwise it falls back to case-insensitive
+ * string equality. This tolerates leading-zero stripping when a researcher
+ * opens the CSV in Numbers or Excel — those apps coerce `'0101'` to `'101'`
+ * on save, producing fake change warnings on otherwise unchanged rows
+ * without risking numeric precision loss on long identifiers (used for
+ * `tag`, `stemtag`, `quadrat`).
+ *
+ * `string-ci` is case-insensitive string equality (used for `spcode`).
+ *
+ * `string-exact` is exact string equality after trimming (used for `codes`
+ * and `comments`).
+ *
+ * `date` normalizes the DB value to a YYYY-MM-DD string before comparing
+ * (used for `date`).
  */
-type IgnoredFieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci';
+type FieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci' | 'string-exact' | 'date';
 
-interface IgnoredFieldDescriptor {
+interface FieldDescriptor {
   dbProperty: keyof ExistingMeasurementRow;
-  compareKind: IgnoredFieldCompareKind;
+  compareKind: FieldCompareKind;
 }
 
-const IGNORED_FIELD_DESCRIPTORS: Record<IgnoredEditField, IgnoredFieldDescriptor> = {
+const FIELD_DESCRIPTORS: Record<UpdatableField, FieldDescriptor> = {
+  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric' },
+  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric' },
+  date: { dbProperty: 'MeasurementDate', compareKind: 'date' },
+  codes: { dbProperty: 'RawCodes', compareKind: 'string-exact' },
+  comments: { dbProperty: 'Description', compareKind: 'string-exact' },
   spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
   quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
   lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
@@ -215,7 +210,7 @@ function isBlankOrNullPlaceholder(value: unknown): boolean {
 function buildRevisionRoleFieldCandidates(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[]): RevisionRoleFieldCandidate[] {
   const candidates: RevisionRoleFieldCandidate[] = [];
   matchedRows.forEach((row, index) => {
-    if (row.ignoredEdits?.spcode) {
+    if (row.changes?.spcode) {
       candidates.push({ rowIndex: index, field: 'spcode' });
     }
   });
@@ -227,45 +222,13 @@ function buildRevisionRoleFieldCandidates(matchedRows: RevisionMatchedRow[], new
   return candidates;
 }
 
-function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
-  const changes: Record<string, { from: unknown; to: unknown }> = {};
-
-  for (const field of UPDATABLE_FIELDS) {
-    const csvValue = csvRow[field];
-    if (isBlankOrNullPlaceholder(csvValue)) {
-      continue;
-    }
-
-    const dbColumn = CSV_FIELD_TO_DB_COLUMN[field];
-    let dbValue: unknown;
-
-    if (field === 'date') {
-      dbValue = normalizeDateToString(dbRow.MeasurementDate as Date | string | null);
-    } else {
-      dbValue = dbRow[dbColumn as keyof ExistingMeasurementRow];
-      if (dbValue !== null && dbValue !== undefined && typeof dbValue === 'number') {
-        dbValue = String(dbValue);
-      }
-    }
-
-    if ((field === 'dbh' || field === 'hom') && areEquivalentNumericValues(String(csvValue).trim(), dbValue)) {
-      continue;
-    }
-
-    if (String(csvValue).trim() !== String(dbValue ?? '').trim()) {
-      changes[field] = { from: dbValue, to: csvValue };
-    }
-  }
-
-  return changes;
-}
-
 /**
- * Detects edits on CSV columns that revision upload does not write back in
- * Phase 1 (spcode, quadrat, lx, ly, tag, stemtag). Returns a map of the
- * detected CSV-vs-DB differences so the UI can warn the user that those
- * edits will be dropped. If the CSV cell is blank/NULL, or if it matches the
- * DB value, the field is not included.
+ * Tag/stemtag/quadrat values are tolerant of leading-zero stripping (Excel
+ * coerces `'0101'` to `'101'` on round-trip). When both sides are pure
+ * digits, we compare them after stripping leading zeros so spreadsheet
+ * round-trips don't surface phantom changes. Returns null when either side
+ * isn't a pure digit string, signaling the caller to fall back to
+ * case-insensitive string equality.
  */
 function normalizeDigitString(value: string): string | null {
   if (!/^\d+$/.test(value)) {
@@ -282,40 +245,57 @@ function areEquivalentAsDigitStrings(csvNormalized: string, dbNormalized: string
   return normalizedCsv !== null && normalizedDb !== null && normalizedCsv === normalizedDb;
 }
 
-function computeIgnoredEdits(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
-  const ignored: Record<string, { from: unknown; to: unknown }> = {};
+function fieldValuesAreEquivalent(compareKind: FieldCompareKind, csvValue: unknown, dbValue: unknown): boolean {
+  const csvNormalized = String(csvValue).trim();
+  const dbNormalized = String(dbValue ?? '').trim();
 
-  for (const field of IGNORED_EDIT_FIELDS) {
+  switch (compareKind) {
+    case 'numeric':
+      return areEquivalentNumericValues(csvNormalized, dbValue);
+    case 'date':
+      return csvNormalized === dbNormalized;
+    case 'string-exact':
+      return csvNormalized === dbNormalized;
+    case 'string-ci':
+      return csvNormalized.toLowerCase() === dbNormalized.toLowerCase();
+    case 'numeric-or-string-ci':
+      return areEquivalentAsDigitStrings(csvNormalized, dbNormalized) || csvNormalized.toLowerCase() === dbNormalized.toLowerCase();
+  }
+}
+
+function readDbValueForDisplay(field: UpdatableField, dbRow: ExistingMeasurementRow): unknown {
+  const descriptor = FIELD_DESCRIPTORS[field];
+  if (descriptor.compareKind === 'date') {
+    return normalizeDateToString(dbRow.MeasurementDate as Date | string | null);
+  }
+  const raw = dbRow[descriptor.dbProperty];
+  // Stringify numeric DB values for the `from` slot so consumers (UI,
+  // BulkEditPlan effects) see a stable shape across row-local and identity
+  // edits. The actual equality check still happens via fieldValuesAreEquivalent.
+  if (typeof raw === 'number') return String(raw);
+  return raw;
+}
+
+function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+
+  for (const field of UPDATABLE_FIELDS) {
     const csvValue = csvRow[field];
     if (isBlankOrNullPlaceholder(csvValue)) {
       continue;
     }
 
-    const descriptor = IGNORED_FIELD_DESCRIPTORS[field];
-    const dbValue = dbRow[descriptor.dbProperty];
+    const descriptor = FIELD_DESCRIPTORS[field];
+    const dbValue = readDbValueForDisplay(field, dbRow);
 
-    if (descriptor.compareKind === 'numeric' && areEquivalentNumericValues(String(csvValue).trim(), dbValue)) {
+    if (fieldValuesAreEquivalent(descriptor.compareKind, csvValue, dbValue)) {
       continue;
     }
 
-    const csvNormalized = String(csvValue).trim();
-    const dbNormalized = String(dbValue ?? '').trim();
-
-    if (descriptor.compareKind === 'numeric-or-string-ci' && areEquivalentAsDigitStrings(csvNormalized, dbNormalized)) {
-      continue;
-    }
-
-    const matches =
-      descriptor.compareKind === 'string-ci' || descriptor.compareKind === 'numeric-or-string-ci'
-        ? csvNormalized.toLowerCase() === dbNormalized.toLowerCase()
-        : csvNormalized === dbNormalized;
-
-    if (!matches) {
-      ignored[field] = { from: dbValue, to: csvValue };
-    }
+    changes[field] = { from: dbValue, to: csvValue };
   }
 
-  return ignored;
+  return changes;
 }
 
 function detectMatchStrategy(rows: IndexedFileRow[], fileName: string): MatchStrategy {
@@ -645,14 +625,12 @@ async function classifyFileRows(
         .map(row => row.CoreMeasurementID)
         .sort((left, right) => left - right);
 
-      const ignoredEdits = computeIgnoredEdits(candidate.csvRow, survivor);
       matchedRows.push({
         csvRow: candidate.csvRow,
         coreMeasurementID: survivor.CoreMeasurementID,
         duplicateMeasurementIDsToDelete,
         existingValues: buildExistingValues(survivor),
-        changes: computeDiff(candidate.csvRow, survivor),
-        ...(Object.keys(ignoredEdits).length > 0 ? { ignoredEdits } : {})
+        changes: computeDiff(candidate.csvRow, survivor)
       });
       continue;
     }
