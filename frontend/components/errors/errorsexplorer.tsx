@@ -51,6 +51,7 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
 import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
@@ -577,6 +578,7 @@ export default function ErrorsExplorer() {
   );
 
   const handleProcessRowUpdateError = useCallback((error: Error) => {
+    if (isMuiRowEditCancelled(error)) return;
     setErrorMessage(error.message);
   }, []);
 

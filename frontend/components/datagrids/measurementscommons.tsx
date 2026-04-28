@@ -3,6 +3,7 @@
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { ErrorBoundary } from '@/components/errorboundary';
+import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -793,7 +794,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       promiseArguments.resolve(updatedRow);
     } catch (error: unknown) {
       promiseArguments.reject(error);
-      const wasCancelled = error instanceof Error && error.message === 'cancelled';
+      const wasCancelled = isMuiRowEditCancelled(error);
       if (wasCancelled && !promiseArguments.oldRow.isNew) {
         setRowModesModel(oldModel => ({
           ...oldModel,
@@ -1463,6 +1464,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 setPaginationModel(newPaginationModel);
               }}
               onProcessRowUpdateError={(error: Error) => {
+                if (isMuiRowEditCancelled(error)) return;
                 ailogger.error('Row update error:', error);
                 setSnackbar({
                   children: 'Error updating row',
