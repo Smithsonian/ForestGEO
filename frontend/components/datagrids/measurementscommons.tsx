@@ -785,10 +785,17 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const performSaveAction = async (id: GridRowId) => {
     if (locked || !promiseArguments) return;
-    // destructive mutation — global overlay blocks UI for the duration of the API call
-    setLoading(true, 'Saving changes...');
+    // The new-row path is a single network call → blocking overlay is appropriate.
+    // The edit path goes through useEditPreviewFlow, which surfaces a Modal whose
+    // own busy state is the user feedback during apply; raising the global overlay
+    // here would block the dialog from receiving its own Apply/Cancel clicks until
+    // the loading provider's 30s default timeout fires.
+    const isLegacyCreate = promiseArguments.oldRow.isNew;
+    if (isLegacyCreate) {
+      setLoading(true, 'Saving changes...');
+    }
     try {
-      const updatedRow = promiseArguments.oldRow.isNew
+      const updatedRow = isLegacyCreate
         ? await createNewRowPost(gridType, currentSite?.schemaName, promiseArguments.newRow, promiseArguments.oldRow)
         : await applyEditViaPreviewFlow(promiseArguments.newRow, promiseArguments.oldRow);
       promiseArguments.resolve(updatedRow);
@@ -836,7 +843,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const errorObj = e instanceof Error ? e : new Error(String(e));
       ailogger.error('Failed to fetch validation errors:', errorObj);
     } finally {
-      setLoading(false);
+      if (isLegacyCreate) {
+        setLoading(false);
+      }
     }
     await invalidateAfter('save-edit-plan', queryScope);
   };
