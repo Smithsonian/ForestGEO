@@ -205,6 +205,7 @@ describe('POST /api/revisionupload', () => {
     await expect(response.json()).resolves.toEqual({
       matchedRows: [
         {
+          csvIndex: 0,
           csvRow: {
             stemid: '5283365',
             tag: '10063',
@@ -648,6 +649,152 @@ describe('POST /api/revisionupload', () => {
     const bulkInput = analyzeArgs[5] as { matched: Array<{ targetID: number }> };
     expect(bulkInput.matched).toHaveLength(1);
     expect(bulkInput.matched[0].targetID).toBe(702);
+  });
+
+  it('demotes matched rows whose plan has a blocking TreeStemResolution error into invalidRows and re-runs the bulk plan on the survivors (regression: a quadrat-not-found row should land in the Invalid tab, not block the whole batch)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 901,
+            StemGUID: 5283335,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 902,
+            StemGUID: 5283336,
+            IsActive: 1,
+            MeasuredDBH: 14.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T2',
+            RawStemTag: 'S2',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T2',
+            StemTag: 'S2',
+            SpeciesCode: 'AAA',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      return [];
+    });
+
+    // First analyzeBulk call: row at array index 0 (target 901) was demoted
+    // by the analyzer because its quadrat change target ('999') doesn't
+    // resolve. Row 1 (target 902) is fine.
+    mocks.analyzeBulk
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 2,
+        rowPlans: [
+          {
+            rowIndex: 0,
+            targetID: 901,
+            status: 'invalid',
+            reason: 'Row 1: quadrat "999" was not found in this plot/census'
+          },
+          {
+            rowIndex: 1,
+            targetID: 902,
+            status: 'matched',
+            plan: {
+              dataType: 'measurementssummary',
+              targetID: 902,
+              fieldChanges: [{ field: 'MeasuredDBH', from: 14, to: 15 }],
+              effects: [],
+              errors: [],
+              canApply: true,
+              maxSeverity: 'info',
+              planHash: 'inner-plan',
+              generatedAt: '2026-04-20T00:00:00.000Z'
+            }
+          }
+        ]
+      })
+      // Second call: route re-runs analyzeBulk on the surviving row only.
+      .mockResolvedValueOnce({
+        ...EMPTY_BULK_PLAN,
+        rowCount: 1,
+        rowPlans: [
+          {
+            rowIndex: 0,
+            targetID: 902,
+            status: 'matched'
+          }
+        ],
+        planHash: 'plan-after-demotion'
+      });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'quadrat-not-found.csv',
+            rows: [
+              { stemid: '5283335', quadrat: '999' },
+              { stemid: '5283336', dbh: '15.0' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].coreMeasurementID).toBe(902);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0]).toMatchObject({
+      csvIndex: 0,
+      reason: 'Row 1: quadrat "999" was not found in this plot/census'
+    });
+    expect(body.bulkPlan.planHash).toBe('plan-after-demotion');
+
+    // Re-run is essential: classify's plan hash must match what /apply would
+    // compute on the survivor-only payload. Otherwise every apply 409s with
+    // a phantom drift.
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
+    const firstCallInput = (mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+    };
+    const secondCallInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+      invalid: Array<{ rowIndex: number }>;
+    };
+    expect(firstCallInput.matched.map(m => m.targetID)).toEqual([901, 902]);
+    expect(secondCallInput.matched.map(m => m.targetID)).toEqual([902]);
+    // The demoted row now appears in the bulkInput.invalid list (under its
+    // CSV index), so apply's analyzeBulk on the same input shape will hash
+    // identically.
+    expect(secondCallInput.invalid.map(i => i.rowIndex)).toEqual([0]);
   });
 
   it('does not send leading-zero-mangled identity fields into the analyzer payload (regression: round-trip CSV must not surface fake bulk-plan changes for tag/stemtag/quadrat)', async () => {

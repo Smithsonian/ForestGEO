@@ -528,10 +528,13 @@ describe('analyzeBulk', () => {
     expect(newRowPlan?.canonicalNewRow).toMatchObject({ TreeTag: 'T99', StemTag: 'S99', MeasuredDBH: 12.5, MeasurementDate: '2026-04-22' });
   });
 
-  it('maxSeverity is destructive when a row plan has only a TreeStemResolution error and no destructive effect', async () => {
-    // Regression for Task 9: bulk maxSeverity was computed only from
-    // aggregateEffects. A row with only blocking errors (no effects) produced
-    // canApply:false but maxSeverity:'info' — a visible UX inconsistency.
+  it('demotes a matched row to status=invalid when its plan has a blocking TreeStemResolution error so the rest of the batch can still apply', async () => {
+    // The previous behavior kept the row in matched/unchanged status and
+    // surfaced the error at plan level — which set canApply=false and forced
+    // the entire batch to be rejected for one bad quadrat/tree/stem.
+    // Demoting the row routes it through the upload-review's Invalid tab
+    // alongside originally-invalid rows, and unblocks the remaining matched
+    // rows for apply.
     const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
     const treeStemError: import('./types').TreeStemResolutionPreviewError = {
       kind: 'TreeStemResolution',
@@ -551,12 +554,45 @@ describe('analyzeBulk', () => {
       duplicateMeasurementIDsToDelete: []
     });
 
-    expect(bulkPlan.aggregateEffects).toHaveLength(0);
-    expect(bulkPlan.errors).toHaveLength(1);
-    expect(bulkPlan.errors?.[0]).toMatchObject({ kind: 'TreeStemResolution', rowIndex: 0 });
+    expect(bulkPlan.rowPlans).toHaveLength(1);
+    const demoted = bulkPlan.rowPlans[0];
+    expect(demoted.status).toBe('invalid');
+    expect(demoted.targetID).toBe(42);
+    expect(demoted.reason).toBe('Tree T-99 not found in plot/census.');
+    // Errors array does not carry the demoted row's blocker; it's now a
+    // per-row invalid concern instead of a plan-level block.
+    expect(bulkPlan.errors ?? []).toHaveLength(0);
+    expect(bulkPlan.canApply).toBe(true);
+  });
+
+  it('keeps RoleForbiddenField errors at the plan level (not demoted) so the UI can show the role-block banner once', async () => {
+    // RoleForbiddenField is per-user authz, not per-row data validity. Every
+    // spcode-changing row would have the same error; demoting them all to
+    // Invalid would obscure the actual cause and clutter the Invalid tab. The
+    // role-block banner exists to surface this once at the plan level.
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+
+    const bulkPlan = await analyzeBulk(
+      cm,
+      SCHEMA,
+      'measurementssummary',
+      PLOT_ID,
+      CENSUS_ID,
+      {
+        matched: [{ rowIndex: 0, targetID: 42, newRow: { SpeciesCode: 'NEWSP' } }],
+        newRows: [],
+        invalid: [],
+        duplicateMeasurementIDsToDelete: []
+      },
+      undefined,
+      { role: 'field crew' }
+    );
+
+    expect(bulkPlan.rowPlans).toHaveLength(1);
+    expect(bulkPlan.rowPlans[0].status).not.toBe('invalid');
+    expect(bulkPlan.errors ?? []).toHaveLength(1);
+    expect(bulkPlan.errors?.[0]).toMatchObject({ kind: 'RoleForbiddenField', rowIndex: 0 });
     expect(bulkPlan.canApply).toBe(false);
-    // The key assertion: errors must drive maxSeverity, not just effects
-    expect(bulkPlan.maxSeverity).toBe('destructive');
   });
 
   it('does not populate canonicalNewRow on invalid RowPlans', async () => {

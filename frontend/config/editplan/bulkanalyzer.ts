@@ -39,6 +39,26 @@ export async function analyzeBulk(
     // a plan-hash drift that the apply endpoint surfaces to the UI.
     try {
       const plan = await analyzeEdit(cm, schema, dataType, plotID, censusID, matched.targetID, matched.newRow, transactionID, options);
+
+      // Per-row data-validity blockers (TreeStemResolution: missing quadrat,
+      // inactive tree, stem in different quadrat, etc.) are demoted to
+      // status:'invalid' so the row can be surfaced in the upload review's
+      // Invalid tab while the rest of the batch still applies. Role-forbidden
+      // errors stay on the plan because they're a per-user authorization
+      // concern — every spcode-changing row would have the same role error,
+      // and the UI needs to show the role-block banner once at the plan level
+      // rather than N times in the Invalid tab.
+      const dataBlockers = (plan.errors ?? []).filter(error => error.blocking && error.kind !== 'RoleForbiddenField');
+      if (dataBlockers.length > 0) {
+        rowPlans.push({
+          rowIndex: matched.rowIndex,
+          targetID: matched.targetID,
+          status: 'invalid',
+          reason: dataBlockers.map(error => error.message).join('; ')
+        });
+        continue;
+      }
+
       rowPlans.push({
         rowIndex: matched.rowIndex,
         targetID: matched.targetID,

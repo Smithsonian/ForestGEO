@@ -2,6 +2,13 @@ import { FileRow } from '@/config/macros/formdetails';
 import { BulkEditPlan } from '@/config/editplan/types';
 
 export interface RevisionMatchedRow {
+  /**
+   * 0-based row index from the source CSV (offset across multi-file uploads).
+   * Used to surface the row number in the Invalid tab when a matched row is
+   * demoted post-classification (e.g., TreeStemResolution: missing quadrat),
+   * and to keep matched rows traceable back to their CSV origin in error UIs.
+   */
+  csvIndex: number;
   csvRow: FileRow;
   coreMeasurementID: number;
   /** Duplicate CoreMeasurementIDs that should be removed after this row survives. */

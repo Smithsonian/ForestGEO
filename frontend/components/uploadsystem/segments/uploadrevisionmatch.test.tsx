@@ -50,6 +50,121 @@ describe('UploadRevisionMatch', () => {
     expect(banner.textContent).toContain('spcode');
   });
 
+  it('shows the species role-blocked banner only when the bulk plan has RoleForbiddenField errors, not for unrelated blockers (regression: a TreeStemResolution failure on a non-spcode row was misleading global users into thinking the role check fired)', () => {
+    const matchedRow: RevisionMatchedRow = {
+      coreMeasurementID: 101,
+      csvRow: { stemid: '101', quadrat: '999' },
+      existingValues: {
+        measuredDBH: 10,
+        measuredHOM: 1.3,
+        measurementDate: '2025-01-01',
+        rawCodes: null,
+        description: null
+      },
+      changes: { quadrat: { from: 'Q1', to: '999' } }
+    };
+    const bulkPlan: BulkEditPlan = {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [{ rowIndex: 0, targetID: 101, status: 'matched' }],
+      aggregateEffects: [],
+      maxSeverity: 'destructive',
+      planHash: 'plan',
+      generatedAt: '2026-04-20T00:00:00.000Z',
+      duplicateDeletions: [],
+      canApply: false,
+      errors: [
+        {
+          kind: 'TreeStemResolution',
+          subject: 'quadrat',
+          reason: 'missing',
+          field: 'QuadratName',
+          message: 'Row 1: quadrat "999" was not found in this plot/census',
+          severity: 'destructive',
+          blocking: true,
+          rowIndex: 0
+        }
+      ]
+    };
+
+    render(
+      <UploadRevisionMatch
+        matchedRows={[matchedRow]}
+        newRows={[]}
+        invalidRows={[]}
+        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, matched: 1, matchedWithChanges: 1, total: 1 }}
+        bulkPlan={bulkPlan}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={vi.fn<(state: ReviewStates) => void>()}
+        onApply={vi.fn()}
+        handleReturnToStart={vi.fn(async () => undefined)}
+      />
+    );
+
+    expect(screen.queryByTestId('revision-role-blocked')).not.toBeInTheDocument();
+    const banner = screen.getByTestId('revision-blocking-errors');
+    expect(banner.textContent).toContain('quadrat');
+    expect(banner.textContent).toContain('999');
+  });
+
+  it('shows the species role-blocked banner when the bulk plan has a RoleForbiddenField error', () => {
+    const matchedRow: RevisionMatchedRow = {
+      coreMeasurementID: 101,
+      csvRow: { stemid: '101', spcode: 'NEWSPC' },
+      existingValues: {
+        measuredDBH: 10,
+        measuredHOM: 1.3,
+        measurementDate: '2025-01-01',
+        rawCodes: null,
+        description: null
+      },
+      changes: { spcode: { from: 'AAA', to: 'NEWSPC' } }
+    };
+    const bulkPlan: BulkEditPlan = {
+      dataType: 'measurementssummary',
+      rowCount: 1,
+      rowPlans: [{ rowIndex: 0, targetID: 101, status: 'matched' }],
+      aggregateEffects: [],
+      maxSeverity: 'destructive',
+      planHash: 'plan',
+      generatedAt: '2026-04-20T00:00:00.000Z',
+      duplicateDeletions: [],
+      canApply: false,
+      errors: [
+        {
+          kind: 'RoleForbiddenField',
+          field: 'spcode',
+          role: 'field crew',
+          message: 'Row 1: spcode can only be edited by global or db admin users.',
+          severity: 'destructive',
+          blocking: true,
+          rowIndex: 0
+        }
+      ]
+    };
+
+    render(
+      <UploadRevisionMatch
+        matchedRows={[matchedRow]}
+        newRows={[]}
+        invalidRows={[]}
+        counts={{ ...EMPTY_REVISION_MATCH_COUNTS, matched: 1, matchedWithChanges: 1, total: 1 }}
+        bulkPlan={bulkPlan}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        setReviewState={vi.fn<(state: ReviewStates) => void>()}
+        onApply={vi.fn()}
+        handleReturnToStart={vi.fn(async () => undefined)}
+      />
+    );
+
+    expect(screen.getByTestId('revision-role-blocked')).toBeInTheDocument();
+    expect(screen.queryByTestId('revision-blocking-errors')).not.toBeInTheDocument();
+  });
+
   it('omits the preflight warning banner when none is supplied', () => {
     render(
       <UploadRevisionMatch

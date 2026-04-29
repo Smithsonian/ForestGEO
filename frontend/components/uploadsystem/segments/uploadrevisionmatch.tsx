@@ -82,7 +82,17 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
   const rowsWithIdentityChanges = rowsWithChanges.filter(hasIdentityChanges);
   const stemIdNotFoundCount = newRows.filter(r => r.reason === 'stemid-not-found').length;
   const actionableMatchedRowCount = rowsWithChanges.length + rowsWithDuplicateCleanupOnly.length;
-  const planBlocked = bulkPlan?.canApply === false || (bulkPlan?.errors ?? []).some(error => error.blocking);
+
+  // Split blocking errors by kind so the banner can describe the actual
+  // reason instead of always claiming a species-role block. The previous
+  // version showed "species-code changes that require a global or db admin
+  // role" any time canApply was false — which fired for completely unrelated
+  // failures (TreeStemResolution: missing quadrat, inactive tree, etc.) and
+  // misled global users into thinking the role check was wrong.
+  const blockingErrors = (bulkPlan?.errors ?? []).filter(error => error.blocking);
+  const roleBlockingErrors = blockingErrors.filter(error => error.kind === 'RoleForbiddenField');
+  const otherBlockingErrors = blockingErrors.filter(error => error.kind !== 'RoleForbiddenField');
+  const planBlocked = bulkPlan?.canApply === false || blockingErrors.length > 0;
   const canApply = !planBlocked && (actionableMatchedRowCount > 0 || (confirmNewRows && newRows.length > 0));
   const defaultTabValue = rowsWithChanges.length > 0 ? 'changes' : rowsWithDuplicateCleanupOnly.length > 0 ? 'duplicates' : 'changes';
 
@@ -144,9 +154,30 @@ export default function UploadRevisionMatch(props: Readonly<UploadRevisionMatchP
         </Alert>
       ) : null}
 
-      {planBlocked ? (
+      {roleBlockingErrors.length > 0 ? (
         <Alert color="danger" variant="soft" data-testid="revision-role-blocked">
           This revision contains species-code changes that require a global or db admin role.
+        </Alert>
+      ) : null}
+
+      {otherBlockingErrors.length > 0 ? (
+        <Alert color="danger" variant="soft" data-testid="revision-blocking-errors">
+          <Stack spacing={0.5}>
+            <Typography level="body-sm" fontWeight="lg">
+              {otherBlockingErrors.length === 1 ? 'A revision row cannot be applied:' : `${otherBlockingErrors.length} revision rows cannot be applied:`}
+            </Typography>
+            {otherBlockingErrors.slice(0, 5).map((error, index) => (
+              <Typography key={`${error.kind}-${error.rowIndex ?? index}-${index}`} level="body-sm">
+                {error.rowIndex !== undefined ? `Row ${error.rowIndex + 1}: ` : ''}
+                {error.message}
+              </Typography>
+            ))}
+            {otherBlockingErrors.length > 5 ? (
+              <Typography level="body-sm" color="neutral">
+                …and {otherBlockingErrors.length - 5} more.
+              </Typography>
+            ) : null}
+          </Stack>
         </Alert>
       ) : null}
 

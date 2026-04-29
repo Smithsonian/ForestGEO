@@ -369,12 +369,7 @@ async function classifyFileRows(
     );
   }
 
-  // Track candidate.csvIndex parallel to matchedRows so we can move a
-  // matched row into invalidRows after a post-classification check (e.g.
-  // unknown species code) without changing the public RevisionMatchedRow
-  // shape.
   const matchedRows: RevisionMatchedRow[] = [];
-  const matchedRowCsvIndices: number[] = [];
   const newRows: RevisionNewRowCandidate[] = [];
 
   for (const candidate of candidates) {
@@ -389,13 +384,13 @@ async function classifyFileRows(
         .sort((left, right) => left - right);
 
       matchedRows.push({
+        csvIndex: candidate.csvIndex,
         csvRow: candidate.csvRow,
         coreMeasurementID: survivor.CoreMeasurementID,
         duplicateMeasurementIDsToDelete,
         existingValues: buildExistingValues(survivor),
         changes: computeDiff(candidate.csvRow, survivor)
       });
-      matchedRowCsvIndices.push(candidate.csvIndex);
       continue;
     }
 
@@ -449,26 +444,22 @@ async function classifyFileRows(
     const knownCodes = await loadKnownSpeciesCodes(connectionManager, schema, [...speciesCodesToCheck]);
 
     const survivingMatched: RevisionMatchedRow[] = [];
-    const survivingMatchedCsvIndices: number[] = [];
-    matchedRows.forEach((row, matchedIndex) => {
+    for (const row of matchedRows) {
       if (row.changes.spcode) {
         const targetCode = String(row.changes.spcode.to).trim();
         if (!knownCodes.has(targetCode.toLowerCase())) {
           invalidRows.push({
             csvRow: row.csvRow,
-            csvIndex: matchedRowCsvIndices[matchedIndex],
+            csvIndex: row.csvIndex,
             reason: `Species not found: ${targetCode}`
           });
-          return;
+          continue;
         }
       }
       survivingMatched.push(row);
-      survivingMatchedCsvIndices.push(matchedRowCsvIndices[matchedIndex]);
-    });
+    }
     matchedRows.length = 0;
     matchedRows.push(...survivingMatched);
-    matchedRowCsvIndices.length = 0;
-    matchedRowCsvIndices.push(...survivingMatchedCsvIndices);
   }
 
   return { matchedRows, newRows, invalidRows };
@@ -557,7 +548,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       csvIndexOffset += file.rows.length;
     }
 
-    const baseBulkPlan = await analyzeBulk(
+    let baseBulkPlan = await analyzeBulk(
       connectionManager,
       schema,
       'measurementssummary',
@@ -567,6 +558,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       undefined,
       { role: session.user.userStatus }
     );
+
+    // analyzeBulk may demote individual matched rows to status:'invalid'
+    // when their plan has a per-row data blocker (TreeStemResolution:
+    // missing quadrat, inactive tree, ...) that we don't want to sink the
+    // whole batch over. Surface those into invalidRows here so the upload
+    // review's Invalid tab renders them with a proper reason, then re-run
+    // analyzeBulk on the survivors so the returned plan hash matches what
+    // /apply will compute on the user's submission. Without the re-run,
+    // classify's hash includes demoted rowPlans but apply's hash doesn't,
+    // and every apply 409s as a phantom drift.
+    const demotedMatchedIndices = new Set<number>();
+    baseBulkPlan.rowPlans.forEach(rowPlan => {
+      if (rowPlan.status !== 'invalid' || rowPlan.targetID === undefined) return;
+      const matchedRow = matchedRows[rowPlan.rowIndex];
+      if (matchedRow && matchedRow.coreMeasurementID === rowPlan.targetID) {
+        invalidRows.push({
+          csvRow: matchedRow.csvRow,
+          csvIndex: matchedRow.csvIndex,
+          reason: rowPlan.reason ?? 'Row failed validation'
+        });
+        demotedMatchedIndices.add(rowPlan.rowIndex);
+      }
+    });
+
+    if (demotedMatchedIndices.size > 0) {
+      const survivors = matchedRows.filter((_, index) => !demotedMatchedIndices.has(index));
+      matchedRows.length = 0;
+      matchedRows.push(...survivors);
+
+      baseBulkPlan = await analyzeBulk(
+        connectionManager,
+        schema,
+        'measurementssummary',
+        normalizedPlotID,
+        normalizedCensusID,
+        buildBulkInput(matchedRows, newRows, invalidRows),
+        undefined,
+        { role: session.user.userStatus }
+      );
+    }
+
     const bulkPlan = applyRevisionRolePolicy(baseBulkPlan, session.user.userStatus, buildRevisionRoleFieldCandidates(matchedRows, newRows));
 
     const response: RevisionUploadResponse = {
