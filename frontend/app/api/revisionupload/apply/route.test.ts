@@ -450,6 +450,65 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
   });
 
+  it('moves apply-time invalid matched rows into the hash plan and only writes surviving matched rows', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
+    mocks.analyzeBulk
+      .mockResolvedValueOnce(
+        buildFreshPlan('demoted-row-plan', {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 101, status: 'invalid', reason: 'Quadrat 999 was not found in this plot/census' },
+            { rowIndex: 1, targetID: 202, status: 'matched' }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        buildFreshPlan(MATCHED_PLAN_HASH, {
+          rowCount: 2,
+          rowPlans: [
+            { rowIndex: 0, targetID: 202, status: 'matched' },
+            { rowIndex: 10, status: 'invalid', reason: 'Quadrat 999 was not found in this plot/census' }
+          ]
+        })
+      );
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            { csvIndex: 10, coreMeasurementID: 101, csvRow: { quadrat: '999' }, duplicateMeasurementIDsToDelete: [55] },
+            { csvIndex: 11, coreMeasurementID: 202, csvRow: { dbh: '12.5' } }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      updatedCount: 1,
+      skippedCount: 0,
+      deletedDuplicateCount: 0
+    });
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(2);
+    const secondBulkInput = (mocks.analyzeBulk.mock.calls[1] as unknown as Array<unknown>)[5] as {
+      matched: Array<{ targetID: number }>;
+      invalid: Array<{ rowIndex: number; reason: string }>;
+      duplicateMeasurementIDsToDelete: Array<{ coreMeasurementID: number; survivorCoreMeasurementID: number }>;
+    };
+    expect(secondBulkInput.matched.map(row => row.targetID)).toEqual([202]);
+    expect(secondBulkInput.invalid).toEqual([{ rowIndex: 10, reason: 'Quadrat 999 was not found in this plot/census' }]);
+    expect(secondBulkInput.duplicateMeasurementIDsToDelete).toEqual([]);
+    expect(mocks.applyEditInTransaction).toHaveBeenCalledTimes(1);
+    expect((mocks.applyEditInTransaction.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1]).toMatchObject({ targetID: 202 });
+  });
+
   it('returns 403 when the recomputed bulk plan contains role-forbidden fields', async () => {
     mocks.assertBulkPlanCanApply.mockImplementation(() => {
       throw new mocks.MockRoleForbiddenFieldError(['spcode'], 'field crew');

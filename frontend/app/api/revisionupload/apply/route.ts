@@ -47,6 +47,7 @@ class RevisionApplyPlanHashMismatchError extends Error {
 }
 
 interface ApplyMatchedRow {
+  csvIndex?: number;
   coreMeasurementID: number;
   csvRow: FileRow;
   duplicateMeasurementIDsToDelete?: number[];
@@ -190,6 +191,7 @@ function normalizeMatchedRows(rawRows: ApplyMatchedRow[]): { matchedRows: ApplyM
     }
 
     matchedRows.push({
+      csvIndex: parseNonNegativeInteger(row?.csvIndex) ?? index,
       coreMeasurementID,
       csvRow: row?.csvRow ?? {},
       ...(duplicateMeasurementIDsToDelete ? { duplicateMeasurementIDsToDelete } : {})
@@ -286,6 +288,45 @@ function buildDuplicateDeletionHints(matchedRows: ApplyMatchedRow[]): DuplicateT
     }
   }
   return duplicates;
+}
+
+function buildBulkInputForApply(
+  matchedRowsWithDiff: MatchedRowWithDiff[],
+  newRows: ApplyNewRow[],
+  invalidRows: ApplyInvalidRow[],
+  duplicateMeasurementIDsToDelete: DuplicateToDelete[]
+): BulkInput {
+  return {
+    matched: matchedRowsWithDiff.map(({ row, changes }, index) => ({
+      rowIndex: index,
+      targetID: row.coreMeasurementID,
+      newRow: buildAnalyzerRowFromChanges(changes, 'revision-update')
+    })),
+    newRows: newRows.map(row => ({
+      rowIndex: row.csvIndex,
+      newRow: canonicalizeRowForHash(row.csvRow, 'revision-insert')
+    })),
+    invalid: invalidRows.map(row => ({
+      rowIndex: row.csvIndex,
+      reason: row.reason
+    })),
+    duplicateMeasurementIDsToDelete
+  };
+}
+
+function collectMatchedRowsDemotedByPlan(matchedRowsWithDiff: MatchedRowWithDiff[], plan: Awaited<ReturnType<typeof analyzeBulk>>): ApplyInvalidRow[] {
+  const demotedRows: ApplyInvalidRow[] = [];
+  for (const rowPlan of plan.rowPlans) {
+    if (rowPlan.status !== 'invalid' || rowPlan.targetID === undefined) continue;
+    const matched = matchedRowsWithDiff[rowPlan.rowIndex];
+    if (!matched || matched.row.coreMeasurementID !== rowPlan.targetID) continue;
+    demotedRows.push({
+      csvRow: matched.row.csvRow,
+      csvIndex: matched.row.csvIndex ?? rowPlan.rowIndex,
+      reason: rowPlan.reason ?? 'Row failed validation'
+    });
+  }
+  return demotedRows;
 }
 
 function duplicateKey(duplicate: DuplicateToDelete): string {
@@ -711,7 +752,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       //      spcode) flow consistently into both the bulk plan and the
       //      per-row applyEditInTransaction call.
       const matchedCoreIDs = normalizedMatchedRows.matchedRows.map(row => row.coreMeasurementID);
-      const dbRowsByID = await loadMeasurementsByCoreID(connectionManager, schema, matchedCoreIDs, transactionID);
+      const dbRowsByID = await loadMeasurementsByCoreID(connectionManager, schema, normalizedCensusID, matchedCoreIDs, transactionID);
 
       const matchedRowsWithDiff: MatchedRowWithDiff[] = normalizedMatchedRows.matchedRows.map(row => {
         const dbRow = dbRowsByID.get(row.coreMeasurementID);
@@ -728,36 +769,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       //     back. Mismatch means the match-time plan has drifted and the user
       //     must re-review — return 409 with the fresh plan so the UI can
       //     surface the delta.
-      const bulkInputForHashCheck: BulkInput = {
-        matched: matchedRowsWithDiff.map(({ row, changes }, index) => ({
-          rowIndex: index,
-          targetID: row.coreMeasurementID,
-          newRow: buildAnalyzerRowFromChanges(changes, 'revision-update')
-        })),
-        newRows: normalizedNewRows.newRows.map(row => ({
-          rowIndex: row.csvIndex,
-          newRow: canonicalizeRowForHash(row.csvRow, 'revision-insert')
-        })),
-        invalid: normalizedInvalidRows.invalidRows.map(row => ({
-          rowIndex: row.csvIndex,
-          reason: row.reason
-        })),
-        duplicateMeasurementIDsToDelete: duplicates
-      };
-      const baseFreshPlan = await analyzeBulk(
+      let effectiveMatchedRowsWithDiff = matchedRowsWithDiff;
+      let effectiveInvalidRows = normalizedInvalidRows.invalidRows;
+      let effectiveDuplicates = duplicates;
+      let baseFreshPlan = await analyzeBulk(
         connectionManager,
         schema,
         'measurementssummary',
         normalizedPlotID,
         normalizedCensusID,
-        bulkInputForHashCheck,
+        buildBulkInputForApply(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows, effectiveInvalidRows, effectiveDuplicates),
         transactionID,
         { role: session.user.userStatus }
       );
+
+      // Keep apply-time demotion in the same survivor-only shape as the match
+      // route. That way the freshPlan returned on 409 is exactly the plan the
+      // UI will submit after moving demoted matched rows into invalidRows.
+      const demotedRows = collectMatchedRowsDemotedByPlan(effectiveMatchedRowsWithDiff, baseFreshPlan);
+      if (demotedRows.length > 0) {
+        const demotedKeys = new Set(demotedRows.map(row => row.csvIndex));
+        effectiveMatchedRowsWithDiff = effectiveMatchedRowsWithDiff.filter(({ row }) => !demotedKeys.has(row.csvIndex ?? -1));
+        effectiveInvalidRows = [...effectiveInvalidRows, ...demotedRows];
+        effectiveDuplicates = buildDuplicateDeletionHints(effectiveMatchedRowsWithDiff.map(({ row }) => row));
+        baseFreshPlan = await analyzeBulk(
+          connectionManager,
+          schema,
+          'measurementssummary',
+          normalizedPlotID,
+          normalizedCensusID,
+          buildBulkInputForApply(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows, effectiveInvalidRows, effectiveDuplicates),
+          transactionID,
+          { role: session.user.userStatus }
+        );
+      }
+
       const freshPlan = applyRevisionRolePolicy(
         baseFreshPlan,
         session.user.userStatus,
-        buildRevisionRoleFieldCandidates(matchedRowsWithDiff, normalizedNewRows.newRows)
+        buildRevisionRoleFieldCandidates(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows)
       );
       assertBulkPlanCanApply(freshPlan);
       if (freshPlan.planHash !== bulkPlanHash) {
@@ -772,7 +822,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const applyErrors: ApplyError[] = [];
       const updatedCoreMeasurementIDs: number[] = [];
 
-      for (const { row, changes } of matchedRowsWithDiff) {
+      for (const { row, changes } of effectiveMatchedRowsWithDiff) {
         if (Object.keys(changes).length === 0) {
           skippedCount++;
           continue;
@@ -808,7 +858,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // --- Delete verified duplicates ---
       let deletedDuplicateCount = 0;
       const deletedDuplicateIDs: number[] = [];
-      for (const dup of duplicates) {
+      for (const dup of effectiveDuplicates) {
         const dupResult = await verifyAndDeleteDuplicate(connectionManager, schema, dup, normalizedCensusID, normalizedPlotID, transactionID);
         deletedDuplicateCount += dupResult.deleted;
         if (dupResult.deleted > 0) {

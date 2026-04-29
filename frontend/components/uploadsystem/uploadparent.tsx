@@ -27,7 +27,7 @@ import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
-import { EMPTY_REVISION_MATCH_COUNTS, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
 
 export interface CMIDRow {
@@ -45,7 +45,15 @@ export interface DetailedCMIDRow extends CMIDRow {
 
 function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkEditPlan): RevisionUploadResponse {
   const changesByTarget = new Map<number, Record<string, { from: unknown; to: unknown }>>();
+  const invalidByTarget = new Map<number, string>();
+  const invalidByCsvIndex = new Map<number, string>();
   for (const rowPlan of freshPlan.rowPlans) {
+    if (rowPlan.status === 'invalid') {
+      const reason = rowPlan.reason ?? 'Row failed validation';
+      if (rowPlan.targetID !== undefined) invalidByTarget.set(rowPlan.targetID, reason);
+      invalidByCsvIndex.set(rowPlan.rowIndex, reason);
+      continue;
+    }
     if (rowPlan.targetID === undefined) continue;
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     for (const change of rowPlan.plan?.fieldChanges ?? []) {
@@ -54,17 +62,37 @@ function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkE
     changesByTarget.set(rowPlan.targetID, changes);
   }
 
-  const matchedRows = result.matchedRows.map(row => ({
-    ...row,
-    changes: changesByTarget.get(row.coreMeasurementID) ?? row.changes
-  }));
+  const matchedRows: RevisionMatchedRow[] = [];
+  const demotedInvalidRows: RevisionInvalidRow[] = [];
+  for (const row of result.matchedRows) {
+    const invalidReason = invalidByTarget.get(row.coreMeasurementID) ?? invalidByCsvIndex.get(row.csvIndex);
+    if (invalidReason !== undefined) {
+      demotedInvalidRows.push({
+        csvRow: row.csvRow,
+        csvIndex: row.csvIndex,
+        reason: invalidReason
+      });
+      continue;
+    }
+    matchedRows.push({
+      ...row,
+      changes: changesByTarget.get(row.coreMeasurementID) ?? row.changes
+    });
+  }
+
+  const invalidRows = [...result.invalidRows, ...demotedInvalidRows];
+  const matchedWithChanges = matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length;
 
   return {
     ...result,
     matchedRows,
+    invalidRows,
     counts: {
       ...result.counts,
-      matchedWithChanges: matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length
+      matched: matchedRows.length,
+      matchedWithChanges,
+      invalid: invalidRows.length,
+      total: matchedRows.length + result.newRows.length + invalidRows.length
     },
     bulkPlan: freshPlan
   };
@@ -420,6 +448,7 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadRevisionApply
             matchedRows={(revisionMatchResult?.matchedRows ?? []).map(row => ({
+              csvIndex: row.csvIndex,
               coreMeasurementID: row.coreMeasurementID,
               csvRow: row.csvRow,
               duplicateMeasurementIDsToDelete: row.duplicateMeasurementIDsToDelete ?? []

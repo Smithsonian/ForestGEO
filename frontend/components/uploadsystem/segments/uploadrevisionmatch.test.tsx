@@ -52,6 +52,7 @@ describe('UploadRevisionMatch', () => {
 
   it('shows the species role-blocked banner only when the bulk plan has RoleForbiddenField errors, not for unrelated blockers (regression: a TreeStemResolution failure on a non-spcode row was misleading global users into thinking the role check fired)', () => {
     const matchedRow: RevisionMatchedRow = {
+      csvIndex: 0,
       coreMeasurementID: 101,
       csvRow: { stemid: '101', quadrat: '999' },
       existingValues: {
@@ -111,6 +112,7 @@ describe('UploadRevisionMatch', () => {
 
   it('shows the species role-blocked banner when the bulk plan has a RoleForbiddenField error', () => {
     const matchedRow: RevisionMatchedRow = {
+      csvIndex: 0,
       coreMeasurementID: 101,
       csvRow: { stemid: '101', spcode: 'NEWSPC' },
       existingValues: {
@@ -189,6 +191,7 @@ describe('UploadRevisionMatch', () => {
     const setReviewState = vi.fn<(state: ReviewStates) => void>();
     const matchedRows: RevisionMatchedRow[] = [
       {
+        csvIndex: 0,
         coreMeasurementID: 101,
         csvRow: {},
         duplicateMeasurementIDsToDelete: [55, 56],
@@ -276,6 +279,7 @@ describe('UploadRevisionMatch', () => {
     const setReviewState = vi.fn<(state: ReviewStates) => void>();
     const matchedRows: RevisionMatchedRow[] = [
       {
+        csvIndex: 0,
         coreMeasurementID: 101,
         csvRow: { stemid: '100', codes: 'B' },
         existingValues: {
@@ -333,6 +337,7 @@ describe('UploadRevisionMatch', () => {
     const setReviewState = vi.fn<(state: ReviewStates) => void>();
     const matchedRows: RevisionMatchedRow[] = [
       {
+        csvIndex: 0,
         coreMeasurementID: 101,
         csvRow: {},
         duplicateMeasurementIDsToDelete: [55],
@@ -393,6 +398,7 @@ describe('UploadRevisionMatch', () => {
     const setReviewState = vi.fn<(state: ReviewStates) => void>();
     const matchedRows: RevisionMatchedRow[] = [
       {
+        csvIndex: 0,
         coreMeasurementID: 700,
         csvRow: { stemid: '5283365', spcode: 'AAAAAA', ly: '1111' },
         existingValues: {

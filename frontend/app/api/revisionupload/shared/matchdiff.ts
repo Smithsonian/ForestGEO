@@ -334,6 +334,7 @@ export async function loadMeasurementsByTagStemTag(
 export async function loadMeasurementsByCoreID(
   connectionManager: ConnectionManager,
   schema: string,
+  censusID: number,
   coreMeasurementIDs: number[],
   transactionID?: string
 ): Promise<Map<number, ExistingMeasurementRow>> {
@@ -346,10 +347,11 @@ export async function loadMeasurementsByCoreID(
       schema,
       `SELECT ${MEASUREMENT_SELECT}
        FROM ${MEASUREMENT_JOINS}
-       WHERE cm.CoreMeasurementID IN (${placeholders})`
+       WHERE cm.CensusID = ?
+         AND cm.CoreMeasurementID IN (${placeholders})`
     );
 
-    const rows = (await connectionManager.executeQuery(query, chunk, transactionID)) as ExistingMeasurementRow[];
+    const rows = (await connectionManager.executeQuery(query, [censusID, ...chunk], transactionID)) as ExistingMeasurementRow[];
     for (const row of rows) {
       result.set(row.CoreMeasurementID, row);
     }

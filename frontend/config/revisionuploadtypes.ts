@@ -79,6 +79,8 @@ export interface RevisionUploadResponse {
 }
 
 export interface RevisionApplyMatchedRow {
+  /** 0-based row index from the source CSV, used to keep apply-time invalid-row plan hashes stable. */
+  csvIndex?: number;
   coreMeasurementID: number;
   csvRow: FileRow;
   /** Duplicate CoreMeasurementIDs that should be removed after this row survives. */
