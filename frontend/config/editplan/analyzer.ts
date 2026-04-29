@@ -1,4 +1,5 @@
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 import type { UserAuthRoles } from '@/config/macros';
 import { EditPlan, EditPlanDataType, Effect, FieldChange, PreviewError, RoleForbiddenFieldPreviewError, SEVERITY_RANK, Severity } from './types';
 import { applySpeciesRules } from './rules/species';
@@ -134,7 +135,9 @@ export async function analyzeEdit(
   const disallowed = rejectDisallowedFields(surface, newRow);
   if (disallowed) throw new DisallowedFieldError(disallowed);
 
+  const tLoadStart = performance.now();
   const oldRow = await loadCurrentRow(cm, schema, dataType, plotID, censusID, targetID, transactionID);
+  const loadCurrentRowMs = Math.round(performance.now() - tLoadStart);
 
   const changedFields = new Set<string>();
   const fieldChanges: FieldChange[] = [];
@@ -155,6 +158,11 @@ export async function analyzeEdit(
   const ctx = { cm, schema, transactionID, dataType, plotID, censusID, oldRow, newRow, changedFields };
   const effects: Effect[] = [...roleForbiddenEffects];
 
+  let speciesRulesMs = 0;
+  let treeStemRulesMs = 0;
+  let coordinateRulesMs = 0;
+  let attributeRulesMs = 0;
+
   // Measurement rules (R1a, R2, R3, R4, R5) surface cross-row and identity
   // ramifications on fully-resolved coremeasurements rows. Failed measurements
   // (StemGUID IS NULL) carry no species/tree/stem/cmattributes linkage, so the
@@ -165,13 +173,35 @@ export async function analyzeEdit(
   // dispatch entirely so the contract is explicit, rather than relying on every
   // rule to silently return [] for a data shape it was never designed to see.
   if (dataType === 'measurementssummary' && roleErrors.length === 0) {
+    let s = performance.now();
     effects.push(...(await applySpeciesRules(ctx)));
+    speciesRulesMs = Math.round(performance.now() - s);
+
+    s = performance.now();
     const treeStem = await applyTreeStemRules(ctx);
+    treeStemRulesMs = Math.round(performance.now() - s);
     effects.push(...treeStem.effects);
     errors.push(...treeStem.errors);
+
+    s = performance.now();
     effects.push(...(await applyCoordinateRules(ctx)));
+    coordinateRulesMs = Math.round(performance.now() - s);
+
+    s = performance.now();
     effects.push(...(await applyAttributeRules(ctx)));
+    attributeRulesMs = Math.round(performance.now() - s);
   }
+
+  ailogger.info('analyzeEdit-timing', {
+    dataType,
+    targetID,
+    changedFields: [...changedFields],
+    loadCurrentRowMs,
+    speciesRulesMs,
+    treeStemRulesMs,
+    coordinateRulesMs,
+    attributeRulesMs
+  });
 
   const effectSeverity = effects.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');
   const errorSeverity = errors.reduce<Severity>((max, e) => (SEVERITY_RANK[e.severity] > SEVERITY_RANK[max] ? e.severity : max), 'info');

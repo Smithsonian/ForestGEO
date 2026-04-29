@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/auth';
+import ailogger from '@/ailogger';
 import ConnectionManager from '@/config/connectionmanager';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { HTTPResponses } from '@/config/macros';
@@ -27,7 +28,9 @@ const PreviewBody = z.object({
 });
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const tEntry = performance.now();
   const session = await auth();
+  const tAuth = performance.now();
   if (!session) {
     return NextResponse.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
   }
@@ -58,20 +61,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const cm = ConnectionManager.getInstance();
+  const t0 = performance.now();
   try {
     await assertCanEditMeasurementScope(cm, session, {
       schema: body.schema,
       plotID: body.plotID,
       censusID: body.censusID
     });
+    const tScopeAssert = performance.now();
     await assertNoActiveMeasurementScopeConflict(cm, {
       schema: body.schema,
       plotID: body.plotID,
       censusID: body.censusID
     });
+    const tScopeProbe = performance.now();
 
     const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow, undefined, {
       role: session.user.userStatus
+    });
+    const tAnalyze = performance.now();
+    ailogger.info('preview-timing', {
+      schema: body.schema,
+      plotID: body.plotID,
+      censusID: body.censusID,
+      targetID: body.targetID,
+      dataType: body.dataType,
+      authMs: Math.round(tAuth - tEntry),
+      preDbMs: Math.round(t0 - tAuth),
+      scopeAssertMs: Math.round(tScopeAssert - t0),
+      scopeProbeMs: Math.round(tScopeProbe - tScopeAssert),
+      analyzeEditMs: Math.round(tAnalyze - tScopeProbe),
+      totalMs: Math.round(tAnalyze - tEntry)
     });
     return NextResponse.json(plan, { status: HTTPResponses.OK });
   } catch (err) {
