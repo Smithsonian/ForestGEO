@@ -23,6 +23,13 @@ function makeConnectionManager(rowSequence: unknown[][]): Pick<ConnectionManager
 
 const TEST_SCHEMA = 'forestgeo_test';
 
+async function expectMeasurementResolutionError(call: Promise<unknown>): Promise<MeasurementResolutionError> {
+  await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
+  const err = await call.catch((error: unknown) => error);
+  expect(err).toBeInstanceOf(MeasurementResolutionError);
+  return err as MeasurementResolutionError;
+}
+
 // ---------------------------------------------------------------------------
 // resolveMeasurementSummaryQuadratID
 // ---------------------------------------------------------------------------
@@ -45,8 +52,7 @@ describe('resolveMeasurementSummaryQuadratID', () => {
       QuadratName: 'QTA',
       PlotID: null
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('quadrat');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('Plot not found for quadrat lookup');
@@ -59,22 +65,24 @@ describe('resolveMeasurementSummaryQuadratID', () => {
       QuadratName: '   ',
       PlotID: 3
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('quadrat');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('Quadrat not found for stem resolution');
   });
 
   it('throws MeasurementResolutionError(quadrat, missing) when the DB returns no matching quadrat', async () => {
-    const cm = makeConnectionManager([[/* empty result set */]]);
+    const cm = makeConnectionManager([
+      [
+        /* empty result set */
+      ]
+    ]);
     const call = resolveMeasurementSummaryQuadratID(cm as unknown as ConnectionManager, TEST_SCHEMA, {
       QuadratID: null,
       QuadratName: 'NoSuchQuadrat',
       PlotID: 3
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('quadrat');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('Quadrat not found');
@@ -102,8 +110,7 @@ describe('resolveMeasurementSummaryTree', () => {
       SpeciesID: 5,
       CensusID: 10
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('tree');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('TreeTag not found for tree resolution');
@@ -116,8 +123,7 @@ describe('resolveMeasurementSummaryTree', () => {
       SpeciesID: null,
       CensusID: 10
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('species');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('Species not found for tree resolution');
@@ -130,8 +136,7 @@ describe('resolveMeasurementSummaryTree', () => {
       SpeciesID: 5,
       CensusID: 10
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('tree');
     expect(err.reason).toBe('inactive');
     expect(err.message).toContain('T-INACTIVE');
@@ -183,8 +188,7 @@ describe('resolveMeasurementSummaryStem', () => {
       ...BASE_STEM_DATA,
       StemTag: null
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('stem');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('StemTag not found for stem resolution');
@@ -196,8 +200,7 @@ describe('resolveMeasurementSummaryStem', () => {
       ...BASE_STEM_DATA,
       QuadratID: null
     });
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('quadrat');
     expect(err.reason).toBe('missing');
     expect(err.message).toBe('Quadrat not found for stem resolution');
@@ -209,8 +212,7 @@ describe('resolveMeasurementSummaryStem', () => {
       [{ StemGUID: 55, QuadratID: 3, IsActive: 0 }] // blocking SELECT → inactive blocker
     ]);
     const call = resolveMeasurementSummaryStem(cm as unknown as ConnectionManager, TEST_SCHEMA, BASE_STEM_DATA);
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('stem');
     expect(err.reason).toBe('inactive');
     expect(err.message).toContain('S100A');
@@ -223,8 +225,7 @@ describe('resolveMeasurementSummaryStem', () => {
       [{ StemGUID: 66, QuadratID: DIFFERENT_QUADRAT_ID, IsActive: 1 }]
     ]);
     const call = resolveMeasurementSummaryStem(cm as unknown as ConnectionManager, TEST_SCHEMA, BASE_STEM_DATA);
-    await expect(call).rejects.toBeInstanceOf(MeasurementResolutionError);
-    const err = await call.catch(e => e as MeasurementResolutionError);
+    const err = await expectMeasurementResolutionError(call);
     expect(err.subject).toBe('stem');
     expect(err.reason).toBe('different_quadrat');
     expect(err.message).toContain('T100');
