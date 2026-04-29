@@ -250,6 +250,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const editPreviewLoadingMessage = 'Saving changes...';
 
   const editFlow = useEditPreviewFlow({
     schema: currentSite?.schemaName ?? '',
@@ -258,6 +259,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     dataType: 'measurementssummary',
     onError: error => {
       setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+    },
+    onBlockingBusyChange: busy => {
+      setLoading(busy, editPreviewLoadingMessage, undefined, 'api');
     }
   });
 
@@ -792,7 +796,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // the loading provider's 30s default timeout fires.
     const isLegacyCreate = promiseArguments.oldRow.isNew;
     if (isLegacyCreate) {
-      setLoading(true, 'Saving changes...');
+      setLoading(true, editPreviewLoadingMessage);
     }
     try {
       const updatedRow = isLegacyCreate
@@ -844,7 +848,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       ailogger.error('Failed to fetch validation errors:', errorObj);
     } finally {
       if (isLegacyCreate) {
-        setLoading(false);
+        setLoading(false, editPreviewLoadingMessage);
       }
     }
     await invalidateAfter('save-edit-plan', queryScope);

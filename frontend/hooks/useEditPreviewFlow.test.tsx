@@ -124,6 +124,68 @@ describe('useEditPreviewFlow', () => {
     });
   });
 
+  it('reports blocking busy while previewing and auto-applying an info-only edit', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(INFO_PLAN)).mockResolvedValueOnce(jsonResponse(APPLY_RESULT));
+    const onBlockingBusyChange = vi.fn();
+
+    const { result } = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onBlockingBusyChange }));
+
+    await act(async () => {
+      await result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+
+    expect(onBlockingBusyChange.mock.calls).toEqual([[true], [false]]);
+    expect(result.current.dialogState.open).toBe(false);
+  });
+
+  it('rejects overlapping edits while preview and auto-apply are in flight', async () => {
+    let resolvePreview!: (response: Response) => void;
+    const previewResponse = new Promise<Response>(resolve => {
+      resolvePreview = resolve;
+    });
+    fetchMock.mockReturnValueOnce(previewResponse).mockResolvedValueOnce(jsonResponse(APPLY_RESULT));
+    const onBlockingBusyChange = vi.fn();
+
+    const { result } = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onBlockingBusyChange }));
+
+    let firstEdit!: Promise<ApplyResult>;
+    act(() => {
+      firstEdit = result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+
+    await waitFor(() => expect(onBlockingBusyChange).toHaveBeenCalledWith(true));
+    await expect(result.current.beginEdit(43, { MeasuredDBH: 13 })).rejects.toThrow('an edit is already pending');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolvePreview(jsonResponse(INFO_PLAN));
+    await act(async () => {
+      await expect(firstEdit).resolves.toEqual(APPLY_RESULT);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onBlockingBusyChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('clears blocking busy before opening a review dialog', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(FRESH_PLAN));
+    const onBlockingBusyChange = vi.fn();
+
+    const { result } = renderHook(() => useEditPreviewFlow({ ...BASE_ARGS, onBlockingBusyChange }));
+
+    let editPromise!: Promise<ApplyResult>;
+    act(() => {
+      editPromise = result.current.beginEdit(42, { MeasuredDBH: 12 });
+    });
+
+    await waitFor(() => expect(result.current.dialogState.open).toBe(true));
+    expect(onBlockingBusyChange.mock.calls).toEqual([[true], [false]]);
+
+    act(() => {
+      result.current.cancelDialog();
+    });
+    await expect(editPromise).rejects.toThrow('cancelled');
+  });
+
   it('opens review instead of auto-applying an info-severity plan with blocking errors', async () => {
     const blockedPlan: EditPlan = {
       ...INFO_PLAN,

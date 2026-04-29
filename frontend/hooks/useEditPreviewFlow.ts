@@ -14,6 +14,7 @@ export interface UseEditPreviewFlowArgs {
   dataType: EditPlanDataType;
   onSuccess?: (result: ApplyResult, plan: EditPlan) => void;
   onError?: (error: Error) => void;
+  onBlockingBusyChange?: (busy: boolean) => void;
 }
 
 export interface BeginEditOptions {
@@ -112,9 +113,10 @@ interface PendingEditRef {
 }
 
 export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreviewFlowReturn {
-  const { schema, plotID, censusID, dataType, onSuccess, onError } = args;
+  const { schema, plotID, censusID, dataType, onSuccess, onError, onBlockingBusyChange } = args;
   const [dialogState, setDialogState] = useState<DialogState>({ open: false, plan: null, busy: false, wasRefreshed: false });
   const pendingRef = useRef<PendingEditRef | null>(null);
+  const beginEditInFlightRef = useRef(false);
 
   const buildRequestBody = useCallback(
     (targetID: number, newRow: Record<string, unknown>, callDataType: EditPlanDataType, planHash?: string) => ({
@@ -180,16 +182,29 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
 
   const beginEdit = useCallback(
     async (targetID: number, newRow: Record<string, unknown>, options?: BeginEditOptions): Promise<ApplyResult> => {
-      if (pendingRef.current) {
+      if (pendingRef.current || beginEditInFlightRef.current) {
         throw new Error('an edit is already pending');
       }
+      beginEditInFlightRef.current = true;
 
       const callDataType: EditPlanDataType = options?.dataType ?? dataType;
+      let blockingBusy = false;
+      const setBlockingBusy = (busy: boolean) => {
+        if (blockingBusy === busy) return;
+        blockingBusy = busy;
+        onBlockingBusyChange?.(busy);
+      };
+      const finishBlockingPhase = () => {
+        beginEditInFlightRef.current = false;
+        setBlockingBusy(false);
+      };
 
       let plan: EditPlan;
       try {
+        setBlockingBusy(true);
         plan = await postPreview(buildRequestBody(targetID, newRow, callDataType));
       } catch (err) {
+        finishBlockingPhase();
         const error = err instanceof Error ? err : new Error(String(err));
         if (onError) onError(error);
         throw error;
@@ -199,6 +214,7 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
         try {
           const applyResponse = await executeApply(plan, targetID, newRow, callDataType);
           if (applyResponse.kind === 'conflict') {
+            finishBlockingPhase();
             return new Promise<ApplyResult>((resolve, reject) => {
               pendingRef.current = { targetID, newRow, dataType: callDataType, resolve, reject };
               setDialogState({ open: true, plan: applyResponse.freshPlan, busy: false, wasRefreshed: true });
@@ -206,21 +222,24 @@ export function useEditPreviewFlow(args: UseEditPreviewFlowArgs): UseEditPreview
           }
 
           const { result } = applyResponse;
+          finishBlockingPhase();
           if (onSuccess) onSuccess(result, plan);
           return result;
         } catch (err) {
+          finishBlockingPhase();
           const error = err instanceof Error ? err : new Error(String(err));
           if (onError) onError(error);
           throw error;
         }
       }
 
+      finishBlockingPhase();
       return new Promise<ApplyResult>((resolve, reject) => {
         pendingRef.current = { targetID, newRow, dataType: callDataType, resolve, reject };
         setDialogState({ open: true, plan, busy: false, wasRefreshed: false });
       });
     },
-    [buildRequestBody, dataType, executeApply, onError, onSuccess]
+    [buildRequestBody, dataType, executeApply, onBlockingBusyChange, onError, onSuccess]
   );
 
   return { beginEdit, dialogState, cancelDialog, confirmDialog };
