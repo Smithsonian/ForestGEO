@@ -109,8 +109,10 @@ export default function ImpactSummary({ bulkPlan, onConfirm, onCancel, busy }: I
 
             {typedConfirmRequired ? (
               <FormControl data-testid="impact-summary-typed-confirm">
-                <FormLabel>Confirm destructive apply</FormLabel>
+                <FormLabel htmlFor="impact-summary-typed-confirm-input">Confirm destructive apply</FormLabel>
                 <Input
+                  aria-label="Confirm destructive apply"
+                  slotProps={{ input: { id: 'impact-summary-typed-confirm-input' } }}
                   placeholder={expectedConfirmPhrase}
                   value={confirmInput}
                   onChange={event => setConfirmInput(event.target.value)}

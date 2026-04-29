@@ -128,7 +128,7 @@ export default function PreviewDialog({ plan, onConfirm, onCancel, busy, wasRefr
                     </thead>
                     <tbody>
                       {plan.fieldChanges.map(change => (
-                        <tr key={change.field} data-testid={`edit-preview-field-${change.field}`}>
+                        <tr key={change.field} data-testid={`edit-preview-field-${change.field}`} aria-label={`Field change: ${change.field}`}>
                           <td>
                             <Typography level="body-sm" sx={{ fontWeight: 600 }}>
                               {change.field}

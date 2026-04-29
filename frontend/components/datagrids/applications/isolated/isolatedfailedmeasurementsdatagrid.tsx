@@ -7,7 +7,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Box, Chip, Stack, Tooltip, Typography } from '@mui/joy';
+import { Box, Button, Chip, Stack, Tooltip, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
@@ -525,9 +525,9 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
       )}
       {editFlowError !== null && (
         <Box sx={{ mt: 1 }}>
-          <Chip variant="soft" color="danger" onClick={() => setEditFlowError(null)}>
+          <Button variant="soft" color="danger" onClick={() => setEditFlowError(null)} aria-label="Dismiss edit flow error">
             {editFlowError}
-          </Chip>
+          </Button>
         </Box>
       )}
       <ValidationCheckModal open={validationModalOpen} onClose={() => setValidationModalOpen(false)} results={validationResults} />
