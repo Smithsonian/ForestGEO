@@ -51,6 +51,17 @@ function extractSchemaFromQuery(query: string): string | null {
 type PoolConnectionWithThreadId = PoolConnection & { threadId?: number };
 
 /**
+ * Tracks the most recently `USE`d schema per pool connection. mysql2 reuses
+ * PoolConnection wrappers, and the underlying MySQL session retains its
+ * current database between acquisitions, so we can skip the per-query
+ * `USE \`schema\`` round-trip when the connection is already on that schema.
+ *
+ * WeakMap so a destroyed PoolConnection drops its entry without leaking.
+ * If a `USE` ever fails, the entry is cleared so the next query will retry.
+ */
+const connectionSchemaCache = new WeakMap<PoolConnection, string>();
+
+/**
  * Helper to safely extract error message from unknown type
  */
 function getErrorMessage(error: unknown): string {
@@ -130,13 +141,15 @@ class ConnectionManager {
       // https://github.com/sidorares/node-mysql2/issues/477
       // https://github.com/sidorares/node-mysql2/issues/1469
       const schema = extractSchemaFromQuery(query);
-      if (schema) {
+      if (schema && connectionSchemaCache.get(connection) !== schema) {
         try {
           // Use simple query protocol (not prepared statements) to switch database
           await connection.query(`USE \`${schema}\``);
+          connectionSchemaCache.set(connection, schema);
         } catch (useError: unknown) {
           // Log but don't fail - the query may still work with fully-qualified names
           ailogger.warn(chalk.yellow(`Could not set database context to ${schema}: ${getErrorMessage(useError)}`));
+          connectionSchemaCache.delete(connection);
         }
       }
 
@@ -626,13 +639,12 @@ class ConnectionManager {
     );
   }
 
-  // Acquire a connection for the current operation
+  // Acquire a connection for the current operation. `getConn` (in
+  // processormacros.ts) already pings the connection after pool acquisition,
+  // so re-pinging here would be a redundant round-trip on every query.
   private async acquireConnectionInternal(): Promise<PoolConnection> {
     try {
-      const connection = await getConn(); // Reuse getConn from processormacros
-      await connection.ping(); // Validate connection
-      // console.log(chalk.green('Connection validated.'));
-      return connection;
+      return await getConn();
     } catch (error: unknown) {
       const errorObj = error instanceof Error ? error : new Error(getErrorMessage(error));
       ailogger.error(chalk.red(`Error acquiring or validating connection: ${getErrorMessage(error)}`), errorObj);
