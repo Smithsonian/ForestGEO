@@ -1,9 +1,8 @@
 // auth.ts
 import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
-import MapperFactory from '@/config/datamapper';
-import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import { submitCookie } from '@/app/actions/cookiemanager';
+import { getOrFetchPermissions } from '@/lib/permissionscache';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -43,36 +42,27 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         return session;
       }
 
-      if (!session.user.userStatus || !session.user.sites || session.user.sites.length === 0 || !session.user.allsites || session.user.allsites.length === 0) {
-        const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
-        try {
-          const response = await fetch(coreURL, {
-            method: 'GET'
-          });
-          if (!response.ok) {
-            const responseText = await response.text().catch(() => '');
-            console.error('auth response not okay', {
-              url: coreURL,
-              status: response.status,
-              statusText: response.statusText,
-              body: responseText.slice(0, 500)
-            });
-            throw new Error(`API call FAILURE! status=${response.status}`);
-          }
-
-          const data = await response.json();
-          await submitCookie('user', token.email ?? ''); // save user email in server storage
-          session.user.userStatus = data.userStatus;
-          session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
-          session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
-        } catch (error) {
-          console.error('Error fetching user data:', {
-            url: coreURL,
-            email: token.email,
-            error
-          });
-          throw error;
+      // Permissions are sourced from AUTH_FUNCTIONS_POLL_URL via an in-process
+      // cache (see lib/permissionscache.ts). The cache amortizes the auth-fetch
+      // cost across all requests within the TTL window — without this, the
+      // session callback ran the fetch on every authenticated API call because
+      // sites/allsites are not persisted on the JWT.
+      try {
+        const email = token.email as string | undefined;
+        if (!email) {
+          throw new Error('JWT has no email — cannot resolve permissions');
         }
+        const permissions = await getOrFetchPermissions(email);
+        await submitCookie('user', email); // save user email in server storage
+        session.user.userStatus = permissions.userStatus;
+        session.user.sites = permissions.sites;
+        session.user.allsites = permissions.allsites;
+      } catch (error) {
+        console.error('Error fetching user data:', {
+          email: token.email,
+          error
+        });
+        throw error;
       }
       return session;
     }
