@@ -467,6 +467,260 @@ describe('POST /api/revisionupload', () => {
     expect(body.matchedRows[0].changes).toEqual({});
   });
 
+  it('does not pass NULL identity fields into the analyzer payload (regression: round-trip CSV with NULL on TreeTag/SpeciesCode/etc must not 422 invalid clear)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 700,
+            StemGUID: 5283335,
+            IsActive: 1,
+            MeasuredDBH: 1,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'SLOATE',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      if (query.includes('FROM ??.species')) {
+        return [{ Code: 'newspc' }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            // Simulates the View Data CSV roundtrip the user uploaded for
+            // RABI Census 3: every column is present, identity columns are
+            // literal "NULL" placeholders meaning "no change", and only one
+            // field (spcode) actually changed. Before the diff-driven analyzer
+            // payload, NULL on TreeTag/StemTag/QuadratName/MeasurementDate
+            // would 422 with `invalid clear` because those fields have
+            // policy=invalid-clear in canonicalizeEditPayload.
+            fileName: 'roundtrip-with-identity.csv',
+            rows: [
+              {
+                stemid: '5283335',
+                tag: null,
+                stemtag: null,
+                spcode: 'NEWSPC',
+                quadrat: null,
+                lx: null,
+                ly: null,
+                date: null,
+                dbh: null,
+                hom: null,
+                codes: null,
+                comments: null
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].changes).toEqual({ spcode: { from: 'SLOATE', to: 'NEWSPC' } });
+
+    // The bulk-plan input must contain ONLY the diffed field. No null entries
+    // for TreeTag, StemTag, QuadratName, MeasurementDate (which would 422
+    // `invalid clear` if they reached canonicalizeEditPayload).
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
+    expect(bulkInput.matched).toHaveLength(1);
+    expect(bulkInput.matched[0].newRow).toEqual({ SpeciesCode: 'NEWSPC' });
+  });
+
+  it('demotes matched rows to invalidRows when their spcode change targets an unknown species (regression: must not 500 the whole batch with SpeciesNotFoundError: CHANGED)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string, _params?: unknown[]) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 701,
+            StemGUID: 5283335,
+            IsActive: 1,
+            MeasuredDBH: 12.5,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T1',
+            RawStemTag: 'S1',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T1',
+            StemTag: 'S1',
+            SpeciesCode: 'SLOATE',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          },
+          {
+            CoreMeasurementID: 702,
+            StemGUID: 5283336,
+            IsActive: 1,
+            MeasuredDBH: 14.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: null,
+            Description: null,
+            RawTreeTag: 'T2',
+            RawStemTag: 'S2',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: 'T2',
+            StemTag: 'S2',
+            SpeciesCode: 'SLOATE',
+            QuadratName: 'Q1',
+            LocalX: 1,
+            LocalY: 1
+          }
+        ];
+      }
+      if (query.includes('FROM ??.species')) {
+        // Only 'realspc' resolves; 'changed' (the bad code from row 1) does not.
+        return [{ Code: 'realspc' }];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'unknown-species.csv',
+            rows: [
+              { stemid: '5283335', spcode: 'CHANGED' },
+              { stemid: '5283336', spcode: 'REALSPC' }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    // Under the old behavior `applySpeciesRules` threw SpeciesNotFoundError:
+    // CHANGED out of analyzeBulk, the route had no catch for it, and the
+    // entire batch died with 500. Now the bad row becomes a regular invalid
+    // row that the upload review's "Invalid" tab can render — and the second
+    // row (with a known species) is preserved as a normal matched edit.
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].coreMeasurementID).toBe(702);
+    expect(body.invalidRows).toHaveLength(1);
+    expect(body.invalidRows[0]).toMatchObject({
+      csvIndex: 0,
+      reason: 'Species not found: CHANGED'
+    });
+
+    // Crucial: the bulk-plan analyzer must only see the surviving row, not
+    // the species-bad one — otherwise applySpeciesRules would still throw
+    // SpeciesNotFoundError mid-analysis.
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as { matched: Array<{ targetID: number }> };
+    expect(bulkInput.matched).toHaveLength(1);
+    expect(bulkInput.matched[0].targetID).toBe(702);
+  });
+
+  it('does not send leading-zero-mangled identity fields into the analyzer payload (regression: round-trip CSV must not surface fake bulk-plan changes for tag/stemtag/quadrat)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.StemGUID IN')) {
+        return [
+          {
+            CoreMeasurementID: 800,
+            StemGUID: 5283366,
+            IsActive: 1,
+            MeasuredDBH: 44.0,
+            MeasuredHOM: 1.3,
+            MeasurementDate: '2026-03-14',
+            RawCodes: 'Q;L',
+            Description: 'unchanged',
+            RawTreeTag: '10063',
+            RawStemTag: '10063',
+            StemIsActive: 1,
+            TreeIsActive: 1,
+            QuadratIsActive: 1,
+            PlotID: 1,
+            TreeTag: '10063',
+            StemTag: '10063',
+            SpeciesCode: 'CRUD02',
+            QuadratName: '0101',
+            LocalX: 9.33,
+            LocalY: 7.39
+          }
+        ];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest({
+        files: [
+          {
+            fileName: 'leading-zero-roundtrip.csv',
+            rows: [
+              {
+                // Spreadsheet-mangled values: '10063' (unchanged) and '101'
+                // (was '0101' in DB). Per FIELD_DESCRIPTORS for tag/stemtag/
+                // quadrat, the leading-zero tolerance treats both sides as
+                // equivalent — so computeDiff returns {} and the analyzer
+                // payload must also be empty (no fake fieldChanges in the
+                // bulk plan).
+                stemid: '5283366',
+                tag: '10063',
+                stemtag: '10063',
+                quadrat: '101',
+                spcode: 'CRUD02'
+              }
+            ]
+          }
+        ],
+        plotID: 1,
+        censusID: 2,
+        schema: 'forestgeo_testing'
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.matchedRows).toHaveLength(1);
+    expect(body.matchedRows[0].changes).toEqual({});
+
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
+    expect(bulkInput.matched).toHaveLength(1);
+    expect(bulkInput.matched[0].newRow).toEqual({});
+  });
+
   it('renders MeasurementDate returned as a Date object using local calendar components, not UTC', async () => {
     // Construct a local Date that lives on 2026-03-14 locally but is 2026-03-15 in UTC
     // when the local offset is negative (e.g. Americas). The comparison should still
@@ -550,6 +804,9 @@ describe('POST /api/revisionupload', () => {
             LocalY: 2.4
           }
         ];
+      }
+      if (query.includes('FROM ??.species')) {
+        return [{ Code: 'aaaaaa' }];
       }
       return [];
     });
@@ -792,6 +1049,9 @@ describe('POST /api/revisionupload', () => {
             LocalY: 7.39
           }
         ];
+      }
+      if (query.includes('FROM ??.species')) {
+        return [{ Code: 'crud2' }];
       }
       return [];
     });

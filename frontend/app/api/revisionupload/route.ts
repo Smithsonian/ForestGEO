@@ -13,97 +13,27 @@ import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/ed
 import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
 import { DuplicateDeletion } from '@/config/editplan/types';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
+import {
+  buildAnalyzerRowFromChanges,
+  computeDiff,
+  ExistingMeasurementRow,
+  isBlankOrNullPlaceholder,
+  isResolvableMeasurement,
+  loadMeasurementsByStemID,
+  loadMeasurementsByTagStemTag,
+  MatchStrategy,
+  normalizeDateToString
+} from './shared/matchdiff';
 
 export const runtime = 'nodejs';
 
-/**
- * Bulk-revision update surface (Phase 2): all 11 editable measurement fields,
- * matching the single-row PATCH path. Identity edits (`spcode`, `tag`,
- * `stemtag`, `quadrat`, `lx`, `ly`) are flagged in `changes` and propagated
- * into `analyzeBulk`, so the bulk plan surfaces R1a/R2/R3/R4 effects (species
- * re-link, tree/stem reassignment, coordinate cross-row propagation) in
- * addition to the row-local R5/R6 effects from Phase 1.
- */
-const UPDATABLE_FIELDS = ['dbh', 'hom', 'date', 'codes', 'comments', 'spcode', 'quadrat', 'lx', 'ly', 'tag', 'stemtag'] as const;
 const REQUIRED_INSERT_FIELDS = ['tag', 'spcode', 'quadrat', 'lx', 'ly', 'date'] as const;
-const LOOKUP_CHUNK_SIZE = 1000;
-const TAG_STEMTAG_LOOKUP_CHUNK_SIZE = 250;
-
-type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
-type MatchStrategy = 'stemid' | 'tag_stemtag';
-
-/**
- * Kind of DB value we're comparing against — controls how we normalize both
- * sides before the equality check.
- *
- * `numeric` parses both sides as floats and compares numerically (used for
- * `dbh`, `hom`, `lx`, `ly`).
- *
- * `numeric-or-string-ci` normalizes purely digit strings by stripping leading
- * zeros before comparing them; otherwise it falls back to case-insensitive
- * string equality. This tolerates leading-zero stripping when a researcher
- * opens the CSV in Numbers or Excel — those apps coerce `'0101'` to `'101'`
- * on save, producing fake change warnings on otherwise unchanged rows
- * without risking numeric precision loss on long identifiers (used for
- * `tag`, `stemtag`, `quadrat`).
- *
- * `string-ci` is case-insensitive string equality (used for `spcode`).
- *
- * `string-exact` is exact string equality after trimming (used for `codes`
- * and `comments`).
- *
- * `date` normalizes the DB value to a YYYY-MM-DD string before comparing
- * (used for `date`).
- */
-type FieldCompareKind = 'numeric' | 'string-ci' | 'numeric-or-string-ci' | 'string-exact' | 'date';
-
-interface FieldDescriptor {
-  dbProperty: keyof ExistingMeasurementRow;
-  compareKind: FieldCompareKind;
-}
-
-const FIELD_DESCRIPTORS: Record<UpdatableField, FieldDescriptor> = {
-  dbh: { dbProperty: 'MeasuredDBH', compareKind: 'numeric' },
-  hom: { dbProperty: 'MeasuredHOM', compareKind: 'numeric' },
-  date: { dbProperty: 'MeasurementDate', compareKind: 'date' },
-  codes: { dbProperty: 'RawCodes', compareKind: 'string-exact' },
-  comments: { dbProperty: 'Description', compareKind: 'string-exact' },
-  spcode: { dbProperty: 'SpeciesCode', compareKind: 'string-ci' },
-  quadrat: { dbProperty: 'QuadratName', compareKind: 'numeric-or-string-ci' },
-  lx: { dbProperty: 'LocalX', compareKind: 'numeric' },
-  ly: { dbProperty: 'LocalY', compareKind: 'numeric' },
-  tag: { dbProperty: 'TreeTag', compareKind: 'numeric-or-string-ci' },
-  stemtag: { dbProperty: 'StemTag', compareKind: 'numeric-or-string-ci' }
-};
 
 class RevisionUploadRequestError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RevisionUploadRequestError';
   }
-}
-
-interface ExistingMeasurementRow {
-  CoreMeasurementID: number;
-  StemGUID: number | null;
-  IsActive: number;
-  MeasuredDBH: number | null;
-  MeasuredHOM: number | null;
-  MeasurementDate: Date | string | null;
-  RawCodes: string | null;
-  Description: string | null;
-  RawTreeTag: string | null;
-  RawStemTag: string | null;
-  StemIsActive: number | null;
-  TreeIsActive: number | null;
-  QuadratIsActive: number | null;
-  PlotID: number | null;
-  TreeTag: string | null;
-  StemTag: string | null;
-  SpeciesCode: string | null;
-  QuadratName: string | null;
-  LocalX: number | string | null;
-  LocalY: number | string | null;
 }
 
 interface RevisionUploadFileRequest {
@@ -179,35 +109,6 @@ function buildTagStemKey(tag: unknown, stemtag: unknown): string | null {
   return `${normalizedTag}::${normalizedStemTag}`;
 }
 
-function getDerivedDbTagStemKey(row: ExistingMeasurementRow): string | null {
-  return buildTagStemKey(row.TreeTag ?? row.RawTreeTag, row.StemTag ?? row.RawStemTag);
-}
-
-function normalizeDateToString(value: Date | string | null): string | null {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) {
-    const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, '0');
-    const day = String(value.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-
-  return String(value).slice(0, 10);
-}
-
-function areEquivalentNumericValues(csvValue: string, dbValue: unknown): boolean {
-  const parsedCsvValue = Number.parseFloat(csvValue);
-  const parsedDbValue = typeof dbValue === 'number' ? dbValue : Number.parseFloat(String(dbValue ?? ''));
-
-  return Number.isFinite(parsedCsvValue) && Number.isFinite(parsedDbValue) && parsedCsvValue === parsedDbValue;
-}
-
-function isBlankOrNullPlaceholder(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  const trimmed = String(value).trim();
-  return trimmed === '' || trimmed.toUpperCase() === 'NULL';
-}
-
 function buildRevisionRoleFieldCandidates(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[]): RevisionRoleFieldCandidate[] {
   const candidates: RevisionRoleFieldCandidate[] = [];
   matchedRows.forEach((row, index) => {
@@ -221,82 +122,6 @@ function buildRevisionRoleFieldCandidates(matchedRows: RevisionMatchedRow[], new
     }
   }
   return candidates;
-}
-
-/**
- * Tag/stemtag/quadrat values are tolerant of leading-zero stripping (Excel
- * coerces `'0101'` to `'101'` on round-trip). When both sides are pure
- * digits, we compare them after stripping leading zeros so spreadsheet
- * round-trips don't surface phantom changes. Returns null when either side
- * isn't a pure digit string, signaling the caller to fall back to
- * case-insensitive string equality.
- */
-function normalizeDigitString(value: string): string | null {
-  if (!/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const normalized = value.replace(/^0+/, '');
-  return normalized === '' ? '0' : normalized;
-}
-
-function areEquivalentAsDigitStrings(csvNormalized: string, dbNormalized: string): boolean {
-  const normalizedCsv = normalizeDigitString(csvNormalized);
-  const normalizedDb = normalizeDigitString(dbNormalized);
-  return normalizedCsv !== null && normalizedDb !== null && normalizedCsv === normalizedDb;
-}
-
-function fieldValuesAreEquivalent(compareKind: FieldCompareKind, csvValue: unknown, dbValue: unknown): boolean {
-  const csvNormalized = String(csvValue).trim();
-  const dbNormalized = String(dbValue ?? '').trim();
-
-  switch (compareKind) {
-    case 'numeric':
-      return areEquivalentNumericValues(csvNormalized, dbValue);
-    case 'date':
-      return csvNormalized === dbNormalized;
-    case 'string-exact':
-      return csvNormalized === dbNormalized;
-    case 'string-ci':
-      return csvNormalized.toLowerCase() === dbNormalized.toLowerCase();
-    case 'numeric-or-string-ci':
-      return areEquivalentAsDigitStrings(csvNormalized, dbNormalized) || csvNormalized.toLowerCase() === dbNormalized.toLowerCase();
-  }
-}
-
-function readDbValueForDisplay(field: UpdatableField, dbRow: ExistingMeasurementRow): unknown {
-  const descriptor = FIELD_DESCRIPTORS[field];
-  if (descriptor.compareKind === 'date') {
-    return normalizeDateToString(dbRow.MeasurementDate as Date | string | null);
-  }
-  const raw = dbRow[descriptor.dbProperty];
-  // Stringify numeric DB values for the `from` slot so consumers (UI,
-  // BulkEditPlan effects) see a stable shape across row-local and identity
-  // edits. The actual equality check still happens via fieldValuesAreEquivalent.
-  if (typeof raw === 'number') return String(raw);
-  return raw;
-}
-
-function computeDiff(csvRow: FileRow, dbRow: ExistingMeasurementRow): Record<string, { from: unknown; to: unknown }> {
-  const changes: Record<string, { from: unknown; to: unknown }> = {};
-
-  for (const field of UPDATABLE_FIELDS) {
-    const csvValue = csvRow[field];
-    if (isBlankOrNullPlaceholder(csvValue)) {
-      continue;
-    }
-
-    const descriptor = FIELD_DESCRIPTORS[field];
-    const dbValue = readDbValueForDisplay(field, dbRow);
-
-    if (fieldValuesAreEquivalent(descriptor.compareKind, csvValue, dbValue)) {
-      continue;
-    }
-
-    changes[field] = { from: dbValue, to: csvValue };
-  }
-
-  return changes;
 }
 
 function detectMatchStrategy(rows: IndexedFileRow[], fileName: string): MatchStrategy {
@@ -404,27 +229,6 @@ function buildDuplicateKeyReason(strategy: MatchStrategy, candidate: ResolutionC
   return `duplicate tag+stemtag "${candidate.tag}/${candidate.stemtag}" appears in multiple rows of the same file; each tag+stemtag must appear at most once`;
 }
 
-function groupRowsByKey(rows: ExistingMeasurementRow[], strategy: MatchStrategy): Map<string, ExistingMeasurementRow[]> {
-  const grouped = new Map<string, ExistingMeasurementRow[]>();
-
-  for (const row of rows) {
-    const key = strategy === 'stemid' ? (row.StemGUID !== null ? String(row.StemGUID) : null) : getDerivedDbTagStemKey(row);
-    if (!key) {
-      continue;
-    }
-
-    const existing = grouped.get(key) ?? [];
-    existing.push(row);
-    grouped.set(key, existing);
-  }
-
-  return grouped;
-}
-
-function isResolvableMeasurement(row: ExistingMeasurementRow, plotID: number): boolean {
-  return row.IsActive === 1 && row.StemGUID !== null && row.StemIsActive === 1 && row.TreeIsActive === 1 && row.QuadratIsActive === 1 && row.PlotID === plotID;
-}
-
 function buildExistingValues(row: ExistingMeasurementRow): RevisionMatchedRow['existingValues'] {
   return {
     measuredDBH: row.MeasuredDBH,
@@ -439,82 +243,38 @@ function getMissingRequiredInsertFields(csvRow: FileRow): string[] {
   return REQUIRED_INSERT_FIELDS.filter(field => normalizeNullableString(csvRow[field]) === null);
 }
 
-async function loadMeasurementsByStemID(
+/**
+ * Look up which of the supplied species codes resolve to an active species
+ * row. Done in a single IN query rather than per-row so the round-trip cost
+ * stays bounded regardless of batch size. Comparison is case-insensitive to
+ * match resolveSpeciesByCode and fieldValuesAreEquivalent('string-ci').
+ *
+ * Returns the lowercased set of codes that DO resolve. The classify pass
+ * uses this to demote rows whose spcode change targets an unknown species
+ * into the invalid-rows tab instead of letting analyzeBulk throw
+ * SpeciesNotFoundError and 500 the whole batch.
+ */
+async function loadKnownSpeciesCodes(
   connectionManager: ConnectionManager,
   schema: string,
-  censusID: number,
-  stemIDs: number[]
-): Promise<Map<string, ExistingMeasurementRow[]>> {
-  const groupedRows = new Map<string, ExistingMeasurementRow[]>();
+  codes: string[]
+): Promise<Set<string>> {
+  const known = new Set<string>();
+  if (codes.length === 0) return known;
 
-  for (const chunk of chunkArray(stemIDs, LOOKUP_CHUNK_SIZE)) {
-    const placeholders = chunk.map(() => '?').join(', ');
-    const query = safeFormatQuery(
-      schema,
-      `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.MeasuredDBH, cm.MeasuredHOM,
-              cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
-              st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
-              q.PlotID, t.TreeTag, st.StemTag,
-              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY
-       FROM ??.coremeasurements cm
-       LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
-       LEFT JOIN ??.trees t ON t.TreeID = st.TreeID
-       LEFT JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
-       LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
-       WHERE cm.CensusID = ?
-         AND cm.StemGUID IN (${placeholders})`
-    );
-
-    const rows = (await connectionManager.executeQuery(query, [censusID, ...chunk])) as ExistingMeasurementRow[];
-    const chunkGrouped = groupRowsByKey(rows, 'stemid');
-    chunkGrouped.forEach((value, key) => {
-      const existing = groupedRows.get(key) ?? [];
-      groupedRows.set(key, [...existing, ...value]);
-    });
+  const placeholders = codes.map(() => 'LOWER(?)').join(', ');
+  const query = safeFormatQuery(
+    schema,
+    `SELECT LOWER(SpeciesCode) AS Code
+     FROM ??.species
+     WHERE LOWER(SpeciesCode) IN (${placeholders})
+       AND IsActive = 1`
+  );
+  const rows = (await connectionManager.executeQuery(query, codes)) as Array<{ Code: string }>;
+  for (const row of rows) {
+    if (row.Code) known.add(row.Code);
   }
-
-  return groupedRows;
-}
-
-async function loadMeasurementsByTagStemTag(
-  connectionManager: ConnectionManager,
-  schema: string,
-  censusID: number,
-  keys: Array<Required<Pick<ResolutionCandidate, 'tag' | 'stemtag'>>>
-): Promise<Map<string, ExistingMeasurementRow[]>> {
-  const groupedRows = new Map<string, ExistingMeasurementRow[]>();
-
-  for (const chunk of chunkArray(keys, TAG_STEMTAG_LOOKUP_CHUNK_SIZE)) {
-    const conditions = chunk
-      .map(() => `(LOWER(TRIM(COALESCE(t.TreeTag, cm.RawTreeTag, ''))) = ? AND LOWER(TRIM(COALESCE(st.StemTag, cm.RawStemTag, ''))) = ?)`)
-      .join(' OR ');
-
-    const params = [censusID, ...chunk.flatMap(key => [key.tag, key.stemtag])];
-    const query = safeFormatQuery(
-      schema,
-      `SELECT cm.CoreMeasurementID, cm.StemGUID, cm.IsActive, cm.MeasuredDBH, cm.MeasuredHOM,
-              cm.MeasurementDate, cm.RawCodes, cm.Description, cm.RawTreeTag, cm.RawStemTag,
-              st.IsActive AS StemIsActive, t.IsActive AS TreeIsActive, q.IsActive AS QuadratIsActive,
-              q.PlotID, t.TreeTag, st.StemTag,
-              sp.SpeciesCode, q.QuadratName, st.LocalX, st.LocalY
-       FROM ??.coremeasurements cm
-       LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID
-       LEFT JOIN ??.trees t ON t.TreeID = st.TreeID
-       LEFT JOIN ??.quadrats q ON q.QuadratID = st.QuadratID
-       LEFT JOIN ??.species sp ON sp.SpeciesID = t.SpeciesID
-       WHERE cm.CensusID = ?
-         AND (${conditions})`
-    );
-
-    const rows = (await connectionManager.executeQuery(query, params)) as ExistingMeasurementRow[];
-    const chunkGrouped = groupRowsByKey(rows, 'tag_stemtag');
-    chunkGrouped.forEach((value, key) => {
-      const existing = groupedRows.get(key) ?? [];
-      groupedRows.set(key, [...existing, ...value]);
-    });
-  }
-
-  return groupedRows;
+  return known;
 }
 
 function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewRowCandidate[], invalidRows: RevisionInvalidRow[]): BulkInput {
@@ -531,7 +291,14 @@ function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewR
     matched: matchedRows.map((row, index) => ({
       rowIndex: index,
       targetID: row.coreMeasurementID,
-      newRow: canonicalizeRowForHash(row.csvRow, 'revision-update')
+      // Build the analyzer payload from the diff (lowercase-aliased `to`
+      // values), not the full CSV row. This keeps revision-upload semantics
+      // single-sourced: NULL placeholders, leading-zero round-trips, and
+      // case-insensitive spcode no-ops are filtered out by `computeDiff`
+      // before they reach `canonicalizeEditPayload`, which would otherwise
+      // reject them as `invalid clear` (identity fields) or surface them
+      // as fake bulk-plan fieldChanges.
+      newRow: buildAnalyzerRowFromChanges(row.changes, 'revision-update')
     })),
     newRows: newRows.map(row => ({
       rowIndex: row.csvIndex,
@@ -543,16 +310,6 @@ function buildBulkInput(matchedRows: RevisionMatchedRow[], newRows: RevisionNewR
     })),
     duplicateMeasurementIDsToDelete: duplicateDeletions
   };
-}
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-
-  return chunks;
 }
 
 function normalizeRequestFiles(body: RevisionUploadRequest): NormalizedRequestFile[] {
@@ -612,7 +369,12 @@ async function classifyFileRows(
     );
   }
 
+  // Track candidate.csvIndex parallel to matchedRows so we can move a
+  // matched row into invalidRows after a post-classification check (e.g.
+  // unknown species code) without changing the public RevisionMatchedRow
+  // shape.
   const matchedRows: RevisionMatchedRow[] = [];
+  const matchedRowCsvIndices: number[] = [];
   const newRows: RevisionNewRowCandidate[] = [];
 
   for (const candidate of candidates) {
@@ -633,6 +395,7 @@ async function classifyFileRows(
         existingValues: buildExistingValues(survivor),
         changes: computeDiff(candidate.csvRow, survivor)
       });
+      matchedRowCsvIndices.push(candidate.csvIndex);
       continue;
     }
 
@@ -663,6 +426,49 @@ async function classifyFileRows(
       csvIndex: candidate.csvIndex,
       reason: hasDifferentPlotRows ? 'stem exists in this census but belongs to a different plot' : 'stem exists but all measurements are inactive/failed'
     });
+  }
+
+  // Pre-validate species codes for any matched row whose `spcode` is in the
+  // diff. The downstream analyzer (applySpeciesRules) throws SpeciesNotFoundError
+  // for unknown codes, which would otherwise abort the entire batch with a 500.
+  // Demoting those rows to invalidRows lets the rest of the batch proceed and
+  // surfaces the offender in the upload review's "Invalid" tab.
+  //
+  // New-row inserts intentionally skip this check: they route through
+  // bulkingestionprocess, which writes a failed-measurement record when the
+  // species code is unknown rather than throwing. Pre-validating here would
+  // also strip them out of the "matched as new" preview before the user sees
+  // it, which is the wrong UX.
+  const speciesCodesToCheck = new Set<string>();
+  for (const row of matchedRows) {
+    if (row.changes.spcode) {
+      speciesCodesToCheck.add(String(row.changes.spcode.to).trim().toLowerCase());
+    }
+  }
+  if (speciesCodesToCheck.size > 0) {
+    const knownCodes = await loadKnownSpeciesCodes(connectionManager, schema, [...speciesCodesToCheck]);
+
+    const survivingMatched: RevisionMatchedRow[] = [];
+    const survivingMatchedCsvIndices: number[] = [];
+    matchedRows.forEach((row, matchedIndex) => {
+      if (row.changes.spcode) {
+        const targetCode = String(row.changes.spcode.to).trim();
+        if (!knownCodes.has(targetCode.toLowerCase())) {
+          invalidRows.push({
+            csvRow: row.csvRow,
+            csvIndex: matchedRowCsvIndices[matchedIndex],
+            reason: `Species not found: ${targetCode}`
+          });
+          return;
+        }
+      }
+      survivingMatched.push(row);
+      survivingMatchedCsvIndices.push(matchedRowCsvIndices[matchedIndex]);
+    });
+    matchedRows.length = 0;
+    matchedRows.push(...survivingMatched);
+    matchedRowCsvIndices.length = 0;
+    matchedRowCsvIndices.push(...survivingMatchedCsvIndices);
   }
 
   return { matchedRows, newRows, invalidRows };

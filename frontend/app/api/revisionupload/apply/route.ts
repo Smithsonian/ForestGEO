@@ -20,6 +20,13 @@ import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/ed
 import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
 import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
+import {
+  buildAnalyzerRowFromChanges,
+  computeDiff,
+  isBlankOrNullPlaceholder as isBlankOrNullCell,
+  isResolvableMeasurement,
+  loadMeasurementsByCoreID
+} from '../shared/matchdiff';
 
 export const runtime = 'nodejs';
 
@@ -132,67 +139,20 @@ function getAffectedRowCount(result: unknown): number {
   return typeof affectedRows === 'number' && Number.isFinite(affectedRows) ? affectedRows : 0;
 }
 
-function isBlankOrNullPlaceholder(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  const trimmed = String(value).trim();
-  return trimmed === '' || trimmed.toUpperCase() === 'NULL';
+interface MatchedRowWithDiff {
+  row: ApplyMatchedRow;
+  changes: Record<string, { from: unknown; to: unknown }>;
 }
 
-function speciesCodesDiffer(csvValue: unknown, dbValue: unknown): boolean {
-  if (isBlankOrNullPlaceholder(csvValue)) return false;
-  return (
-    String(csvValue).trim().toLowerCase() !==
-    String(dbValue ?? '')
-      .trim()
-      .toLowerCase()
-  );
-}
-
-async function loadCurrentSpeciesCode(
-  connectionManager: ConnectionManager,
-  schema: string,
-  coreMeasurementID: number,
-  censusID: number,
-  plotID: number,
-  transactionID: string
-): Promise<unknown> {
-  const query = safeFormatQuery(
-    schema,
-    `SELECT sp.SpeciesCode
-     FROM ??.coremeasurements cm
-     JOIN ??.census c ON c.CensusID = cm.CensusID
-     LEFT JOIN ??.stems st ON st.StemGUID = cm.StemGUID AND st.IsActive = 1
-     LEFT JOIN ??.trees tr ON tr.TreeID = st.TreeID AND tr.IsActive = 1
-     LEFT JOIN ??.species sp ON sp.SpeciesID = tr.SpeciesID
-     WHERE cm.CoreMeasurementID = ?
-       AND cm.CensusID = ?
-       AND c.PlotID = ?
-       AND cm.IsActive = 1
-     LIMIT 1`
-  );
-  const rows = await connectionManager.executeQuery(query, [coreMeasurementID, censusID, plotID], transactionID);
-  return rows[0]?.SpeciesCode ?? null;
-}
-
-async function buildRevisionRoleFieldCandidates(
-  connectionManager: ConnectionManager,
-  schema: string,
-  plotID: number,
-  censusID: number,
-  matchedRows: ApplyMatchedRow[],
-  newRows: ApplyNewRow[],
-  transactionID: string
-): Promise<RevisionRoleFieldCandidate[]> {
+function buildRevisionRoleFieldCandidates(matchedWithDiff: MatchedRowWithDiff[], newRows: ApplyNewRow[]): RevisionRoleFieldCandidate[] {
   const candidates: RevisionRoleFieldCandidate[] = [];
-  for (const [index, row] of matchedRows.entries()) {
-    if (isBlankOrNullPlaceholder(row.csvRow.spcode)) continue;
-    const dbSpeciesCode = await loadCurrentSpeciesCode(connectionManager, schema, row.coreMeasurementID, censusID, plotID, transactionID);
-    if (speciesCodesDiffer(row.csvRow.spcode, dbSpeciesCode)) {
+  matchedWithDiff.forEach(({ changes }, index) => {
+    if (changes.spcode) {
       candidates.push({ rowIndex: index, field: 'spcode' });
     }
-  }
+  });
   for (const row of newRows) {
-    if (!isBlankOrNullPlaceholder(row.csvRow.spcode)) {
+    if (!isBlankOrNullCell(row.csvRow.spcode)) {
       candidates.push({ rowIndex: row.csvIndex, field: 'spcode' });
     }
   }
@@ -336,42 +296,6 @@ function duplicatesMatch(left: DuplicateToDelete[], right: DuplicateToDelete[]):
   const leftKeys = left.map(duplicateKey).sort();
   const rightKeys = right.map(duplicateKey).sort();
   return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index]);
-}
-
-/**
- * Re-resolves a CoreMeasurementID within the current plot+census boundary.
- * Returns true if the measurement is active and owned by the given plot.
- * This TOCTOU check ensures the row hasn't been deleted/deactivated between
- * the initial match (POST /revisionupload) and this apply step.
- */
-async function verifyMeasurementStillActive(
-  connectionManager: ConnectionManager,
-  schema: string,
-  coreMeasurementID: number,
-  censusID: number,
-  plotID: number,
-  transactionID: string
-): Promise<boolean> {
-  const query = safeFormatQuery(
-    schema,
-    `SELECT 1
-     FROM ??.coremeasurements cm
-     JOIN ??.stems st ON st.StemGUID = cm.StemGUID AND st.IsActive = 1
-     JOIN ??.quadrats q ON q.QuadratID = st.QuadratID AND q.IsActive = 1
-     WHERE cm.CoreMeasurementID = ?
-       AND cm.CensusID = ?
-       AND cm.IsActive = 1
-       AND cm.StemGUID IS NOT NULL
-       AND q.PlotID = ?
-     LIMIT 1`
-  );
-
-  const rows = await connectionManager.executeQuery(query, [coreMeasurementID, censusID, plotID], transactionID);
-  return rows.length > 0;
-}
-
-function hasAnyCanonicalField(csvRow: FileRow): boolean {
-  return Object.keys(canonicalizeRowForHash(csvRow, 'revision-update')).length > 0;
 }
 
 /**
@@ -772,16 +696,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
 
+      // Load full ExistingMeasurementRow shape for every matched row up front,
+      // inside the transaction (and under the scope lock acquired above), so
+      // we can:
+      //   1. Run the TOCTOU active/plot check via isResolvableMeasurement,
+      //      replacing the per-row verifyMeasurementStillActive query.
+      //   2. Recompute the diff against live DB state via computeDiff. The
+      //      apply path must NOT trust client-supplied changes — drift is
+      //      detected by re-running the same diff that classify ran, then
+      //      comparing the resulting plan hash.
+      //   3. Feed the diff into the analyzer/writer via
+      //      buildAnalyzerRowFromChanges, so revision-upload tolerances
+      //      (NULL = no-change, leading-zero round-trip, case-insensitive
+      //      spcode) flow consistently into both the bulk plan and the
+      //      per-row applyEditInTransaction call.
+      const matchedCoreIDs = normalizedMatchedRows.matchedRows.map(row => row.coreMeasurementID);
+      const dbRowsByID = await loadMeasurementsByCoreID(connectionManager, schema, matchedCoreIDs, transactionID);
+
+      const matchedRowsWithDiff: MatchedRowWithDiff[] = normalizedMatchedRows.matchedRows.map(row => {
+        const dbRow = dbRowsByID.get(row.coreMeasurementID);
+        if (!dbRow || !isResolvableMeasurement(dbRow, normalizedPlotID)) {
+          throw new RevisionApplyConflictError(
+            `Measurement ${row.coreMeasurementID} is no longer active in this plot/census — may have been deactivated since upload was matched`
+          );
+        }
+        return { row, changes: computeDiff(row.csvRow, dbRow) };
+      });
+
       // --- Bulk plan hash check: re-compute the plan inside the outer transaction
       //     (under the scope lock) and compare against the hash the client sent
       //     back. Mismatch means the match-time plan has drifted and the user
       //     must re-review — return 409 with the fresh plan so the UI can
       //     surface the delta.
       const bulkInputForHashCheck: BulkInput = {
-        matched: normalizedMatchedRows.matchedRows.map((row, index) => ({
+        matched: matchedRowsWithDiff.map(({ row, changes }, index) => ({
           rowIndex: index,
           targetID: row.coreMeasurementID,
-          newRow: canonicalizeRowForHash(row.csvRow, 'revision-update')
+          newRow: buildAnalyzerRowFromChanges(changes, 'revision-update')
         })),
         newRows: normalizedNewRows.newRows.map(row => ({
           rowIndex: row.csvIndex,
@@ -806,15 +757,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const freshPlan = applyRevisionRolePolicy(
         baseFreshPlan,
         session.user.userStatus,
-        await buildRevisionRoleFieldCandidates(
-          connectionManager,
-          schema,
-          normalizedPlotID,
-          normalizedCensusID,
-          normalizedMatchedRows.matchedRows,
-          normalizedNewRows.newRows,
-          transactionID
-        )
+        buildRevisionRoleFieldCandidates(matchedRowsWithDiff, normalizedNewRows.newRows)
       );
       assertBulkPlanCanApply(freshPlan);
       if (freshPlan.planHash !== bulkPlanHash) {
@@ -829,27 +772,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const applyErrors: ApplyError[] = [];
       const updatedCoreMeasurementIDs: number[] = [];
 
-      for (const row of normalizedMatchedRows.matchedRows) {
-        const stillActive = await verifyMeasurementStillActive(
-          connectionManager,
-          schema,
-          row.coreMeasurementID,
-          normalizedCensusID,
-          normalizedPlotID,
-          transactionID
-        );
-        if (!stillActive) {
-          throw new RevisionApplyConflictError(
-            `Measurement ${row.coreMeasurementID} is no longer active in this plot/census — may have been deactivated since upload was matched`
-          );
-        }
-
-        if (!hasAnyCanonicalField(row.csvRow)) {
+      for (const { row, changes } of matchedRowsWithDiff) {
+        if (Object.keys(changes).length === 0) {
           skippedCount++;
           continue;
         }
 
-        const canonicalNewRow = canonicalizeRowForHash(row.csvRow, 'revision-update');
+        const canonicalNewRow = buildAnalyzerRowFromChanges(changes, 'revision-update');
 
         // Per-row ledger entries are suppressed: bulk rows are revertable:false,
         // so the full beforeState/afterState JSON would be pure audit cost.

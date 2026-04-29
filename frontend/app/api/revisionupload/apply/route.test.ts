@@ -192,6 +192,39 @@ function buildValidBody(overrides: Record<string, unknown> = {}): Record<string,
   };
 }
 
+/**
+ * Mock DB row in the ExistingMeasurementRow shape that loadMeasurementsByCoreID
+ * returns. Defaults to a fully resolvable row in plot 1, with field values
+ * unlikely to collide with the CSV values used in the tests so that
+ * computeDiff actually surfaces the asserted edits. Override per-test to
+ * exercise no-op (csvValue equals dbValue) and active-state cases.
+ */
+function buildDbRow(coreMeasurementID: number, overrides: Record<string, unknown> = {}) {
+  return {
+    CoreMeasurementID: coreMeasurementID,
+    StemGUID: coreMeasurementID,
+    IsActive: 1,
+    MeasuredDBH: 1.0,
+    MeasuredHOM: 0.5,
+    MeasurementDate: '2025-01-01',
+    RawCodes: null,
+    Description: null,
+    RawTreeTag: 'T',
+    RawStemTag: 'S',
+    StemIsActive: 1,
+    TreeIsActive: 1,
+    QuadratIsActive: 1,
+    PlotID: 1,
+    TreeTag: 'T',
+    StemTag: 'S',
+    SpeciesCode: 'AAA',
+    QuadratName: 'Q',
+    LocalX: 0,
+    LocalY: 0,
+    ...overrides
+  };
+}
+
 function buildFreshPlan(planHash: string, overrides: Record<string, unknown> = {}) {
   return {
     dataType: 'measurementssummary',
@@ -332,6 +365,12 @@ describe('POST /api/revisionupload/apply', () => {
   });
 
   it('recomputes the bulk hash from the full reviewed row set', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
+      }
+      return [];
+    });
     await POST(
       buildRequest(
         buildValidBody({
@@ -387,6 +426,12 @@ describe('POST /api/revisionupload/apply', () => {
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
     const freshPlan = buildFreshPlan(DRIFTED_PLAN_HASH, { rowCount: 2 });
     mocks.analyzeBulk.mockResolvedValue(freshPlan);
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101)];
+      }
+      return [];
+    });
 
     const response = await POST(
       buildRequest(
@@ -419,6 +464,12 @@ describe('POST /api/revisionupload/apply', () => {
 
   it('returns 401 and does not write when authorization is stale after the hash check', async () => {
     mocks.assertAuthorizationFresh.mockRejectedValue(new mocks.MockSessionExpiredError());
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101)];
+      }
+      return [];
+    });
 
     const response = await POST(
       buildRequest(
@@ -438,8 +489,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
       }
       return [];
     });
@@ -523,8 +574,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
       }
       return [];
     });
@@ -567,8 +618,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return []; // row no longer active
+      if (query.includes('cm.CoreMeasurementID IN')) {
+        return []; // row no longer active or deleted
       }
       return [];
     });
@@ -591,8 +642,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101)];
       }
       if (query.includes('SELECT cm.CoreMeasurementID, cm.StemGUID')) {
         return [
@@ -635,8 +686,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
       }
       return [];
     });
@@ -686,8 +737,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
       }
       return [];
     });
@@ -714,8 +765,8 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.executeQuery.mockImplementation(async (query: string) => {
       if (query.includes('FROM ??.upload_sessions')) return [];
       if (query.includes('FROM ??.validation_runs')) return [];
-      if (query.includes('WHERE cm.CoreMeasurementID = ?') && query.includes('LIMIT 1')) {
-        return [{ ok: 1 }];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        return [buildDbRow(101), buildDbRow(202)];
       }
       return [];
     });
@@ -741,5 +792,99 @@ describe('POST /api/revisionupload/apply', () => {
     expect(mocks.refreshMeasurementViewsForScope).not.toHaveBeenCalled();
     expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
     expect(mocks.writeEditOperation).not.toHaveBeenCalled();
+  });
+
+  it('skips matched rows whose CSV cells are all NULL placeholders, regardless of which columns are populated (regression: round-trip identity columns must not be rejected as `invalid clear`)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        // DB row matches every CSV value, so computeDiff returns {} per row.
+        return [buildDbRow(101, { TreeTag: 'T1', StemTag: 'S1', SpeciesCode: 'AAA', QuadratName: 'Q1' })];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            {
+              coreMeasurementID: 101,
+              csvRow: {
+                tag: null,
+                stemtag: null,
+                spcode: null,
+                quadrat: null,
+                lx: null,
+                ly: null,
+                date: null,
+                dbh: null,
+                hom: null,
+                codes: null,
+                comments: null
+              }
+            }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      updatedCount: 0,
+      skippedCount: 1,
+      insertedCount: 0,
+      deletedDuplicateCount: 0,
+      applyErrors: [],
+      validationPending: false
+    });
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+
+    // Plan-hash recomputation must use the same diff-driven matched-row
+    // filtering as the classify route — so the bulk input's matched newRow
+    // is empty, never carrying nulls for invalid-clear identity fields.
+    expect(mocks.analyzeBulk).toHaveBeenCalledTimes(1);
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
+    expect(bulkInput.matched).toHaveLength(1);
+    expect(bulkInput.matched[0].newRow).toEqual({});
+  });
+
+  it('keeps leading-zero round-trip rows out of the analyzer/writer payload (regression: tag/stemtag/quadrat tolerance must apply at apply time too)', async () => {
+    mocks.executeQuery.mockImplementation(async (query: string) => {
+      if (query.includes('FROM ??.upload_sessions')) return [];
+      if (query.includes('FROM ??.validation_runs')) return [];
+      if (query.includes('cm.MeasuredDBH') && query.includes('cm.CoreMeasurementID IN')) {
+        // DB stores '0101' for QuadratName; CSV says '101'. Same digit-string
+        // value after leading-zero strip, so computeDiff returns {} and the
+        // row must be skipped.
+        return [buildDbRow(101, { QuadratName: '0101', TreeTag: '10063', StemTag: '10063' })];
+      }
+      return [];
+    });
+
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          matchedRows: [
+            {
+              coreMeasurementID: 101,
+              csvRow: { quadrat: '101', tag: '10063', stemtag: '10063' }
+            }
+          ]
+        })
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.updatedCount).toBe(0);
+    expect(body.skippedCount).toBe(1);
+    expect(mocks.applyEditInTransaction).not.toHaveBeenCalled();
+
+    const analyzeArgs = mocks.analyzeBulk.mock.calls[0] as unknown as Array<unknown>;
+    const bulkInput = analyzeArgs[5] as { matched: Array<{ newRow: Record<string, unknown> }> };
+    expect(bulkInput.matched[0].newRow).toEqual({});
   });
 });

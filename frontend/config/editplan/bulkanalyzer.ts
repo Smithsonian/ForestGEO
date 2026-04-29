@@ -4,6 +4,7 @@ import { AnalyzeEditOptions, RoleForbiddenFieldError, TargetNotFoundError, analy
 import { applyDuplicateRules } from './rules/duplicates';
 import { canonicalizeRowForHash } from './canonicalrow';
 import { hashPlan } from './planhash';
+import { SpeciesNotFoundError } from './rules/context';
 
 export class BulkPlanUnapplicableError extends Error {
   constructor(public readonly blockingErrors: PreviewError[]) {
@@ -51,6 +52,21 @@ export async function analyzeBulk(
           targetID: matched.targetID,
           status: 'invalid',
           reason: `Measurement ${matched.targetID} is no longer active in this plot/census`
+        });
+        continue;
+      }
+      // SpeciesNotFoundError is a per-row issue: the user supplied a species
+      // code that doesn't resolve in the species table (typo, deleted species,
+      // or a placeholder like 'CHANGED'). Demoting it to an invalid rowPlan
+      // lets the rest of the batch proceed and surfaces the offending row in
+      // the upload review's "Invalid" tab — instead of failing the whole
+      // bulk plan with a 422.
+      if (err instanceof SpeciesNotFoundError) {
+        rowPlans.push({
+          rowIndex: matched.rowIndex,
+          targetID: matched.targetID,
+          status: 'invalid',
+          reason: err.code === '' ? 'Species code is blank — species cannot be cleared' : `Species not found: ${err.code}`
         });
         continue;
       }

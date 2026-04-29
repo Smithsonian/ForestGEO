@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analyzeEdit, assertEditPlanCanApply, DisallowedFieldError, EditPlanUnapplicableError, RoleForbiddenFieldError, TargetNotFoundError } from './analyzer';
 import { analyzeBulk, assertBulkPlanCanApply, BulkPlanUnapplicableError } from './bulkanalyzer';
 import { applyDuplicateRules } from './rules/duplicates';
+import { SpeciesNotFoundError } from './rules/context';
 import { DuplicateDeletion, Effect } from './types';
 
 vi.mock('./rules/species', () => ({
@@ -442,6 +443,52 @@ describe('analyzeBulk', () => {
     expect(missing?.reason).toMatch(/no longer active/i);
     const kept = bulkPlan.rowPlans.find(rp => rp.rowIndex === 0);
     expect(kept?.status).toBe('matched');
+  });
+
+  it('converts SpeciesNotFoundError from a matched row into an invalid-row entry (does not crash the batch)', async () => {
+    // Mirrors the TargetNotFoundError test above: applySpeciesRules can throw
+    // on the second matched row (unknown species code, e.g. user typed 'CHANGED'
+    // or the species was deactivated mid-batch). analyzeBulk must catch it and
+    // demote that row to status:'invalid' with a "Species not found" reason —
+    // not bubble up and 500 the entire upload.
+    vi.mocked(applySpeciesRules).mockImplementation(async ctx => {
+      if (ctx.newRow.SpeciesCode === 'UNKNOWN_SP') {
+        throw new SpeciesNotFoundError('UNKNOWN_SP');
+      }
+      return [];
+    });
+
+    const cm = makeConnectionManager(MEASUREMENT_OLD_ROW);
+
+    const bulkPlan = await analyzeBulk(
+      cm,
+      SCHEMA,
+      'measurementssummary',
+      PLOT_ID,
+      CENSUS_ID,
+      {
+        matched: [
+          { rowIndex: 0, targetID: 42, newRow: { MeasuredDBH: 16 } },
+          { rowIndex: 1, targetID: 43, newRow: { SpeciesCode: 'UNKNOWN_SP' } }
+        ],
+        newRows: [],
+        invalid: [],
+        duplicateMeasurementIDsToDelete: []
+      },
+      undefined,
+      // SpeciesCode edits are role-gated to global/db admin in
+      // isFieldEditableByRole. Without an explicit role, analyzeEdit short-
+      // circuits with a RoleForbidden error and never reaches applySpeciesRules
+      // — so the SpeciesNotFoundError catch under test would not fire.
+      { role: 'global' }
+    );
+
+    expect(bulkPlan.rowPlans).toHaveLength(2);
+    const bad = bulkPlan.rowPlans.find(rp => rp.rowIndex === 1);
+    expect(bad?.status).toBe('invalid');
+    expect(bad?.reason).toBe('Species not found: UNKNOWN_SP');
+    const good = bulkPlan.rowPlans.find(rp => rp.rowIndex === 0);
+    expect(good?.status).toBe('matched');
   });
 
   it('aggregates affectedRowCount across repeated effect ids using max severity', async () => {
