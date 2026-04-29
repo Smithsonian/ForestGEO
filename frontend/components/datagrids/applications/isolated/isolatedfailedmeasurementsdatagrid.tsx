@@ -7,7 +7,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { Box, Chip, Stack, Tooltip, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
@@ -18,6 +18,7 @@ import ailogger from '@/ailogger';
 import { invalidateAfter } from '@/lib/query';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
 import PreviewDialog from '@/components/editplan/previewdialog';
 import UndoToast from '@/components/editplan/undotoast';
@@ -356,15 +357,37 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             }
             return (
               <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
-                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', width: '100%', marginY: 0.5 }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 0.5, width: '100%', marginY: 0.5 }}>
                   {column.field === 'codes' ? (
-                    ((params.value ?? '').split(';') ?? [])
-                      .filter((code: string) => selectableOpts.codes.includes(code))
-                      .map((i: string, index: number) => (
-                        <Chip key={index} variant={'soft'}>
-                          {i}
-                        </Chip>
-                      ))
+                    (params.value ?? '')
+                      .split(';')
+                      .map((code: string) => code.trim())
+                      .filter((code: string) => code !== '')
+                      .map((code: string, index: number) =>
+                        selectableOpts.codes.includes(code) ? (
+                          <Chip key={index} variant="soft">
+                            {code}
+                          </Chip>
+                        ) : (
+                          <Tooltip key={index} title="Code not in attributes table" variant="soft">
+                            <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                              {code}
+                            </Chip>
+                          </Tooltip>
+                        )
+                      )
+                  ) : column.field === 'spCode' && params.value && !selectableOpts.spCode.includes(String(params.value).trim()) ? (
+                    <Tooltip title="Species code not in species table" variant="soft">
+                      <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                        {String(params.value)}
+                      </Chip>
+                    </Tooltip>
+                  ) : column.field === 'quadrat' && params.value && !selectableOpts.quadrat.includes(String(params.value).trim()) ? (
+                    <Tooltip title="Quadrat not in quadrats table" variant="soft">
+                      <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                        {String(params.value)}
+                      </Chip>
+                    </Tooltip>
                   ) : (
                     <Typography
                       sx={{

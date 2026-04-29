@@ -533,6 +533,31 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
+
+  const loadAttributes = useCallback(async () => {
+    if (!currentSite?.schemaName) return;
+    try {
+      const response = await fetch(`/api/query`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      const attrMap = new Map<string, AttributesRDS>();
+      data.forEach(attr => {
+        if (attr.code) attrMap.set(attr.code, attr);
+      });
+      setAttributesMap(attrMap);
+      setReloadAttrs(false);
+    } catch (e: unknown) {
+      const errorObj = e instanceof Error ? e : new Error(String(e));
+      ailogger.error('Failed to load attributes:', errorObj);
+    }
+  }, [currentSite?.schemaName]);
+
+  useEffect(() => {
+    loadAttributes();
+  }, [loadAttributes]);
   // helper functions for usage:
   const handleSortModelChange = useCallback(
     (newModel: GridSortModel) => {
@@ -821,24 +846,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (handleSelectQuadrat) handleSelectQuadrat(null);
 
     if (reloadAttrs) {
-      try {
-        const response = await fetch(`/api/query`, {
-          method: 'POST',
-          body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
-        });
-        const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
-        setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
-        // Create a map for quick lookup of attribute details by code
-        const attrMap = new Map<string, AttributesRDS>();
-        data.forEach(attr => {
-          if (attr.code) attrMap.set(attr.code, attr);
-        });
-        setAttributesMap(attrMap);
-        setReloadAttrs(false);
-      } catch (e: unknown) {
-        const errorObj = e instanceof Error ? e : new Error(String(e));
-        ailogger.error('Failed to reload attributes:', errorObj);
-      }
+      await loadAttributes();
     }
 
     try {
