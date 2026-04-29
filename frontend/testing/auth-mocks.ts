@@ -1,5 +1,6 @@
 // test/auth-mocks.ts
 import { beforeEach, vi } from 'vitest';
+import { _clearCacheForTest } from '@/lib/permissionscache';
 
 // ------------------------------------
 // 1) Mock Microsoft Entra ID provider
@@ -121,7 +122,7 @@ function installDefaultHandlers() {
         // ✅ Pass values that match NextAuth v5's shape closely enough for your code:
         await lastConfig?.callbacks?.session?.({
           session: { user: { email: 'x@y.z' } } as any,
-          token: {} as any,
+          token: { email: 'x@y.z' } as any,
           user: undefined,
           trigger: 'get', // <-- important for some implementations
           // request isn't always used, but some code inspects it:
@@ -161,6 +162,8 @@ beforeEach(() => {
   submitCookie.mockClear();
   fetchMock.mockClear();
   fetchQueue.length = 0;
+  // Clear the per-process permissions cache so each test re-runs the fetch.
+  _clearCacheForTest();
 
   installDefaultHandlers(); // re-install defaults every test
 });
