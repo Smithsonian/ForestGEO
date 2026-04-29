@@ -13,7 +13,7 @@ import { HTTPResponses } from '@/config/macros';
 import { analyzeEdit, DisallowedFieldError, TargetNotFoundError } from '@/config/editplan/analyzer';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
-import { InvalidClearError } from '@/config/editplan/fieldpolicy';
+import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
 
 export const runtime = 'nodejs';
@@ -106,6 +106,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (err instanceof InvalidClearError) {
       return NextResponse.json({ error: 'invalid clear', field: err.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (err instanceof InvalidFieldValueError) {
+      return NextResponse.json({ error: 'invalid field value', field: err.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     if (err instanceof SpeciesNotFoundError) {
       return NextResponse.json({ error: 'species not found', code: err.code }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });

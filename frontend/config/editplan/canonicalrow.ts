@@ -1,4 +1,4 @@
-import { PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
+import { InvalidFieldValueError, PER_COLUMN_DECIMAL_PRECISION, isDateField } from './fieldpolicy';
 
 export type RowMode = 'revision-update' | 'revision-insert';
 
@@ -69,24 +69,33 @@ function normalizeString(value: unknown): string | null {
 function normalizeDate(value: unknown): string | null {
   const trimmed = normalizeString(value);
   if (trimmed === null) return null;
-  // Already in YYYY-MM-DD — pass through without touching
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  // ISO datetime — strip the time component
-  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return trimmed.slice(0, 10);
-  // Fallback: parse and re-format, return raw string if unparseable
+  const datePrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:$|T)/)?.[1];
   const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime()) ? trimmed : parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new InvalidFieldValueError('MeasurementDate', value, 'Field "MeasurementDate" must be a valid date');
+  }
+
+  const normalized = parsed.toISOString().slice(0, 10);
+  if (datePrefix && datePrefix !== normalized) {
+    throw new InvalidFieldValueError('MeasurementDate', value, 'Field "MeasurementDate" must be a valid date');
+  }
+
+  return datePrefix ?? normalized;
 }
 
-function normalizeDecimal(value: unknown, precision: number): number | null {
+function normalizeDecimal(field: string, value: unknown, precision: number): number | null {
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return null;
+    if (!Number.isFinite(value)) {
+      throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
+    }
     return Number(value.toFixed(precision));
   }
   const trimmed = normalizeString(value);
   if (trimmed === null) return null;
   const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) return null;
+  if (!Number.isFinite(parsed)) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
+  }
   return Number(parsed.toFixed(precision));
 }
 
@@ -121,7 +130,7 @@ export function canonicalizeRowForHash(row: Record<string, unknown>, mode: RowMo
 
     const precision = PER_COLUMN_DECIMAL_PRECISION[canonical];
     if (precision !== undefined) {
-      out[canonical] = normalizeDecimal(rawValue, precision);
+      out[canonical] = normalizeDecimal(canonical, rawValue, precision);
       continue;
     }
 

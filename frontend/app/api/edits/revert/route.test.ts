@@ -133,6 +133,17 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockInvalidFieldValueError extends Error {
+    field: string;
+    value: unknown;
+    constructor(field: string, value: unknown = 'bad') {
+      super(`Field "${field}" has an invalid value`);
+      this.name = 'InvalidFieldValueError';
+      this.field = field;
+      this.value = value;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
@@ -157,7 +168,8 @@ const mocks = vi.hoisted(() => {
     MockRevertDriftError,
     MockScopeAccessError,
     MockScopeBusyError,
-    MockInvalidClearError
+    MockInvalidClearError,
+    MockInvalidFieldValueError
   };
 });
 
@@ -211,7 +223,8 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 }));
 
 vi.mock('@/config/editplan/fieldpolicy', () => ({
-  InvalidClearError: mocks.MockInvalidClearError
+  InvalidClearError: mocks.MockInvalidClearError,
+  InvalidFieldValueError: mocks.MockInvalidFieldValueError
 }));
 
 vi.mock('@/config/editoperations', () => ({
@@ -427,6 +440,13 @@ describe('POST /api/edits/revert', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'invalid clear', field: 'QuadratName' });
+  });
+
+  it('returns 422 when revertEdit throws InvalidFieldValueError', async () => {
+    mocks.revertEdit.mockRejectedValue(new mocks.MockInvalidFieldValueError('Date'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid field value', field: 'Date' });
   });
 
   it('returns 200 with ApplyResult on happy path and forwards createdBy', async () => {

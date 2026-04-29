@@ -137,6 +137,17 @@ export class InvalidClearError extends Error {
   }
 }
 
+export class InvalidFieldValueError extends Error {
+  constructor(
+    public field: string,
+    public value: unknown,
+    message = `Field "${field}" has an invalid value`
+  ) {
+    super(message);
+    this.name = 'InvalidFieldValueError';
+  }
+}
+
 const TAXONOMIC_IDENTITY_FIELDS = new Set(['SpeciesCode', 'SpCode', 'spcode']);
 const SPECIES_EDIT_ROLES = new Set<UserAuthRoles>(['global', 'db admin']);
 
@@ -144,6 +155,39 @@ export function isFieldEditableByRole(fieldName: string, role: UserAuthRoles | n
   if (role === 'pending') return false;
   if (!TAXONOMIC_IDENTITY_FIELDS.has(fieldName)) return true;
   return role !== null && role !== undefined && SPECIES_EDIT_ROLES.has(role);
+}
+
+function normalizeNumericValue(field: string, value: unknown): number {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a finite number`);
+  }
+  return parsed;
+}
+
+function normalizeDateValue(field: string, value: unknown): string {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new InvalidFieldValueError(field, value, `Field "${field}" must be a valid date`);
+    }
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value !== 'string') {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a valid date`);
+  }
+
+  const trimmed = value.trim();
+  const datePrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:$|T)/)?.[1];
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a valid date`);
+  }
+  const normalized = parsed.toISOString().slice(0, 10);
+  if (datePrefix && datePrefix !== normalized) {
+    throw new InvalidFieldValueError(field, value, `Field "${field}" must be a valid date`);
+  }
+  return datePrefix ?? normalized;
 }
 
 export function normalizeFieldValue(field: string, value: unknown): unknown {
@@ -163,8 +207,12 @@ export function normalizeFieldValue(field: string, value: unknown): unknown {
       if (policy === 'clear-on-explicit-null' && !isLiteralNull) return undefined;
       return null;
     }
+    if (PER_COLUMN_DECIMAL_PRECISION[field] !== undefined) return normalizeNumericValue(field, trimmed);
+    if (isDateField(field)) return normalizeDateValue(field, trimmed);
     return trimmed;
   }
+  if (PER_COLUMN_DECIMAL_PRECISION[field] !== undefined) return normalizeNumericValue(field, value);
+  if (isDateField(field)) return normalizeDateValue(field, value);
   return value;
 }
 

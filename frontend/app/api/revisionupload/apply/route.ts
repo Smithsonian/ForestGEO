@@ -19,6 +19,7 @@ import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditFor
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 import { ensureEditOperationsTable, writeEditOperation } from '@/config/editoperations';
 import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
+import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 
 export const runtime = 'nodejs';
 
@@ -338,18 +339,6 @@ function duplicatesMatch(left: DuplicateToDelete[], right: DuplicateToDelete[]):
 }
 
 /**
- * Normalizes a date string to YYYY-MM-DD for MySQL DATE columns.
- * If already in that format, returns as-is.
- * Falls through to raw string on parse failure, letting MySQL reject it.
- */
-function normalizeDateForSQL(dateStr: string): string {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-  const parsed = new Date(dateStr);
-  if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
-  return dateStr;
-}
-
-/**
  * Re-resolves a CoreMeasurementID within the current plot+census boundary.
  * Returns true if the measurement is active and owned by the given plot.
  * This TOCTOU check ensures the row hasn't been deleted/deactivated between
@@ -609,31 +598,24 @@ async function insertNewRowsThroughPipeline(
   const batchID = generateShortBatchID();
 
   const rowValues = newRows.map(csvRow => {
-    const lx = csvRow['lx'] !== null && csvRow['lx'] !== undefined && String(csvRow['lx']).trim() !== '' ? parseFloat(String(csvRow['lx']).trim()) : null;
-    const ly = csvRow['ly'] !== null && csvRow['ly'] !== undefined && String(csvRow['ly']).trim() !== '' ? parseFloat(String(csvRow['ly']).trim()) : null;
-    const dbh = csvRow['dbh'] !== null && csvRow['dbh'] !== undefined && String(csvRow['dbh']).trim() !== '' ? parseFloat(String(csvRow['dbh']).trim()) : null;
-    const hom = csvRow['hom'] !== null && csvRow['hom'] !== undefined && String(csvRow['hom']).trim() !== '' ? parseFloat(String(csvRow['hom']).trim()) : null;
-    const date =
-      csvRow['date'] !== null && csvRow['date'] !== undefined && String(csvRow['date']).trim() !== ''
-        ? normalizeDateForSQL(String(csvRow['date']).trim())
-        : null;
+    const canonical = canonicalizeRowForHash(csvRow, 'revision-insert');
 
     return [
       REVISION_UPLOAD_FILE_ID,
       batchID,
       plotID,
       censusID,
-      csvRow['tag'] ?? null,
-      csvRow['stemtag'] ?? null,
-      csvRow['spcode'] ?? null,
-      csvRow['quadrat'] ?? null,
-      isNaN(lx as number) ? null : lx,
-      isNaN(ly as number) ? null : ly,
-      isNaN(dbh as number) ? null : dbh,
-      isNaN(hom as number) ? null : hom,
-      date,
-      csvRow['codes'] ?? null,
-      csvRow['comments'] ?? null
+      canonical.TreeTag ?? null,
+      canonical.StemTag ?? null,
+      canonical.SpeciesCode ?? null,
+      canonical.QuadratName ?? null,
+      canonical.StemLocalX ?? null,
+      canonical.StemLocalY ?? null,
+      canonical.MeasuredDBH ?? null,
+      canonical.MeasuredHOM ?? null,
+      canonical.MeasurementDate ?? null,
+      canonical.Attributes ?? null,
+      canonical.Description ?? null
     ];
   });
 
@@ -1013,6 +995,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof MeasurementResolutionError) {
       return NextResponse.json({ error: errorObj.message, subject: errorObj.subject, reason: errorObj.reason }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof InvalidClearError) {
+      return NextResponse.json({ error: 'invalid clear', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof InvalidFieldValueError) {
+      return NextResponse.json({ error: 'invalid field value', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     const status = errorObj instanceof RevisionApplyConflictError ? HTTPResponses.CONFLICT : HTTPResponses.INTERNAL_SERVER_ERROR;
     return NextResponse.json({ error: errorObj.message }, { status });

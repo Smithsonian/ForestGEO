@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { canonicalizeRowForHash } from './canonicalrow';
+import { InvalidFieldValueError } from './fieldpolicy';
 
 describe('canonicalizeRowForHash', () => {
   describe('revision-update mode', () => {
@@ -113,13 +114,14 @@ describe('canonicalizeRowForHash', () => {
       expect(out.MeasurementDate).toBeNull();
     });
 
-    it('passes unparseable date strings through unchanged', () => {
-      // Intentional hash-parity with the apply-path write (normalizeDateForSQL in
-      // apply/route.ts), which also falls through to the raw string for NaN dates
-      // rather than coercing to null. Changing this to null would silently break
-      // hash comparison between the plan and the applied record.
-      const out = canonicalizeRowForHash({ date: 'not-a-date' }, 'revision-update');
-      expect(out.MeasurementDate).toBe('not-a-date');
+    it('rejects unparseable and impossible dates', () => {
+      expect(() => canonicalizeRowForHash({ date: 'not-a-date' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ date: '2026-02-30' }, 'revision-update')).toThrow(InvalidFieldValueError);
+    });
+
+    it('rejects malformed numeric strings instead of converting them to null', () => {
+      expect(() => canonicalizeRowForHash({ dbh: '12abc' }, 'revision-update')).toThrow(InvalidFieldValueError);
+      expect(() => canonicalizeRowForHash({ hom: Number.NaN }, 'revision-update')).toThrow(InvalidFieldValueError);
     });
 
     it('accepts numeric values directly without string conversion', () => {

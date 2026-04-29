@@ -52,6 +52,17 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class MockInvalidFieldValueError extends Error {
+    field: string;
+    value: unknown;
+    constructor(field: string, value: unknown = 'bad') {
+      super(`Field "${field}" has an invalid value`);
+      this.name = 'InvalidFieldValueError';
+      this.field = field;
+      this.value = value;
+    }
+  }
+
   return {
     auth: vi.fn(),
     isValidSchema: vi.fn(() => true),
@@ -65,7 +76,8 @@ const mocks = vi.hoisted(() => {
     MockSpeciesNotFoundError,
     MockScopeAccessError,
     MockScopeBusyError,
-    MockInvalidClearError
+    MockInvalidClearError,
+    MockInvalidFieldValueError
   };
 });
 
@@ -104,7 +116,8 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 }));
 
 vi.mock('@/config/editplan/fieldpolicy', () => ({
-  InvalidClearError: mocks.MockInvalidClearError
+  InvalidClearError: mocks.MockInvalidClearError,
+  InvalidFieldValueError: mocks.MockInvalidFieldValueError
 }));
 
 function buildRequest(body: unknown) {
@@ -195,6 +208,13 @@ describe('POST /api/edits/preview', () => {
     const response = await POST(buildRequest(VALID_BODY));
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({ error: 'invalid clear', field: 'SpeciesCode' });
+  });
+
+  it('returns 422 when the analyzer throws InvalidFieldValueError', async () => {
+    mocks.analyzeEdit.mockRejectedValue(new mocks.MockInvalidFieldValueError('MeasurementDate'));
+    const response = await POST(buildRequest(VALID_BODY));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid field value', field: 'MeasurementDate' });
   });
 
   it('returns 422 when the analyzer throws SpeciesNotFoundError', async () => {

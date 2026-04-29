@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canonicalizeEditPayload,
   InvalidClearError,
+  InvalidFieldValueError,
   isFieldEditableByRole,
   isFieldEditableOnSurface,
   normalizeFieldValue,
@@ -47,6 +48,22 @@ describe('fieldpolicy', () => {
 
     it('preserves non-blank numeric values', () => {
       expect(normalizeFieldValue('MeasuredDBH', 12.34)).toBe(12.34);
+    });
+
+    it('parses numeric strings for numeric edit fields', () => {
+      expect(normalizeFieldValue('MeasuredDBH', ' 12.34 ')).toBe(12.34);
+      expect(normalizeFieldValue('StemLocalX', '-5.5')).toBe(-5.5);
+    });
+
+    it('rejects malformed numeric strings before the writer can coerce them to null', () => {
+      expect(() => normalizeFieldValue('MeasuredDBH', 'abc')).toThrow(InvalidFieldValueError);
+      expect(() => normalizeFieldValue('StemLocalY', Number.NaN)).toThrow(InvalidFieldValueError);
+    });
+
+    it('normalizes valid dates and rejects invalid calendar dates', () => {
+      expect(normalizeFieldValue('MeasurementDate', '2026-01-02T12:30:00.000Z')).toBe('2026-01-02');
+      expect(() => normalizeFieldValue('MeasurementDate', '2026-02-30')).toThrow(InvalidFieldValueError);
+      expect(() => normalizeFieldValue('Date', 'not-a-date')).toThrow(InvalidFieldValueError);
     });
 
     it('passes undefined through unchanged', () => {

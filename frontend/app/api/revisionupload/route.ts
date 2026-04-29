@@ -12,6 +12,7 @@ import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/ed
 import { applyRevisionRolePolicy, RevisionRoleFieldCandidate } from '@/config/editplan/revisionrolepolicy';
 import { canonicalizeRowForHash } from '@/config/editplan/canonicalrow';
 import { DuplicateDeletion } from '@/config/editplan/types';
+import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 
 export const runtime = 'nodejs';
 
@@ -787,6 +788,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (errorObj instanceof ScopeBusyError) {
       return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.LOCKED });
+    }
+    if (errorObj instanceof InvalidClearError) {
+      return NextResponse.json({ error: 'invalid clear', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
+    }
+    if (errorObj instanceof InvalidFieldValueError) {
+      return NextResponse.json({ error: 'invalid field value', field: errorObj.field }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
     }
     ailogger.error('[revisionupload API] Error classifying rows:', errorObj);
     return NextResponse.json({ error: errorObj.message }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });

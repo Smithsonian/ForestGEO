@@ -365,6 +365,25 @@ describe('POST /api/revisionupload/apply', () => {
     );
   });
 
+  it('rejects malformed numeric values in new rows before inserting temporary measurements', async () => {
+    const response = await POST(
+      buildRequest(
+        buildValidBody({
+          newRows: [{ csvIndex: 0, csvRow: { tag: 'T1', dbh: '12abc' } }],
+          confirmNewRows: true
+        })
+      )
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid field value', field: 'MeasuredDBH' });
+    expect(mocks.executeQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT IGNORE INTO ??.temporarymeasurements'),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
   it('returns 409 with freshPlan when the bulk plan hash drifts between match and apply', async () => {
     const freshPlan = buildFreshPlan(DRIFTED_PLAN_HASH, { rowCount: 2 });
     mocks.analyzeBulk.mockResolvedValue(freshPlan);
