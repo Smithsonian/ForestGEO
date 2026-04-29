@@ -95,6 +95,29 @@ describe('assertNoActiveMeasurementScopeConflict', () => {
     expect(cm.executeQuery.mock.calls[1][0]).toContain('FROM `forestgeo_testing`.validation_runs');
   });
 
+  it('locks activity rows when called inside an edit transaction', async () => {
+    const cm = makeConnectionManager();
+    cm.executeQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await expect(
+      assertNoActiveMeasurementScopeConflict(
+        cm,
+        {
+          schema: 'forestgeo_testing',
+          plotID: 1,
+          censusID: 2
+        },
+        'tx-1'
+      )
+    ).resolves.toBeUndefined();
+
+    expect(cm.executeQuery).toHaveBeenCalledTimes(2);
+    expect(cm.executeQuery.mock.calls[0][0]).toContain('LIMIT 1 FOR UPDATE');
+    expect(cm.executeQuery.mock.calls[0][2]).toBe('tx-1');
+    expect(cm.executeQuery.mock.calls[1][0]).toContain('LIMIT 1 FOR UPDATE');
+    expect(cm.executeQuery.mock.calls[1][2]).toBe('tx-1');
+  });
+
   it('rejects active upload sessions in the requested scope', async () => {
     const cm = makeConnectionManager();
     cm.executeQuery.mockResolvedValueOnce([{ session_id: 'upload-1' }]);

@@ -19,6 +19,7 @@ import { writeMeasurementsSummary } from './writers/measurementssummary';
 import { writeFailedMeasurements } from './writers/failedmeasurements';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { ensureEditOperationsTable, writeEditOperation, EditOperationType } from '@/config/editoperations';
+import { assertNoActiveMeasurementScopeConflict } from './scopeguard';
 
 export { SessionExpiredError } from './authorization';
 
@@ -30,6 +31,13 @@ export class HashDriftError extends Error {
   constructor(public freshPlan: EditPlan) {
     super('plan hash drift');
     this.name = 'HashDriftError';
+  }
+}
+
+export class EditOperationsSchemaNotEnsuredError extends Error {
+  constructor() {
+    super('edit_operations schema must be ensured before entering applyEditInTransaction');
+    this.name = 'EditOperationsSchemaNotEnsuredError';
   }
 }
 
@@ -48,12 +56,11 @@ export interface ApplyInput {
   createdBy: string;
   role?: UserAuthRoles | null;
   assertAuthorizationFresh?: () => Promise<void>;
-  // Batch callers MUST set this true and call ensureEditOperationsTable ONCE
-  // before opening the outer transaction. MySQL treats CREATE TABLE IF NOT
-  // EXISTS as a DDL implicit-commit even when the table already exists, so a
-  // per-iteration DDL call commits prior iterations' writes and defeats the
-  // outer rollback. Default false preserves the self-bootstrap behavior for
-  // single-row callers that own their own transaction.
+  // Callers that write ledger rows MUST set this true and call
+  // ensureEditOperationsTable before opening their transaction. MySQL treats
+  // CREATE TABLE IF NOT EXISTS as a DDL implicit-commit even when the table
+  // already exists, so applyEditInTransaction refuses to bootstrap inside an
+  // active transaction.
   schemaEnsured?: boolean;
 }
 
@@ -62,6 +69,8 @@ export interface ApplyInTransactionInput extends ApplyInput {
 }
 
 export async function applyEdit(cm: ConnectionManager, input: ApplyInput): Promise<ApplyResult> {
+  await ensureEditOperationsTable(cm, input.schema);
+
   const txID = await cm.beginTransaction();
   try {
     const acquired = await cm.acquireApplicationLock(
@@ -71,7 +80,17 @@ export async function applyEdit(cm: ConnectionManager, input: ApplyInput): Promi
     );
     if (!acquired) throw new ScopeLockHeldError('scope locked');
 
-    const result = await applyEditInTransaction(cm, { ...input, transactionID: txID });
+    await assertNoActiveMeasurementScopeConflict(
+      cm,
+      {
+        schema: input.schema,
+        plotID: input.plotID,
+        censusID: input.censusID
+      },
+      txID
+    );
+
+    const result = await applyEditInTransaction(cm, { ...input, transactionID: txID, schemaEnsured: true });
     await cm.commitTransaction(txID);
     return result;
   } catch (err) {
@@ -85,8 +104,8 @@ export async function applyEdit(cm: ConnectionManager, input: ApplyInput): Promi
 }
 
 export async function applyEditInTransaction(cm: ConnectionManager, input: ApplyInTransactionInput): Promise<ApplyResult> {
-  if (!input.schemaEnsured) {
-    await ensureEditOperationsTable(cm, input.schema, input.transactionID);
+  if (input.writeLedger !== false && !input.schemaEnsured) {
+    throw new EditOperationsSchemaNotEnsuredError();
   }
 
   const freshPlan = await analyzeEdit(cm, input.schema, input.dataType, input.plotID, input.censusID, input.targetID, input.newRow, input.transactionID, {

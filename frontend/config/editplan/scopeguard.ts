@@ -57,8 +57,9 @@ async function assertPlotCensusExists(cm: ConnectionManager, schema: string, plo
   }
 }
 
-async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+async function probeActiveUploadSession(cm: ConnectionManager, schema: string, plotID: number, censusID: number, transactionID?: string): Promise<void> {
   const placeholders = ACTIVE_UPLOAD_SESSION_STATES.map(() => '?').join(', ');
+  const lockClause = transactionID ? ' FOR UPDATE' : '';
   try {
     const rows = await cm.executeQuery(
       safeFormatQuery(
@@ -70,9 +71,10 @@ async function probeActiveUploadSession(cm: ConnectionManager, schema: string, p
            AND state IN (${placeholders})
            AND last_heartbeat >= DATE_SUB(NOW(), INTERVAL ? SECOND)
          ORDER BY last_heartbeat DESC, updated_at DESC, created_at DESC
-         LIMIT 1`
+         LIMIT 1${lockClause}`
       ),
-      [plotID, censusID, ...ACTIVE_UPLOAD_SESSION_STATES, ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS]
+      [plotID, censusID, ...ACTIVE_UPLOAD_SESSION_STATES, ACTIVE_UPLOAD_SESSION_HEARTBEAT_TIMEOUT_SECONDS],
+      transactionID
     );
 
     if (Array.isArray(rows) && rows.length > 0) {
@@ -85,7 +87,8 @@ async function probeActiveUploadSession(cm: ConnectionManager, schema: string, p
   }
 }
 
-async function probeActiveValidationRun(cm: ConnectionManager, schema: string, plotID: number, censusID: number): Promise<void> {
+async function probeActiveValidationRun(cm: ConnectionManager, schema: string, plotID: number, censusID: number, transactionID?: string): Promise<void> {
+  const lockClause = transactionID ? ' FOR UPDATE' : '';
   try {
     const rows = await cm.executeQuery(
       safeFormatQuery(
@@ -96,9 +99,10 @@ async function probeActiveValidationRun(cm: ConnectionManager, schema: string, p
            AND CensusID = ?
            AND Status = 'running'
          ORDER BY RunID DESC
-         LIMIT 1`
+         LIMIT 1${lockClause}`
       ),
-      [plotID, censusID]
+      [plotID, censusID],
+      transactionID
     );
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -122,9 +126,9 @@ async function probeActiveValidationRun(cm: ConnectionManager, schema: string, p
  * scope, and that plot/census actually exists. Does NOT probe for concurrent
  * activity — call `assertNoActiveMeasurementScopeConflict` for that.
  *
- * Callers that later acquire the authoritative scope lock (applyEdit,
- * revisionupload/apply) can skip the conflict probe and rely on the
- * in-transaction FOR UPDATE checks.
+ * Mutating callers should acquire the authoritative scope lock, then call
+ * assertNoActiveMeasurementScopeConflict with their transaction ID before
+ * analyzing or writing.
  *
  * Note: the plan's `assertTargetInScope` check is enforced implicitly by
  * `analyzer.loadCurrentRow`, which constrains its WHERE clause to
@@ -140,12 +144,12 @@ export async function assertCanEditMeasurementScope(cm: ConnectionManager, sessi
 }
 
 /**
- * Non-locking conflict probe: rejects if a recent upload session or a fresh
- * validation run is active for the given scope. Read-only routes
- * (preview, revert) use this before analysis; routes that take the
- * authoritative scope lock do not need it.
+ * Conflict probe: rejects if a recent upload session or a fresh validation run
+ * is active for the given scope. Pass the edit transaction ID after acquiring
+ * the measurement scope lock to pin the probed rows with FOR UPDATE; omit it
+ * for read-only preview checks.
  */
-export async function assertNoActiveMeasurementScopeConflict(cm: ConnectionManager, input: MeasurementScopeInput): Promise<void> {
-  await probeActiveUploadSession(cm, input.schema, input.plotID, input.censusID);
-  await probeActiveValidationRun(cm, input.schema, input.plotID, input.censusID);
+export async function assertNoActiveMeasurementScopeConflict(cm: ConnectionManager, input: MeasurementScopeInput, transactionID?: string): Promise<void> {
+  await probeActiveUploadSession(cm, input.schema, input.plotID, input.censusID, transactionID);
+  await probeActiveValidationRun(cm, input.schema, input.plotID, input.censusID, transactionID);
 }

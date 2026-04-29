@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { applyEdit, applyEditInTransaction, HashDriftError, ScopeLockHeldError, ApplyInput, SessionExpiredError } from './apply';
+import {
+  applyEdit,
+  applyEditInTransaction,
+  HashDriftError,
+  ScopeLockHeldError,
+  ApplyInput,
+  SessionExpiredError,
+  EditOperationsSchemaNotEnsuredError
+} from './apply';
 import { DisallowedFieldError, RoleForbiddenFieldError } from './analyzer';
 import { SpeciesNotFoundError } from './rules/context';
 
@@ -16,11 +24,15 @@ vi.mock('@/config/editoperations', () => ({
   ensureEditOperationsTable: vi.fn(async () => undefined),
   writeEditOperation: vi.fn(async () => 99)
 }));
+vi.mock('./scopeguard', () => ({
+  assertNoActiveMeasurementScopeConflict: vi.fn(async () => undefined)
+}));
 
 import * as analyzer from './analyzer';
 import * as measurementsWriter from './writers/measurementssummary';
 import * as failedWriter from './writers/failedmeasurements';
 import * as editOps from '@/config/editoperations';
+import * as scopeguard from './scopeguard';
 
 const TRANSACTION_ID = 'tx';
 const LEDGER_ID = 99;
@@ -74,6 +86,7 @@ function mockWriterSuccess() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (scopeguard.assertNoActiveMeasurementScopeConflict as any).mockResolvedValue(undefined);
 });
 
 describe('applyEdit', () => {
@@ -85,10 +98,21 @@ describe('applyEdit', () => {
     const result = await applyEdit(cm, baseInput);
 
     expect(cm.beginTransaction).toHaveBeenCalledTimes(1);
+    expect(editOps.ensureEditOperationsTable).toHaveBeenCalledWith(cm, baseInput.schema);
+    expect(editOps.ensureEditOperationsTable).not.toHaveBeenCalledWith(cm, baseInput.schema, TRANSACTION_ID);
     expect(cm.acquireApplicationLock).toHaveBeenCalledWith(
       `measurement-scope:${baseInput.schema}:${baseInput.plotID}:${baseInput.censusID}`,
       TRANSACTION_ID,
       0
+    );
+    expect(scopeguard.assertNoActiveMeasurementScopeConflict).toHaveBeenCalledWith(
+      cm,
+      {
+        schema: baseInput.schema,
+        plotID: baseInput.plotID,
+        censusID: baseInput.censusID
+      },
+      TRANSACTION_ID
     );
     expect(cm.commitTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
     expect(cm.rollbackTransaction).not.toHaveBeenCalled();
@@ -105,8 +129,22 @@ describe('applyEdit', () => {
     expect(cm.beginTransaction).toHaveBeenCalledTimes(1);
     expect(cm.rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
     expect(cm.commitTransaction).not.toHaveBeenCalled();
+    expect(scopeguard.assertNoActiveMeasurementScopeConflict).not.toHaveBeenCalled();
     expect(analyzer.analyzeEdit).not.toHaveBeenCalled();
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
+  });
+
+  it('rolls back before analysis when an active upload or validation run is detected under the scope lock', async () => {
+    const cm = makeCM({ lockAcquired: true });
+    const busy = new Error('validation run 99 is active for this plot/census');
+    (scopeguard.assertNoActiveMeasurementScopeConflict as any).mockRejectedValue(busy);
+
+    await expect(applyEdit(cm, baseInput)).rejects.toBe(busy);
+
+    expect(analyzer.analyzeEdit).not.toHaveBeenCalled();
+    expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
+    expect(cm.rollbackTransaction).toHaveBeenCalledWith(TRANSACTION_ID);
+    expect(cm.commitTransaction).not.toHaveBeenCalled();
   });
 
   it('rolls back when the writer throws', async () => {
@@ -193,7 +231,7 @@ describe('applyEditInTransaction', () => {
     mockFreshPlan();
     mockWriterSuccess();
 
-    await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx' });
+    await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', schemaEnsured: true });
 
     expect(cm.beginTransaction).not.toHaveBeenCalled();
     expect(cm.commitTransaction).not.toHaveBeenCalled();
@@ -206,9 +244,9 @@ describe('applyEditInTransaction', () => {
     mockFreshPlan();
     mockWriterSuccess();
 
-    const result = await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx' });
+    const result = await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', schemaEnsured: true });
 
-    expect(editOps.ensureEditOperationsTable).toHaveBeenCalledWith(cm, baseInput.schema, 'outer-tx');
+    expect(editOps.ensureEditOperationsTable).not.toHaveBeenCalled();
     expect(editOps.writeEditOperation).toHaveBeenCalledTimes(1);
     const [, schemaArg, record, txArg] = (editOps.writeEditOperation as any).mock.calls[0];
     expect(schemaArg).toBe(baseInput.schema);
@@ -230,7 +268,8 @@ describe('applyEditInTransaction', () => {
       ...baseInput,
       transactionID: 'outer-tx',
       operationType: 'bulk-revision-row',
-      revertable: false
+      revertable: false,
+      schemaEnsured: true
     });
 
     const [, , record] = (editOps.writeEditOperation as any).mock.calls[0];
@@ -257,7 +296,7 @@ describe('applyEditInTransaction', () => {
     const cm = makeCM({ lockAcquired: true });
     mockFreshPlan('different-hash');
 
-    const err = await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx' }).catch(e => e);
+    const err = await applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', schemaEnsured: true }).catch(e => e);
     expect(err).toBeInstanceOf(HashDriftError);
     expect((err as HashDriftError).freshPlan.planHash).toBe('different-hash');
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
@@ -287,7 +326,9 @@ describe('applyEditInTransaction', () => {
       generatedAt: '2026-04-21T00:00:00Z'
     });
 
-    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', role: 'field crew' })).rejects.toBeInstanceOf(RoleForbiddenFieldError);
+    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx', role: 'field crew', schemaEnsured: true })).rejects.toBeInstanceOf(
+      RoleForbiddenFieldError
+    );
 
     expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
     expect(editOps.writeEditOperation).not.toHaveBeenCalled();
@@ -301,10 +342,21 @@ describe('applyEditInTransaction', () => {
     await applyEditInTransaction(cm, {
       ...baseInput,
       transactionID: 'outer-tx',
-      expectedPlanHash: null
+      expectedPlanHash: null,
+      schemaEnsured: true
     });
 
     expect(measurementsWriter.writeMeasurementsSummary).toHaveBeenCalledTimes(1);
     expect(editOps.writeEditOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to write ledger rows if the caller did not ensure edit_operations before the outer transaction', async () => {
+    const cm = makeCM({ lockAcquired: true });
+
+    await expect(applyEditInTransaction(cm, { ...baseInput, transactionID: 'outer-tx' })).rejects.toBeInstanceOf(EditOperationsSchemaNotEnsuredError);
+
+    expect(editOps.ensureEditOperationsTable).not.toHaveBeenCalled();
+    expect(analyzer.analyzeEdit).not.toHaveBeenCalled();
+    expect(measurementsWriter.writeMeasurementsSummary).not.toHaveBeenCalled();
   });
 });

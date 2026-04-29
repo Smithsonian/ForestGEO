@@ -18,6 +18,7 @@ import { applyEditInTransaction, ScopeLockHeldError } from './apply';
 import { EditOperationRecord, EditOperationStateRow, ensureEditOperationsTable, markEditOperationReverted, readEditOperation } from '@/config/editoperations';
 import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
+import { assertNoActiveMeasurementScopeConflict } from './scopeguard';
 
 export class EditOperationNotFoundError extends Error {
   constructor(public editOperationID: number) {
@@ -106,6 +107,16 @@ export async function revertEdit(cm: ConnectionManager, input: RevertInput): Pro
     if (!acquired) {
       throw new ScopeLockHeldError('scope locked');
     }
+
+    await assertNoActiveMeasurementScopeConflict(
+      cm,
+      {
+        schema: input.schema,
+        plotID: original.plotID,
+        censusID: original.censusID
+      },
+      txID
+    );
 
     const restorePlan = await analyzeEdit(cm, input.schema, original.dataType, original.plotID, original.censusID, targetID, newRow, txID, {
       role: input.role
