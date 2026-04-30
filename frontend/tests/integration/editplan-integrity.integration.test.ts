@@ -137,9 +137,7 @@ vi.mock('@/config/connectionmanager', () => {
     executeQuery: async (query: string, params?: unknown[], transactionID?: string) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -465,15 +463,10 @@ async function seedP2Fixture(connection: Connection, testData: TestData, databas
   const plotID = testData.plots[0].plotID;
   const censusID = testData.census[0].censusID;
 
-  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ? AND IsActive = 1', [
-    P2_EXISTING_SPECIES
-  ]);
+  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ? AND IsActive = 1', [P2_EXISTING_SPECIES]);
   const speciesID = speciesRows[0].SpeciesID as number;
 
-  const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
-    P2_QUADRAT,
-    plotID
-  ]);
+  const [quadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [P2_QUADRAT, plotID]);
   const quadratID = quadratRows[0].QuadratID as number;
 
   // Source tree — always active, has the live measurement.
@@ -502,10 +495,12 @@ async function seedP2Fixture(connection: Connection, testData: TestData, databas
 
   // Target tree — active or inactive depending on the test scenario.
   const targetIsActive = opts.targetTreeActive ? 1 : 0;
-  const [targetTreeRes] = await connection.query<ResultSetHeader>(
-    'INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, ?)',
-    [P2_MOVE_TARGET_TAG, speciesID, censusID, targetIsActive]
-  );
+  const [targetTreeRes] = await connection.query<ResultSetHeader>('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, ?)', [
+    P2_MOVE_TARGET_TAG,
+    speciesID,
+    censusID,
+    targetIsActive
+  ]);
   const targetTreeID = targetTreeRes.insertId;
 
   return { plotID, censusID, sourceTreeID, stemGUID, coreMeasurementID, targetTreeID, targetTreeTag: P2_MOVE_TARGET_TAG };
@@ -721,9 +716,7 @@ describe('editplan bulk hash drift — tampered payload (integration)', () => {
 
     // The match route picks the highest CoreMeasurementID as survivor.
     // The other two are sorted ascending in duplicateMeasurementIDsToDelete.
-    expect(survivorRow.coreMeasurementID, 'match route must pick the highest CoreMeasurementID as survivor').toBe(
-      fixture.coreMeasurementIDThird
-    );
+    expect(survivorRow.coreMeasurementID, 'match route must pick the highest CoreMeasurementID as survivor').toBe(fixture.coreMeasurementIDThird);
     expect(survivorRow.duplicateMeasurementIDsToDelete, 'two siblings must be queued for deletion').toHaveLength(2);
 
     const bulkPlanHash = matchBody.bulkPlan.planHash;

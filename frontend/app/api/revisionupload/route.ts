@@ -254,11 +254,7 @@ function getMissingRequiredInsertFields(csvRow: FileRow): string[] {
  * into the invalid-rows tab instead of letting analyzeBulk throw
  * SpeciesNotFoundError and 500 the whole batch.
  */
-async function loadKnownSpeciesCodes(
-  connectionManager: ConnectionManager,
-  schema: string,
-  codes: string[]
-): Promise<Set<string>> {
+async function loadKnownSpeciesCodes(connectionManager: ConnectionManager, schema: string, codes: string[]): Promise<Set<string>> {
   const known = new Set<string>();
   if (codes.length === 0) return known;
 

@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { applyTreeStemRules } from './treestem';
-import {
-  CONFLICT_REASON_INACTIVE_TREE,
-  CONFLICT_REASON_INACTIVE_STEM,
-  CONFLICT_REASON_DIFFERENT_QUADRAT
-} from '../resolvers';
+import { CONFLICT_REASON_INACTIVE_TREE, CONFLICT_REASON_INACTIVE_STEM, CONFLICT_REASON_DIFFERENT_QUADRAT } from '../resolvers';
 
 vi.mock('../resolvers', () => ({
   resolveSpeciesByCode: vi.fn(async () => ({ speciesID: 1 })),
@@ -61,7 +57,14 @@ describe('applyTreeStemRules', () => {
       })
     );
     expect(result.errors).toContainEqual(
-      expect.objectContaining({ kind: 'TreeStemResolution', subject: 'species', reason: 'missing', field: 'SpeciesCode', blocking: true, severity: 'destructive' })
+      expect.objectContaining({
+        kind: 'TreeStemResolution',
+        subject: 'species',
+        reason: 'missing',
+        field: 'SpeciesCode',
+        blocking: true,
+        severity: 'destructive'
+      })
     );
     expect(result.effects).toEqual([]);
     expect(resolvers.planTreeResolution).not.toHaveBeenCalled();

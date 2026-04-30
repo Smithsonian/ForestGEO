@@ -112,7 +112,10 @@ export function isRoleForbiddenPreviewError(error: PreviewError): error is RoleF
 export function assertEditPlanCanApply(plan: EditPlan): void {
   const roleErrors = (plan.errors ?? []).filter(isRoleForbiddenPreviewError).filter(error => error.blocking);
   if (roleErrors.length > 0) {
-    throw new RoleForbiddenFieldError(roleErrors.map(e => e.field), roleErrors[0].role);
+    throw new RoleForbiddenFieldError(
+      roleErrors.map(e => e.field),
+      roleErrors[0].role
+    );
   }
   if (plan.canApply === false) {
     throw new EditPlanUnapplicableError((plan.errors ?? []).filter(e => e.blocking));

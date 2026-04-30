@@ -23,9 +23,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -72,13 +70,7 @@ vi.mock('@/ailogger', () => ({
 // Imports must follow vi.mock so the mocked ConnectionManager is wired in.
 import ConnectionManager from '@/config/connectionmanager';
 import { applyEdit } from '@/config/editplan/apply';
-import {
-  revertEdit,
-  EditOperationNotFoundError,
-  AlreadyRevertedError,
-  CannotRevertRevertError,
-  RevertDriftError
-} from '@/config/editplan/revert';
+import { revertEdit, EditOperationNotFoundError, AlreadyRevertedError, CannotRevertRevertError, RevertDriftError } from '@/config/editplan/revert';
 import { ScopeLockHeldError } from '@/config/editplan/apply';
 import { readEditOperation } from '@/config/editoperations';
 import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
@@ -125,10 +117,10 @@ async function seedRevertFixture(connection: Connection, testData: TestData): Pr
   const plotID = testData.plots[0].plotID;
   const censusID = testData.census[0].censusID;
 
-  const [speciesRows] = await connection.query<RowDataPacket[]>(
-    'SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)',
-    [SPECIES_CODE_ACERRU, SPECIES_CODE_QUERCO]
-  );
+  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)', [
+    SPECIES_CODE_ACERRU,
+    SPECIES_CODE_QUERCO
+  ]);
   const speciesIDs: Record<string, number> = {};
   for (const row of speciesRows) {
     speciesIDs[row.SpeciesCode as string] = row.SpeciesID as number;
@@ -144,10 +136,11 @@ async function seedRevertFixture(connection: Connection, testData: TestData): Pr
     quadratIDs[name] = res.insertId;
   }
 
-  const [treeRes] = await connection.query<ResultSetHeader>(
-    `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-    [TREE_TAG_T1, speciesIDs[SPECIES_CODE_ACERRU], censusID]
-  );
+  const [treeRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+    TREE_TAG_T1,
+    speciesIDs[SPECIES_CODE_ACERRU],
+    censusID
+  ]);
   const treeID = treeRes.insertId;
 
   const [stemRes] = await connection.query<ResultSetHeader>(
@@ -183,20 +176,14 @@ async function seedRevertFixture(connection: Connection, testData: TestData): Pr
   const coreMeasurementID = cmRes.insertId;
 
   for (const code of [ATTR_CODE_ALIVE, ATTR_CODE_MISSING]) {
-    await connection.query<ResultSetHeader>(
-      `INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-      [coreMeasurementID, code]
-    );
+    await connection.query<ResultSetHeader>(`INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [coreMeasurementID, code]);
   }
 
   return { plotID, censusID, speciesIDs, quadratIDs, treeID, stemGUID, coreMeasurementID };
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1',
-    [coreMeasurementID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
@@ -302,10 +289,9 @@ describe('revertEdit (integration)', () => {
       });
       const originalEditOperationID = applyResult.editOperationID!;
 
-      const [attrsAfterEdit] = await connection.query<RowDataPacket[]>(
-        'SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code',
-        [fixture.coreMeasurementID]
-      );
+      const [attrsAfterEdit] = await connection.query<RowDataPacket[]>('SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code', [
+        fixture.coreMeasurementID
+      ]);
       expect(attrsAfterEdit.map(r => r.Code)).toEqual(['B']);
 
       let freshPlanHash: string | null = null;
@@ -329,10 +315,9 @@ describe('revertEdit (integration)', () => {
         confirmedPlanHash: freshPlanHash!
       });
 
-      const [attrsAfterRevert] = await connection.query<RowDataPacket[]>(
-        'SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code',
-        [fixture.coreMeasurementID]
-      );
+      const [attrsAfterRevert] = await connection.query<RowDataPacket[]>('SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code', [
+        fixture.coreMeasurementID
+      ]);
       const restoredCodes = attrsAfterRevert.map(r => r.Code as string).sort();
       expect(restoredCodes).toEqual([ATTR_CODE_ALIVE, ATTR_CODE_MISSING].sort());
     });
@@ -494,10 +479,7 @@ describe('revertEdit (integration)', () => {
       });
       const originalEditOperationID = applyResult.editOperationID!;
 
-      await connection.query('UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?', [
-        DRIFT_DBH,
-        fixture.coreMeasurementID
-      ]);
+      await connection.query('UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?', [DRIFT_DBH, fixture.coreMeasurementID]);
       const cmRowAfterDrift = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
       expect(Number(cmRowAfterDrift.MeasuredDBH)).toBeCloseTo(DRIFT_DBH, 2);
 
@@ -537,10 +519,7 @@ describe('revertEdit (integration)', () => {
       });
       const originalEditOperationID = applyResult.editOperationID!;
 
-      const stemRowsAfterEdit = await connection.query<RowDataPacket[]>(
-        'SELECT LocalX FROM stems WHERE StemGUID = ?',
-        [fixture.stemGUID]
-      );
+      const stemRowsAfterEdit = await connection.query<RowDataPacket[]>('SELECT LocalX FROM stems WHERE StemGUID = ?', [fixture.stemGUID]);
       expect(Number((stemRowsAfterEdit[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(EDITED_STEM_X, 2);
 
       await connection.query('UPDATE stems SET LocalX = ? WHERE StemGUID = ?', [DRIFT_STEM_X, fixture.stemGUID]);
@@ -553,10 +532,7 @@ describe('revertEdit (integration)', () => {
         })
       ).rejects.toBeInstanceOf(RevertDriftError);
 
-      const stemRowsAfterRefusal = await connection.query<RowDataPacket[]>(
-        'SELECT LocalX FROM stems WHERE StemGUID = ?',
-        [fixture.stemGUID]
-      );
+      const stemRowsAfterRefusal = await connection.query<RowDataPacket[]>('SELECT LocalX FROM stems WHERE StemGUID = ?', [fixture.stemGUID]);
       expect(Number((stemRowsAfterRefusal[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(DRIFT_STEM_X, 2);
 
       const original = await readEditOperation(cm, config.database, originalEditOperationID);
@@ -615,14 +591,8 @@ describe('revertEdit (integration)', () => {
         // The measurement stays at the post-apply state (QUERCO species) — the
         // failed revert did not flip tree linkage halfway.
         const cmRowAfter = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
-        const [stemRowsAfter] = await connection.query<RowDataPacket[]>(
-          'SELECT TreeID FROM stems WHERE StemGUID = ?',
-          [cmRowAfter.StemGUID]
-        );
-        const [treeRowsAfter] = await connection.query<RowDataPacket[]>(
-          'SELECT SpeciesID FROM trees WHERE TreeID = ?',
-          [stemRowsAfter[0].TreeID]
-        );
+        const [stemRowsAfter] = await connection.query<RowDataPacket[]>('SELECT TreeID FROM stems WHERE StemGUID = ?', [cmRowAfter.StemGUID]);
+        const [treeRowsAfter] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM trees WHERE TreeID = ?', [stemRowsAfter[0].TreeID]);
         expect(treeRowsAfter[0].SpeciesID).toBe(fixture.speciesIDs[SPECIES_CODE_QUERCO]);
       } finally {
         // Restore species state so downstream tests see the seeded fixture.
@@ -669,10 +639,7 @@ describe('revertEdit (integration)', () => {
       });
       expect(revertResult.editOperationID).not.toBeNull();
 
-      const stemRowsAfterRevert = await connection.query<RowDataPacket[]>(
-        'SELECT LocalX FROM stems WHERE StemGUID = ?',
-        [fixture.stemGUID]
-      );
+      const stemRowsAfterRevert = await connection.query<RowDataPacket[]>('SELECT LocalX FROM stems WHERE StemGUID = ?', [fixture.stemGUID]);
       expect(Number((stemRowsAfterRevert[0] as RowDataPacket[])[0].LocalX)).toBeCloseTo(INITIAL_STEM_X, 2);
 
       const original = await readEditOperation(cm, config.database, originalEditOperationID);

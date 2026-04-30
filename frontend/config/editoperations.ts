@@ -74,11 +74,7 @@ const ALTER_EDIT_OPERATION_TYPE_SQL = `
   MODIFY COLUMN OperationType ENUM('single-row-edit', 'bulk-revision-row', 'revert') NOT NULL
 `;
 
-async function ensureOperationTypeColumn(
-  connectionManager: ConnectionManager,
-  schema: string,
-  transactionID?: string
-): Promise<void> {
+async function ensureOperationTypeColumn(connectionManager: ConnectionManager, schema: string, transactionID?: string): Promise<void> {
   const rows = await connectionManager.executeQuery(
     `SELECT COLUMN_TYPE AS columnType
      FROM INFORMATION_SCHEMA.COLUMNS
@@ -98,11 +94,7 @@ async function ensureOperationTypeColumn(
   await connectionManager.executeQuery(safeFormatQuery(schema, ALTER_EDIT_OPERATION_TYPE_SQL), undefined, transactionID);
 }
 
-async function ensureRevertableColumn(
-  connectionManager: ConnectionManager,
-  schema: string,
-  transactionID?: string
-): Promise<void> {
+async function ensureRevertableColumn(connectionManager: ConnectionManager, schema: string, transactionID?: string): Promise<void> {
   const rows = await connectionManager.executeQuery(
     `SELECT COUNT(*) AS columnCount
      FROM INFORMATION_SCHEMA.COLUMNS
@@ -125,11 +117,7 @@ async function ensureRevertableColumn(
   );
 }
 
-async function ensureTargetIDNullable(
-  connectionManager: ConnectionManager,
-  schema: string,
-  transactionID?: string
-): Promise<void> {
+async function ensureTargetIDNullable(connectionManager: ConnectionManager, schema: string, transactionID?: string): Promise<void> {
   const rows = await connectionManager.executeQuery(
     `SELECT IS_NULLABLE AS isNullable
      FROM INFORMATION_SCHEMA.COLUMNS
@@ -146,37 +134,22 @@ async function ensureTargetIDNullable(
     return;
   }
 
-  await connectionManager.executeQuery(
-    safeFormatQuery(schema, `ALTER TABLE ??.edit_operations MODIFY COLUMN TargetID BIGINT NULL`),
-    undefined,
-    transactionID
-  );
+  await connectionManager.executeQuery(safeFormatQuery(schema, `ALTER TABLE ??.edit_operations MODIFY COLUMN TargetID BIGINT NULL`), undefined, transactionID);
 }
 
-async function ensureEditOperationsSchemaUpgrades(
-  connectionManager: ConnectionManager,
-  schema: string,
-  transactionID?: string
-): Promise<void> {
+async function ensureEditOperationsSchemaUpgrades(connectionManager: ConnectionManager, schema: string, transactionID?: string): Promise<void> {
   await ensureOperationTypeColumn(connectionManager, schema, transactionID);
   await ensureRevertableColumn(connectionManager, schema, transactionID);
   await ensureTargetIDNullable(connectionManager, schema, transactionID);
 }
 
-export async function ensureEditOperationsTable(
-  connectionManager: ConnectionManager,
-  schema: string,
-  transactionID?: string
-): Promise<void> {
+export async function ensureEditOperationsTable(connectionManager: ConnectionManager, schema: string, transactionID?: string): Promise<void> {
   const sql = safeFormatQuery(schema, CREATE_EDIT_OPERATIONS_TABLE_SQL);
   try {
     await connectionManager.executeQuery(sql, undefined, transactionID);
     await ensureEditOperationsSchemaUpgrades(connectionManager, schema, transactionID);
   } catch (error: unknown) {
-    ailogger.error(
-      `[editoperations] Failed to ensure edit_operations table in ${schema}:`,
-      error instanceof Error ? error : new Error(String(error))
-    );
+    ailogger.error(`[editoperations] Failed to ensure edit_operations table in ${schema}:`, error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 }

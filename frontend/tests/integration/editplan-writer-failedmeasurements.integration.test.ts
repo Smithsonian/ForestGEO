@@ -25,9 +25,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error(`ConnectionManager mock: query contains unformatted identifier placeholders: ${query}`);
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -176,13 +174,7 @@ function buildPlan(fieldChanges: FieldChange[], targetID: number): EditPlan {
   };
 }
 
-function buildInput(
-  schema: string,
-  plotID: number,
-  censusID: number,
-  coreMeasurementID: number,
-  newRow: Record<string, unknown>
-): ApplyInTransactionInput {
+function buildInput(schema: string, plotID: number, censusID: number, coreMeasurementID: number, newRow: Record<string, unknown>): ApplyInTransactionInput {
   return {
     dataType: 'failedmeasurements',
     schema,
@@ -197,10 +189,7 @@ function buildInput(
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1',
-    [coreMeasurementID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
@@ -292,9 +281,7 @@ describe('writeFailedMeasurements (integration)', () => {
       // IsValidated = FALSE is set on every update. bit(1) returns a Buffer
       // from mysql2; normalize to a boolean by reading the first byte.
       const isValidatedRaw = afterCm.IsValidated;
-      const isValidatedAsNumber = Buffer.isBuffer(isValidatedRaw)
-        ? (isValidatedRaw as Buffer)[0]
-        : Number(isValidatedRaw ?? 0);
+      const isValidatedAsNumber = Buffer.isBuffer(isValidatedRaw) ? (isValidatedRaw as Buffer)[0] : Number(isValidatedRaw ?? 0);
       expect(isValidatedAsNumber).toBe(0);
 
       // beforeState captures the exact prior row for revert.
@@ -371,9 +358,7 @@ describe('writeFailedMeasurements (integration)', () => {
       // afterState reflects the normalized date.
       const afterStoredDate = (result.afterState[0].row as any).MeasurementDate;
       const afterStoredDateAsIso =
-        afterStoredDate instanceof Date
-          ? afterStoredDate.toISOString().split('T')[0]
-          : String(afterStoredDate).split('T')[0].split(' ')[0];
+        afterStoredDate instanceof Date ? afterStoredDate.toISOString().split('T')[0] : String(afterStoredDate).split('T')[0].split(' ')[0];
       expect(afterStoredDateAsIso).toBe(NEW_DATE_YMD);
     });
   });
@@ -477,30 +462,26 @@ describe('writeFailedMeasurements (integration)', () => {
       // Flip the seeded row into "successful" shape by clearing all raw fields
       // and attaching a StemGUID — then the writer's StemGUID IS NULL guard
       // should reject it at load time.
-      const [stemRes] = await connection.query<ResultSetHeader>(
-        `INSERT INTO trees (TreeTag, CensusID, IsActive) VALUES (?, ?, 1)`,
-        ['STUBTREE', fixture.censusID]
-      );
+      const [stemRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, CensusID, IsActive) VALUES (?, ?, 1)`, [
+        'STUBTREE',
+        fixture.censusID
+      ]);
       const stubTreeID = stemRes.insertId;
-      const [insertStem] = await connection.query<ResultSetHeader>(
-        `INSERT INTO stems (TreeID, CensusID, StemTag, IsActive) VALUES (?, ?, ?, 1)`,
-        [stubTreeID, fixture.censusID, 'STUBSTEM']
-      );
+      const [insertStem] = await connection.query<ResultSetHeader>(`INSERT INTO stems (TreeID, CensusID, StemTag, IsActive) VALUES (?, ?, ?, 1)`, [
+        stubTreeID,
+        fixture.censusID,
+        'STUBSTEM'
+      ]);
       const stubStemGUID = insertStem.insertId;
       // measurement_error_log has FK on MeasurementID; null the StemGUID update
       // only on the failed row we seeded.
-      await connection.query(
-        `UPDATE coremeasurements SET StemGUID = ? WHERE CoreMeasurementID = ?`,
-        [stubStemGUID, fixture.coreMeasurementID]
-      );
+      await connection.query(`UPDATE coremeasurements SET StemGUID = ? WHERE CoreMeasurementID = ?`, [stubStemGUID, fixture.coreMeasurementID]);
 
       const plan = buildPlan([{ field: 'DBH', from: INITIAL_DBH, to: 99 }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { DBH: 99 });
 
       const txID = await cm.beginTransaction();
-      await expect(writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
-        /not found or StemGUID is not NULL/
-      );
+      await expect(writeFailedMeasurements(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(/not found or StemGUID is not NULL/);
       await cm.rollbackTransaction(txID);
     });
   });

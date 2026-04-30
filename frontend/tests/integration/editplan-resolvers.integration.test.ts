@@ -23,9 +23,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -46,9 +44,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: commit transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: commit transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       await sharedState.connection.commit();
       sharedState.activeTransactionID = null;
@@ -58,9 +54,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: rollback transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: rollback transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
@@ -133,18 +127,15 @@ interface FixtureIDs {
   inactiveTreeID: number;
 }
 
-async function seedResolverFixture(
-  connection: Connection,
-  testData: TestData
-): Promise<FixtureIDs> {
+async function seedResolverFixture(connection: Connection, testData: TestData): Promise<FixtureIDs> {
   const plotID = testData.plots[0].plotID;
   const censusID = testData.census[0].censusID;
 
   // Species IDs for the two codes we care about (seeded by default fixture)
-  const [speciesRows] = await connection.query<RowDataPacket[]>(
-    'SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)',
-    [SPECIES_CODE_AA, SPECIES_CODE_BB]
-  );
+  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)', [
+    SPECIES_CODE_AA,
+    SPECIES_CODE_BB
+  ]);
   const speciesIDs: Record<string, number> = {};
   for (const row of speciesRows) {
     speciesIDs[row.SpeciesCode as string] = row.SpeciesID as number;
@@ -166,16 +157,18 @@ async function seedResolverFixture(
   // repeat because of the unique constraint, so inactive uses a distinct tag).
   const treeIDs: Record<string, number> = {};
   for (const treeTag of [TREE_TAG_100, TREE_TAG_200]) {
-    const [insertRes] = await connection.query<ResultSetHeader>(
-      `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-      [treeTag, speciesIDs[SPECIES_CODE_AA], censusID]
-    );
+    const [insertRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+      treeTag,
+      speciesIDs[SPECIES_CODE_AA],
+      censusID
+    ]);
     treeIDs[treeTag] = insertRes.insertId;
   }
-  const [inactiveTreeRes] = await connection.query<ResultSetHeader>(
-    `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)`,
-    [TREE_TAG_INACTIVE, speciesIDs[SPECIES_CODE_AA], censusID]
-  );
+  const [inactiveTreeRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)`, [
+    TREE_TAG_INACTIVE,
+    speciesIDs[SPECIES_CODE_AA],
+    censusID
+  ]);
   const inactiveTreeID = inactiveTreeRes.insertId;
   treeIDs[TREE_TAG_INACTIVE] = inactiveTreeID;
 
@@ -205,10 +198,13 @@ async function seedResolverFixture(
   ];
 
   for (const stem of stemSeeds) {
-    const [insertRes] = await connection.query<ResultSetHeader>(
-      `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, IsActive) VALUES (?, ?, ?, ?, ?)`,
-      [treeIDs[stem.treeTag], quadratIDs[stem.quadratName], censusID, stem.stemTag, stem.isActive]
-    );
+    const [insertRes] = await connection.query<ResultSetHeader>(`INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, IsActive) VALUES (?, ?, ?, ?, ?)`, [
+      treeIDs[stem.treeTag],
+      quadratIDs[stem.quadratName],
+      censusID,
+      stem.stemTag,
+      stem.isActive
+    ]);
     stemGUIDs[stem.label] = insertRes.insertId;
   }
 
@@ -326,10 +322,9 @@ describe('editplan/resolvers (integration)', () => {
       // fixture attaches to TREE_TAG_100 (the seed attaches STEM_TAG_ON_TREE_100,
       // STEM_TAG_ON_TREE_100_SECOND, and STEM_TAG_DIFFERENT_QUADRAT — three
       // active stems — plus one inactive blocker).
-      const [activeStemRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) AS cnt FROM stems WHERE TreeID = ? AND IsActive = 1',
-        [fixture.treeIDs[TREE_TAG_100]]
-      );
+      const [activeStemRows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems WHERE TreeID = ? AND IsActive = 1', [
+        fixture.treeIDs[TREE_TAG_100]
+      ]);
       const activeStemCount = Number(activeStemRows[0].cnt);
       // Sanity check: the fixture must seed at least two active stems on the
       // source tree for this assertion to be meaningful (so count-1 > 0).

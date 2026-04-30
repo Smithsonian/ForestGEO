@@ -25,9 +25,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error(`ConnectionManager mock: query contains unformatted identifier placeholders: ${query}`);
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -120,10 +118,10 @@ async function seedWriterFixture(connection: Connection, testData: TestData): Pr
   const plotID = testData.plots[0].plotID;
   const censusID = testData.census[0].censusID;
 
-  const [speciesRows] = await connection.query<RowDataPacket[]>(
-    'SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)',
-    [SPECIES_CODE_ACERRU, SPECIES_CODE_QUERCO]
-  );
+  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID, SpeciesCode FROM species WHERE SpeciesCode IN (?, ?)', [
+    SPECIES_CODE_ACERRU,
+    SPECIES_CODE_QUERCO
+  ]);
   const speciesIDs: Record<string, number> = {};
   for (const row of speciesRows) {
     speciesIDs[row.SpeciesCode as string] = row.SpeciesID as number;
@@ -145,10 +143,11 @@ async function seedWriterFixture(connection: Connection, testData: TestData): Pr
     [TREE_TAG_T1, SPECIES_CODE_ACERRU],
     [TREE_TAG_T2, SPECIES_CODE_QUERCO]
   ] as const) {
-    const [res] = await connection.query<ResultSetHeader>(
-      `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-      [tag, speciesIDs[code], censusID]
-    );
+    const [res] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+      tag,
+      speciesIDs[code],
+      censusID
+    ]);
     treeIDs[tag] = res.insertId;
   }
 
@@ -194,10 +193,7 @@ async function seedWriterFixture(connection: Connection, testData: TestData): Pr
   const coreMeasurementID = cmRes.insertId;
 
   for (const code of [ATTR_CODE_ALIVE, ATTR_CODE_MISSING]) {
-    await connection.query<ResultSetHeader>(
-      `INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-      [coreMeasurementID, code]
-    );
+    await connection.query<ResultSetHeader>(`INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [coreMeasurementID, code]);
   }
 
   return { plotID, censusID, speciesIDs, quadratIDs, treeIDs, stemGUIDs, coreMeasurementID };
@@ -215,13 +211,7 @@ function buildPlan(fieldChanges: FieldChange[], targetID: number): EditPlan {
   };
 }
 
-function buildInput(
-  schema: string,
-  plotID: number,
-  censusID: number,
-  coreMeasurementID: number,
-  newRow: Record<string, unknown>
-): ApplyInTransactionInput {
+function buildInput(schema: string, plotID: number, censusID: number, coreMeasurementID: number, newRow: Record<string, unknown>): ApplyInTransactionInput {
   return {
     dataType: 'measurementssummary',
     schema,
@@ -236,35 +226,23 @@ function buildInput(
 }
 
 async function countCmAttributes(connection: Connection, coreMeasurementID: number): Promise<number> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT COUNT(*) AS cnt FROM cmattributes WHERE CoreMeasurementID = ?',
-    [coreMeasurementID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM cmattributes WHERE CoreMeasurementID = ?', [coreMeasurementID]);
   return Number(rows[0].cnt);
 }
 
 async function loadCoreMeasurement(connection: Connection, coreMeasurementID: number): Promise<Record<string, unknown>> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1',
-    [coreMeasurementID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM coremeasurements WHERE CoreMeasurementID = ? LIMIT 1', [coreMeasurementID]);
   if (rows.length === 0) throw new Error('coremeasurements row vanished');
   return rows[0] as Record<string, unknown>;
 }
 
 async function loadStem(connection: Connection, stemGUID: number): Promise<Record<string, unknown> | null> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT * FROM stems WHERE StemGUID = ? LIMIT 1',
-    [stemGUID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM stems WHERE StemGUID = ? LIMIT 1', [stemGUID]);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
 async function loadSpecies(connection: Connection, speciesID: number): Promise<Record<string, unknown> | null> {
-  const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT * FROM species WHERE SpeciesID = ? LIMIT 1',
-    [speciesID]
-  );
+  const [rows] = await connection.query<RowDataPacket[]>('SELECT * FROM species WHERE SpeciesID = ? LIMIT 1', [speciesID]);
   return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
@@ -352,10 +330,10 @@ describe('writeMeasurementsSummary (integration)', () => {
       const treeCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
       expect(treeCountAfter).toBe(treeCountBefore + 1);
 
-      const [newTreeRows] = await connection.query<RowDataPacket[]>(
-        'SELECT TreeID FROM trees WHERE TreeTag = ? AND CensusID = ?',
-        [TREE_TAG_NEW, fixture.censusID]
-      );
+      const [newTreeRows] = await connection.query<RowDataPacket[]>('SELECT TreeID FROM trees WHERE TreeTag = ? AND CensusID = ?', [
+        TREE_TAG_NEW,
+        fixture.censusID
+      ]);
       expect(newTreeRows.length).toBe(1);
 
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
@@ -375,10 +353,11 @@ describe('writeMeasurementsSummary (integration)', () => {
     it('reuses an existing tree row when a row already matches (TreeTag + SpeciesID + CensusID)', async () => {
       // Insert an extra tree so T2 with SpeciesID ACERRU already exists in this
       // census. Moving our measurement from T1 -> T2 should reuse that row.
-      const [existingRes] = await connection.query<ResultSetHeader>(
-        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-        [TREE_TAG_T2, fixture.speciesIDs[SPECIES_CODE_ACERRU], fixture.censusID]
-      );
+      const [existingRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+        TREE_TAG_T2,
+        fixture.speciesIDs[SPECIES_CODE_ACERRU],
+        fixture.censusID
+      ]);
       const existingMatchingTreeID = existingRes.insertId;
       const treeCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
 
@@ -457,14 +436,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       const [preexistingRes] = await connection.query<ResultSetHeader>(
         `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
          VALUES (?, ?, ?, ?, ?, ?, 1)`,
-        [
-          fixture.treeIDs[TREE_TAG_T1],
-          fixture.quadratIDs[QUADRAT_NAME_A],
-          fixture.censusID,
-          PREEXISTING_STEM_TAG,
-          PREEXISTING_STEM_X,
-          PREEXISTING_STEM_Y
-        ]
+        [fixture.treeIDs[TREE_TAG_T1], fixture.quadratIDs[QUADRAT_NAME_A], fixture.censusID, PREEXISTING_STEM_TAG, PREEXISTING_STEM_X, PREEXISTING_STEM_Y]
       );
       const preexistingStemGUID = preexistingRes.insertId;
 
@@ -526,10 +498,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       const querSpeciesID = fixture.speciesIDs[SPECIES_CODE_QUERCO];
       const querRowBefore = await loadSpecies(connection, querSpeciesID);
 
-      const plan = buildPlan(
-        [{ field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_QUERCO }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_QUERCO }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { SpeciesCode: SPECIES_CODE_QUERCO });
 
       const txID = await cm.beginTransaction();
@@ -539,10 +508,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       // The measurement should now be linked (via stems -> trees) to the QUERCO species.
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
       const stemRow = await loadStem(connection, Number(cmRow.StemGUID));
-      const [treeRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM trees WHERE TreeID = ?',
-        [stemRow?.TreeID]
-      );
+      const [treeRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM trees WHERE TreeID = ?', [stemRow?.TreeID]);
       expect(treeRows[0].SpeciesID).toBe(querSpeciesID);
 
       // Regression: the species row itself must not have been updated.
@@ -554,20 +520,16 @@ describe('writeMeasurementsSummary (integration)', () => {
   describe('Attributes change', () => {
     it('DELETEs old cmattributes rows and INSERTs exactly the new set', async () => {
       const newAttributes = `${ATTR_CODE_BROKEN}; ${ATTR_CODE_ALIVE}`;
-      const plan = buildPlan(
-        [{ field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: newAttributes }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: newAttributes }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Attributes: newAttributes });
 
       const txID = await cm.beginTransaction();
       await writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID);
       await cm.commitTransaction(txID);
 
-      const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code',
-        [fixture.coreMeasurementID]
-      );
+      const [rows] = await connection.query<RowDataPacket[]>('SELECT Code FROM cmattributes WHERE CoreMeasurementID = ? ORDER BY Code', [
+        fixture.coreMeasurementID
+      ]);
       const codes = rows.map(r => r.Code as string);
       expect(codes.sort()).toEqual([ATTR_CODE_ALIVE, ATTR_CODE_BROKEN].sort());
       // Verify the old M code is gone.
@@ -655,10 +617,7 @@ describe('writeMeasurementsSummary (integration)', () => {
 
   describe('unknown SpeciesCode', () => {
     it('throws when the SpeciesCode cannot be resolved (safety net for bypassed analyzer)', async () => {
-      const plan = buildPlan(
-        [{ field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_UNKNOWN }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'SpeciesCode', from: SPECIES_CODE_ACERRU, to: SPECIES_CODE_UNKNOWN }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { SpeciesCode: SPECIES_CODE_UNKNOWN });
 
       const txID = await cm.beginTransaction();
@@ -679,47 +638,35 @@ describe('writeMeasurementsSummary (integration)', () => {
       // Seed an inactive tree row that shares the target TreeTag, species, and census.
       // This would trip ux_trees_treetag_speciesid_censusid on INSERT, so the
       // resolver must detect the inactive match and refuse up front.
-      const [inactiveRes] = await connection.query<ResultSetHeader>(
-        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)`,
-        [TREE_TAG_NEW, fixture.speciesIDs[SPECIES_CODE_ACERRU], fixture.censusID]
-      );
+      const [inactiveRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 0)`, [
+        TREE_TAG_NEW,
+        fixture.speciesIDs[SPECIES_CODE_ACERRU],
+        fixture.censusID
+      ]);
       const inactiveTreeID = inactiveRes.insertId;
 
       const stemGUIDBefore = fixture.stemGUIDs[STEM_TAG_S1];
-      const treeCountBefore = Number(
-        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt
-      );
-      const stemCountBefore = Number(
-        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt
-      );
+      const treeCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
+      const stemCountBefore = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
 
       const plan = buildPlan([{ field: 'TreeTag', from: TREE_TAG_T1, to: TREE_TAG_NEW }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { TreeTag: TREE_TAG_NEW });
 
       const txID = await cm.beginTransaction();
-      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
-        /matching tree exists but is inactive/
-      );
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(/matching tree exists but is inactive/);
       await cm.rollbackTransaction(txID);
 
       // Rollback invariants: no new trees/stems, measurement still on original stem,
       // the inactive tree seeded above is still the only row with that tag/species.
-      const treeCountAfter = Number(
-        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt
-      );
-      const stemCountAfter = Number(
-        ((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt
-      );
+      const treeCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM trees'))[0] as RowDataPacket[])[0].cnt);
+      const stemCountAfter = Number(((await connection.query<RowDataPacket[]>('SELECT COUNT(*) AS cnt FROM stems'))[0] as RowDataPacket[])[0].cnt);
       expect(treeCountAfter).toBe(treeCountBefore);
       expect(stemCountAfter).toBe(stemCountBefore);
 
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
       expect(cmRow.StemGUID).toBe(stemGUIDBefore);
 
-      const [inactiveTreeRows] = await connection.query<RowDataPacket[]>(
-        'SELECT IsActive FROM trees WHERE TreeID = ?',
-        [inactiveTreeID]
-      );
+      const [inactiveTreeRows] = await connection.query<RowDataPacket[]>('SELECT IsActive FROM trees WHERE TreeID = ?', [inactiveTreeID]);
       expect(Number(inactiveTreeRows[0].IsActive)).toBe(0);
     });
 
@@ -742,9 +689,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: STEM_TAG_BLOCK });
 
       const txID = await cm.beginTransaction();
-      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
-        /already exists in a different quadrat/
-      );
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(/already exists in a different quadrat/);
       await cm.rollbackTransaction(txID);
 
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
@@ -774,9 +719,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemTag: STEM_TAG_INACTIVE });
 
       const txID = await cm.beginTransaction();
-      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(
-        /matching TreeID .* exists but is inactive/
-      );
+      await expect(writeMeasurementsSummary(cm, { ...input, transactionID: txID }, plan, txID)).rejects.toThrow(/matching TreeID .* exists but is inactive/);
       await cm.rollbackTransaction(txID);
 
       const cmRow = await loadCoreMeasurement(connection, fixture.coreMeasurementID);
@@ -799,10 +742,7 @@ describe('writeMeasurementsSummary (integration)', () => {
   // -----------------------------------------------------------------------
   describe('explicit field clears write NULL to DB', () => {
     it('clears Description to NULL when the user removes it', async () => {
-      const plan = buildPlan(
-        [{ field: 'Description', from: 'initial comment', to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'Description', from: 'initial comment', to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Description: null });
 
       const txID = await cm.beginTransaction();
@@ -818,10 +758,7 @@ describe('writeMeasurementsSummary (integration)', () => {
       const attrCountBefore = await countCmAttributes(connection, fixture.coreMeasurementID);
       expect(attrCountBefore).toBeGreaterThan(0);
 
-      const plan = buildPlan(
-        [{ field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'Attributes', from: `${ATTR_CODE_ALIVE}; ${ATTR_CODE_MISSING}`, to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { Attributes: null });
 
       const txID = await cm.beginTransaction();
@@ -836,10 +773,7 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
 
     it('clears MeasuredDBH to NULL when the user removes it', async () => {
-      const plan = buildPlan(
-        [{ field: 'MeasuredDBH', from: INITIAL_DBH, to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'MeasuredDBH', from: INITIAL_DBH, to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredDBH: null });
 
       const txID = await cm.beginTransaction();
@@ -851,10 +785,7 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
 
     it('clears MeasuredHOM to NULL when the user removes it', async () => {
-      const plan = buildPlan(
-        [{ field: 'MeasuredHOM', from: INITIAL_HOM, to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'MeasuredHOM', from: INITIAL_HOM, to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredHOM: null });
 
       const txID = await cm.beginTransaction();
@@ -866,10 +797,7 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
 
     it('clears StemLocalX to NULL when the user removes it', async () => {
-      const plan = buildPlan(
-        [{ field: 'StemLocalX', from: INITIAL_STEM_X, to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'StemLocalX', from: INITIAL_STEM_X, to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemLocalX: null });
 
       const txID = await cm.beginTransaction();
@@ -881,10 +809,7 @@ describe('writeMeasurementsSummary (integration)', () => {
     });
 
     it('clears StemLocalY to NULL when the user removes it', async () => {
-      const plan = buildPlan(
-        [{ field: 'StemLocalY', from: INITIAL_STEM_Y, to: null }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'StemLocalY', from: INITIAL_STEM_Y, to: null }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { StemLocalY: null });
 
       const txID = await cm.beginTransaction();
@@ -898,10 +823,7 @@ describe('writeMeasurementsSummary (integration)', () => {
     it('preserves current Description when it is not in the plan (regression: no stale-clear)', async () => {
       // Only change DBH — Description must remain 'initial comment', not become NULL.
       const NEW_DBH = 20.0;
-      const plan = buildPlan(
-        [{ field: 'MeasuredDBH', from: INITIAL_DBH, to: NEW_DBH }],
-        fixture.coreMeasurementID
-      );
+      const plan = buildPlan([{ field: 'MeasuredDBH', from: INITIAL_DBH, to: NEW_DBH }], fixture.coreMeasurementID);
       const input = buildInput(config.database, fixture.plotID, fixture.censusID, fixture.coreMeasurementID, { MeasuredDBH: NEW_DBH });
 
       const txID = await cm.beginTransaction();

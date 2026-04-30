@@ -12,12 +12,7 @@ import {
 
 type TreeStemError = TreeStemResolutionPreviewError;
 
-function buildError(
-  subject: TreeStemError['subject'],
-  reason: TreeStemError['reason'],
-  field: TreeStemError['field'],
-  message: string
-): TreeStemError {
+function buildError(subject: TreeStemError['subject'], reason: TreeStemError['reason'], field: TreeStemError['field'], message: string): TreeStemError {
   return { kind: 'TreeStemResolution', subject, reason, field, message, severity: 'destructive', blocking: true };
 }
 
@@ -58,9 +53,7 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<{ effects: E
           buildError('tree', 'inactive', 'TreeTag', `Matching tree for TreeTag "${ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag}" exists but is inactive`)
         );
       } else if (!planned.existingTreeID && !planned.wouldCreate) {
-        errors.push(
-          buildError('tree', 'cannot_create', 'TreeTag', `Cannot resolve or create tree for TreeTag "${ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag}"`)
-        );
+        errors.push(buildError('tree', 'cannot_create', 'TreeTag', `Cannot resolve or create tree for TreeTag "${ctx.newRow.TreeTag ?? ctx.oldRow.TreeTag}"`));
       } else {
         destinationTreeID = planned.existingTreeID;
         const currentTreeID = Number(ctx.oldRow.TreeID);
@@ -95,9 +88,7 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<{ effects: E
     );
 
     if (quadratID === null) {
-      errors.push(
-        buildError('quadrat', 'missing', 'QuadratName', `Quadrat "${ctx.newRow.QuadratName ?? ctx.oldRow.QuadratName}" not found in this plot`)
-      );
+      errors.push(buildError('quadrat', 'missing', 'QuadratName', `Quadrat "${ctx.newRow.QuadratName ?? ctx.oldRow.QuadratName}" not found in this plot`));
     } else {
       const planned = await planStemResolution(
         ctx.cm,
@@ -114,14 +105,17 @@ export async function applyTreeStemRules(ctx: RuleContext): Promise<{ effects: E
 
       if (planned.conflictReason === CONFLICT_REASON_INACTIVE_STEM) {
         errors.push(
-          buildError('stem', 'inactive', 'StemTag', `Matching stem for StemTag "${ctx.newRow.StemTag ?? ctx.oldRow.StemTag}" exists but is inactive for this census`)
+          buildError(
+            'stem',
+            'inactive',
+            'StemTag',
+            `Matching stem for StemTag "${ctx.newRow.StemTag ?? ctx.oldRow.StemTag}" exists but is inactive for this census`
+          )
         );
       } else if (planned.conflictReason === CONFLICT_REASON_DIFFERENT_QUADRAT) {
         errors.push(buildError('stem', 'different_quadrat', 'QuadratName', `Matching stem exists in a different quadrat`));
       } else if (!planned.existingStemGUID && !planned.wouldCreate) {
-        errors.push(
-          buildError('stem', 'cannot_create', 'StemTag', `Cannot resolve or create stem for StemTag "${ctx.newRow.StemTag ?? ctx.oldRow.StemTag}"`)
-        );
+        errors.push(buildError('stem', 'cannot_create', 'StemTag', `Cannot resolve or create stem for StemTag "${ctx.newRow.StemTag ?? ctx.oldRow.StemTag}"`));
       } else {
         const movedAway = planned.sourceStemGUID !== null && planned.sourceStemGUID !== planned.existingStemGUID;
         if (movedAway) {

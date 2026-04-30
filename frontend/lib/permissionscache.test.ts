@@ -13,9 +13,7 @@ const POLL_URL = 'https://example.invalid/auth-poll';
 
 const SAMPLE_RESPONSE = {
   userStatus: 'global',
-  allowedSites: [
-    { SiteID: '1', SiteName: 'Site One', SchemaName: 'site_one', SQDimX: '20', SQDimY: '20', DoubleDataEntry: 0 }
-  ],
+  allowedSites: [{ SiteID: '1', SiteName: 'Site One', SchemaName: 'site_one', SQDimX: '20', SQDimY: '20', DoubleDataEntry: 0 }],
   allSites: [
     { SiteID: '1', SiteName: 'Site One', SchemaName: 'site_one', SQDimX: '20', SQDimY: '20', DoubleDataEntry: 0 },
     { SiteID: '2', SiteName: 'Site Two', SchemaName: 'site_two', SQDimX: '25', SQDimY: '25', DoubleDataEntry: 1 }
@@ -23,11 +21,12 @@ const SAMPLE_RESPONSE = {
 };
 
 function makeFetchOk(payload: unknown) {
-  return vi.fn(async () =>
-    new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    })
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
   ) as unknown as typeof fetch;
 }
 

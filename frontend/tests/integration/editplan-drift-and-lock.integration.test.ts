@@ -52,9 +52,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -88,10 +86,10 @@ vi.mock('@/config/connectionmanager', () => {
     acquireApplicationLock: async (lockName: string, _transactionID: string, timeoutMs: number) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       const timeoutSeconds = Math.ceil(timeoutMs / 1000);
-      const [rows] = (await sharedState.connection.query('SELECT GET_LOCK(?, ?) AS acquired', [
-        lockName,
-        timeoutSeconds
-      ])) as unknown as [RowDataPacket[], unknown];
+      const [rows] = (await sharedState.connection.query('SELECT GET_LOCK(?, ?) AS acquired', [lockName, timeoutSeconds])) as unknown as [
+        RowDataPacket[],
+        unknown
+      ];
       return rows?.[0]?.acquired === 1;
     },
     releaseApplicationLock: async (lockName: string) => {
@@ -119,9 +117,7 @@ vi.mock('@/ailogger', () => ({
 // PendingUserEditForbiddenError, SessionExpiredError) come through via
 // importActual so type identity is preserved for the route's instanceof check.
 vi.mock('@/config/editplan/authorization', async () => {
-  const actual = await vi.importActual<typeof import('@/config/editplan/authorization')>(
-    '@/config/editplan/authorization'
-  );
+  const actual = await vi.importActual<typeof import('@/config/editplan/authorization')>('@/config/editplan/authorization');
   return {
     ...actual,
     createFreshAuthorizationCheck: () => () => sharedState.assertAuthorizationFresh()
@@ -165,10 +161,7 @@ async function seedDriftLockFixture(connection: Connection, testData: TestData):
   const plotID = testData.plots[0].plotID;
   const censusID = testData.census[0].censusID;
 
-  const [speciesRows] = await connection.query<RowDataPacket[]>(
-    'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-    [SPECIES_CODE]
-  );
+  const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [SPECIES_CODE]);
   const speciesID = speciesRows[0].SpeciesID as number;
 
   const [quadratRes] = await connection.query<ResultSetHeader>(
@@ -178,10 +171,11 @@ async function seedDriftLockFixture(connection: Connection, testData: TestData):
   );
   const quadratID = quadratRes.insertId;
 
-  const [treeRes] = await connection.query<ResultSetHeader>(
-    `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-    [TREE_TAG_VALID, speciesID, censusID]
-  );
+  const [treeRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+    TREE_TAG_VALID,
+    speciesID,
+    censusID
+  ]);
   const treeID = treeRes.insertId;
 
   const [stemRes] = await connection.query<ResultSetHeader>(
@@ -197,23 +191,11 @@ async function seedDriftLockFixture(connection: Connection, testData: TestData):
         RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
         RawCodes, IsValidated, IsActive)
      VALUES (?, ?, ?, 1.3, '2024-06-15', ?, ?, ?, ?, 5.0, 5.0, ?, 1, 1)`,
-    [
-      stemGUID,
-      censusID,
-      INITIAL_DBH,
-      TREE_TAG_VALID,
-      STEM_TAG_VALID,
-      SPECIES_CODE,
-      QUADRAT_NAME,
-      ATTR_CODE_ALIVE
-    ]
+    [stemGUID, censusID, INITIAL_DBH, TREE_TAG_VALID, STEM_TAG_VALID, SPECIES_CODE, QUADRAT_NAME, ATTR_CODE_ALIVE]
   );
   const coreMeasurementID = cmRes.insertId;
 
-  await connection.query(
-    `INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`,
-    [coreMeasurementID, ATTR_CODE_ALIVE]
-  );
+  await connection.query(`INSERT INTO cmattributes (CoreMeasurementID, Code) VALUES (?, ?)`, [coreMeasurementID, ATTR_CODE_ALIVE]);
 
   return { plotID, censusID, speciesID, quadratID, treeID, stemGUID, coreMeasurementID };
 }
@@ -277,15 +259,9 @@ describe('editplan drift + lock (integration)', () => {
     // would appear to succeed even when an outer session holds a conflicting
     // lock on that same name. RELEASE_LOCK is reference-counted per session;
     // call it until it returns 0 (lock not held).
-    const prevLockName = buildMeasurementScopeLockName(
-      config.database,
-      fixture.plotID,
-      fixture.censusID
-    );
+    const prevLockName = buildMeasurementScopeLockName(config.database, fixture.plotID, fixture.censusID);
     for (let i = 0; i < 5; i += 1) {
-      const [rows] = (await connection.query('SELECT RELEASE_LOCK(?) AS released', [
-        prevLockName
-      ])) as unknown as [RowDataPacket[], unknown];
+      const [rows] = (await connection.query('SELECT RELEASE_LOCK(?) AS released', [prevLockName])) as unknown as [RowDataPacket[], unknown];
       if (rows[0].released !== 1) break;
     }
   });
@@ -294,9 +270,7 @@ describe('editplan drift + lock (integration)', () => {
     it('applyEdit bootstraps edit_operations when the table is absent (ensureEditOperationsTable covers missing migration registration)', async () => {
       // The beforeEach dropped edit_operations; if applyEdit does not create it
       // via ensureEditOperationsTable, the INSERT will fail.
-      const [preRows] = await connection.query<RowDataPacket[]>(
-        `SHOW TABLES LIKE 'edit_operations'`
-      );
+      const [preRows] = await connection.query<RowDataPacket[]>(`SHOW TABLES LIKE 'edit_operations'`);
       expect(preRows).toHaveLength(0);
 
       // 1) preview
@@ -334,9 +308,7 @@ describe('editplan drift + lock (integration)', () => {
       expect(applyBody.editOperationID).toBeGreaterThan(0);
       expect(applyBody.validationPending).toBe(true);
 
-      const [postRows] = await connection.query<RowDataPacket[]>(
-        `SHOW TABLES LIKE 'edit_operations'`
-      );
+      const [postRows] = await connection.query<RowDataPacket[]>(`SHOW TABLES LIKE 'edit_operations'`);
       expect(postRows).toHaveLength(1);
     });
   });
@@ -360,10 +332,7 @@ describe('editplan drift + lock (integration)', () => {
       // Out-of-band mutation simulates a concurrent editor committing first.
       // Must NOT use sharedState.connection-level transaction — we want it
       // visible to the apply path's own transaction when it re-analyzes.
-      await connection.query(
-        `UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?`,
-        [DRIFTED_DBH, fixture.coreMeasurementID]
-      );
+      await connection.query(`UPDATE coremeasurements SET MeasuredDBH = ? WHERE CoreMeasurementID = ?`, [DRIFTED_DBH, fixture.coreMeasurementID]);
 
       const applyRes = await applyPOST(
         buildApplyRequest({
@@ -396,10 +365,9 @@ describe('editplan drift + lock (integration)', () => {
       expect(Number(dbhChange!.to)).toBeCloseTo(PREVIEW_ATTEMPT_DBH, 2);
 
       // Assert the measurement was NOT updated by the rejected apply attempt.
-      const [rowsAfter] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(DRIFTED_DBH, 2);
     });
   });
@@ -440,18 +408,12 @@ describe('editplan drift + lock (integration)', () => {
 
     it('returns 423 Locked when the scope lock is held elsewhere, and succeeds after the lock is released', async () => {
       lockHolder = await createLockHolder();
-      const lockName = buildMeasurementScopeLockName(
-        config.database,
-        fixture.plotID,
-        fixture.censusID
-      );
+      const lockName = buildMeasurementScopeLockName(config.database, fixture.plotID, fixture.censusID);
       LOCK_NAME_HOLDER.push(lockName);
 
       // Acquire the scope lock on the outer connection (timeout 10s just in
       // case another test somehow holds it; expected to be unheld).
-      const [holderRows] = (await lockHolder.query('SELECT GET_LOCK(?, 10) AS acquired', [
-        lockName
-      ])) as unknown as [RowDataPacket[], unknown];
+      const [holderRows] = (await lockHolder.query('SELECT GET_LOCK(?, 10) AS acquired', [lockName])) as unknown as [RowDataPacket[], unknown];
       expect(holderRows[0].acquired).toBe(1);
 
       // Run preview to get a valid plan hash (preview does NOT acquire the
@@ -485,16 +447,13 @@ describe('editplan drift + lock (integration)', () => {
       expect(blockedBody.error).toBe('scope locked');
 
       // Apply should NOT have mutated the row while the lock was held.
-      const [midRows] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [midRows] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(midRows[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
 
       // Release the lock and re-apply. Expect 200 this time.
-      const [releaseRows] = (await lockHolder.query('SELECT RELEASE_LOCK(?) AS released', [
-        lockName
-      ])) as unknown as [RowDataPacket[], unknown];
+      const [releaseRows] = (await lockHolder.query('SELECT RELEASE_LOCK(?) AS released', [lockName])) as unknown as [RowDataPacket[], unknown];
       expect(releaseRows[0].released).toBe(1);
       LOCK_NAME_HOLDER.length = 0;
 
@@ -526,10 +485,9 @@ describe('editplan drift + lock (integration)', () => {
       );
       expect(applyOkRes.status).toBe(200);
 
-      const [finalRows] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [finalRows] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(finalRows[0].MeasuredDBH)).toBeCloseTo(PREVIEW_ATTEMPT_DBH, 2);
     });
   });
@@ -543,7 +501,7 @@ describe('editplan drift + lock (integration)', () => {
   // out-of-band SQL writes; this one proves the same contract holds when the
   // drift came from a legitimate concurrent apply through the same route.
   describe('concurrent edit drift', () => {
-    it('returns 409 for the second caller and freshPlan reflects the first caller\'s committed change', async () => {
+    it("returns 409 for the second caller and freshPlan reflects the first caller's committed change", async () => {
       const USER_A_DBH = 42.0;
       const USER_B_DBH = 55.0;
 
@@ -632,18 +590,16 @@ describe('editplan drift + lock (integration)', () => {
 
       // Database still carries A's value, not B's. B's rejected apply did not
       // half-write the row.
-      const [rowsAfter] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(USER_A_DBH, 2);
 
       // Exactly one ledger entry for this target — A's. B's rejected apply
       // wrote nothing to the ledger.
-      const [ledgerRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(ledgerRows[0].cnt)).toBe(1);
     });
   });
@@ -669,10 +625,7 @@ describe('editplan drift + lock (integration)', () => {
 
       // Soft-delete between preview and apply. The analyzer's loadCurrentRow
       // filters by cm.IsActive = 1, so the next analysis will miss it.
-      await connection.query(
-        `UPDATE coremeasurements SET IsActive = 0 WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      await connection.query(`UPDATE coremeasurements SET IsActive = 0 WHERE CoreMeasurementID = ?`, [fixture.coreMeasurementID]);
 
       const applyRes = await applyPOST(
         buildApplyRequest({
@@ -690,10 +643,9 @@ describe('editplan drift + lock (integration)', () => {
       expect(body.error).toBe('target not found');
 
       // Row still carries its pre-apply DBH — no half-write.
-      const [rowsAfter] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH, IsActive FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH, IsActive FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
       expect(Number(rowsAfter[0].IsActive)).toBe(0);
     });
@@ -701,10 +653,7 @@ describe('editplan drift + lock (integration)', () => {
     it('returns 422 when the target species is deactivated between preview and apply of a SpeciesCode change', async () => {
       // Seed a second species so we can redirect to it.
       const OTHER_SPECIES_CODE = 'QUERCO';
-      const [otherSpeciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [OTHER_SPECIES_CODE]
-      );
+      const [otherSpeciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [OTHER_SPECIES_CODE]);
       expect(otherSpeciesRows.length).toBe(1);
 
       const previewRes = await previewPOST(
@@ -775,10 +724,11 @@ describe('editplan drift + lock (integration)', () => {
       const FIRST_NEW_DBH = 55.5;
       const SECOND_NEW_DBH = 77.7;
 
-      const [secondTreeRes] = await connection.query<ResultSetHeader>(
-        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-        [SECOND_TREE_TAG, fixture.speciesID, fixture.censusID]
-      );
+      const [secondTreeRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+        SECOND_TREE_TAG,
+        fixture.speciesID,
+        fixture.censusID
+      ]);
       const secondTreeID = secondTreeRes.insertId;
 
       const [secondStemRes] = await connection.query<ResultSetHeader>(
@@ -794,15 +744,7 @@ describe('editplan drift + lock (integration)', () => {
             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
             IsValidated, IsActive)
          VALUES (?, ?, ?, 1.2, '2024-06-15', ?, ?, ?, ?, 1, 1, 1, 1)`,
-        [
-          secondStemGUID,
-          fixture.censusID,
-          SECOND_INITIAL_DBH,
-          SECOND_TREE_TAG,
-          SECOND_STEM_TAG,
-          SPECIES_CODE,
-          QUADRAT_NAME
-        ]
+        [secondStemGUID, fixture.censusID, SECOND_INITIAL_DBH, SECOND_TREE_TAG, SECOND_STEM_TAG, SPECIES_CODE, QUADRAT_NAME]
       );
       const secondCoreMeasurementID = secondCmRes.insertId;
 
@@ -899,16 +841,14 @@ describe('editplan drift + lock (integration)', () => {
       // Row 1 must be back at its pre-transaction value — the rollback has to
       // wipe the earlier writer's UPDATE even though that writer completed
       // successfully in isolation.
-      const [row1After] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [row1After] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(row1After[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
 
-      const [row2After] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [secondCoreMeasurementID]
-      );
+      const [row2After] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        secondCoreMeasurementID
+      ]);
       expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
     });
 
@@ -935,17 +875,15 @@ describe('editplan drift + lock (integration)', () => {
       const ROW2_TARGET_SPECIES_CODE = 'QUERCO';
       const LEDGER_CREATED_BY = AUTH_USER_EMAIL;
 
-      const [targetSpeciesRows] = await connection.query<RowDataPacket[]>(
-        'SELECT SpeciesID FROM species WHERE SpeciesCode = ?',
-        [ROW2_TARGET_SPECIES_CODE]
-      );
+      const [targetSpeciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [ROW2_TARGET_SPECIES_CODE]);
       expect(targetSpeciesRows.length).toBe(1);
       const row2TargetSpeciesID = targetSpeciesRows[0].SpeciesID as number;
 
-      const [secondTreeRes] = await connection.query<ResultSetHeader>(
-        `INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`,
-        [SECOND_TREE_TAG, fixture.speciesID, fixture.censusID]
-      );
+      const [secondTreeRes] = await connection.query<ResultSetHeader>(`INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)`, [
+        SECOND_TREE_TAG,
+        fixture.speciesID,
+        fixture.censusID
+      ]);
       const secondTreeID = secondTreeRes.insertId;
 
       const [secondStemRes] = await connection.query<ResultSetHeader>(
@@ -961,15 +899,7 @@ describe('editplan drift + lock (integration)', () => {
             RawTreeTag, RawStemTag, RawSpCode, RawQuadrat, RawX, RawY,
             IsValidated, IsActive)
          VALUES (?, ?, ?, 1.1, '2024-06-15', ?, ?, ?, ?, 2, 2, 1, 1)`,
-        [
-          secondStemGUID,
-          fixture.censusID,
-          SECOND_INITIAL_DBH,
-          SECOND_TREE_TAG,
-          SECOND_STEM_TAG,
-          SPECIES_CODE,
-          QUADRAT_NAME
-        ]
+        [secondStemGUID, fixture.censusID, SECOND_INITIAL_DBH, SECOND_TREE_TAG, SECOND_STEM_TAG, SPECIES_CODE, QUADRAT_NAME]
       );
       const secondCoreMeasurementID = secondCmRes.insertId;
 
@@ -1065,23 +995,21 @@ describe('editplan drift + lock (integration)', () => {
       // Row 1 must be at its pre-transaction value — the outer rollback has to
       // wipe every prior applyEditInTransaction's data AND ledger writes, even
       // ones that completed in isolation.
-      const [row1After] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [row1After] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(row1After[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
 
-      const [row2After] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [secondCoreMeasurementID]
-      );
+      const [row2After] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        secondCoreMeasurementID
+      ]);
       expect(Number(row2After[0].MeasuredDBH)).toBeCloseTo(SECOND_INITIAL_DBH, 2);
 
       // Ledger must be empty for these targets — no half-committed bulk rows.
-      const [ledgerRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID IN (?, ?)`,
-        [fixture.coreMeasurementID, secondCoreMeasurementID]
-      );
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID IN (?, ?)`, [
+        fixture.coreMeasurementID,
+        secondCoreMeasurementID
+      ]);
       expect(Number(ledgerRows[0].cnt)).toBe(0);
     });
   });
@@ -1131,19 +1059,17 @@ describe('editplan drift + lock (integration)', () => {
 
       // Row must retain its pre-apply DBH. If the safeguard fires but the
       // rollback wiring is broken, the writer's UPDATE could leak through.
-      const [rowsAfter] = await connection.query<RowDataPacket[]>(
-        `SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [rowsAfter] = await connection.query<RowDataPacket[]>(`SELECT MeasuredDBH FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(rowsAfter[0].MeasuredDBH)).toBeCloseTo(INITIAL_DBH, 2);
 
       // Ledger must be empty — writeEditOperation runs AFTER the writer, so a
       // ledger row would only exist if both the auth check and the transaction
       // rollback were broken.
-      const [ledgerRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [ledgerRows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS cnt FROM edit_operations WHERE TargetID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(Number(ledgerRows[0].cnt)).toBe(0);
     });
   });
@@ -1191,19 +1117,17 @@ describe('editplan drift + lock (integration)', () => {
       expect(applyRes.status).toBe(200);
 
       // coremeasurements.StemGUID now points at the new stem row.
-      const [cmRows] = await connection.query<RowDataPacket[]>(
-        `SELECT StemGUID FROM coremeasurements WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [cmRows] = await connection.query<RowDataPacket[]>(`SELECT StemGUID FROM coremeasurements WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       const newStemGUID = cmRows[0].StemGUID as number;
       expect(newStemGUID).not.toBe(fixture.stemGUID);
 
       // And the refreshed measurementssummary view row reflects the new stem
       // identity — this is the regression we want to guard against.
-      const [viewRows] = await connection.query<RowDataPacket[]>(
-        `SELECT StemGUID, StemTag FROM measurementssummary WHERE CoreMeasurementID = ?`,
-        [fixture.coreMeasurementID]
-      );
+      const [viewRows] = await connection.query<RowDataPacket[]>(`SELECT StemGUID, StemTag FROM measurementssummary WHERE CoreMeasurementID = ?`, [
+        fixture.coreMeasurementID
+      ]);
       expect(viewRows.length).toBe(1);
       expect(viewRows[0].StemGUID).toBe(newStemGUID);
       expect(viewRows[0].StemTag).toBe(NEW_STEM_TAG);

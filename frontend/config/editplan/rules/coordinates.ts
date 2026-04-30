@@ -6,7 +6,11 @@ export async function applyCoordinateRules(ctx: RuleContext): Promise<Effect[]> 
   if (!ctx.changedFields.has('StemLocalX') && !ctx.changedFields.has('StemLocalY')) return [];
   const stemGUID = Number(ctx.oldRow.StemGUID);
   if (!stemGUID) return [];
-  const rows = await ctx.cm.executeQuery(safeFormatQuery(ctx.schema, `SELECT COUNT(*) AS cnt FROM ??.coremeasurements WHERE StemGUID = ?`), [stemGUID], ctx.transactionID);
+  const rows = await ctx.cm.executeQuery(
+    safeFormatQuery(ctx.schema, `SELECT COUNT(*) AS cnt FROM ??.coremeasurements WHERE StemGUID = ?`),
+    [stemGUID],
+    ctx.transactionID
+  );
   const count = Number(rows?.[0]?.cnt ?? 0);
   return [
     {

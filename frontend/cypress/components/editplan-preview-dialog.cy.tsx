@@ -93,11 +93,7 @@ describe('PreviewDialog (Cypress component)', () => {
       .filter((_index, el) => !(el.getAttribute('data-testid') ?? '').startsWith('edit-effect-rowcount-'))
       .then($cards => {
         const ids = Cypress.$.makeArray($cards).map(el => el.getAttribute('data-testid'));
-        expect(ids).to.deep.equal([
-          'edit-effect-destructive-duplicate-merge',
-          'edit-effect-warn-reparenting-stems',
-          'edit-effect-info-children-untouched'
-        ]);
+        expect(ids).to.deep.equal(['edit-effect-destructive-duplicate-merge', 'edit-effect-warn-reparenting-stems', 'edit-effect-info-children-untouched']);
       });
 
     // Affected-row badge renders for effects with row counts.

@@ -77,12 +77,7 @@ describe('editoperations', () => {
     const cm = makeConnectionManager();
     cm.executeQuery.mockResolvedValue({ insertId: 99 });
 
-    const id = await writeEditOperation(
-      cm,
-      'forestgeo_testing',
-      buildInput({ operationType: 'bulk-revision-row', revertable: false, targetID: null }),
-      'tx'
-    );
+    const id = await writeEditOperation(cm, 'forestgeo_testing', buildInput({ operationType: 'bulk-revision-row', revertable: false, targetID: null }), 'tx');
 
     expect(id).toBe(99);
     expect(cm.executeQuery.mock.calls[0][1][3]).toBeNull();

@@ -190,41 +190,53 @@ describe('hashPlan', () => {
 
 describe('planhash - bulk duplicateDeletions', () => {
   it('hashes same pairs regardless of input order', () => {
-    const a = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [
-        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
-        { coreMeasurementID: 20, survivorCoreMeasurementID: 2 }
-      ]
-    }));
-    const b = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [
-        { coreMeasurementID: 20, survivorCoreMeasurementID: 2 },
-        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
-      ]
-    }));
+    const a = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [
+          { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
+          { coreMeasurementID: 20, survivorCoreMeasurementID: 2 }
+        ]
+      })
+    );
+    const b = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [
+          { coreMeasurementID: 20, survivorCoreMeasurementID: 2 },
+          { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
+        ]
+      })
+    );
     expect(a).toBe(b);
   });
 
   it('changes hash when survivor ID swaps', () => {
-    const a = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
-    }));
-    const b = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 2 }]
-    }));
+    const a = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
+      })
+    );
+    const b = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 2 }]
+      })
+    );
     expect(a).not.toBe(b);
   });
 
   it('changes hash when a pair is duplicated (no dedupe)', () => {
-    const single = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
-    }));
-    const doubled = hashPlan(buildBulkPlanShell({
-      duplicateDeletions: [
-        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
-        { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
-      ]
-    }));
+    const single = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [{ coreMeasurementID: 10, survivorCoreMeasurementID: 1 }]
+      })
+    );
+    const doubled = hashPlan(
+      buildBulkPlanShell({
+        duplicateDeletions: [
+          { coreMeasurementID: 10, survivorCoreMeasurementID: 1 },
+          { coreMeasurementID: 10, survivorCoreMeasurementID: 1 }
+        ]
+      })
+    );
     expect(single).not.toBe(doubled);
   });
 });

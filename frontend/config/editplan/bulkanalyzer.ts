@@ -141,7 +141,10 @@ export async function analyzeBulk(
 export function assertBulkPlanCanApply(plan: BulkEditPlan): void {
   const roleErrors = (plan.errors ?? []).filter(isRoleForbiddenPreviewError).filter(error => error.blocking);
   if (roleErrors.length > 0) {
-    throw new RoleForbiddenFieldError(roleErrors.map(e => e.field), roleErrors[0].role);
+    throw new RoleForbiddenFieldError(
+      roleErrors.map(e => e.field),
+      roleErrors[0].role
+    );
   }
   if (plan.canApply === false) {
     throw new BulkPlanUnapplicableError((plan.errors ?? []).filter(e => e.blocking));

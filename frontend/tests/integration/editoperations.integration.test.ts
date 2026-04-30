@@ -18,12 +18,7 @@ const sharedState = vi.hoisted(() => ({
 const TEST_TRANSACTION_ID = 'test-transaction-id';
 const UNKNOWN_EDIT_OPERATION_ID = 9_999_999;
 
-const MIGRATION_PATH = path.join(
-  process.cwd(),
-  'db-migrations',
-  'unified-measurements-migrations',
-  '54_create_edit_operations.sql'
-);
+const MIGRATION_PATH = path.join(process.cwd(), 'db-migrations', 'unified-measurements-migrations', '54_create_edit_operations.sql');
 
 // ---------------------------------------------------------------------------
 // Mock ConnectionManager — mirrors the pattern used by reingest-routes
@@ -40,9 +35,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID && transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       const [rows] = await sharedState.connection.query(query, (params as unknown[]) ?? []);
       return rows;
@@ -63,9 +56,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: commit transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: commit transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       await sharedState.connection.commit();
       sharedState.activeTransactionID = null;
@@ -75,9 +66,7 @@ vi.mock('@/config/connectionmanager', () => {
         throw new Error('Test DB connection not initialized');
       }
       if (transactionID !== sharedState.activeTransactionID) {
-        throw new Error(
-          `ConnectionManager mock: rollback transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`
-        );
+        throw new Error(`ConnectionManager mock: rollback transactionID mismatch (got "${transactionID}", active "${sharedState.activeTransactionID}")`);
       }
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
@@ -288,12 +277,7 @@ describe('editoperations (integration)', () => {
     await ensureEditOperationsTable(cm, config.database);
 
     const transactionID = await cm.beginTransaction();
-    const editOperationID = await writeEditOperation(
-      cm,
-      config.database,
-      buildInput({ operationType: 'bulk-revision-row', revertable: false }),
-      transactionID
-    );
+    const editOperationID = await writeEditOperation(cm, config.database, buildInput({ operationType: 'bulk-revision-row', revertable: false }), transactionID);
     await cm.commitTransaction(transactionID);
 
     const roundTripped = await readEditOperation(cm, config.database, editOperationID);
