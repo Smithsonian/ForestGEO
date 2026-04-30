@@ -18,7 +18,6 @@
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import type { UserAuthRoles } from '@/config/macros';
-import ailogger from '@/ailogger';
 
 export interface CachedPermissions {
   userStatus: UserAuthRoles;
@@ -78,7 +77,7 @@ async function fetchAndShape(email: string, fetchImpl: typeof fetch): Promise<Ca
   const response = await fetchImpl(url, { method: 'GET' });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    ailogger.error(`auth function poll returned ${response.status}`, undefined, {
+    console.error(`auth function poll returned ${response.status}`, {
       url,
       status: response.status,
       statusText: response.statusText,
