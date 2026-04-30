@@ -147,9 +147,19 @@ describe('permissionscache', () => {
 });
 
 describe('permissionscache in-flight dedup', () => {
+  const originalUrl = process.env.AUTH_FUNCTIONS_POLL_URL;
+
   beforeEach(() => {
     _clearCacheForTest();
     process.env.AUTH_FUNCTIONS_POLL_URL = POLL_URL;
+  });
+
+  afterEach(() => {
+    if (originalUrl === undefined) {
+      delete process.env.AUTH_FUNCTIONS_POLL_URL;
+    } else {
+      process.env.AUTH_FUNCTIONS_POLL_URL = originalUrl;
+    }
   });
 
   it('dedupes concurrent calls for the same email — fetch invoked once', async () => {
@@ -161,6 +171,34 @@ describe('permissionscache in-flight dedup', () => {
     for (const r of results) {
       expect(r.userStatus).toBe('global');
     }
+  });
+
+  it('dedupes when the fetch takes multiple ticks to settle (async timing)', async () => {
+    let resolveFetch!: (v: Response) => void;
+    const fetchImpl = vi.fn(
+      () =>
+        new Promise<Response>(r => {
+          resolveFetch = r;
+        })
+    ) as unknown as typeof fetch;
+
+    // Fire all 5 calls before resolving the fetch. They should share the
+    // single in-flight Promise — if inflight.set were moved after an await,
+    // the synchronous-mock test would still pass while this one would fail
+    // by invoking the fetch 5 times.
+    const promises = Array.from({ length: 5 }, () => getOrFetchPermissions('slow@example.com', fetchImpl));
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    resolveFetch(
+      new Response(JSON.stringify(SAMPLE_RESPONSE), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
+
+    const results = await Promise.all(promises);
+    expect(results.every(r => r.userStatus === 'global')).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('does not dedupe across different emails', async () => {
@@ -205,9 +243,19 @@ describe('permissionscache in-flight dedup', () => {
 });
 
 describe('permissionscache email key normalization', () => {
+  const originalUrl = process.env.AUTH_FUNCTIONS_POLL_URL;
+
   beforeEach(() => {
     _clearCacheForTest();
     process.env.AUTH_FUNCTIONS_POLL_URL = POLL_URL;
+  });
+
+  afterEach(() => {
+    if (originalUrl === undefined) {
+      delete process.env.AUTH_FUNCTIONS_POLL_URL;
+    } else {
+      process.env.AUTH_FUNCTIONS_POLL_URL = originalUrl;
+    }
   });
 
   it('treats different cases of the same email as one cache entry', async () => {
