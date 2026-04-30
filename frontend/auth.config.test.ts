@@ -35,6 +35,13 @@ describe('auth.config E2E credentials provider gate', () => {
     expect(cfg.providers.find((p: any) => p.id === 'e2e-credentials')).toBeUndefined();
   });
 
+  it('omits e2e-credentials when NEXT_PUBLIC_E2E_TESTING is unset and NODE_ENV is production', async () => {
+    delete process.env.NEXT_PUBLIC_E2E_TESTING;
+    process.env.NODE_ENV = 'production';
+    const cfg = await loadConfigFresh();
+    expect(cfg.providers.find((p: any) => p.id === 'e2e-credentials')).toBeUndefined();
+  });
+
   it('includes e2e-credentials in development with the flag set', async () => {
     process.env.NEXT_PUBLIC_E2E_TESTING = 'true';
     process.env.NODE_ENV = 'development';
@@ -49,7 +56,7 @@ describe('auth.config E2E credentials provider gate', () => {
     expect(cfg.providers.find((p: any) => p.id === 'e2e-credentials')).toBeUndefined();
   });
 
-  it('omits e2e-credentials when flag set but NODE_ENV unset', async () => {
+  it('includes e2e-credentials when flag set and NODE_ENV is unset (treated as non-production)', async () => {
     process.env.NEXT_PUBLIC_E2E_TESTING = 'true';
     delete process.env.NODE_ENV;
     const cfg = await loadConfigFresh();
