@@ -33,7 +33,7 @@ export default auth(req => {
   // /api/health: deployment health check.
   // /api/auth/*: NextAuth's own sign-in/callback handlers.
   // /api/customsignin: legacy custom sign-in path.
-  const isPublicApi = pathname === '/api/health' || pathname.startsWith('/api/auth/') || pathname.startsWith('/api/customsignin');
+  const isPublicApi = pathname === '/api/health' || pathname.startsWith('/api/auth') || pathname.startsWith('/api/customsignin');
   if (isPublicApi) return NextResponse.next();
 
   const isApi = pathname.startsWith('/api/');

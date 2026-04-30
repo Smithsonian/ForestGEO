@@ -24,6 +24,16 @@ function makeRequest(pathname: string, authed = false): NextRequest {
   } as unknown as NextRequest;
 }
 
+async function withE2EDisabled<T>(fn: () => Promise<T>): Promise<T> {
+  const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+  process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
+  try {
+    return await fn();
+  } finally {
+    process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+  }
+}
+
 describe('middleware', () => {
   beforeEach(() => vi.resetModules());
 
@@ -37,55 +47,39 @@ describe('middleware', () => {
   });
 
   it('lets /api/health through unauthenticated', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/api/health', false);
       const res = await mod.default(req as any);
       expect(res?.status).toBe(200);
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+    });
   });
 
   it('redirects unauthenticated /dashboard to /login', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/dashboard', false);
       const res = await mod.default(req as any);
       expect(res?.headers.get('location')).toContain('/login');
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+    });
   });
 
   it('redirects unauthenticated / to /login', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/', false);
       const res = await mod.default(req as any);
       expect(res?.headers.get('location')).toContain('/login');
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+    });
   });
 
   it('redirects authenticated / to /dashboard', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/', true);
       const res = await mod.default(req as any);
       expect(res?.headers.get('location')).toContain('/dashboard');
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+    });
   });
 });
 
@@ -93,42 +87,55 @@ describe('middleware /api/* gating', () => {
   beforeEach(() => vi.resetModules());
 
   it('returns 401 JSON for unauthenticated /api/cleanup', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/api/cleanup', false);
       const res = await mod.default(req as any);
       expect(res?.status).toBe(401);
       expect(res?.headers.get('content-type')).toMatch(/application\/json/);
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+    });
   });
 
   it('lets /api/auth/callback through unauthenticated (NextAuth handlers)', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/api/auth/callback', false);
       const res = await mod.default(req as any);
-      expect(res?.status).not.toBe(401);
-    } finally {
-      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
-    }
+      expect(res?.status).toBe(200);
+    });
   });
 
   it('lets authenticated /api/cleanup through', async () => {
-    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
-    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
-    try {
+    await withE2EDisabled(async () => {
       const mod = await import('./middleware');
       const req = makeRequest('/api/cleanup', true);
       const res = await mod.default(req as any);
-      expect(res?.status).not.toBe(401);
+      expect(res?.status).toBe(200);
+    });
+  });
+
+  it('E2E bypass passes /api/cleanup through even when unauthenticated (ordering invariant)', async () => {
+    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+    const savedNodeEnv = process.env.NODE_ENV;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'true';
+    process.env.NODE_ENV = 'development';
+    try {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/cleanup', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(200);
     } finally {
       process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+      process.env.NODE_ENV = savedNodeEnv;
     }
+  });
+
+  it('lets /api/customsignin through unauthenticated', async () => {
+    await withE2EDisabled(async () => {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/customsignin', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(200);
+    });
   });
 });
