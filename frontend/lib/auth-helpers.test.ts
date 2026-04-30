@@ -36,6 +36,18 @@ describe('requireAdmin', () => {
     expect(body.error).toMatch(/admin/i);
   });
 
+  it('returns 403 for lead technician', () => {
+    const session = { user: { email: 'l@example.com', userStatus: 'lead technician', sites: [], allsites: [] } } as any;
+    const res = requireAdmin(session);
+    expect(res?.status).toBe(403);
+  });
+
+  it('returns 403 for pending', () => {
+    const session = { user: { email: 'p@example.com', userStatus: 'pending', sites: [], allsites: [] } } as any;
+    const res = requireAdmin(session);
+    expect(res?.status).toBe(403);
+  });
+
   it('returns 401 when session is null', () => {
     const res = requireAdmin(null);
     expect(res?.status).toBe(401);
