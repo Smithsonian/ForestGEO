@@ -88,3 +88,47 @@ describe('middleware', () => {
     }
   });
 });
+
+describe('middleware /api/* gating', () => {
+  beforeEach(() => vi.resetModules());
+
+  it('returns 401 JSON for unauthenticated /api/cleanup', async () => {
+    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
+    try {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/cleanup', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(401);
+      expect(res?.headers.get('content-type')).toMatch(/application\/json/);
+    } finally {
+      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+    }
+  });
+
+  it('lets /api/auth/callback through unauthenticated (NextAuth handlers)', async () => {
+    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
+    try {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/auth/callback', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).not.toBe(401);
+    } finally {
+      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+    }
+  });
+
+  it('lets authenticated /api/cleanup through', async () => {
+    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
+    try {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/cleanup', true);
+      const res = await mod.default(req as any);
+      expect(res?.status).not.toBe(401);
+    } finally {
+      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+    }
+  });
+});
