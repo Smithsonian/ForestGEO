@@ -64,6 +64,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         // page through the duration of the outage.
         console.error('permissions fetch failed; returning empty-permission session', { email, error });
         delete (session.user as Partial<typeof session.user>).userStatus;
+        // Also clear the JWT-side snapshot. Today only the E2E branch reads
+        // token.userStatus, but leaving a stale role on the token would let a
+        // future non-E2E reader silently see a role we just decided we cannot
+        // verify.
+        delete (token as Partial<typeof token>).userStatus;
         session.user.sites = [];
         session.user.allsites = [];
         session.user.permissionsUnavailable = true;
