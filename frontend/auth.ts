@@ -1,7 +1,6 @@
 // auth.ts
 import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
-import { submitCookie } from '@/app/actions/cookiemanager';
 import { getOrFetchPermissions } from '@/lib/permissionscache';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
@@ -53,7 +52,6 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           throw new Error('JWT has no email — cannot resolve permissions');
         }
         const permissions = await getOrFetchPermissions(email);
-        await submitCookie('user', email); // save user email in server storage
         session.user.userStatus = permissions.userStatus;
         session.user.sites = permissions.sites;
         session.user.allsites = permissions.allsites;

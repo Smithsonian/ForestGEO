@@ -6,7 +6,7 @@ import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 import { auth } from '@/auth';
-import { Session } from 'next-auth';
+import { requireAdmin } from '@/lib/auth-helpers';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -22,20 +22,6 @@ const VALID_TABLE_TYPES = {
 } as const;
 
 type TableType = keyof typeof VALID_TABLE_TYPES;
-
-function getAdminAuthErrorResponse(session: Session | null, method: 'GET' | 'DELETE'): NextResponse | null {
-  if (!session?.user) {
-    ailogger.warn(`Unauthorized admin clear ${method} attempt - no session`);
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
-  }
-
-  if (!['global', 'db admin'].includes(session.user.userStatus)) {
-    ailogger.warn(`Forbidden admin clear ${method} attempt by role: ${session.user.userStatus}`);
-    return new NextResponse(JSON.stringify({ error: 'Forbidden - admin access required' }), { status: 403 });
-  }
-
-  return null;
-}
 
 function buildFailedMeasurementsScopeWhereClause(schema: string) {
   return `c.PlotID = ?
@@ -66,11 +52,8 @@ export async function DELETE(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const session = await auth();
-  const authError = getAdminAuthErrorResponse(session, 'DELETE');
-  if (authError) {
-    return authError;
-  }
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
 
   const { tableType, schema: schemaParam, plotID: plotIDParam, censusID: censusIDParam } = await props.params;
 
@@ -223,11 +206,8 @@ export async function GET(
     params: Promise<{ tableType: string; schema: string; plotID: string; censusID: string }>;
   }
 ) {
-  const session = await auth();
-  const authError = getAdminAuthErrorResponse(session, 'GET');
-  if (authError) {
-    return authError;
-  }
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
 
   const { tableType, schema, plotID, censusID } = await props.params;
 
