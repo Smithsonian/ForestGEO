@@ -54,7 +54,7 @@ describe('NextAuth route (App Router compliant)', () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  it('propagates failures from poll URL during session retrieval', async () => {
+  it('soft-fails poll URL failures into a 200 session with permissionsUnavailable', async () => {
     const mod = await loadRoute<any>(ROUTE_PATH);
     const { GET } = pickHandlers(mod);
     expect(GET).toBeTypeOf('function');
@@ -64,8 +64,13 @@ describe('NextAuth route (App Router compliant)', () => {
     const req = new Request('http://localhost/api/auth/session', { method: 'GET' });
     const res = await GET!(req, { params: { nextauth: ['session'] } });
 
+    // The mock route handler calls the session callback internally then always
+    // returns 200. The key assertion is that a poll-URL failure does NOT bubble
+    // up as a 4xx/5xx — it soft-fails. The callback-level invariant (that the
+    // resulting session carries permissionsUnavailable:true) is covered in
+    // depth by the 'soft-fails permission fetch' test below.
     expect(__auth.spies.fetchMock).toHaveBeenCalledTimes(1);
-    expect([200, 401, 500, 503]).toContain(res.status);
+    expect(res.status).toBe(200);
   });
 
   it('only uses the E2E session shortcut for e2e-credentials tokens', async () => {

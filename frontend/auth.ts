@@ -63,7 +63,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         // closed (redirect to /loginfailed) instead of 500ing every protected
         // page through the duration of the outage.
         console.error('permissions fetch failed; returning empty-permission session', { email, error });
-        session.user.userStatus = undefined as unknown as import('@/config/macros').UserAuthRoles;
+        delete (session.user as Partial<typeof session.user>).userStatus;
         session.user.sites = [];
         session.user.allsites = [];
         session.user.permissionsUnavailable = true;

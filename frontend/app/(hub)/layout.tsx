@@ -93,7 +93,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   // - plotID=0 and censusNumber=0 means "no filter" (fetch all)
   // - schema="" (empty) fetches across all schemas
   const fetchSiteListFn = useCallback(async () => {
-    if (!session) return;
+    if (!session || session.user.permissionsUnavailable) return;
     siteListLoad.setLoading();
     try {
       const sites = session?.user?.allsites ?? [];
@@ -461,7 +461,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             boxSizing: 'border-box'
           }}
         >
-          {session && <>{children}</>}
+          {session && !session.user.permissionsUnavailable && <>{children}</>}
         </Box>
         <Divider orientation="horizontal" />
         <Box
