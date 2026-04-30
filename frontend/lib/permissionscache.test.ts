@@ -145,3 +145,90 @@ describe('permissionscache', () => {
     expect(calledWith).toBe(`${POLL_URL}?email=first.last%2Btag%40example.com`);
   });
 });
+
+describe('permissionscache in-flight dedup', () => {
+  beforeEach(() => {
+    _clearCacheForTest();
+    process.env.AUTH_FUNCTIONS_POLL_URL = POLL_URL;
+  });
+
+  it('dedupes concurrent calls for the same email — fetch invoked once', async () => {
+    const fetchMock = makeFetchOk(SAMPLE_RESPONSE);
+    const promises = Array.from({ length: 10 }, () => getOrFetchPermissions('a@example.com', fetchMock));
+    const results = await Promise.all(promises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // All callers receive the same resolved entry
+    for (const r of results) {
+      expect(r.userStatus).toBe('global');
+    }
+  });
+
+  it('does not dedupe across different emails', async () => {
+    const fetchMock = makeFetchOk(SAMPLE_RESPONSE);
+    const promises = Array.from({ length: 5 }, (_, i) => getOrFetchPermissions(`u${i}@example.com`, fetchMock));
+    await Promise.all(promises);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it('clears in-flight on rejection so subsequent calls retry instead of seeing a stuck rejection', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return new Response('boom', { status: 500 });
+      }
+      return new Response(JSON.stringify(SAMPLE_RESPONSE), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(getOrFetchPermissions('r@example.com', fetchImpl)).rejects.toThrow();
+    // Second call must retry — if the in-flight map kept the rejected promise,
+    // this would re-throw without ever calling fetch a second time.
+    const result = await getOrFetchPermissions('r@example.com', fetchImpl);
+    expect(result.userStatus).toBe('global');
+    expect(calls).toBe(2);
+  });
+
+  it('concurrent callers all receive the same rejection from a failed in-flight fetch', async () => {
+    const fetchMock = makeFetchErr(503);
+    const promises = Array.from({ length: 5 }, () => getOrFetchPermissions('x@example.com', fetchMock).catch(e => e));
+    const errors = await Promise.all(promises);
+    // All five resolved with rejection (caught above) — confirms a single shared rejection
+    for (const e of errors) {
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).message).toMatch(/503/);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('permissionscache email key normalization', () => {
+  beforeEach(() => {
+    _clearCacheForTest();
+    process.env.AUTH_FUNCTIONS_POLL_URL = POLL_URL;
+  });
+
+  it('treats different cases of the same email as one cache entry', async () => {
+    const fetchMock = makeFetchOk(SAMPLE_RESPONSE);
+    await getOrFetchPermissions('User@Example.com', fetchMock);
+    await getOrFetchPermissions('user@example.com', fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('trims whitespace before keying', async () => {
+    const fetchMock = makeFetchOk(SAMPLE_RESPONSE);
+    await getOrFetchPermissions('  user@example.com  ', fetchMock);
+    await getOrFetchPermissions('user@example.com', fetchMock);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidatePermissions and getCachedPermissions are case-insensitive', () => {
+    const seed: CachedPermissions = { userStatus: 'global', sites: [], allsites: [], expiresAt: Date.now() + 60_000 };
+    _seedCacheForTest('User@Example.com', seed);
+    expect(getCachedPermissions('user@example.com')).not.toBeNull();
+    invalidatePermissions('USER@EXAMPLE.COM');
+    expect(getCachedPermissions('user@example.com')).toBeNull();
+  });
+});

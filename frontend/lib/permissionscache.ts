@@ -46,12 +46,18 @@ function readTtlMs(): number {
 }
 
 const cache = new Map<string, CachedPermissions>();
+const inflight = new Map<string, Promise<CachedPermissions>>();
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export function getCachedPermissions(email: string): CachedPermissions | null {
-  const entry = cache.get(email);
+  const key = normalizeEmail(email);
+  const entry = cache.get(key);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
-    cache.delete(email);
+    cache.delete(key);
     return null;
   }
   return entry;
@@ -60,9 +66,12 @@ export function getCachedPermissions(email: string): CachedPermissions | null {
 export function invalidatePermissions(email?: string): void {
   if (email === undefined) {
     cache.clear();
+    inflight.clear();
     return;
   }
-  cache.delete(email);
+  const key = normalizeEmail(email);
+  cache.delete(key);
+  inflight.delete(key);
 }
 
 // Internal: do the network fetch and shape the response into a cache entry.
@@ -96,19 +105,37 @@ async function fetchAndShape(email: string, fetchImpl: typeof fetch): Promise<Ca
 }
 
 export async function getOrFetchPermissions(email: string, fetchImpl: typeof fetch = fetch): Promise<CachedPermissions> {
-  const cached = getCachedPermissions(email);
+  const key = normalizeEmail(email);
+  const cached = getCachedPermissions(key);
   if (cached) return cached;
-  const fresh = await fetchAndShape(email, fetchImpl);
-  cache.set(email, fresh);
-  return fresh;
+
+  const existing = inflight.get(key);
+  if (existing) return existing;
+
+  // Important: clear the in-flight entry whether the fetch resolved or
+  // rejected. Without the .finally, a rejected promise would stay parked
+  // and every subsequent caller for this email would see the same stuck
+  // rejection until the cache eventually got invalidated some other way.
+  const pending = fetchAndShape(key, fetchImpl)
+    .then(fresh => {
+      cache.set(key, fresh);
+      return fresh;
+    })
+    .finally(() => {
+      inflight.delete(key);
+    });
+
+  inflight.set(key, pending);
+  return pending;
 }
 
 // Test seam: lets tests inject entries deterministically without going through
 // the network. Not part of the production API.
 export function _seedCacheForTest(email: string, entry: CachedPermissions): void {
-  cache.set(email, entry);
+  cache.set(normalizeEmail(email), entry);
 }
 
 export function _clearCacheForTest(): void {
   cache.clear();
+  inflight.clear();
 }
