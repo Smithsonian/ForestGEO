@@ -46,21 +46,27 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       // cost across all requests within the TTL window — without this, the
       // session callback ran the fetch on every authenticated API call because
       // sites/allsites are not persisted on the JWT.
+      const email = token.email as string | undefined;
+      if (!email) {
+        // Hard fail: a JWT without email indicates a malformed or tampered
+        // token, not a transient external problem.
+        throw new Error('JWT has no email — cannot resolve permissions');
+      }
       try {
-        const email = token.email as string | undefined;
-        if (!email) {
-          throw new Error('JWT has no email — cannot resolve permissions');
-        }
         const permissions = await getOrFetchPermissions(email);
         session.user.userStatus = permissions.userStatus;
         session.user.sites = permissions.sites;
         session.user.allsites = permissions.allsites;
       } catch (error) {
-        console.error('Error fetching user data:', {
-          email: token.email,
-          error
-        });
-        throw error;
+        // Soft fail: the auth Azure Function rejected or timed out. Return
+        // a session marked permissionsUnavailable so the hub layout can fail
+        // closed (redirect to /loginfailed) instead of 500ing every protected
+        // page through the duration of the outage.
+        console.error('permissions fetch failed; returning empty-permission session', { email, error });
+        session.user.userStatus = undefined as unknown as import('@/config/macros').UserAuthRoles;
+        session.user.sites = [];
+        session.user.allsites = [];
+        session.user.permissionsUnavailable = true;
       }
       return session;
     }

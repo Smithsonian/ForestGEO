@@ -118,6 +118,52 @@ describe('NextAuth route (App Router compliant)', () => {
     }
   });
 
+  it('soft-fails permission fetch into a permissions-unavailable session (does not throw)', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+    expect(cfg?.callbacks?.session).toBeTypeOf('function');
+
+    __auth.pushFetchFail(503, { error: 'auth function down' });
+
+    const result = await cfg.callbacks.session({
+      session: { user: { email: 'transient-failure@example.com' } },
+      token: { email: 'transient-failure@example.com', isE2ETestUser: false }
+    });
+
+    expect(result.user.email).toBe('transient-failure@example.com');
+    expect(result.user.userStatus).toBeUndefined();
+    expect(result.user.sites).toEqual([]);
+    expect(result.user.allsites).toEqual([]);
+    expect(result.user.permissionsUnavailable).toBe(true);
+  });
+
+  it('does NOT mark permissionsUnavailable on the success path', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+
+    __auth.pushFetchOk(__auth.makeSessionOkPayload());
+
+    const result = await cfg.callbacks.session({
+      session: { user: { email: 'happy@example.com' } },
+      token: { email: 'happy@example.com', isE2ETestUser: false }
+    });
+
+    expect(result.user.permissionsUnavailable).toBeUndefined();
+    expect(result.user.userStatus).toBeDefined();
+  });
+
+  it('still throws when JWT has no email (tampered or malformed)', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+
+    await expect(
+      cfg.callbacks.session({
+        session: { user: {} },
+        token: { isE2ETestUser: false }
+      })
+    ).rejects.toThrow(/email/i);
+  });
+
   it('handles signin POST', async () => {
     const mod = await loadRoute<any>(ROUTE_PATH);
     const { POST } = pickHandlers(mod);

@@ -23,7 +23,7 @@ export function requireAdmin(session: Session | null): NextResponse | null {
   const sessionError = requireSession(session);
   if (sessionError) return sessionError;
   const role = session!.user.userStatus;
-  if (!ADMIN_ROLES.has(role)) {
+  if (!role || !ADMIN_ROLES.has(role)) {
     return NextResponse.json({ error: 'forbidden — admin role required' }, { status: HTTP_FORBIDDEN });
   }
   return null;

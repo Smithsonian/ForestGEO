@@ -9,12 +9,16 @@ declare module 'next-auth' {
    */
   interface Session {
     user: {
-      userStatus: UserAuthRoles;
+      userStatus?: UserAuthRoles;
       name?: string;
       email?: string;
       image?: string;
       sites: SitesRDS[];
       allsites: SitesRDS[];
+      /** Set to true when the session callback could not resolve permissions
+       *  from the auth function (transient failure). The hub layout treats
+       *  this as fail-closed and redirects instead of rendering a broken UI. */
+      permissionsUnavailable?: boolean;
     };
   }
 

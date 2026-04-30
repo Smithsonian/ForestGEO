@@ -212,6 +212,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     preventDuplicates: true
   });
 
+  useEffect(() => {
+    if (session?.user?.permissionsUnavailable) {
+      redirect('/loginfailed?reason=permissions-unavailable');
+    }
+  }, [session?.user?.permissionsUnavailable]);
+
   // Fetch site list after hydration when session exists
   // IMPORTANT: Wait for Zustand hydration before fetching to avoid race conditions
   useEffect(() => {
