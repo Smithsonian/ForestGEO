@@ -1,57 +1,51 @@
 /**
- * Middleware to handle authentication for Next.js requests.
+ * Edge-runtime authentication gate.
  *
- * Redirects unauthenticated users to the login page if trying to access protected routes.
- * Redirects authenticated users to the dashboard page from the home page.
- * Allows the request to continue if no redirect conditions are met.
+ * Imports ONLY the lightweight auth.config (no DB mappers, no App Insights,
+ * no Node-only modules). NextAuth v5's documented split: middleware uses
+ * auth.config; full callbacks live in auth.ts and run in Node-runtime
+ * route handlers / server components.
+ *
+ * Behavior:
+ * - /api/health and /api/customsignin are public.
+ * - In E2E mode (NEXT_PUBLIC_E2E_TESTING=true AND NODE_ENV !== 'production')
+ *   middleware is bypassed so Cypress can mock auth client-side.
+ * - Unauthenticated requests to protected pages → redirect to /login.
+ * - Authenticated requests to / → redirect to /dashboard.
+ * - Otherwise → continue.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
 import NextAuth from 'next-auth';
+import { NextResponse } from 'next/server';
 import authConfig from './auth.config';
 
-const { auth: nextAuthMiddleware } = NextAuth(authConfig);
+const { auth } = NextAuth(authConfig);
 
-export default auth(async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+export default auth(req => {
+  const { pathname } = req.nextUrl;
 
-  // Health check endpoint must be publicly accessible for deployment verification
   if (pathname === '/api/health') return NextResponse.next();
-
   if (pathname.includes('/api/customsignin')) return NextResponse.next();
 
-  // E2E TESTING BYPASS
-  // When running Cypress E2E tests, skip authentication middleware
-  // This allows E2E tests to mock authentication client-side with cy.intercept()
   if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production') {
-    console.log('[E2E MODE] Middleware auth bypass active');
     return NextResponse.next();
   }
 
-  const url = request.nextUrl.clone();
-  const session = await nextAuthMiddleware(); // Fetch session once
+  const url = req.nextUrl.clone();
+  const isAuthenticated = !!req.auth;
+  const isProtectedPage = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => pathname.startsWith(route));
 
-  const isAuthenticated = !!session;
-  const isProtectedRoute = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => url.pathname.startsWith(route));
-
-  if (isProtectedRoute && !isAuthenticated) {
-    // Redirect unauthenticated users trying to access protected routes
-    if (url.pathname !== '/login') {
+  if (isProtectedPage && !isAuthenticated) {
+    if (pathname !== '/login') {
       url.pathname = '/login';
       return NextResponse.redirect(url);
     }
-  } else if (url.pathname === '/') {
-    // Redirect from home to dashboard if authenticated, otherwise to login
-    if (isAuthenticated) {
-      url.pathname = '/dashboard';
-    } else {
-      url.pathname = '/login';
-    }
+  } else if (pathname === '/') {
+    url.pathname = isAuthenticated ? '/dashboard' : '/login';
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next(); // Allow request to continue if no conditions are met
+  return NextResponse.next();
 });
 
 export const config = {
