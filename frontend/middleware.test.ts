@@ -27,19 +27,26 @@ function makeRequest(pathname: string, authed = false): NextRequest {
 describe('middleware', () => {
   beforeEach(() => vi.resetModules());
 
-  it('does not import @/auth (the heavy Node-runtime auth)', async () => {
+  it('does not import Node-only modules (@/auth, @/ailogger, @/lib/permissionscache, @/config/datamapper)', async () => {
     const middlewarePath = path.resolve(__dirname, 'middleware.ts');
     const fileContents = await fs.readFile(middlewarePath, 'utf8');
     expect(fileContents).not.toMatch(/from '@\/auth'/);
     expect(fileContents).not.toMatch(/from '@\/ailogger'/);
     expect(fileContents).not.toMatch(/from '@\/lib\/permissionscache'/);
+    expect(fileContents).not.toMatch(/from '@\/config\/datamapper'/);
   });
 
   it('lets /api/health through unauthenticated', async () => {
-    const mod = await import('./middleware');
-    const req = makeRequest('/api/health', false);
-    const res = await mod.default(req as any);
-    expect(res?.status).not.toBe(307); // not a redirect
+    const savedE2E = process.env.NEXT_PUBLIC_E2E_TESTING;
+    process.env.NEXT_PUBLIC_E2E_TESTING = 'false';
+    try {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/health', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(200);
+    } finally {
+      process.env.NEXT_PUBLIC_E2E_TESTING = savedE2E;
+    }
   });
 
   it('redirects unauthenticated /dashboard to /login', async () => {

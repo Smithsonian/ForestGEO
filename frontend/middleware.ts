@@ -36,10 +36,8 @@ export default auth(req => {
   const isProtectedPage = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => pathname.startsWith(route));
 
   if (isProtectedPage && !isAuthenticated) {
-    if (pathname !== '/login') {
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
-    }
+    url.pathname = '/login';
+    return NextResponse.redirect(url);
   } else if (pathname === '/') {
     url.pathname = isAuthenticated ? '/dashboard' : '/login';
     return NextResponse.redirect(url);
