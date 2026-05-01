@@ -18,6 +18,12 @@ describe('requireSession', () => {
   it('returns 401 when session has no user', () => {
     expect(requireSession({} as any)?.status).toBe(401);
   });
+
+  it('returns 503 when permissions could not be verified', async () => {
+    const res = requireSession({ user: { email: 'u@example.com', permissionsUnavailable: true, sites: [], allsites: [] } } as any);
+    expect(res?.status).toBe(503);
+    await expect(res!.json()).resolves.toEqual({ error: 'permissions unavailable' });
+  });
 });
 
 describe('requireAdmin', () => {
@@ -51,5 +57,10 @@ describe('requireAdmin', () => {
   it('returns 401 when session is null', () => {
     const res = requireAdmin(null);
     expect(res?.status).toBe(401);
+  });
+
+  it('returns 503 when admin permissions could not be verified', () => {
+    const res = requireAdmin({ user: { email: 'a@example.com', permissionsUnavailable: true, sites: [], allsites: [] } } as any);
+    expect(res?.status).toBe(503);
   });
 });
