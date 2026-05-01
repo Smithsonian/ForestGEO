@@ -5,17 +5,37 @@ import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
+import { auth } from '@/auth';
+import { requireAdmin } from '@/lib/auth-helpers';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
-  const connectionManager = ConnectionManager.getInstance();
+function getValidatedSchema(request: NextRequest): string | NextResponse {
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('No schema variable provided!');
+  if (!schema) {
+    return NextResponse.json({ error: 'No schema variable provided' }, { status: HTTPResponses.INVALID_REQUEST });
+  }
   try {
-    const query = `SELECT * FROM ${schema}.sitespecificvalidations;`;
+    validateSchemaOrThrow(schema);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Invalid schema';
+    return NextResponse.json({ error: message }, { status: HTTPResponses.INVALID_REQUEST });
+  }
+  return schema;
+}
+
+export async function GET(request: NextRequest) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
+  const connectionManager = ConnectionManager.getInstance();
+  const schema = getValidatedSchema(request);
+  if (typeof schema !== 'string') return schema;
+  try {
+    const query = format('SELECT * FROM ??.sitespecificvalidations;', [schema]);
     const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('sitespecificvalidations').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
@@ -27,9 +47,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const validationProcedure: ValidationProceduresRDS = await request.json();
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('No schema variable provided!');
+  const schema = getValidatedSchema(request);
+  if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
@@ -56,9 +79,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const validationProcedure: ValidationProceduresRDS = await request.json();
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('No schema variable provided!');
+  const schema = getValidatedSchema(request);
+  if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
@@ -84,9 +110,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const validationProcedure: ValidationProceduresRDS = await request.json();
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('No schema variable provided!');
+  const schema = getValidatedSchema(request);
+  if (typeof schema !== 'string') return schema;
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
