@@ -22,6 +22,10 @@ import authConfig from './auth.config';
 
 const { auth } = NextAuth(authConfig);
 
+function isPathOrChild(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
 export default auth(req => {
   const { pathname } = req.nextUrl;
 
@@ -33,7 +37,7 @@ export default auth(req => {
   // /api/health: deployment health check.
   // /api/auth/*: NextAuth's own sign-in/callback handlers.
   // /api/customsignin: legacy custom sign-in path.
-  const isPublicApi = pathname === '/api/health' || pathname.startsWith('/api/auth') || pathname.startsWith('/api/customsignin');
+  const isPublicApi = pathname === '/api/health' || isPathOrChild(pathname, '/api/auth') || isPathOrChild(pathname, '/api/customsignin');
   if (isPublicApi) return NextResponse.next();
 
   const isApi = pathname.startsWith('/api/');

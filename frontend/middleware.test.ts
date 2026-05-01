@@ -105,6 +105,15 @@ describe('middleware /api/* gating', () => {
     });
   });
 
+  it('does not treat auth-prefixed APIs as public unless they are /api/auth children', async () => {
+    await withE2EDisabled(async () => {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/authentication/status', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(401);
+    });
+  });
+
   it('lets authenticated /api/cleanup through', async () => {
     await withE2EDisabled(async () => {
       const mod = await import('./middleware');
