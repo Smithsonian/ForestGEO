@@ -56,10 +56,10 @@ describe('LoginFailed - Functional Tests', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Rendering with Custom Failure Reason', () => {
+  describe('Rendering with Reason Slugs', () => {
     it('MUST render error heading', () => {
       mockUseSearchParams.mockReturnValue({
-        get: vi.fn().mockReturnValue('Invalid credentials')
+        get: vi.fn().mockReturnValue('permissions-unavailable')
       });
 
       render(<LoginFailed />);
@@ -67,24 +67,29 @@ describe('LoginFailed - Functional Tests', () => {
       expect(screen.getByRole('heading', { name: /oops! login failed/i })).toBeInTheDocument();
     });
 
-    it('MUST display custom failure reason from URL params', () => {
+    it('MUST display friendly message for permissions-unavailable slug', () => {
       mockUseSearchParams.mockReturnValue({
-        get: vi.fn().mockReturnValue('Invalid credentials')
+        get: vi.fn().mockReturnValue('permissions-unavailable')
       });
 
       render(<LoginFailed />);
 
-      expect(screen.getByText(/failure caused due to invalid credentials/i)).toBeInTheDocument();
+      expect(screen.getByText(/could not reach the authentication service/i)).toBeInTheDocument();
+      // Raw slug must NOT appear in the DOM — only the friendly mapped message.
+      expect(screen.queryByText(/permissions-unavailable/i)).not.toBeInTheDocument();
     });
 
-    it('MUST display different custom failure reason', () => {
+    it('MUST fall through to default message for unknown reason slug', () => {
       mockUseSearchParams.mockReturnValue({
-        get: vi.fn().mockReturnValue('Account locked')
+        get: vi.fn().mockReturnValue('some-unmapped-slug')
       });
 
       render(<LoginFailed />);
 
-      expect(screen.getByText(/failure caused due to account locked/i)).toBeInTheDocument();
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
+      // The raw slug is never reflected to the user — protects against
+      // attacker-controlled query params being shown verbatim.
+      expect(screen.queryByText(/some-unmapped-slug/i)).not.toBeInTheDocument();
     });
 
     it('MUST display help text', () => {
@@ -240,7 +245,7 @@ describe('LoginFailed - Functional Tests', () => {
       consoleErrorSpy.mockRestore();
     });
 
-    it('MUST handle very long failure reasons', () => {
+    it('MUST not echo long failure reasons (avoids reflection / DoS)', () => {
       const longReason = 'A'.repeat(500);
       mockUseSearchParams.mockReturnValue({
         get: vi.fn().mockReturnValue(longReason)
@@ -248,17 +253,25 @@ describe('LoginFailed - Functional Tests', () => {
 
       render(<LoginFailed />);
 
-      expect(screen.getByText(new RegExp(longReason))).toBeInTheDocument();
+      // Long arbitrary strings are unmapped; the modal shows the default
+      // message instead of reflecting the raw input back.
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
+      expect(screen.queryByText(new RegExp(longReason))).not.toBeInTheDocument();
     });
 
-    it('MUST handle special characters in failure reason', () => {
+    it('MUST not echo HTML/script content from failure reason (XSS protection)', () => {
       mockUseSearchParams.mockReturnValue({
         get: vi.fn().mockReturnValue('<script>alert("test")</script>')
       });
 
       render(<LoginFailed />);
 
-      expect(screen.getByText(/<script>alert\("test"\)<\/script>/)).toBeInTheDocument();
+      // The modal must not reflect attacker-controlled query content. Even
+      // though React would escape the markup, never rendering it at all
+      // closes both the visual-confusion vector and any future regression
+      // where a maintainer routes the reason through dangerouslySetInnerHTML.
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
+      expect(screen.queryByText(/<script>alert\("test"\)<\/script>/)).not.toBeInTheDocument();
     });
   });
 
@@ -345,16 +358,17 @@ describe('LoginFailed - Functional Tests', () => {
       expect(firstRender).toBe(secondRender);
     });
 
-    it('MUST handle re-renders with different failure reasons', () => {
-      const mockGet = vi.fn().mockReturnValue('First reason');
+    it('MUST handle re-renders with different reason slugs', () => {
+      const mockGet = vi.fn().mockReturnValue('permissions-unavailable');
       mockUseSearchParams.mockReturnValue({ get: mockGet });
 
       const { rerender } = render(<LoginFailed />);
-      expect(screen.getByText(/first reason/i)).toBeInTheDocument();
+      expect(screen.getByText(/could not reach the authentication service/i)).toBeInTheDocument();
 
-      mockGet.mockReturnValue('Second reason');
+      // Re-render with an unknown slug; modal swaps to the default message.
+      mockGet.mockReturnValue('something-else');
       rerender(<LoginFailed />);
-      expect(screen.getByText(/second reason/i)).toBeInTheDocument();
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
     });
   });
 
@@ -398,7 +412,8 @@ describe('LoginFailed - Functional Tests', () => {
       render(<LoginFailed />);
 
       const mainHeading = screen.getByRole('heading', { name: /oops! login failed/i });
-      const reasonText = screen.getByText(/failure caused due to/i);
+      // 'Test reason' is an unknown slug → default message renders.
+      const reasonText = screen.getByText(/login failure triggered without reason/i);
       const helpText = screen.getByText(/we couldn't log you in/i);
 
       expect(mainHeading).toHaveClass(/MuiTypography/);
@@ -448,25 +463,28 @@ describe('LoginFailed - Functional Tests', () => {
       expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
     });
 
-    it('MUST handle failure reason with newlines', () => {
+    it('MUST not echo failure reason with newlines (unmapped → default)', () => {
       mockUseSearchParams.mockReturnValue({
         get: vi.fn().mockReturnValue('Line 1\nLine 2\nLine 3')
       });
 
       render(<LoginFailed />);
 
-      expect(screen.getByText(/line 1/i)).toBeInTheDocument();
+      // Multi-line input is an unknown slug; modal shows default, not the
+      // attacker-controlled content.
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
+      expect(screen.queryByText(/line 1/i)).not.toBeInTheDocument();
     });
 
-    it('MUST handle failure reason with only whitespace', () => {
+    it('MUST handle failure reason with only whitespace as default', () => {
       mockUseSearchParams.mockReturnValue({
         get: vi.fn().mockReturnValue('   ')
       });
 
       render(<LoginFailed />);
 
-      // Whitespace is treated as a valid reason and gets displayed
-      expect(screen.getByText(/failure caused due to/i)).toBeInTheDocument();
+      // Whitespace-only is unmapped → default message.
+      expect(screen.getByText(/login failure triggered without reason/i)).toBeInTheDocument();
     });
   });
 });
