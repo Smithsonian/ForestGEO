@@ -15,6 +15,7 @@ import { SpeciesNotFoundError } from '@/config/editplan/rules/context';
 import { assertCanEditMeasurementScope, assertNoActiveMeasurementScopeConflict, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import { requireSession } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
 
@@ -31,9 +32,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const tEntry = performance.now();
   const session = await auth();
   const tAuth = performance.now();
-  if (!session) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
-  }
+  const authError = requireSession(session);
+  if (authError) return authError;
 
   let rawBody: unknown;
   try {
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid schema' }, { status: HTTPResponses.BAD_REQUEST });
   }
   try {
-    assertSessionMayEdit(session);
+    assertSessionMayEdit(session!);
   } catch (err) {
     if (err instanceof PendingUserEditForbiddenError) {
       return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: HTTPResponses.FORBIDDEN });
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const cm = ConnectionManager.getInstance();
   const t0 = performance.now();
   try {
-    await assertCanEditMeasurementScope(cm, session, {
+    await assertCanEditMeasurementScope(cm, session!, {
       schema: body.schema,
       plotID: body.plotID,
       censusID: body.censusID
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const tScopeProbe = performance.now();
 
     const plan = await analyzeEdit(cm, body.schema, body.dataType, body.plotID, body.censusID, body.targetID, body.newRow, undefined, {
-      role: session.user.userStatus
+      role: session!.user.userStatus
     });
     const tAnalyze = performance.now();
     ailogger.info('preview-timing', {

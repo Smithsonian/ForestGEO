@@ -16,6 +16,7 @@ import { applyEdit, HashDriftError, ScopeLockHeldError, SessionExpiredError } fr
 import { assertCanEditMeasurementScope, ScopeAccessError, ScopeBusyError } from '@/config/editplan/scopeguard';
 import { InvalidClearError, InvalidFieldValueError } from '@/config/editplan/fieldpolicy';
 import { assertSessionMayEdit, createFreshAuthorizationCheck, PendingUserEditForbiddenError } from '@/config/editplan/authorization';
+import { requireSession } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
 
@@ -31,9 +32,8 @@ const ApplyBody = z.object({
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await auth();
-  if (!session) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
-  }
+  const authError = requireSession(session);
+  if (authError) return authError;
 
   let rawBody: unknown;
   try {
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid schema' }, { status: HTTPResponses.BAD_REQUEST });
   }
   try {
-    assertSessionMayEdit(session);
+    assertSessionMayEdit(session!);
   } catch (err) {
     if (err instanceof PendingUserEditForbiddenError) {
       return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: HTTPResponses.FORBIDDEN });
@@ -60,11 +60,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     throw err;
   }
 
-  const createdBy = session.user?.email ?? session.user?.name ?? 'unknown';
+  const createdBy = session!.user?.email ?? session!.user?.name ?? 'unknown';
 
   const cm = ConnectionManager.getInstance();
   try {
-    await assertCanEditMeasurementScope(cm, session, {
+    await assertCanEditMeasurementScope(cm, session!, {
       schema: body.schema,
       plotID: body.plotID,
       censusID: body.censusID
@@ -79,8 +79,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       newRow: body.newRow,
       expectedPlanHash: body.planHash,
       createdBy,
-      role: session.user.userStatus,
-      assertAuthorizationFresh: createFreshAuthorizationCheck(session, {
+      role: session!.user.userStatus,
+      assertAuthorizationFresh: createFreshAuthorizationCheck(session!, {
         schema: body.schema,
         plotID: body.plotID,
         censusID: body.censusID

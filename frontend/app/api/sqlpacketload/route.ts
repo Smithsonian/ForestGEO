@@ -18,6 +18,7 @@ import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessi
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
+import { requireSession } from '@/lib/auth-helpers';
 
 /**
  * Generate idempotency key for a batch of data
@@ -1003,15 +1004,10 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
   // Authentication check
   const session = await auth();
-  if (!session?.user) {
+  const authError = requireSession(session);
+  if (authError) {
     ailogger.warn('Unauthorized upload attempt - no session');
-    return new NextResponse(
-      JSON.stringify({
-        responseMessage: 'Unauthorized - authentication required',
-        error: 'You must be logged in to upload data'
-      }),
-      { status: HTTPResponses.UNAUTHORIZED }
-    );
+    return authError;
   }
 
   let body;

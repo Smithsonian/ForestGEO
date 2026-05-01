@@ -27,6 +27,7 @@ import {
   isResolvableMeasurement,
   loadMeasurementsByCoreID
 } from '../shared/matchdiff';
+import { requireSession } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
 
@@ -609,9 +610,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   ailogger.info(`${logPrefix} auth start`);
   const session = await auth();
   ailogger.info(`${logPrefix} auth complete in ${Date.now() - authStartedAt}ms`);
-  if (!session?.user) {
+  const authError = requireSession(session);
+  if (authError) {
     ailogger.warn(`${logPrefix} unauthorized after ${Date.now() - requestStartedAt}ms`);
-    return NextResponse.json({ error: 'Unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
+    return authError;
   }
 
   let body: ApplyRequest;
@@ -695,7 +697,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
   try {
-    assertSessionMayEdit(session);
+    assertSessionMayEdit(session!);
   } catch (error) {
     if (error instanceof PendingUserEditForbiddenError) {
       return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: HTTPResponses.FORBIDDEN });
@@ -706,7 +708,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    await assertCanEditMeasurementScope(connectionManager, session, {
+    await assertCanEditMeasurementScope(connectionManager, session!, {
       schema,
       plotID: normalizedPlotID,
       censusID: normalizedCensusID
@@ -727,8 +729,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const transactionStartedAt = Date.now();
     ailogger.info(`${logPrefix} transaction requested for schema=${schema} plot=${normalizedPlotID} census=${normalizedCensusID}`);
-    const createdBy = session.user.email ?? session.user.name ?? 'revision-apply';
-    const assertAuthorizationFresh = createFreshAuthorizationCheck(session, {
+    const createdBy = session!.user.email ?? session!.user.name ?? 'revision-apply';
+    const assertAuthorizationFresh = createFreshAuthorizationCheck(session!, {
       schema,
       plotID: normalizedPlotID,
       censusID: normalizedCensusID
@@ -780,7 +782,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         normalizedCensusID,
         buildBulkInputForApply(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows, effectiveInvalidRows, effectiveDuplicates),
         transactionID,
-        { role: session.user.userStatus }
+        { role: session!.user.userStatus }
       );
 
       // Keep apply-time demotion in the same survivor-only shape as the match
@@ -800,13 +802,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           normalizedCensusID,
           buildBulkInputForApply(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows, effectiveInvalidRows, effectiveDuplicates),
           transactionID,
-          { role: session.user.userStatus }
+          { role: session!.user.userStatus }
         );
       }
 
       const freshPlan = applyRevisionRolePolicy(
         baseFreshPlan,
-        session.user.userStatus,
+        session!.user.userStatus,
         buildRevisionRoleFieldCandidates(effectiveMatchedRowsWithDiff, normalizedNewRows.newRows)
       );
       assertBulkPlanCanApply(freshPlan);
@@ -846,7 +848,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           writeLedger: false,
           refreshViews: false,
           createdBy,
-          role: session.user.userStatus,
+          role: session!.user.userStatus,
           transactionID,
           schemaEnsured: true
         });

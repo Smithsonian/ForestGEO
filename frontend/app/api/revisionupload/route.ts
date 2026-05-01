@@ -24,6 +24,7 @@ import {
   MatchStrategy,
   normalizeDateToString
 } from './shared/matchdiff';
+import { requireSession } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
 
@@ -463,9 +464,8 @@ async function classifyFileRows(
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
-  }
+  const authError = requireSession(session);
+  if (authError) return authError;
 
   let body: RevisionUploadRequest;
   try {
@@ -493,7 +493,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid schema' }, { status: HTTPResponses.INVALID_REQUEST });
   }
   try {
-    assertSessionMayEdit(session);
+    assertSessionMayEdit(session!);
   } catch (error) {
     if (error instanceof PendingUserEditForbiddenError) {
       return NextResponse.json({ error: 'pending users cannot edit measurements' }, { status: 403 });
@@ -523,7 +523,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const invalidRows: RevisionInvalidRow[] = [];
 
   try {
-    await assertCanEditMeasurementScope(connectionManager, session, {
+    await assertCanEditMeasurementScope(connectionManager, session!, {
       schema,
       plotID: normalizedPlotID,
       censusID: normalizedCensusID
@@ -552,7 +552,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       normalizedCensusID,
       buildBulkInput(matchedRows, newRows, invalidRows),
       undefined,
-      { role: session.user.userStatus }
+      { role: session!.user.userStatus }
     );
 
     // analyzeBulk may demote individual matched rows to status:'invalid'
@@ -591,11 +591,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         normalizedCensusID,
         buildBulkInput(matchedRows, newRows, invalidRows),
         undefined,
-        { role: session.user.userStatus }
+        { role: session!.user.userStatus }
       );
     }
 
-    const bulkPlan = applyRevisionRolePolicy(baseBulkPlan, session.user.userStatus, buildRevisionRoleFieldCandidates(matchedRows, newRows));
+    const bulkPlan = applyRevisionRolePolicy(baseBulkPlan, session!.user.userStatus, buildRevisionRoleFieldCandidates(matchedRows, newRows));
 
     const response: RevisionUploadResponse = {
       matchedRows,
