@@ -5,7 +5,10 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { getContainerNameWithFallback } from '@/config/macros/containernames';
 import { auth } from '@/auth';
+import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
+import { isValidSchema } from '@/config/utils/sqlsecurity';
 import path from 'path';
+import type { Session } from 'next-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -42,6 +45,7 @@ const VALID_OPERATIONS: Record<string, FileOperation> = {
 } as const;
 
 interface FileOperationParams {
+  schema?: string;
   container?: string;
   legacyContainer?: string;
   filename?: string;
@@ -53,6 +57,85 @@ interface FileOperationParams {
   formType?: string;
 }
 
+interface AuthorizedFileScope {
+  userId: string;
+  primaryContainer: string;
+  legacyContainer?: string;
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function hasSchemaAccess(session: Session, schema: string): boolean {
+  const role = session.user?.userStatus;
+  if (role === 'global' || role === 'db admin') return true;
+  return (session.user?.sites ?? []).some(site => site.schemaName === schema);
+}
+
+function normalizeContainerName(containerName: string | undefined): string | undefined {
+  return containerName?.trim().toLowerCase();
+}
+
+function requestedContainersMatchScope(params: FileOperationParams, scope: Pick<AuthorizedFileScope, 'primaryContainer' | 'legacyContainer'>): boolean {
+  const allowed = new Set([scope.primaryContainer, scope.legacyContainer].filter((name): name is string => Boolean(name)).map(name => name.toLowerCase()));
+  const requested = [params.container, params.legacyContainer].map(normalizeContainerName).filter((name): name is string => Boolean(name));
+  return requested.every(containerName => allowed.has(containerName));
+}
+
+function authorizeFileScope(session: Session, params: FileOperationParams): AuthorizedFileScope | NextResponse {
+  const { schema } = params;
+  if (!schema) {
+    return new NextResponse(JSON.stringify({ error: 'Schema is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  if (!isValidSchema(schema)) {
+    ailogger.warn(`Invalid schema provided for file operation: ${schema}`);
+    return new NextResponse(JSON.stringify({ error: 'Invalid schema' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  if (!hasSchemaAccess(session, schema)) {
+    return new NextResponse(JSON.stringify({ error: 'Forbidden - site access required' }), { status: HTTPResponses.FORBIDDEN });
+  }
+
+  const userId = getSessionUserId(session);
+  if (!userId) {
+    return new NextResponse(JSON.stringify({ error: 'Authenticated session has no user identifier' }), { status: HTTPResponses.UNAUTHORIZED });
+  }
+
+  const censusNumber = parsePositiveInteger(params.census);
+  if (!censusNumber) {
+    return new NextResponse(JSON.stringify({ error: 'Census parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  const plotID = parsePositiveInteger(params.plotID);
+  const plotName = params.plotName ?? params.plot;
+  if (!plotID && !plotName) {
+    return new NextResponse(JSON.stringify({ error: 'Either plotID or plotName parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  let containerNames: { primary: string; legacy?: string };
+  try {
+    containerNames = getContainerNameWithFallback(plotID, plotName, censusNumber);
+  } catch (error: any) {
+    return new NextResponse(JSON.stringify({ error: error.message || 'Invalid plot or census identifier' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
+  const scope = {
+    userId,
+    primaryContainer: containerNames.primary.toLowerCase(),
+    legacyContainer: containerNames.legacy?.toLowerCase()
+  };
+
+  if (!requestedContainersMatchScope(params, scope)) {
+    return new NextResponse(JSON.stringify({ error: 'Forbidden - container does not match authorized scope' }), { status: HTTPResponses.FORBIDDEN });
+  }
+
+  return scope;
+}
+
 /**
  * Unified file operations endpoint for Azure Storage
  * Handles upload, download, delete, and list operations
@@ -62,16 +145,18 @@ interface FileOperationParams {
 export async function POST(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
   // Authentication check
   const session = await auth();
-  if (!session?.user) {
-    ailogger.warn('Unauthorized file upload attempt - no session');
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized - authentication required' }), { status: HTTPResponses.UNAUTHORIZED });
-  }
+  const authError = requireSession(session);
+  if (authError) return authError;
 
   const { operation } = await props.params;
 
   if (operation !== 'upload') {
     return new NextResponse(JSON.stringify({ error: 'POST method only supports upload operation' }), { status: HTTPResponses.METHOD_NOT_ALLOWED });
   }
+
+  const params = extractParams(request);
+  const scope = authorizeFileScope(session!, params);
+  if (scope instanceof NextResponse) return scope;
 
   let formData: FormData;
   try {
@@ -83,14 +168,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const params = extractParams(request);
-  const { fileName, plot, census, user, formType } = params;
+  const { fileName, formType } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(formData.get('fileRowErrors') as string) : [];
 
   // Validate required parameters for upload
-  if (!file || !fileName || !plot || !census || !user || !formType) {
-    return new NextResponse(JSON.stringify({ error: 'Missing required parameters: fileName, plot, census, user, formType, and file' }), {
+  if (!file || !fileName || !formType) {
+    return new NextResponse(JSON.stringify({ error: 'Missing required parameters: fileName, formType, and file' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -130,31 +214,23 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     ailogger.warn(`File name sanitized: ${fileName} -> ${sanitizedFileName}`);
   }
 
-  // 5. Validate container name components (plot and census)
-  const plotSanitized = plot.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
-  const censusSanitized = census.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase();
-
-  if (plotSanitized.length === 0 || censusSanitized.length === 0) {
-    return new NextResponse(JSON.stringify({ error: 'Invalid plot or census identifier' }), { status: HTTPResponses.INVALID_REQUEST });
-  }
-
   try {
     // getContainerClient now throws with detailed error messages on failure
-    const containerClient = await getContainerClient(`${plotSanitized}-${censusSanitized}`);
+    const containerClient = await getContainerClient(scope.primaryContainer);
 
     // uploadValidFileAsBuffer now always returns a response or throws
-    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user, formType, fileRowErrors);
+    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, scope.userId, formType, fileRowErrors);
 
     // Verify the response status
     if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
       throw new Error(`Upload failed: Azure returned status ${uploadResponse._response.status}`);
     }
 
-    ailogger.info(`File uploaded successfully: ${sanitizedFileName} by ${session.user.email}`);
+    ailogger.info(`File uploaded successfully: ${sanitizedFileName} by ${scope.userId}`);
     return new NextResponse(JSON.stringify({ message: 'File uploaded successfully' }), { status: HTTPResponses.OK });
   } catch (error: any) {
     // Log the full error for debugging but don't expose details to client
-    ailogger.error(`File upload error for ${sanitizedFileName} (${plotSanitized}/${censusSanitized}): ${error.message}`);
+    ailogger.error(`File upload error for ${sanitizedFileName} (${scope.primaryContainer}): ${error.message}`);
     return new NextResponse(
       JSON.stringify({
         error: 'Failed to upload file',
@@ -172,6 +248,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
 
 // GET: Download file or list files
 export async function GET(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
+  const session = await auth();
+  const authError = requireSession(session);
+  if (authError) return authError;
+
   const { operation } = await props.params;
 
   if (!VALID_OPERATIONS[operation] || !['download', 'list'].includes(operation)) {
@@ -179,11 +259,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ opera
   }
 
   const params = extractParams(request);
+  const scope = authorizeFileScope(session!, params);
+  if (scope instanceof NextResponse) return scope;
 
   if (operation === 'download') {
-    return handleDownload(params);
+    return handleDownload(params, scope);
   } else if (operation === 'list') {
-    return handleList(params);
+    return handleList(scope);
   }
 
   return new NextResponse(JSON.stringify({ error: 'Invalid operation' }), { status: HTTPResponses.INVALID_REQUEST });
@@ -191,6 +273,10 @@ export async function GET(request: NextRequest, props: { params: Promise<{ opera
 
 // DELETE: Delete file
 export async function DELETE(request: NextRequest, props: { params: Promise<{ operation: string }> }) {
+  const session = await auth();
+  const authError = requireSession(session);
+  if (authError) return authError;
+
   const { operation } = await props.params;
 
   if (operation !== 'delete') {
@@ -198,7 +284,9 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ op
   }
 
   const params = extractParams(request);
-  return handleDelete(params);
+  const scope = authorizeFileScope(session!, params);
+  if (scope instanceof NextResponse) return scope;
+  return handleDelete(params, scope);
 }
 
 // Helper function to extract parameters from request
@@ -206,6 +294,7 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
   const searchParams = request.nextUrl.searchParams;
 
   return {
+    schema: searchParams.get('schema')?.trim() || undefined,
     container: searchParams.get('container')?.trim() || undefined,
     legacyContainer: searchParams.get('legacyContainer')?.trim() || undefined,
     filename: searchParams.get('filename')?.trim() || undefined,
@@ -220,18 +309,12 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
 }
 
 // Handle file download with backward compatibility
-async function handleDownload(params: FileOperationParams & { filename?: string }) {
-  const { container, legacyContainer, filename } = params;
+async function handleDownload(params: FileOperationParams & { filename?: string }, scope: AuthorizedFileScope) {
+  const { filename } = params;
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 
   if (!filename || !storageAccountConnectionString) {
     return new NextResponse(JSON.stringify({ error: 'Filename and storage connection string are required' }), {
-      status: HTTPResponses.INVALID_REQUEST
-    });
-  }
-
-  if (!container && !legacyContainer) {
-    return new NextResponse(JSON.stringify({ error: 'Container name is required' }), {
       status: HTTPResponses.INVALID_REQUEST
     });
   }
@@ -242,9 +325,9 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
     let actualContainerName = '';
 
     // Try primary container first
-    if (container) {
-      containerClient = await getContainerClient(container.toLowerCase());
-      actualContainerName = container.toLowerCase();
+    if (scope.primaryContainer) {
+      containerClient = await getContainerClient(scope.primaryContainer);
+      actualContainerName = scope.primaryContainer;
 
       // Check if container exists
       const exists = await containerClient?.exists();
@@ -255,13 +338,13 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
     }
 
     // Fall back to legacy container if primary doesn't exist
-    if (!containerClient && legacyContainer) {
-      containerClient = await getContainerClient(legacyContainer.toLowerCase());
-      actualContainerName = legacyContainer.toLowerCase();
+    if (!containerClient && scope.legacyContainer) {
+      containerClient = await getContainerClient(scope.legacyContainer);
+      actualContainerName = scope.legacyContainer;
 
       const exists = await containerClient?.exists();
       if (!exists) {
-        return new NextResponse(JSON.stringify({ error: `Container not found: ${container || legacyContainer}` }), {
+        return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.primaryContainer}` }), {
           status: HTTPResponses.NOT_FOUND
         });
       }
@@ -309,15 +392,11 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
 }
 
 // Handle file deletion with backward compatibility
-async function handleDelete(params: FileOperationParams & { filename?: string }) {
-  const { container, legacyContainer, filename } = params;
+async function handleDelete(params: FileOperationParams & { filename?: string }, scope: AuthorizedFileScope) {
+  const { filename } = params;
 
   if (!filename) {
     return new NextResponse(JSON.stringify({ error: 'Filename is required' }), { status: HTTPResponses.INVALID_REQUEST });
-  }
-
-  if (!container && !legacyContainer) {
-    return new NextResponse(JSON.stringify({ error: 'Container name is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   try {
@@ -325,9 +404,9 @@ async function handleDelete(params: FileOperationParams & { filename?: string })
     let actualContainerName = '';
 
     // Try primary container first
-    if (container) {
-      containerClient = await getContainerClient(container.toLowerCase());
-      actualContainerName = container.toLowerCase();
+    if (scope.primaryContainer) {
+      containerClient = await getContainerClient(scope.primaryContainer);
+      actualContainerName = scope.primaryContainer;
 
       const exists = await containerClient?.exists();
       if (!exists) {
@@ -337,13 +416,13 @@ async function handleDelete(params: FileOperationParams & { filename?: string })
     }
 
     // Fall back to legacy container if primary doesn't exist
-    if (!containerClient && legacyContainer) {
-      containerClient = await getContainerClient(legacyContainer.toLowerCase());
-      actualContainerName = legacyContainer.toLowerCase();
+    if (!containerClient && scope.legacyContainer) {
+      containerClient = await getContainerClient(scope.legacyContainer);
+      actualContainerName = scope.legacyContainer;
 
       const exists = await containerClient?.exists();
       if (!exists) {
-        return new NextResponse(JSON.stringify({ error: `Container not found: ${container || legacyContainer}` }), {
+        return new NextResponse(JSON.stringify({ error: `Container not found: ${scope.primaryContainer}` }), {
           status: HTTPResponses.NOT_FOUND
         });
       }
@@ -372,37 +451,21 @@ async function handleDelete(params: FileOperationParams & { filename?: string })
 }
 
 // Handle file listing with backward compatibility
-async function handleList(params: FileOperationParams) {
-  const { plotID, plotName, census } = params;
-
-  if (!census) {
-    return new NextResponse(JSON.stringify({ error: 'Census parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
-  }
-
-  if (!plotID && !plotName) {
-    return new NextResponse(JSON.stringify({ error: 'Either plotID or plotName parameter is required' }), { status: HTTPResponses.INVALID_REQUEST });
-  }
-
+async function handleList(scope: AuthorizedFileScope) {
   try {
-    // Generate container names with fallback
-    const censusNum = parseInt(census, 10);
-    const plotIdNum = plotID ? parseInt(plotID, 10) : undefined;
-
-    const { primary, legacy } = getContainerNameWithFallback(plotIdNum, plotName, censusNum);
-
     let containerClient;
     let actualContainerName = '';
 
     // Try primary (ID-based) container first
-    containerClient = await getContainerClient(primary.toLowerCase());
-    actualContainerName = primary.toLowerCase();
+    containerClient = await getContainerClient(scope.primaryContainer);
+    actualContainerName = scope.primaryContainer;
 
     let exists = await containerClient?.exists();
-    if (!exists && legacy) {
+    if (!exists && scope.legacyContainer) {
       // Fall back to legacy container
-      ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy "${legacy}"...`);
-      containerClient = await getContainerClient(legacy.toLowerCase());
-      actualContainerName = legacy.toLowerCase();
+      ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy "${scope.legacyContainer}"...`);
+      containerClient = await getContainerClient(scope.legacyContainer);
+      actualContainerName = scope.legacyContainer;
 
       exists = await containerClient?.exists();
       if (exists) {
