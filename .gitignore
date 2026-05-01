@@ -72,6 +72,9 @@ frontend/db-migrations/unified-measurements-migrations/branch_refresh_00_ensure_
 superpowers/
 .superpowers/
 
+# personal weekly work notes — synced to Obsidian, not source-controlled
+weekly-notes/
+
 # agent/tool scratch dirs & generated artifacts
 .claude/
 .codex/
