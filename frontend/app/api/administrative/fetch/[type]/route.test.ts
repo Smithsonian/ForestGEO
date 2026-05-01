@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   rollbackTransaction: vi.fn(async () => {}),
   closeConnection: vi.fn(async () => {}),
   mapData: vi.fn((rows: any[]) => rows),
-  demapData: vi.fn((rows: any[]) => rows)
+  demapData: vi.fn((rows: any[]) => rows),
+  invalidatePermissions: vi.fn()
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
@@ -28,6 +29,9 @@ vi.mock('@/config/datamapper', () => ({
   default: {
     getMapper: () => ({ mapData: mocks.mapData, demapData: mocks.demapData })
   }
+}));
+vi.mock('@/lib/permissionscache', () => ({
+  invalidatePermissions: mocks.invalidatePermissions
 }));
 
 import { GET, POST, PATCH, DELETE } from './route';
@@ -118,5 +122,28 @@ describe('/api/administrative/fetch/[type] auth gate', () => {
     expect(res.status).toBe(403);
     expect(mocks.executeQuery).not.toHaveBeenCalled();
     expect(mocks.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('PATCH → invalidates old and new user emails after a successful admin mutation', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await PATCH(
+      makeReq('http://x/api/administrative/fetch/users', {
+        oldRow: { userID: 1, email: 'old@example.com', userSites: [], notifications: '' },
+        newRow: { userID: 1, email: 'new@example.com', userSites: [], notifications: '' }
+      }),
+      params('users')
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.invalidatePermissions).toHaveBeenCalledWith('old@example.com');
+    expect(mocks.invalidatePermissions).toHaveBeenCalledWith('new@example.com');
+  });
+
+  it('POST → clears the permission cache when a site changes', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'a@x', userStatus: 'global' } });
+    const res = await POST(makeReq('http://x/api/administrative/fetch/sites', { newRow: { siteName: 'BCI' } }), params('sites'));
+
+    expect(res.status).toBe(200);
+    expect(mocks.invalidatePermissions).toHaveBeenCalledWith();
   });
 });

@@ -4,11 +4,35 @@ import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { invalidatePermissions } from '@/lib/permissionscache';
 import { format } from 'mysql2/promise';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
+
+function getEmailFromRow(row: unknown): string | undefined {
+  if (!row || typeof row !== 'object') return undefined;
+  const candidate = row as { email?: unknown; Email?: unknown };
+  const email = candidate.email ?? candidate.Email;
+  return typeof email === 'string' && email.trim() ? email : undefined;
+}
+
+function invalidateAdminPermissionsChange(type: string, oldRow?: unknown, newRow?: unknown): void {
+  if (type === 'users') {
+    const emails = new Set([getEmailFromRow(oldRow), getEmailFromRow(newRow)].filter((email): email is string => Boolean(email)));
+    if (emails.size === 0) {
+      invalidatePermissions();
+      return;
+    }
+    for (const email of emails) invalidatePermissions(email);
+    return;
+  }
+
+  if (type === 'sites' || type === 'usersiterelations') {
+    invalidatePermissions();
+  }
+}
 
 export async function GET(request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const authError = requireAdmin(await auth());
@@ -74,6 +98,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
     const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`catalog.${type}`, newRow]);
     await connectionManager.executeQuery(insertQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, undefined, newRow);
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Insertion into catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
@@ -118,6 +143,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
     const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`catalog.${type}`, remaining, gridID, mappedOldRow[gridID]]);
     await connectionManager.executeQuery(updateQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, oldRow, newRow);
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Update of catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
@@ -142,6 +168,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
     await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, newRow, undefined);
     return new NextResponse(JSON.stringify({ message: 'Successfully deleted' }), { status: HTTPResponses.OK });
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
