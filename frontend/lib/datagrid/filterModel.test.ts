@@ -4,6 +4,7 @@ import {
   areFilterItemsEqual,
   areFilterValuesEqual,
   areGridFilterModelsEqual,
+  hasServerFilter,
   isActiveFilterItem,
   isNonEmptyFilterValue,
   sanitizeQuickFilterValues,
@@ -167,5 +168,19 @@ describe('areGridFilterModelsEqual', () => {
     expect(
       areGridFilterModelsEqual({ items: [], quickFilterValues: [], logicOperator: 'and' }, { items: [], quickFilterValues: [], logicOperator: 'or' })
     ).toBe(false);
+  });
+});
+
+describe('hasServerFilter', () => {
+  it('returns false for an empty model', () => {
+    expect(hasServerFilter({ items: [], quickFilterValues: [] })).toBe(false);
+  });
+
+  it('returns true when items are present', () => {
+    expect(hasServerFilter({ items: [{ field: 'spCode', operator: 'contains', value: 'AC' }], quickFilterValues: [] })).toBe(true);
+  });
+
+  it('returns true when quickFilterValues are present', () => {
+    expect(hasServerFilter({ items: [], quickFilterValues: ['AC'] })).toBe(true);
   });
 });

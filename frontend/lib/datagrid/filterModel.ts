@@ -46,6 +46,10 @@ export function areFilterItemsEqual(left: readonly GridFilterItem[] | undefined,
   );
 }
 
+export function hasServerFilter(model: GridFilterModel): boolean {
+  return (model.items?.length ?? 0) > 0 || (model.quickFilterValues?.length ?? 0) > 0;
+}
+
 export function toServerFilterModel(model: GridFilterModel): GridFilterModel {
   const items = (model.items ?? []).filter(isActiveFilterItem).map(toServerFilterItem);
   const quickFilterValues = sanitizeQuickFilterValues(model.quickFilterValues);

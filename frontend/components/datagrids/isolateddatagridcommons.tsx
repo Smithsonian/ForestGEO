@@ -53,7 +53,7 @@ import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
 import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, QueryError, invalidateAfter, MutationKind } from '@/lib/query';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
-import { areGridFilterModelsEqual, toServerFilterModel } from '@/lib/datagrid/filterModel';
+import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -177,7 +177,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const skipNextProcessRowUpdateRef = useRef(false);
 
-  const hasFilter = (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
+  const hasFilter = hasServerFilter(filterModel);
 
   const fetchUrl = React.useMemo(() => {
     if (!currentSite?.schemaName) return null;
