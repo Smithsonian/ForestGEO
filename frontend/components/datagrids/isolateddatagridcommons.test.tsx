@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 import IsolatedDataGridCommons, { FILTER_APPLY_DEBOUNCE_MS } from './isolateddatagridcommons';
+import { LOADING_BAR_VISIBLE_DELAY_MS } from '@/components/loading';
 
 const mockFetch = vi.fn();
 const mockGetRowWithUpdatedValues = vi.fn();
@@ -143,7 +144,6 @@ vi.mock('@/config/styleddatagrid', async () => {
 
     return (
       <div>
-        <div data-testid="grid-loading">{String(Boolean(props.loading))}</div>
         <div data-testid="filter-model-state">{JSON.stringify(props.filterModel ?? null)}</div>
         <div data-testid="pagination-state">{JSON.stringify(props.paginationModel ?? null)}</div>
         <button
@@ -375,7 +375,12 @@ describe('IsolatedDataGridCommons', () => {
     expect(screen.getByTestId('pagination-state').textContent).toContain('"page":0');
     expect(screen.getByTestId('row-state').textContent).toContain('RUBI04');
     expect(screen.queryByTestId('skeleton-grid-row')).not.toBeInTheDocument();
-    expect(screen.getByTestId('grid-loading').textContent).toBe('true');
+
+    await act(async () => {
+      vi.advanceTimersByTime(LOADING_BAR_VISIBLE_DELAY_MS);
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
 
     vi.useRealTimers();
     await act(async () => {
@@ -384,7 +389,7 @@ describe('IsolatedDataGridCommons', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('row-state').textContent).toContain('ANOPKL');
-      expect(screen.getByTestId('grid-loading').textContent).toBe('false');
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
   });
 
@@ -439,7 +444,7 @@ describe('IsolatedDataGridCommons', () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(initialFetchCount);
-    expect(screen.getByTestId('grid-loading').textContent).toBe('false');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('skeleton-grid-row')).not.toBeInTheDocument();
 
     vi.useRealTimers();

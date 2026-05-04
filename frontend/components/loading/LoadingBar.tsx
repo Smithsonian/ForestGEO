@@ -7,7 +7,7 @@ export interface LoadingBarProps {
   label?: string;
 }
 
-const VISIBLE_DELAY_MS = 150;
+export const LOADING_BAR_VISIBLE_DELAY_MS = 150;
 
 export function LoadingBar({ active, label = 'Refreshing data' }: LoadingBarProps) {
   const [visible, setVisible] = React.useState(false);
@@ -18,7 +18,7 @@ export function LoadingBar({ active, label = 'Refreshing data' }: LoadingBarProp
       setVisible(false);
       return;
     }
-    const id = window.setTimeout(() => setVisible(true), VISIBLE_DELAY_MS);
+    const id = window.setTimeout(() => setVisible(true), LOADING_BAR_VISIBLE_DELAY_MS);
     return () => window.clearTimeout(id);
   }, [active]);
 

@@ -1,4 +1,4 @@
-export { LoadingBar } from './LoadingBar';
+export { LoadingBar, LOADING_BAR_VISIBLE_DELAY_MS } from './LoadingBar';
 export type { LoadingBarProps } from './LoadingBar';
 export { ContentSkeleton } from './ContentSkeleton';
 export type { SkeletonKind, ContentSkeletonProps } from './ContentSkeleton';
