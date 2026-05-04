@@ -1,6 +1,7 @@
 // measurementcommons datagrid
 'use client';
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { isMuiRowEditCancelled } from '@/lib/muirowedit';
@@ -103,7 +104,6 @@ import {
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
-  mergeMeasurementFilterModel,
   shouldRefreshMeasurementsAfterValidationTransition,
   shouldUseAutoMeasurementRowHeight,
   toServerMeasurementFilterModel
@@ -114,7 +114,7 @@ import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefi
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
-const FILTER_APPLY_DEBOUNCE_MS = 500;
+export const FILTER_APPLY_DEBOUNCE_MS = 500;
 
 const COLUMN_FIELD_TO_OPTS_KEY: Record<string, string> = {
   speciesCode: 'spCode',
@@ -216,18 +216,30 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [showNR, setShowNR] = useState<boolean>(true);
 
   const [hidingEmpty, setHidingEmpty] = useState(true);
-  const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>(() => ({
+
+  const initialFilterModel: ExtendedGridFilterModel = {
     items: [],
     quickFilterValues: [],
     visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
     tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-  }));
-  const [gridFilterModel, setGridFilterModel] = useState<ExtendedGridFilterModel>(() => ({
-    items: [],
-    quickFilterValues: [],
-    visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
-    tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-  }));
+  };
+
+  const resetPageOnFilterCommit = useCallback(() => {
+    setPaginationModel(prev => (prev.page === 0 ? prev : { ...prev, page: 0 }));
+  }, [setPaginationModel]);
+
+  const {
+    uiModel: gridFilterModel,
+    serverModel: filterModel,
+    applyChange: applyFilterChange,
+    flush: flushFilterChange
+  } = useDebouncedFilterModel<ExtendedGridFilterModel>(
+    initialFilterModel,
+    FILTER_APPLY_DEBOUNCE_MS,
+    areExtendedFilterModelsEqual,
+    toServerMeasurementFilterModel,
+    resetPageOnFilterCommit
+  );
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [invalidCount, setInvalidCount] = useState<number>(0);
@@ -267,9 +279,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
   const editPreviewLoadingMessage = 'Saving changes...';
-  const filterApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gridFilterModelRef = useRef(gridFilterModel);
-  const serverFilterModelRef = useRef(filterModel);
 
   const editFlow = useEditPreviewFlow({
     schema: currentSite?.schemaName ?? '',
@@ -530,33 +539,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentPlot, currentCensus, paginationModel.page, sortModel, fetchValidationErrors]);
 
   useEffect(() => {
-    gridFilterModelRef.current = gridFilterModel;
-  }, [gridFilterModel]);
-
-  useEffect(() => {
-    serverFilterModelRef.current = filterModel;
-  }, [filterModel]);
-
-  useEffect(() => {
-    const nextGridFilterModel = mergeMeasurementFilterModel(gridFilterModelRef.current, {
+    applyFilterChange({
       visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
       tss: buildMeasurementTssFilters(showOT, showMS, showNR)
     });
-
-    if (nextGridFilterModel !== gridFilterModelRef.current) {
-      gridFilterModelRef.current = nextGridFilterModel;
-      setGridFilterModel(nextGridFilterModel);
-    }
-
-    const nextServerFilterModel = toServerMeasurementFilterModel(nextGridFilterModel);
-    if (areExtendedFilterModelsEqual(serverFilterModelRef.current, nextServerFilterModel)) {
-      return;
-    }
-
-    serverFilterModelRef.current = nextServerFilterModel;
-    setFilterModel(nextServerFilterModel);
-    setPaginationModel(previousModel => (previousModel.page === 0 ? previousModel : { ...previousModel, page: 0 }));
-  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, setPaginationModel]);
+    flushFilterChange();
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, applyFilterChange, flushFilterChange]);
 
   // Handle refresh signal - use ref to guard against concurrent/redundant fetches
   const isRefreshing = useRef(false);
@@ -611,13 +599,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     loadAttributes();
   }, [loadAttributes]);
 
-  useEffect(() => {
-    return () => {
-      if (filterApplyTimerRef.current) {
-        clearTimeout(filterApplyTimerRef.current);
-      }
-    };
-  }, []);
   // helper functions for usage:
   const handleSortModelChange = useCallback(
     (newModel: GridSortModel) => {
@@ -1427,57 +1408,16 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  const applyServerFilterModel = useCallback(
-    (nextFilterModel: ExtendedGridFilterModel) => {
-      const nextServerFilterModel = toServerMeasurementFilterModel(nextFilterModel);
-      if (areExtendedFilterModelsEqual(serverFilterModelRef.current, nextServerFilterModel)) {
-        return;
-      }
-
-      serverFilterModelRef.current = nextServerFilterModel;
-      setFilterModel(nextServerFilterModel);
-      setPaginationModel(previousModel => (previousModel.page === 0 ? previousModel : { ...previousModel, page: 0 }));
-    },
-    [setPaginationModel]
-  );
-
-  const scheduleServerFilterModel = useCallback(
-    (nextFilterModel: ExtendedGridFilterModel) => {
-      if (filterApplyTimerRef.current) {
-        clearTimeout(filterApplyTimerRef.current);
-      }
-
-      filterApplyTimerRef.current = setTimeout(() => {
-        applyServerFilterModel(nextFilterModel);
-      }, FILTER_APPLY_DEBOUNCE_MS);
-    },
-    [applyServerFilterModel]
-  );
-
   const onQuickFilterChange = useCallback(
-    (incomingValues: GridFilterModel) => {
-      const nextFilterModel = mergeMeasurementFilterModel(gridFilterModel, {
+    (incomingValues: GridFilterModel) =>
+      applyFilterChange({
         items: incomingValues.items || [],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      });
-      if (nextFilterModel === gridFilterModel) return;
-
-      setGridFilterModel(nextFilterModel);
-      scheduleServerFilterModel(nextFilterModel);
-    },
-    [gridFilterModel, scheduleServerFilterModel]
+      }),
+    [applyFilterChange]
   );
 
-  const handleFilterModelChange = useCallback(
-    (newFilterModel: GridFilterModel) => {
-      const nextFilterModel = mergeMeasurementFilterModel(gridFilterModel, newFilterModel);
-      if (nextFilterModel === gridFilterModel) return;
-
-      setGridFilterModel(nextFilterModel);
-      scheduleServerFilterModel(nextFilterModel);
-    },
-    [gridFilterModel, scheduleServerFilterModel]
-  );
+  const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
     closeModal(false);

@@ -1,6 +1,7 @@
-import { GridFilterItem, GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
+import { GridFilterModel, GridPaginationModel, GridRowModel, GridSortModel } from '@mui/x-data-grid';
 import { ExtendedGridFilterModel, TSSFilter, VisibleFilter } from '@/config/datagridhelpers';
 import { EDITABLE_FIELDS_BY_SURFACE, EditSurface, FIELD_ALIASES_BY_SURFACE, PER_COLUMN_DECIMAL_PRECISION } from '@/config/editplan/fieldpolicy';
+import { areArraysEqual, areFilterItemsEqual, isActiveFilterItem, sanitizeQuickFilterValues, toServerFilterItem } from '@/lib/datagrid/filterModel';
 
 // Numeric edits that round to the existing value at server precision are
 // detected here so the client can (a) skip the API roundtrip and (b) tell the
@@ -60,80 +61,6 @@ export interface FormattedQueryRequest {
   query: string;
   params: Array<string | number>;
   format: true;
-}
-
-const VALUELESS_FILTER_OPERATORS = new Set(['isEmpty', 'isNotEmpty']);
-
-function areArraysEqual<T>(left: readonly T[] | undefined, right: readonly T[] | undefined): boolean {
-  const leftValues = left ?? [];
-  const rightValues = right ?? [];
-
-  if (leftValues.length !== rightValues.length) {
-    return false;
-  }
-
-  return leftValues.every((value, index) => Object.is(value, rightValues[index]));
-}
-
-function areFilterValuesEqual(left: unknown, right: unknown): boolean {
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && areArraysEqual(left, right);
-  }
-
-  return Object.is(left ?? null, right ?? null);
-}
-
-function areFilterItemsEqual(left: readonly GridFilterItem[] | undefined, right: readonly GridFilterItem[] | undefined): boolean {
-  const leftItems = left ?? [];
-  const rightItems = right ?? [];
-
-  if (leftItems.length !== rightItems.length) {
-    return false;
-  }
-
-  return leftItems.every((item, index) => {
-    return (
-      (item.field ?? '') === (rightItems[index]?.field ?? '') &&
-      (item.operator ?? '') === (rightItems[index]?.operator ?? '') &&
-      areFilterValuesEqual(item.value, rightItems[index]?.value)
-    );
-  });
-}
-
-function isNonEmptyFilterValue(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(isNonEmptyFilterValue);
-  }
-
-  return value !== undefined && value !== null && String(value).trim() !== '';
-}
-
-function sanitizeQuickFilterValues(values: GridFilterModel['quickFilterValues']): NonNullable<GridFilterModel['quickFilterValues']> {
-  return (values ?? []).filter(isNonEmptyFilterValue).map(value => (typeof value === 'string' ? value.trim() : value));
-}
-
-function isActiveFilterItem(item: GridFilterItem): boolean {
-  if (!item.field || !item.operator) {
-    return false;
-  }
-
-  return VALUELESS_FILTER_OPERATORS.has(item.operator) || isNonEmptyFilterValue(item.value);
-}
-
-function toServerFilterItem(item: GridFilterItem): GridFilterItem {
-  const { id: _id, value, ...serverItem } = item;
-
-  if (Array.isArray(value)) {
-    return {
-      ...serverItem,
-      value: value.filter(isNonEmptyFilterValue)
-    };
-  }
-
-  return {
-    ...serverItem,
-    value
-  };
 }
 
 export function buildMeasurementVisibleFilters(showErrorRows: boolean, showValidRows: boolean, showPendingRows: boolean): VisibleFilter[] {
