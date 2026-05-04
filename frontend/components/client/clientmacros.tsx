@@ -110,6 +110,9 @@ async function fetchAndMapOptions<RDS, Result>(
     const mapper = MapperFactory.getMapper<RDS, Result>(mapperType as any);
     const mappedData: RDS[] = mapper.mapData(data);
     const values = mappedData.map(extractField).filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0);
+    // Trees/stems are unique by (TreeTag, SpeciesID, CensusID), not by tag alone, so the
+    // same display string can come from distinct rows. Collapse to one autocomplete option
+    // per displayed string here.
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
   } catch (error: any) {
     // Ignore abort errors - they're expected during cleanup
