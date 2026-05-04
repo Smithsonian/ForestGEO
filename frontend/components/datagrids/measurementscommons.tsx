@@ -115,7 +115,6 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 const FILTER_APPLY_DEBOUNCE_MS = 500;
-const GRID_RESPONSE_CACHE_TTL_MS = 5000;
 
 const COLUMN_FIELD_TO_OPTS_KEY: Record<string, string> = {
   speciesCode: 'spCode',
@@ -271,7 +270,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const filterApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gridFilterModelRef = useRef(gridFilterModel);
   const serverFilterModelRef = useRef(filterModel);
-  const gridResponseCacheRef = useRef<{ signature: string; cachedAt: number; data: { output: any[]; totalCount: number } } | null>(null);
 
   const editFlow = useEditPreviewFlow({
     schema: currentSite?.schemaName ?? '',
@@ -424,12 +422,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const filterBodyFetcher = React.useCallback(
     async (u: string): Promise<{ output: any[]; totalCount: number }> => {
-      const requestSignature = JSON.stringify({ url: u, filterModel, sortModel });
-      const cachedResponse = gridResponseCacheRef.current;
-      if (cachedResponse && cachedResponse.signature === requestSignature && Date.now() - cachedResponse.cachedAt < GRID_RESPONSE_CACHE_TTL_MS) {
-        return cachedResponse.data;
-      }
-
       const res = await fetch(u, {
         method: 'POST',
         credentials: 'include',
@@ -440,13 +432,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         const body = await res.json().catch(() => undefined);
         throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
       }
-      const data = (await res.json()) as { output: any[]; totalCount: number };
-      gridResponseCacheRef.current = {
-        signature: requestSignature,
-        cachedAt: Date.now(),
-        data
-      };
-      return data;
+      return (await res.json()) as { output: any[]; totalCount: number };
     },
     [filterModel, sortModel]
   );
@@ -462,9 +448,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     fetchUrl,
     useMemo(
       () => ({
-        fetcher: filterBodyFetcher,
-        revalidateOnFocus: false,
-        revalidateIfStale: false
+        fetcher: filterBodyFetcher
       }),
       [filterBodyFetcher]
     )
@@ -537,7 +521,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
-    gridResponseCacheRef.current = null;
     await Promise.all([refetch(), fetchValidationErrors()]);
   }, [refetch, fetchValidationErrors]);
 
@@ -992,7 +975,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       } finally {
         setLoading(false);
       }
-      gridResponseCacheRef.current = null;
       await refetch();
       await invalidateAfter('delete-measurement', queryScope);
     }

@@ -87,7 +87,6 @@ export type IsolatedDataGridCommonsHandle = {
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
 const FILTER_APPLY_DEBOUNCE_MS = 500;
-const GRID_RESPONSE_CACHE_TTL_MS = 5000;
 const VALUELESS_FILTER_OPERATORS = new Set(['isEmpty', 'isNotEmpty']);
 
 function isNonEmptyFilterValue(value: unknown): boolean {
@@ -254,11 +253,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   });
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const serverFilterModelRef = useRef(filterModel);
-  const gridResponseCacheRef = useRef<{
-    signature: string;
-    cachedAt: number;
-    data: { output: any[]; totalCount: number; finishedQuery?: string };
-  } | null>(null);
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -321,20 +315,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const filterBodyFetcher = React.useCallback(
     async (u: string): Promise<{ output: any[]; totalCount: number; finishedQuery?: string }> => {
-      const requestSignature = JSON.stringify({ url: u, hasFilter, filterModel });
-      const cachedResponse = gridResponseCacheRef.current;
-      if (cachedResponse && cachedResponse.signature === requestSignature && Date.now() - cachedResponse.cachedAt < GRID_RESPONSE_CACHE_TTL_MS) {
-        return cachedResponse.data;
-      }
-
       if (!hasFilter) {
-        const data = await defaultFetcher<{ output: any[]; totalCount: number; finishedQuery?: string }>(u);
-        gridResponseCacheRef.current = {
-          signature: requestSignature,
-          cachedAt: Date.now(),
-          data
-        };
-        return data;
+        return defaultFetcher<{ output: any[]; totalCount: number; finishedQuery?: string }>(u);
       }
       const res = await fetch(u, {
         method: 'POST',
@@ -346,13 +328,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const body = await res.json().catch(() => undefined);
         throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
       }
-      const data = (await res.json()) as { output: any[]; totalCount: number; finishedQuery?: string };
-      gridResponseCacheRef.current = {
-        signature: requestSignature,
-        cachedAt: Date.now(),
-        data
-      };
-      return data;
+      return (await res.json()) as { output: any[]; totalCount: number; finishedQuery?: string };
     },
     [hasFilter, filterModel]
   );
@@ -372,9 +348,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     fetchUrl,
     useMemo(
       () => ({
-        fetcher: filterBodyFetcher,
-        revalidateOnFocus: false,
-        revalidateIfStale: false
+        fetcher: filterBodyFetcher
       }),
       [filterBodyFetcher]
     )
@@ -401,7 +375,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, [gridData, onDataLoaded]);
 
   const handleRefresh = useCallback(async () => {
-    gridResponseCacheRef.current = null;
     await refetch();
   }, [refetch]);
 
@@ -788,7 +761,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
 
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-      gridResponseCacheRef.current = null;
       await refetch();
     },
     [
@@ -847,7 +819,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-          gridResponseCacheRef.current = null;
           await refetch();
           const deleteMutationKind = resolveDeleteMutationKind(gridType);
           if (deleteMutationKind) {
@@ -987,7 +958,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       );
     },
     fetchPaginatedData: async () => {
-      gridResponseCacheRef.current = null;
       await refetch();
     },
     showSnackbar: (message: string, severity: 'success' | 'error') => {
