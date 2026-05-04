@@ -89,6 +89,27 @@ export function standardizeGridColumns(cols: GridColDef[]): GridColDef[] {
   return cols.map(col => applyStandardSettings(col));
 }
 
+const SELECTABLE_FIELD_TO_OPTION_KEY: Record<string, string> = {
+  tag: 'treeTag',
+  treeTag: 'treeTag',
+  stemtag: 'stemTag',
+  stemTag: 'stemTag',
+  quadrat: 'quadratName',
+  quadratName: 'quadratName',
+  spCode: 'speciesCode',
+  spcode: 'speciesCode',
+  speciesCode: 'speciesCode',
+  codes: 'codes'
+};
+
+export function selectableOptionKeyForField(field: string): string {
+  return SELECTABLE_FIELD_TO_OPTION_KEY[field] ?? field;
+}
+
+export function getSelectableOptionsForField(selectableOpts: Record<string, string[]>, field: string): string[] {
+  return selectableOpts[selectableOptionKeyForField(field)] ?? [];
+}
+
 /**
  * Helper function to safely fetch and map data for selectable options
  * RDS = mapped type (what we work with in the app)
@@ -167,10 +188,10 @@ export async function loadSelectableOptions(
   setSelectableOpts((prev: any) => {
     return {
       ...prev,
-      tag: tagOpts,
+      treeTag: tagOpts,
       stemTag: stemOpts,
-      quadrat: quadOpts,
-      spCode: specOpts,
+      quadratName: quadOpts,
+      speciesCode: specOpts,
       codes: codeOpts
     };
   });
@@ -187,7 +208,7 @@ export function selectableAutocomplete(params: any, column: GridColDef, selectab
       freeSolo={column.field !== 'codes'}
       clearOnBlur={false}
       isOptionEqualToValue={(option, value) => option === value}
-      options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
+      options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
       value={
         column.field === 'codes' ? (params.value ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0) : []) : (params.value ?? '')
       }

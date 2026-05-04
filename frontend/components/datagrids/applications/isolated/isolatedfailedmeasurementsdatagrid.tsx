@@ -13,7 +13,7 @@ import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
-import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
+import { loadSelectableOptions, selectableAutocomplete, selectableOptionKeyForField } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
 import { invalidateAfter } from '@/lib/query';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
@@ -82,10 +82,10 @@ export function formatDetailedFailureDescription(description?: string | null): s
 export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: IsolatedFailedMeasurementsDataGridProps = {}) {
   const [refresh, setRefresh] = useState(false);
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
-    tag: [],
+    treeTag: [],
     stemTag: [],
-    quadrat: [],
-    spCode: [],
+    quadratName: [],
+    speciesCode: [],
     codes: []
   });
   const [validationModalOpen, setValidationModalOpen] = useState(false);
@@ -165,13 +165,13 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
 
       if (!row.spCode?.trim()) {
         reasons.push('SpCode missing');
-      } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
+      } else if (!selectableOpts.speciesCode.includes(row.spCode.trim())) {
         reasons.push('SpCode invalid');
       }
 
       if (!row.quadrat?.trim()) {
         reasons.push('Quadrat missing');
-      } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
+      } else if (!selectableOpts.quadratName.includes(row.quadrat.trim())) {
         reasons.push('Quadrat invalid');
       }
 
@@ -376,13 +376,13 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                           </Tooltip>
                         )
                       )
-                  ) : column.field === 'spCode' && params.value && !selectableOpts.spCode.includes(String(params.value).trim()) ? (
+                  ) : column.field === 'spCode' && params.value && !selectableOpts.speciesCode.includes(String(params.value).trim()) ? (
                     <Tooltip title="Species code not in species table" variant="soft">
                       <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
                         {String(params.value)}
                       </Chip>
                     </Tooltip>
-                  ) : column.field === 'quadrat' && params.value && !selectableOpts.quadrat.includes(String(params.value).trim()) ? (
+                  ) : column.field === 'quadrat' && params.value && !selectableOpts.quadratName.includes(String(params.value).trim()) ? (
                     <Tooltip title="Quadrat not in quadrats table" variant="soft">
                       <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
                         {String(params.value)}
@@ -440,7 +440,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                   />
                 </Box>
               );
-            } else if (Object.keys(selectableOpts).includes(column.field)) {
+            } else if (Object.prototype.hasOwnProperty.call(selectableOpts, selectableOptionKeyForField(column.field))) {
               return (
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
                   {selectableAutocomplete(params, column, selectableOpts)}
@@ -464,7 +464,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   }, [selectableOpts, displayFailureReason]);
 
   return Object.keys(selectableOpts)
-    .filter(i => !['tag', 'stemTag'].includes(i))
+    .filter(i => !['treeTag', 'stemTag'].includes(i))
     .every(key => selectableOpts[key].length > 0) ? (
     <>
       <IsolatedDataGridCommons

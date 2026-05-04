@@ -86,7 +86,7 @@ import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
-import { loadSelectableOptions } from '@/components/client/clientmacros';
+import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
@@ -115,12 +115,6 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
-
-const COLUMN_FIELD_TO_OPTS_KEY: Record<string, string> = {
-  speciesCode: 'spCode',
-  quadratName: 'quadrat',
-  treeTag: 'tag'
-};
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -252,10 +246,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
   const [attributesMap, setAttributesMap] = useState<Map<string, AttributesRDS>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
-    tag: [],
+    treeTag: [],
     stemTag: [],
-    quadrat: [],
-    spCode: []
+    quadratName: [],
+    speciesCode: []
   });
   const [reloadAttrs, setReloadAttrs] = useState(true);
 
@@ -1227,7 +1221,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         };
       }
       if (['quadratName', 'speciesCode', 'treeTag', 'stemTag'].includes(column.field)) {
-        const optsKey = COLUMN_FIELD_TO_OPTS_KEY[column.field] ?? column.field;
         column = {
           ...column,
           renderEditCell: (params: GridRenderEditCellParams) => (
@@ -1241,7 +1234,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 freeSolo={['treeTag', 'stemTag'].includes(column.field)}
                 clearOnBlur={false}
                 isOptionEqualToValue={(option, value) => option === value}
-                options={[...(selectableOpts[optsKey] || [])].sort((a, b) => a.localeCompare(b))}
+                options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
                 value={
                   column.field === 'attributes'
                     ? params.value

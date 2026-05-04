@@ -89,7 +89,8 @@ vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
 vi.mock('@/components/client/clientmacros', () => ({
   loadSelectableOptions: vi.fn().mockResolvedValue(undefined),
   selectableAutocomplete: () => <div>Mock Autocomplete</div>,
-  standardizeGridColumns: (cols: any) => cols
+  standardizeGridColumns: (cols: any) => cols,
+  selectableOptionKeyForField: (field: string) => field
 }));
 
 vi.mock('@/ailogger', () => ({
@@ -171,10 +172,10 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       const { loadSelectableOptions } = await import('@/components/client/clientmacros');
       (loadSelectableOptions as any).mockImplementation(async (_site: any, _plot: any, _census: any, setSelectableOpts: any) => {
         setSelectableOpts({
-          tag: [],
+          treeTag: [],
           stemTag: [],
-          quadrat: ['0101'],
-          spCode: ['CRATSN'],
+          quadratName: ['0101'],
+          speciesCode: ['CRATSN'],
           codes: ['M']
         });
       });
@@ -408,10 +409,10 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       const { loadSelectableOptions } = await import('@/components/client/clientmacros');
       (loadSelectableOptions as any).mockImplementation(async (_site: any, _plot: any, _census: any, setSelectableOpts: any) => {
         setSelectableOpts({
-          tag: [],
+          treeTag: [],
           stemTag: [],
-          quadrat: ['0101'],
-          spCode: ['CRATSN'],
+          quadratName: ['0101'],
+          speciesCode: ['CRATSN'],
           codes: ['M']
         });
       });

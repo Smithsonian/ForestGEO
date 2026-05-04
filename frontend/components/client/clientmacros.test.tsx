@@ -37,7 +37,7 @@ describe('loadSelectableOptions', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const previousOptions = { tag: [], stemTag: [], quadrat: [], spCode: [], codes: [] };
+    const previousOptions = { treeTag: [], stemTag: [], quadratName: [], speciesCode: [], codes: [] };
     let nextOptions = previousOptions;
     const setSelectableOpts = vi.fn((updater: (prev: typeof previousOptions) => typeof previousOptions) => {
       nextOptions = updater(previousOptions);
@@ -46,10 +46,10 @@ describe('loadSelectableOptions', () => {
     await loadSelectableOptions({ schemaName: 'myschema' } as any, { plotID: 42 } as any, { plotCensusNumber: 3 } as any, setSelectableOpts as any);
 
     expect(nextOptions).toMatchObject({
-      tag: ['T1'],
+      treeTag: ['T1'],
       stemTag: ['S1'],
-      quadrat: ['Q1'],
-      spCode: ['CRATSN', 'RUBI04'],
+      quadratName: ['Q1'],
+      speciesCode: ['CRATSN', 'RUBI04'],
       codes: ['A1']
     });
   });
