@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
-import IsolatedDataGridCommons from './isolateddatagridcommons';
+import IsolatedDataGridCommons, { FILTER_APPLY_DEBOUNCE_MS } from './isolateddatagridcommons';
 
 const mockFetch = vi.fn();
 const mockGetRowWithUpdatedValues = vi.fn();
@@ -364,7 +364,7 @@ describe('IsolatedDataGridCommons', () => {
     expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
 
     await act(async () => {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(FILTER_APPLY_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
@@ -434,7 +434,7 @@ describe('IsolatedDataGridCommons', () => {
     expect(screen.getByTestId('filter-model-state').textContent).not.toContain('ANOPKL');
 
     await act(async () => {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(FILTER_APPLY_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
