@@ -115,4 +115,28 @@ describe('useForestQuery', () => {
     expect(override.mock.calls[0][0]).toBe('/api/over');
     expect(ambient).not.toHaveBeenCalled();
   });
+
+  it('does not refetch when the hook rerenders with the same key and url', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ rows: ['a'] });
+    const { result, rerender } = renderHook(
+      ({ uiState }: { uiState: number }) => {
+        void uiState;
+        return useForestQuery<{ rows: string[] }>(queryKey('grid:measurements', { siteSchema: 's' }), '/api/x');
+      },
+      {
+        initialProps: { uiState: 0 },
+        wrapper: ({ children }) => (
+          <SWRConfig value={{ provider: () => new Map(), fetcher, dedupingInterval: 0, revalidateOnFocus: false, shouldRetryOnError: false }}>
+            {children}
+          </SWRConfig>
+        )
+      }
+    );
+
+    await waitFor(() => expect(result.current.data).toEqual({ rows: ['a'] }));
+    rerender({ uiState: 1 });
+
+    await waitFor(() => expect(result.current.data).toEqual({ rows: ['a'] }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
 });

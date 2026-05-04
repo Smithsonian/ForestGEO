@@ -95,6 +95,7 @@ import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
+  areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   arePaginationModelsEqual,
   buildEditableFieldsDiffWithMetaForSurface,
@@ -104,7 +105,8 @@ import {
   createResetValidationStatesQuery,
   mergeMeasurementFilterModel,
   shouldRefreshMeasurementsAfterValidationTransition,
-  shouldUseAutoMeasurementRowHeight
+  shouldUseAutoMeasurementRowHeight,
+  toServerMeasurementFilterModel
 } from './measurementscommonsutils';
 import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
 
@@ -112,6 +114,14 @@ import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefi
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
+const FILTER_APPLY_DEBOUNCE_MS = 500;
+const GRID_RESPONSE_CACHE_TTL_MS = 5000;
+
+const COLUMN_FIELD_TO_OPTS_KEY: Record<string, string> = {
+  speciesCode: 'spCode',
+  quadratName: 'quadrat',
+  treeTag: 'tag'
+};
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -176,7 +186,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const initialValidRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('valid') : true;
   const initialPendingRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('pending') : true;
 
-  const [newLastPage, setNewLastPage] = useState<number | null>(null);
+  const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -207,12 +217,19 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [showNR, setShowNR] = useState<boolean>(true);
 
   const [hidingEmpty, setHidingEmpty] = useState(true);
-  const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>({
+  const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>(() => ({
     items: [],
     quickFilterValues: [],
     visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
     tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-  });
+  }));
+  const [gridFilterModel, setGridFilterModel] = useState<ExtendedGridFilterModel>(() => ({
+    items: [],
+    quickFilterValues: [],
+    visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+    tss: buildMeasurementTssFilters(showOT, showMS, showNR)
+  }));
+  const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [invalidCount, setInvalidCount] = useState<number>(0);
   const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
@@ -251,6 +268,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
   const editPreviewLoadingMessage = 'Saving changes...';
+  const filterApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gridFilterModelRef = useRef(gridFilterModel);
+  const serverFilterModelRef = useRef(filterModel);
+  const gridResponseCacheRef = useRef<{ signature: string; cachedAt: number; data: { output: any[]; totalCount: number } } | null>(null);
 
   const editFlow = useEditPreviewFlow({
     schema: currentSite?.schemaName ?? '',
@@ -383,11 +404,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     );
   }, [currentSite?.schemaName, gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
-  const queryScope: QueryScope = {
-    siteSchema: currentSite?.schemaName,
-    plotID: currentPlot?.plotID,
-    censusID: currentCensus?.dateRanges?.[0]?.censusID
-  };
+  const queryScope: QueryScope = useMemo(
+    () => ({
+      siteSchema: currentSite?.schemaName,
+      plotID: currentPlot?.plotID,
+      censusID: currentCensus?.dateRanges?.[0]?.censusID
+    }),
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
+  );
 
   const gridQueryKey = fetchUrl
     ? queryKey(`grid:${gridType}` as QueryNamespace, queryScope, {
@@ -400,6 +424,12 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const filterBodyFetcher = React.useCallback(
     async (u: string): Promise<{ output: any[]; totalCount: number }> => {
+      const requestSignature = JSON.stringify({ url: u, filterModel, sortModel });
+      const cachedResponse = gridResponseCacheRef.current;
+      if (cachedResponse && cachedResponse.signature === requestSignature && Date.now() - cachedResponse.cachedAt < GRID_RESPONSE_CACHE_TTL_MS) {
+        return cachedResponse.data;
+      }
+
       const res = await fetch(u, {
         method: 'POST',
         credentials: 'include',
@@ -410,7 +440,13 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         const body = await res.json().catch(() => undefined);
         throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
       }
-      return res.json() as Promise<{ output: any[]; totalCount: number }>;
+      const data = (await res.json()) as { output: any[]; totalCount: number };
+      gridResponseCacheRef.current = {
+        signature: requestSignature,
+        cachedAt: Date.now(),
+        data
+      };
+      return data;
     },
     [filterModel, sortModel]
   );
@@ -421,12 +457,24 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     isValidating,
     error: gridError,
     refetch
-  } = useForestQuery<{ output: any[]; totalCount: number }>(gridQueryKey, fetchUrl, { fetcher: filterBodyFetcher });
+  } = useForestQuery<{ output: any[]; totalCount: number }>(
+    gridQueryKey,
+    fetchUrl,
+    useMemo(
+      () => ({
+        fetcher: filterBodyFetcher,
+        revalidateOnFocus: false,
+        revalidateIfStale: false
+      }),
+      [filterBodyFetcher]
+    )
+  );
 
   useEffect(() => {
     if (gridData) {
       setRows(gridData.output);
       setRowCount(gridData.totalCount);
+      setHasLoadedGrid(true);
     }
   }, [gridData, setRows, setRowCount]);
 
@@ -435,7 +483,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       ailogger.error('Error fetching data:', gridError);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
     }
-  }, [gridError]);
+  }, [gridError, setSnackbar]);
 
   const fetchValidationErrors = useCallback(async () => {
     try {
@@ -489,6 +537,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
+    gridResponseCacheRef.current = null;
     await Promise.all([refetch(), fetchValidationErrors()]);
   }, [refetch, fetchValidationErrors]);
 
@@ -498,13 +547,33 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentPlot, currentCensus, paginationModel.page, sortModel, fetchValidationErrors]);
 
   useEffect(() => {
-    setFilterModel(prevModel =>
-      mergeMeasurementFilterModel(prevModel, {
-        visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
-        tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-      })
-    );
-  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
+    gridFilterModelRef.current = gridFilterModel;
+  }, [gridFilterModel]);
+
+  useEffect(() => {
+    serverFilterModelRef.current = filterModel;
+  }, [filterModel]);
+
+  useEffect(() => {
+    const nextGridFilterModel = mergeMeasurementFilterModel(gridFilterModelRef.current, {
+      visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+      tss: buildMeasurementTssFilters(showOT, showMS, showNR)
+    });
+
+    if (nextGridFilterModel !== gridFilterModelRef.current) {
+      gridFilterModelRef.current = nextGridFilterModel;
+      setGridFilterModel(nextGridFilterModel);
+    }
+
+    const nextServerFilterModel = toServerMeasurementFilterModel(nextGridFilterModel);
+    if (areExtendedFilterModelsEqual(serverFilterModelRef.current, nextServerFilterModel)) {
+      return;
+    }
+
+    serverFilterModelRef.current = nextServerFilterModel;
+    setFilterModel(nextServerFilterModel);
+    setPaginationModel(previousModel => (previousModel.page === 0 ? previousModel : { ...previousModel, page: 0 }));
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, setPaginationModel]);
 
   // Handle refresh signal - use ref to guard against concurrent/redundant fetches
   const isRefreshing = useRef(false);
@@ -558,6 +627,14 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   useEffect(() => {
     loadAttributes();
   }, [loadAttributes]);
+
+  useEffect(() => {
+    return () => {
+      if (filterApplyTimerRef.current) {
+        clearTimeout(filterApplyTimerRef.current);
+      }
+    };
+  }, []);
   // helper functions for usage:
   const handleSortModelChange = useCallback(
     (newModel: GridSortModel) => {
@@ -915,6 +992,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       } finally {
         setLoading(false);
       }
+      gridResponseCacheRef.current = null;
       await refetch();
       await invalidateAfter('delete-measurement', queryScope);
     }
@@ -1186,6 +1264,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         };
       }
       if (['quadratName', 'speciesCode', 'treeTag', 'stemTag'].includes(column.field)) {
+        const optsKey = COLUMN_FIELD_TO_OPTS_KEY[column.field] ?? column.field;
         column = {
           ...column,
           renderEditCell: (params: GridRenderEditCellParams) => (
@@ -1199,7 +1278,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 freeSolo={['treeTag', 'stemTag'].includes(column.field)}
                 clearOnBlur={false}
                 isOptionEqualToValue={(option, value) => option === value}
-                options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
+                options={[...(selectableOpts[optsKey] || [])].sort((a, b) => a.localeCompare(b))}
                 value={
                   column.field === 'attributes'
                     ? params.value
@@ -1366,14 +1445,57 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel =>
-      mergeMeasurementFilterModel(prevFilterModel, {
+  const applyServerFilterModel = useCallback(
+    (nextFilterModel: ExtendedGridFilterModel) => {
+      const nextServerFilterModel = toServerMeasurementFilterModel(nextFilterModel);
+      if (areExtendedFilterModelsEqual(serverFilterModelRef.current, nextServerFilterModel)) {
+        return;
+      }
+
+      serverFilterModelRef.current = nextServerFilterModel;
+      setFilterModel(nextServerFilterModel);
+      setPaginationModel(previousModel => (previousModel.page === 0 ? previousModel : { ...previousModel, page: 0 }));
+    },
+    [setPaginationModel]
+  );
+
+  const scheduleServerFilterModel = useCallback(
+    (nextFilterModel: ExtendedGridFilterModel) => {
+      if (filterApplyTimerRef.current) {
+        clearTimeout(filterApplyTimerRef.current);
+      }
+
+      filterApplyTimerRef.current = setTimeout(() => {
+        applyServerFilterModel(nextFilterModel);
+      }, FILTER_APPLY_DEBOUNCE_MS);
+    },
+    [applyServerFilterModel]
+  );
+
+  const onQuickFilterChange = useCallback(
+    (incomingValues: GridFilterModel) => {
+      const nextFilterModel = mergeMeasurementFilterModel(gridFilterModel, {
         items: incomingValues.items || [],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      })
-    );
-  }
+      });
+      if (nextFilterModel === gridFilterModel) return;
+
+      setGridFilterModel(nextFilterModel);
+      scheduleServerFilterModel(nextFilterModel);
+    },
+    [gridFilterModel, scheduleServerFilterModel]
+  );
+
+  const handleFilterModelChange = useCallback(
+    (newFilterModel: GridFilterModel) => {
+      const nextFilterModel = mergeMeasurementFilterModel(gridFilterModel, newFilterModel);
+      if (nextFilterModel === gridFilterModel) return;
+
+      setGridFilterModel(nextFilterModel);
+      scheduleServerFilterModel(nextFilterModel);
+    },
+    [gridFilterModel, scheduleServerFilterModel]
+  );
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
     closeModal(false);
@@ -1447,6 +1569,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   if (!currentSite || !currentPlot || !currentCensus) {
     return null;
   } else {
+    const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
+    const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
     return (
       <Box
         sx={{
@@ -1460,8 +1584,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         }}
       >
         <Box sx={{ width: '100%', flexDirection: 'column', position: 'relative' }}>
-          <LoadingBar active={isValidating && !!gridData} />
-          {isLoading && !gridData ? (
+          <LoadingBar active={isValidating && hasLoadedGrid} />
+          {showInitialGridSkeleton ? (
             <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
           ) : (
             <StyledDataGrid
@@ -1475,7 +1599,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               onRowModesModelChange={handleRowModesModelChange}
               onRowEditStop={handleRowEditStop}
               processRowUpdate={processRowUpdate}
-              loading={false}
+              loading={showGridLoading}
               paginationMode="server"
               filterMode="server"
               onPaginationModelChange={newPaginationModel => {
@@ -1503,10 +1627,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
               pageSizeOptions={[10, 25, 50, 100]}
               sortModel={sortModel}
               onSortModelChange={handleSortModelChange}
-              filterModel={filterModel}
-              onFilterModelChange={newFilterModel => {
-                setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
-              }}
+              filterModel={gridFilterModel}
+              onFilterModelChange={handleFilterModelChange}
               ignoreDiacritics
               initialState={{
                 columns: {
@@ -1524,7 +1646,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                   handleExport: fetchRowsForExport,
                   showToolbarActions: showToolbarActions,
                   handleQuickFilterChange: onQuickFilterChange,
-                  filterModel: filterModel,
+                  filterModel: gridFilterModel,
                   gridColumns: gridColumns,
                   gridType: FormType.measurements,
                   dynamicButtons: dynamicButtons,

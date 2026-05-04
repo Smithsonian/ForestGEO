@@ -109,10 +109,8 @@ async function fetchAndMapOptions<RDS, Result>(
     const data: Result[] = await response.json();
     const mapper = MapperFactory.getMapper<RDS, Result>(mapperType as any);
     const mappedData: RDS[] = mapper.mapData(data);
-    return mappedData
-      .map(extractField)
-      .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b));
+    const values = mappedData.map(extractField).filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0);
+    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
   } catch (error: any) {
     // Ignore abort errors - they're expected during cleanup
     if (error.name === 'AbortError') {

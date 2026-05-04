@@ -143,6 +143,14 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
                      WHERE c.PlotID = ?
                      ORDER BY c.PlotCensusNumber DESC, c.CensusID DESC`;
       results = await connectionManager.executeQuery(query, [effectivePlotID, effectivePlotID]);
+    } else if (dataType === 'species') {
+      const query = `
+        SELECT *
+        FROM ${schema}.species
+        WHERE IsActive IS TRUE
+          AND SpeciesCode IS NOT NULL
+        ORDER BY SpeciesCode`;
+      results = await connectionManager.executeQuery(query);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;
       results = await connectionManager.executeQuery(query);

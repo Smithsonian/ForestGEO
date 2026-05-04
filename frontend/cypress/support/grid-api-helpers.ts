@@ -467,7 +467,7 @@ export function mockMeasurementsSummaryApi<Row extends GenericRow>({
 
   cy.intercept('POST', `**/api/fixeddatafilter/measurementssummary/${schema}/**`, req => {
     replyWithPage(req, filteredRows(req));
-  });
+  }).as('filterMeasurementsSummaryRows');
 
   cy.intercept('PATCH', `**/api/fixeddata/measurementssummary/${schema}/coreMeasurementID**`, req => {
     const oldRow = (req.body?.oldRow ?? {}) as Partial<Row>;

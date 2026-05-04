@@ -10,7 +10,8 @@ import {
   createResetValidationStatesQuery,
   mergeMeasurementFilterModel,
   shouldRefreshMeasurementsAfterValidationTransition,
-  shouldUseAutoMeasurementRowHeight
+  shouldUseAutoMeasurementRowHeight,
+  toServerMeasurementFilterModel
 } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
@@ -88,6 +89,62 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       });
 
       expect(nextModel).toBe(previousModel);
+    });
+
+    it('removes incomplete draft filter items and empty quick-filter values from the server model', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [
+            { id: 12, field: 'speciesCode', operator: 'contains', value: ' ACRU ' },
+            { id: 13, field: 'treeTag', operator: 'contains', value: '' },
+            { id: 14, field: '', operator: 'contains', value: 'TREE101' }
+          ],
+          quickFilterValues: ['TREE101', '   '],
+          quickFilterExcludeHiddenColumns: true,
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        })
+      ).toEqual({
+        items: [{ field: 'speciesCode', operator: 'contains', value: ' ACRU ' }],
+        quickFilterValues: ['TREE101'],
+        quickFilterExcludeHiddenColumns: true,
+        visible: ['errors', 'valid', 'pending'],
+        tss: ['old tree', 'multi stem', 'new recruit']
+      });
+    });
+
+    it('drops quick-filter metadata when there is no active quick filter', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [],
+          quickFilterValues: [],
+          quickFilterExcludeHiddenColumns: true,
+          quickFilterLogicOperator: 'and',
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        })
+      ).toEqual({
+        items: [],
+        quickFilterValues: [],
+        visible: ['errors', 'valid', 'pending'],
+        tss: ['old tree', 'multi stem', 'new recruit']
+      });
+    });
+
+    it('keeps valueless operators as active server filters', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [{ id: 15, field: 'description', operator: 'isEmpty' }],
+          quickFilterValues: [],
+          visible: ['errors'],
+          tss: ['old tree']
+        })
+      ).toEqual({
+        items: [{ field: 'description', operator: 'isEmpty', value: undefined }],
+        quickFilterValues: [],
+        visible: ['errors'],
+        tss: ['old tree']
+      });
     });
 
     it('builds stable visible and tree-state filters from toggle state', () => {

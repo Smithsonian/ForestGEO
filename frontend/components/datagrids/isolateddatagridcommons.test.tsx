@@ -1,6 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SWRConfig } from 'swr';
 import IsolatedDataGridCommons from './isolateddatagridcommons';
 
@@ -143,6 +143,46 @@ vi.mock('@/config/styleddatagrid', async () => {
 
     return (
       <div>
+        <div data-testid="grid-loading">{String(Boolean(props.loading))}</div>
+        <div data-testid="filter-model-state">{JSON.stringify(props.filterModel ?? null)}</div>
+        <div data-testid="pagination-state">{JSON.stringify(props.paginationModel ?? null)}</div>
+        <button
+          type="button"
+          onClick={() =>
+            props.onPaginationModelChange?.({
+              page: 2,
+              pageSize: props.paginationModel?.pageSize ?? 10
+            })
+          }
+        >
+          Go Page 2
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            props.onFilterModelChange?.({
+              ...(props.filterModel ?? {}),
+              items: [{ id: 1, field: 'spCode', operator: 'contains', value: 'ANOPKL' }],
+              quickFilterValues: []
+            })
+          }
+        >
+          Apply Panel Filter
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            props.onFilterModelChange?.({
+              ...(props.filterModel ?? {}),
+              items: [{ id: 1, field: 'spCode', operator: 'contains' }],
+              logicOperator: 'and',
+              quickFilterLogicOperator: 'and',
+              quickFilterValues: []
+            })
+          }
+        >
+          Open Draft Panel Filter
+        </button>
         <div data-testid="row-state">{JSON.stringify(rows)}</div>
         {rows.map((row: any) => {
           const actionColumn = columns.find((column: any) => typeof column.getActions === 'function');
@@ -168,6 +208,10 @@ describe('IsolatedDataGridCommons', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     global.fetch = mockFetch as any;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('refetches from the server after a confirmed save, bypassing the SWR cache', async () => {
@@ -246,5 +290,158 @@ describe('IsolatedDataGridCommons', () => {
       expect(listCalls).toHaveLength(initialListCallCount + 1);
       expect(screen.getByTestId('row-state').textContent).toContain('ANOPKL');
     });
+  });
+
+  it('keeps the grid mounted while debounced server filters are loading', async () => {
+    const originalRow = {
+      id: 1,
+      failedMeasurementID: 123,
+      spCode: 'RUBI04'
+    };
+    const filteredRow = {
+      ...originalRow,
+      spCode: 'ANOPKL'
+    };
+
+    let resolveFilteredFetch: (() => void) | undefined;
+
+    mockFetch.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Promise<Response>(resolve => {
+          resolveFilteredFetch = () =>
+            resolve({
+              ok: true,
+              json: async () => ({
+                output: [filteredRow],
+                totalCount: 1,
+                finishedQuery: 'SELECT filtered'
+              })
+            } as Response);
+        });
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          output: [originalRow],
+          totalCount: 1,
+          finishedQuery: 'SELECT initial'
+        })
+      } as Response;
+    });
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="failedmeasurements"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'spCode', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('row-state').textContent).toContain('RUBI04');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Page 2' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pagination-state').textContent).toContain('"page":2');
+    });
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Panel Filter' }));
+
+    expect(screen.getByTestId('filter-model-state').textContent).toContain('ANOPKL');
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    const postCalls = mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(postCalls).toHaveLength(1);
+    expect(String(postCalls[0][0])).toContain('/api/fixeddatafilter/failedmeasurements/testschema/0/10/1/1');
+
+    expect(screen.getByTestId('pagination-state').textContent).toContain('"page":0');
+    expect(screen.getByTestId('row-state').textContent).toContain('RUBI04');
+    expect(screen.queryByTestId('skeleton-grid-row')).not.toBeInTheDocument();
+    expect(screen.getByTestId('grid-loading').textContent).toBe('true');
+
+    vi.useRealTimers();
+    await act(async () => {
+      resolveFilteredFetch?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('row-state').textContent).toContain('ANOPKL');
+      expect(screen.getByTestId('grid-loading').textContent).toBe('false');
+    });
+  });
+
+  it('does not refetch when the filter panel creates an incomplete draft filter', async () => {
+    const originalRow = {
+      id: 1,
+      failedMeasurementID: 123,
+      spCode: 'RUBI04'
+    };
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [originalRow],
+        totalCount: 1,
+        finishedQuery: 'SELECT initial'
+      })
+    } as Response);
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false, dedupingInterval: 0 }}>
+        <IsolatedDataGridCommons
+          gridType="failedmeasurements"
+          gridColumns={[
+            { field: 'id', editable: false },
+            { field: 'spCode', editable: true }
+          ]}
+          refresh={false}
+          setRefresh={vi.fn()}
+          dynamicButtons={[]}
+          initialRow={originalRow}
+          onDataUpdate={vi.fn().mockResolvedValue(undefined)}
+        />
+      </SWRConfig>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('row-state').textContent).toContain('RUBI04');
+    });
+
+    const initialFetchCount = mockFetch.mock.calls.length;
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Draft Panel Filter' }));
+
+    expect(screen.getByTestId('filter-model-state').textContent).toContain('spCode');
+    expect(screen.getByTestId('filter-model-state').textContent).not.toContain('ANOPKL');
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(initialFetchCount);
+    expect(screen.getByTestId('grid-loading').textContent).toBe('false');
+    expect(screen.queryByTestId('skeleton-grid-row')).not.toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });

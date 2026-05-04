@@ -62,6 +62,8 @@ export interface FormattedQueryRequest {
   format: true;
 }
 
+const VALUELESS_FILTER_OPERATORS = new Set(['isEmpty', 'isNotEmpty']);
+
 function areArraysEqual<T>(left: readonly T[] | undefined, right: readonly T[] | undefined): boolean {
   const leftValues = left ?? [];
   const rightValues = right ?? [];
@@ -73,12 +75,12 @@ function areArraysEqual<T>(left: readonly T[] | undefined, right: readonly T[] |
   return leftValues.every((value, index) => Object.is(value, rightValues[index]));
 }
 
-function normalizeFilterItem(item: GridFilterItem) {
-  return {
-    field: item.field ?? '',
-    operator: item.operator ?? '',
-    value: item.value ?? null
-  };
+function areFilterValuesEqual(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && areArraysEqual(left, right);
+  }
+
+  return Object.is(left ?? null, right ?? null);
 }
 
 function areFilterItemsEqual(left: readonly GridFilterItem[] | undefined, right: readonly GridFilterItem[] | undefined): boolean {
@@ -90,15 +92,48 @@ function areFilterItemsEqual(left: readonly GridFilterItem[] | undefined, right:
   }
 
   return leftItems.every((item, index) => {
-    const normalizedLeft = normalizeFilterItem(item);
-    const normalizedRight = normalizeFilterItem(rightItems[index]);
-
     return (
-      normalizedLeft.field === normalizedRight.field &&
-      normalizedLeft.operator === normalizedRight.operator &&
-      Object.is(normalizedLeft.value, normalizedRight.value)
+      (item.field ?? '') === (rightItems[index]?.field ?? '') &&
+      (item.operator ?? '') === (rightItems[index]?.operator ?? '') &&
+      areFilterValuesEqual(item.value, rightItems[index]?.value)
     );
   });
+}
+
+function isNonEmptyFilterValue(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(isNonEmptyFilterValue);
+  }
+
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function sanitizeQuickFilterValues(values: GridFilterModel['quickFilterValues']): NonNullable<GridFilterModel['quickFilterValues']> {
+  return (values ?? []).filter(isNonEmptyFilterValue).map(value => (typeof value === 'string' ? value.trim() : value));
+}
+
+function isActiveFilterItem(item: GridFilterItem): boolean {
+  if (!item.field || !item.operator) {
+    return false;
+  }
+
+  return VALUELESS_FILTER_OPERATORS.has(item.operator) || isNonEmptyFilterValue(item.value);
+}
+
+function toServerFilterItem(item: GridFilterItem): GridFilterItem {
+  const { id: _id, value, ...serverItem } = item;
+
+  if (Array.isArray(value)) {
+    return {
+      ...serverItem,
+      value: value.filter(isNonEmptyFilterValue)
+    };
+  }
+
+  return {
+    ...serverItem,
+    value
+  };
 }
 
 export function buildMeasurementVisibleFilters(showErrorRows: boolean, showValidRows: boolean, showPendingRows: boolean): VisibleFilter[] {
@@ -143,6 +178,31 @@ export function mergeMeasurementFilterModel(
   };
 
   return areExtendedFilterModelsEqual(previousModel, nextModel) ? previousModel : nextModel;
+}
+
+export function toServerMeasurementFilterModel(model: ExtendedGridFilterModel): ExtendedGridFilterModel {
+  const items = (model.items ?? []).filter(isActiveFilterItem).map(toServerFilterItem);
+  const quickFilterValues = sanitizeQuickFilterValues(model.quickFilterValues);
+  const serverModel: ExtendedGridFilterModel = {
+    items,
+    quickFilterValues,
+    visible: [...(model.visible ?? [])],
+    tss: [...(model.tss ?? [])]
+  };
+
+  if (items.length > 1 && model.logicOperator) {
+    serverModel.logicOperator = model.logicOperator;
+  }
+
+  if (quickFilterValues.length > 1 && model.quickFilterLogicOperator) {
+    serverModel.quickFilterLogicOperator = model.quickFilterLogicOperator;
+  }
+
+  if (quickFilterValues.length > 0 && model.quickFilterExcludeHiddenColumns !== undefined) {
+    serverModel.quickFilterExcludeHiddenColumns = model.quickFilterExcludeHiddenColumns;
+  }
+
+  return serverModel;
 }
 
 export function areGridSortModelsEqual(left: GridSortModel, right: GridSortModel): boolean {
