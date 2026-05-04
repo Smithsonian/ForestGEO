@@ -19,6 +19,7 @@ export function useForestQuery<T>(key: QueryKey | null, url: string | null, opts
   const { fetcher: contextFetcher } = useSWRConfig();
 
   const tupleFetcher = (args: readonly unknown[]): Promise<T> => {
+    // SWR passes the full tuple key as one arg; URL is the last element.
     const u = args[args.length - 1] as string;
     const userFetcher = opts?.fetcher as StringFetcher<T> | undefined;
     if (userFetcher) return userFetcher(u);
