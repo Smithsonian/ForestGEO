@@ -144,12 +144,14 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
                      ORDER BY c.PlotCensusNumber DESC, c.CensusID DESC`;
       results = await connectionManager.executeQuery(query, [effectivePlotID, effectivePlotID]);
     } else if (dataType === 'species') {
+      // Species are site-scoped; plot/census slugs are accepted by the route shape but not used.
       const query = `
         SELECT *
         FROM ${schema}.species
         WHERE IsActive IS TRUE
           AND SpeciesCode IS NOT NULL
-        ORDER BY SpeciesCode`;
+        ORDER BY SpeciesCode
+        LIMIT 10000`;
       results = await connectionManager.executeQuery(query);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;
