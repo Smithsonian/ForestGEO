@@ -18,7 +18,6 @@ import {
   GridActionsCellItem,
   GridColDef,
   GridEventListener,
-  GridFilterItem,
   GridFilterModel,
   GridRowEditStopReasons,
   GridRowId,
@@ -54,6 +53,8 @@ import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
 import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, QueryError, invalidateAfter, MutationKind } from '@/lib/query';
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
+import { areGridFilterModelsEqual, toServerFilterModel } from '@/lib/datagrid/filterModel';
+import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -86,108 +87,9 @@ export type IsolatedDataGridCommonsHandle = {
 
 const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
 const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
-const FILTER_APPLY_DEBOUNCE_MS = 500;
-const VALUELESS_FILTER_OPERATORS = new Set(['isEmpty', 'isNotEmpty']);
+export const FILTER_APPLY_DEBOUNCE_MS = 500;
 
-function isNonEmptyFilterValue(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(isNonEmptyFilterValue);
-  return value !== undefined && value !== null && String(value).trim() !== '';
-}
-
-function sanitizeQuickFilterValues(values: GridFilterModel['quickFilterValues']): NonNullable<GridFilterModel['quickFilterValues']> {
-  return (values ?? []).filter(isNonEmptyFilterValue).map(value => (typeof value === 'string' ? value.trim() : value));
-}
-
-function isActiveFilterItem(item: GridFilterItem): boolean {
-  if (!item.field || !item.operator) return false;
-  return VALUELESS_FILTER_OPERATORS.has(item.operator) || isNonEmptyFilterValue(item.value);
-}
-
-function toServerFilterItem(item: GridFilterItem): GridFilterItem {
-  const { id: _id, value, ...serverItem } = item;
-  if (Array.isArray(value)) {
-    return {
-      ...serverItem,
-      value: value.filter(isNonEmptyFilterValue)
-    };
-  }
-  return {
-    ...serverItem,
-    value
-  };
-}
-
-function toServerFilterModel(model: GridFilterModel): GridFilterModel {
-  const items = (model.items ?? []).filter(isActiveFilterItem).map(toServerFilterItem);
-  const quickFilterValues = sanitizeQuickFilterValues(model.quickFilterValues);
-  const serverModel: GridFilterModel = {
-    items,
-    quickFilterValues
-  };
-
-  if (items.length > 1 && model.logicOperator) {
-    serverModel.logicOperator = model.logicOperator;
-  }
-  if (quickFilterValues.length > 1 && model.quickFilterLogicOperator) {
-    serverModel.quickFilterLogicOperator = model.quickFilterLogicOperator;
-  }
-
-  return serverModel;
-}
-
-function areArraysEqual<T>(left: readonly T[] | undefined, right: readonly T[] | undefined): boolean {
-  const leftValues = left ?? [];
-  const rightValues = right ?? [];
-  return leftValues.length === rightValues.length && leftValues.every((value, index) => Object.is(value, rightValues[index]));
-}
-
-function areFilterValuesEqual(left: unknown, right: unknown): boolean {
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && areArraysEqual(left, right);
-  }
-  return Object.is(left ?? null, right ?? null);
-}
-
-function areFilterItemsEqual(left: readonly GridFilterItem[] | undefined, right: readonly GridFilterItem[] | undefined): boolean {
-  const leftItems = left ?? [];
-  const rightItems = right ?? [];
-  return (
-    leftItems.length === rightItems.length &&
-    leftItems.every(
-      (item, index) =>
-        item.field === rightItems[index]?.field && item.operator === rightItems[index]?.operator && areFilterValuesEqual(item.value, rightItems[index]?.value)
-    )
-  );
-}
-
-function areGridFilterModelsEqual(left: GridFilterModel, right: GridFilterModel): boolean {
-  return (
-    areFilterItemsEqual(left.items, right.items) &&
-    areArraysEqual(left.quickFilterValues, right.quickFilterValues) &&
-    left.logicOperator === right.logicOperator &&
-    left.quickFilterLogicOperator === right.quickFilterLogicOperator &&
-    left.quickFilterExcludeHiddenColumns === right.quickFilterExcludeHiddenColumns
-  );
-}
-
-function mergeGridFilterModel(previousModel: GridFilterModel, incomingModel: GridFilterModel): GridFilterModel {
-  const nextModel = {
-    ...previousModel,
-    ...incomingModel,
-    items: (incomingModel.items ?? previousModel.items ?? []).map(item => ({ ...item })),
-    quickFilterValues:
-      incomingModel.quickFilterValues !== undefined
-        ? [...incomingModel.quickFilterValues]
-        : previousModel.quickFilterValues !== undefined
-          ? [...previousModel.quickFilterValues]
-          : []
-  };
-  return areGridFilterModelsEqual(previousModel, nextModel) ? previousModel : nextModel;
-}
-
-function hasServerFilter(model: GridFilterModel): boolean {
-  return (model.items?.length ?? 0) > 0 || (model.quickFilterValues?.length ?? 0) > 0;
-}
+const INITIAL_FILTER_MODEL: GridFilterModel = { items: [], quickFilterValues: [] };
 
 function resolveDeleteMutationKind(gridType: string): MutationKind | null {
   if (QUADRAT_GRID_TYPES.has(gridType)) return 'delete-quadrat';
@@ -242,17 +144,23 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
-  const [filterModel, setFilterModel] = useState<GridFilterModel>({
-    items: [],
-    quickFilterValues: []
-  });
-  // The grid model updates immediately for input focus; the server model is debounced.
-  const [gridFilterModel, setGridFilterModel] = useState<GridFilterModel>({
-    items: [],
-    quickFilterValues: []
-  });
   const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
-  const serverFilterModelRef = useRef(filterModel);
+
+  const resetPageOnFilterCommit = useCallback(() => {
+    setPaginationModel(prev => (prev.page === 0 ? prev : { ...prev, page: 0 }));
+  }, []);
+
+  const {
+    uiModel: gridFilterModel,
+    serverModel: filterModel,
+    applyChange: applyFilterChange
+  } = useDebouncedFilterModel<GridFilterModel>(
+    INITIAL_FILTER_MODEL,
+    FILTER_APPLY_DEBOUNCE_MS,
+    areGridFilterModelsEqual,
+    toServerFilterModel,
+    resetPageOnFilterCommit
+  );
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -269,7 +177,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const skipNextProcessRowUpdateRef = useRef(false);
 
-  const hasFilter = hasServerFilter(filterModel);
+  const hasFilter = (filterModel.items?.length ?? 0) > 0 || (filterModel.quickFilterValues?.length ?? 0) > 0;
 
   const fetchUrl = React.useMemo(() => {
     if (!currentSite?.schemaName) return null;
@@ -360,10 +268,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
     }
   }, [gridError]);
-
-  useEffect(() => {
-    serverFilterModelRef.current = filterModel;
-  }, [filterModel]);
 
   useEffect(() => {
     if (gridData) {
@@ -1115,63 +1019,18 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     [locked, rows]
   );
 
-  const filterApplyTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   // Cleanup timers on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
       if (editClickTimerRef.current) {
         clearTimeout(editClickTimerRef.current);
       }
-      if (filterApplyTimerRef.current) {
-        clearTimeout(filterApplyTimerRef.current);
-      }
     };
   }, []);
 
-  const applyServerFilterModel = useCallback((nextFilterModel: GridFilterModel) => {
-    const nextServerFilterModel = toServerFilterModel(nextFilterModel);
-    if (areGridFilterModelsEqual(serverFilterModelRef.current, nextServerFilterModel)) {
-      return;
-    }
-    serverFilterModelRef.current = nextServerFilterModel;
-    setFilterModel(nextServerFilterModel);
-    setPaginationModel(previousModel => (previousModel.page === 0 ? previousModel : { ...previousModel, page: 0 }));
-  }, []);
+  const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => applyFilterChange(incomingValues), [applyFilterChange]);
 
-  const scheduleServerFilterModel = useCallback(
-    (nextFilterModel: GridFilterModel) => {
-      if (filterApplyTimerRef.current) {
-        clearTimeout(filterApplyTimerRef.current);
-      }
-
-      const normalizedFilterModel = mergeGridFilterModel({ items: [], quickFilterValues: [] }, nextFilterModel);
-      filterApplyTimerRef.current = setTimeout(() => {
-        applyServerFilterModel(normalizedFilterModel);
-      }, FILTER_APPLY_DEBOUNCE_MS);
-    },
-    [applyServerFilterModel]
-  );
-
-  const onQuickFilterChange = useCallback(
-    (incomingValues: GridFilterModel) => {
-      const nextFilterModel = mergeGridFilterModel(gridFilterModel, incomingValues);
-      if (nextFilterModel === gridFilterModel) return;
-      setGridFilterModel(nextFilterModel);
-      scheduleServerFilterModel(nextFilterModel);
-    },
-    [gridFilterModel, scheduleServerFilterModel]
-  );
-
-  const handleFilterModelChange = useCallback(
-    (newFilterModel: GridFilterModel) => {
-      const nextFilterModel = mergeGridFilterModel(gridFilterModel, newFilterModel);
-      if (nextFilterModel === gridFilterModel) return;
-      setGridFilterModel(nextFilterModel);
-      scheduleServerFilterModel(nextFilterModel);
-    },
-    [gridFilterModel, scheduleServerFilterModel]
-  );
+  const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
 
   const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
   const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
