@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
@@ -119,7 +120,7 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
           items: [],
           quickFilterValues: [],
           quickFilterExcludeHiddenColumns: true,
-          quickFilterLogicOperator: 'and',
+          quickFilterLogicOperator: GridLogicOperator.And,
           visible: ['errors', 'valid', 'pending'],
           tss: ['old tree', 'multi stem', 'new recruit']
         })

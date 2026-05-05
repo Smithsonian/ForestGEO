@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GridLogicOperator } from '@mui/x-data-grid';
 import {
   areArraysEqual,
   areFilterItemsEqual,
@@ -114,7 +115,7 @@ describe('toServerFilterModel', () => {
     const out = toServerFilterModel({
       items: [{ id: 1, field: 'spCode', operator: 'contains', value: 'AC' }],
       quickFilterValues: [],
-      logicOperator: 'and'
+      logicOperator: GridLogicOperator.And
     });
     expect(out.logicOperator).toBeUndefined();
   });
@@ -126,16 +127,16 @@ describe('toServerFilterModel', () => {
         { id: 2, field: 'tag', operator: 'contains', value: '12' }
       ],
       quickFilterValues: [],
-      logicOperator: 'or'
+      logicOperator: GridLogicOperator.Or
     });
-    expect(out.logicOperator).toBe('or');
+    expect(out.logicOperator).toBe(GridLogicOperator.Or);
   });
 
   it('drops quickFilterLogicOperator when at most one quick-filter value survives', () => {
     const out = toServerFilterModel({
       items: [],
       quickFilterValues: ['hello'],
-      quickFilterLogicOperator: 'and'
+      quickFilterLogicOperator: GridLogicOperator.And
     });
     expect(out.quickFilterLogicOperator).toBeUndefined();
   });
@@ -166,7 +167,10 @@ describe('areGridFilterModelsEqual', () => {
 
   it('returns false when logicOperator differs', () => {
     expect(
-      areGridFilterModelsEqual({ items: [], quickFilterValues: [], logicOperator: 'and' }, { items: [], quickFilterValues: [], logicOperator: 'or' })
+      areGridFilterModelsEqual(
+        { items: [], quickFilterValues: [], logicOperator: GridLogicOperator.And },
+        { items: [], quickFilterValues: [], logicOperator: GridLogicOperator.Or }
+      )
     ).toBe(false);
   });
 });
