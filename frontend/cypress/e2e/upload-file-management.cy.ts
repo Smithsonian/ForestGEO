@@ -77,9 +77,13 @@ describe('Upload File Management', () => {
 
     cy.wait('@downloadUploadedFile').then(interception => {
       const url = new URL(interception.request.url);
-      expect(url.searchParams.get('container')).to.equal('plot1-census5');
-      expect(url.searchParams.get('legacyContainer')).to.equal('luquillo-main-plot-5');
+      expect(url.searchParams.get('schema')).to.equal('luquillo');
+      expect(url.searchParams.get('plotID')).to.equal('1');
+      expect(url.searchParams.get('plotName')).to.equal('Luquillo Main Plot');
+      expect(url.searchParams.get('census')).to.equal('5');
       expect(url.searchParams.get('filename')).to.equal('measurements-2024-06-15.csv');
+      expect(url.searchParams.get('container')).to.equal(null);
+      expect(url.searchParams.get('legacyContainer')).to.equal(null);
     });
 
     cy.url().should('include', '#download-complete');
@@ -99,9 +103,13 @@ describe('Upload File Management', () => {
 
     cy.wait('@deleteUploadedFile').then(interception => {
       const url = new URL(interception.request.url);
-      expect(url.searchParams.get('container')).to.equal('plot1-census5');
-      expect(url.searchParams.get('legacyContainer')).to.equal('luquillo-main-plot-5');
+      expect(url.searchParams.get('schema')).to.equal('luquillo');
+      expect(url.searchParams.get('plotID')).to.equal('1');
+      expect(url.searchParams.get('plotName')).to.equal('Luquillo Main Plot');
+      expect(url.searchParams.get('census')).to.equal('5');
       expect(url.searchParams.get('filename')).to.equal('measurements-2024-06-15.csv');
+      expect(url.searchParams.get('container')).to.equal(null);
+      expect(url.searchParams.get('legacyContainer')).to.equal(null);
     });
     cy.wait('@fetchUploadedFiles');
 

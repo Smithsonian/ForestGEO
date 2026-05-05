@@ -61,9 +61,9 @@ function props(operation: string) {
   return { params: Promise.resolve({ operation }) };
 }
 
-function makeContainerClient(blobs: any[] = []) {
+function makeContainerClient(blobs: any[] = [], exists = true) {
   return {
-    exists: vi.fn(async () => true),
+    exists: vi.fn(async () => exists),
     getBlobClient: vi.fn((filename: string) => ({
       url: `https://storage.local/${filename}`,
       delete: mocks.blobDelete
@@ -165,7 +165,7 @@ describe('/api/files/[operation]', () => {
       containerName: 'plot1-census2',
       blobData: [{ name: 'measurements.csv', user: 'mason@example.com' }]
     });
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2');
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2', { createIfMissing: false });
   });
 
   it('deletes only from the server-derived plot/census container', async () => {
@@ -176,10 +176,32 @@ describe('/api/files/[operation]', () => {
 
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
-    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2');
+    expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2', { createIfMissing: false });
     const containerClient = await mocks.getContainerClient.mock.results[0].value;
     expect(containerClient.getBlobClient).toHaveBeenCalledWith('data.csv');
     expect(mocks.blobDelete).toHaveBeenCalled();
+  });
+
+  it('falls back to the legacy container without creating the missing primary container', async () => {
+    const primaryClient = makeContainerClient([], false);
+    const legacyClient = makeContainerClient([
+      {
+        name: 'legacy-measurements.csv',
+        metadata: { user: 'mason@example.com', FormType: 'measurements', FileErrorState: '[]' },
+        properties: { lastModified: new Date('2026-01-01T00:00:00Z') }
+      }
+    ]);
+    mocks.getContainerClient.mockImplementation(async (containerName: string) => (containerName === 'plot1-census2' ? primaryClient : legacyClient));
+
+    const response = await GET(makeRequest('http://localhost/api/files/list?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2'), props('list'));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      containerName: 'bci-2',
+      blobData: [{ name: 'legacy-measurements.csv' }]
+    });
+    expect(mocks.getContainerClient).toHaveBeenNthCalledWith(1, 'plot1-census2', { createIfMissing: false });
+    expect(mocks.getContainerClient).toHaveBeenNthCalledWith(2, 'bci-2', { createIfMissing: false });
   });
 
   it('uses authenticated identity for upload metadata instead of query user', async () => {
@@ -198,6 +220,24 @@ describe('/api/files/[operation]', () => {
     const responseBody = await response.json();
     expect(response.status, JSON.stringify(responseBody)).toBe(200);
     expect(mocks.getContainerClient).toHaveBeenCalledWith('plot1-census2');
-    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', []);
+    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'measurements.csv');
+  });
+
+  it('uploads using the sanitized filename that passed route validation', async () => {
+    const formData = new FormData();
+    const file = new File(['TreeTag\n1'], 'bad/name.csv', { type: 'text/csv' });
+    formData.append('bad/name.csv', file);
+
+    const request = makeRequest(
+      'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=bad%2Fname.csv&formType=measurements',
+      { method: 'POST' }
+    ) as any;
+    request.formData = vi.fn(async () => formData);
+
+    const response = await POST(request, props('upload'));
+
+    const responseBody = await response.json();
+    expect(response.status, JSON.stringify(responseBody)).toBe(200);
+    expect(mocks.uploadValidFileAsBuffer).toHaveBeenCalledWith(expect.anything(), file, 'mason@example.com', 'measurements', [], 'name.csv');
   });
 });

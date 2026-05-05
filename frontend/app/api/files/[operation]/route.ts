@@ -35,6 +35,8 @@ function isValidMimeType(mimeType: string): boolean {
   return ALLOWED_MIME_TYPES.includes(mimeType as any);
 }
 
+const READ_ONLY_CONTAINER_OPTIONS = { createIfMissing: false } as const;
+
 type FileOperation = 'upload' | 'download' | 'delete' | 'list';
 
 const VALID_OPERATIONS: Record<string, FileOperation> = {
@@ -219,7 +221,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     const containerClient = await getContainerClient(scope.primaryContainer);
 
     // uploadValidFileAsBuffer now always returns a response or throws
-    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, scope.userId, formType, fileRowErrors);
+    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, scope.userId, formType, fileRowErrors, sanitizedFileName);
 
     // Verify the response status
     if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
@@ -326,7 +328,7 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
 
     // Try primary container first
     if (scope.primaryContainer) {
-      containerClient = await getContainerClient(scope.primaryContainer);
+      containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
       actualContainerName = scope.primaryContainer;
 
       // Check if container exists
@@ -339,7 +341,7 @@ async function handleDownload(params: FileOperationParams & { filename?: string 
 
     // Fall back to legacy container if primary doesn't exist
     if (!containerClient && scope.legacyContainer) {
-      containerClient = await getContainerClient(scope.legacyContainer);
+      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
       actualContainerName = scope.legacyContainer;
 
       const exists = await containerClient?.exists();
@@ -405,7 +407,7 @@ async function handleDelete(params: FileOperationParams & { filename?: string },
 
     // Try primary container first
     if (scope.primaryContainer) {
-      containerClient = await getContainerClient(scope.primaryContainer);
+      containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
       actualContainerName = scope.primaryContainer;
 
       const exists = await containerClient?.exists();
@@ -417,7 +419,7 @@ async function handleDelete(params: FileOperationParams & { filename?: string },
 
     // Fall back to legacy container if primary doesn't exist
     if (!containerClient && scope.legacyContainer) {
-      containerClient = await getContainerClient(scope.legacyContainer);
+      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
       actualContainerName = scope.legacyContainer;
 
       const exists = await containerClient?.exists();
@@ -457,14 +459,14 @@ async function handleList(scope: AuthorizedFileScope) {
     let actualContainerName = '';
 
     // Try primary (ID-based) container first
-    containerClient = await getContainerClient(scope.primaryContainer);
+    containerClient = await getContainerClient(scope.primaryContainer, READ_ONLY_CONTAINER_OPTIONS);
     actualContainerName = scope.primaryContainer;
 
     let exists = await containerClient?.exists();
     if (!exists && scope.legacyContainer) {
       // Fall back to legacy container
       ailogger.info(`Primary container "${actualContainerName}" not found, trying legacy "${scope.legacyContainer}"...`);
-      containerClient = await getContainerClient(scope.legacyContainer);
+      containerClient = await getContainerClient(scope.legacyContainer, READ_ONLY_CONTAINER_OPTIONS);
       actualContainerName = scope.legacyContainer;
 
       exists = await containerClient?.exists();
