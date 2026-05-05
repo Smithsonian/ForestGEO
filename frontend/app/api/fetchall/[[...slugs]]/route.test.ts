@@ -298,7 +298,7 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(String(sql)).toMatch(/WHERE IsActive IS TRUE/i);
     expect(String(sql)).toMatch(/SpeciesCode IS NOT NULL/i);
     expect(String(sql)).toMatch(/ORDER BY SpeciesCode/i);
-    expect(String(sql)).toMatch(/LIMIT\s+10000/i);
+    expect(String(sql)).not.toMatch(/\bLIMIT\b/i);
     expect(params).toBeUndefined();
     expect(getMapperSpy).toHaveBeenCalledWith('species');
   });

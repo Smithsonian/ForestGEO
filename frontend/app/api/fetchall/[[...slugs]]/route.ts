@@ -150,8 +150,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         FROM ${schema}.species
         WHERE IsActive IS TRUE
           AND SpeciesCode IS NOT NULL
-        ORDER BY SpeciesCode
-        LIMIT 10000`;
+        ORDER BY SpeciesCode`;
       results = await connectionManager.executeQuery(query);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;
