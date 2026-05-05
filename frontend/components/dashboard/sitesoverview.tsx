@@ -41,6 +41,7 @@ interface SiteWithPlotCount extends SitesRDS {
 export interface SitesOverviewProps {
   sites: SiteWithPlotCount[];
   isLoading?: boolean;
+  onSelectSite?: (site: SiteWithPlotCount) => void;
 }
 
 function SiteCardSkeleton() {
@@ -50,17 +51,32 @@ function SiteCardSkeleton() {
 interface SiteCardProps {
   site: SiteWithPlotCount;
   index: number;
+  onSelect?: (site: SiteWithPlotCount) => void;
 }
 
-function SiteCard({ site, index }: SiteCardProps) {
+function SiteCard({ site, index, onSelect }: SiteCardProps) {
   const IconComponent = SITE_ICONS[index % SITE_ICONS.length];
   const gradient = SITE_GRADIENTS[index % SITE_GRADIENTS.length];
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
       component="article"
       variant="solid"
-      aria-label={`Site: ${site.siteName}. Schema: ${site.schemaName}.${site.plotCount !== undefined ? ` ${site.plotCount} plots available.` : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Site: ${site.siteName}. Schema: ${site.schemaName}.${site.plotCount !== undefined ? ` ${site.plotCount} plots available.` : ''}${onSelect ? ' Click to select.' : ''}`}
+      onClick={onSelect ? () => onSelect(site) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(site);
+              }
+            }
+          : undefined
+      }
       sx={{
         background: gradient,
         color: 'white',
@@ -68,6 +84,14 @@ function SiteCard({ site, index }: SiteCardProps) {
         position: 'relative',
         overflow: 'hidden',
         border: 'none',
+        ...(onSelect && {
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
+          }
+        }),
 
         // Decorative background pattern
         '&::before': {
@@ -195,7 +219,7 @@ function SiteCard({ site, index }: SiteCardProps) {
   );
 }
 
-export default function SitesOverview({ sites, isLoading = false }: SitesOverviewProps) {
+export default function SitesOverview({ sites, isLoading = false, onSelectSite }: SitesOverviewProps) {
   if (isLoading) {
     return (
       <Box
@@ -273,7 +297,7 @@ export default function SitesOverview({ sites, isLoading = false }: SitesOvervie
     >
       {sites.map((site, index) => (
         <Box component="li" key={site.siteID ?? index}>
-          <SiteCard site={site} index={index} />
+          <SiteCard site={site} index={index} onSelect={onSelectSite} />
         </Box>
       ))}
     </Box>
