@@ -451,7 +451,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     fetchUrl,
     useMemo(
       () => ({
-        fetcher: filterBodyFetcher
+        fetcher: filterBodyFetcher,
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
+        revalidateIfStale: false
       }),
       [filterBodyFetcher]
     )

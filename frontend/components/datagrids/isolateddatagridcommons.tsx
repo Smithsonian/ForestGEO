@@ -256,7 +256,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     fetchUrl,
     useMemo(
       () => ({
-        fetcher: filterBodyFetcher
+        fetcher: filterBodyFetcher,
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
+        revalidateIfStale: false
       }),
       [filterBodyFetcher]
     )
