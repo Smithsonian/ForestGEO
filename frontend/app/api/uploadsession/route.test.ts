@@ -136,7 +136,7 @@ describe('POST /api/uploadsession', () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ session: { sessionId: 'session-2' } });
     expect(mocks.ensureUploadSessionsTable).toHaveBeenCalledWith('forestgeo_testing');
-    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-1', undefined);
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason@example.com', 'hash-1', undefined);
     expect(mocks.buildMeasurementScopeLockName).toHaveBeenCalledWith('forestgeo_testing', 1, 2);
     expect(mocks.acquireApplicationLock).toHaveBeenCalledWith('measurement-scope:forestgeo_testing:1:2', 'tx-1', 0);
     expect(mocks.assertCanEditMeasurementScope).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ user: expect.any(Object) }), {
@@ -168,7 +168,7 @@ describe('POST /api/uploadsession', () => {
 
     expect(response.status).toBe(201);
     expect(mocks.createUploadSession).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason@example.com', 'spplist.csv', 1, 'idem-1', 'clean_reupload');
-    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'hash-2', 'clean_reupload');
+    expect(mocks.generateUploadSessionIdempotencyKey).toHaveBeenCalledWith('forestgeo_testing', 1, 2, 'mason@example.com', 'hash-2', 'clean_reupload');
   });
 
   it('rejects session creation when permissions are unavailable', async () => {

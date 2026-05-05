@@ -131,7 +131,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await ensureUploadSessionsTable(schema);
 
     // Generate idempotency key if file hash provided
-    const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, parsedPlotId, parsedCensusId, fileHash, mode) : undefined;
+    const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, parsedPlotId, parsedCensusId, userId, fileHash, mode) : undefined;
 
     const uploadSession = await connectionManager.withTransaction(async transactionID => {
       const scopeLockAcquired = await connectionManager.acquireApplicationLock(
