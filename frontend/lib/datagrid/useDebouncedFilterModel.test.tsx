@@ -55,6 +55,15 @@ describe('useDebouncedFilterModel', () => {
     expect(result.current.serverModel).toBe(initial);
   });
 
+  it('keeps uiModel reference identity stable when the incoming model is equivalent', () => {
+    const { result } = renderHook(() => useDebouncedFilterModel(EMPTY, 500, areGridFilterModelsEqual, toServerFilterModel));
+    const initialUi = result.current.uiModel;
+
+    act(() => result.current.applyChange({ items: [], quickFilterValues: [] }));
+
+    expect(result.current.uiModel).toBe(initialUi);
+  });
+
   it('flush() commits immediately and cancels the pending timer', () => {
     const { result } = renderHook(() => useDebouncedFilterModel(EMPTY, 500, areGridFilterModelsEqual));
     act(() => result.current.applyChange({ items: [], quickFilterValues: ['Z'] }));

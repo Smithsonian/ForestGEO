@@ -19,6 +19,7 @@ import {
   GridColDef,
   GridEventListener,
   GridFilterModel,
+  GridPaginationModel,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -90,6 +91,16 @@ const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtax
 export const FILTER_APPLY_DEBOUNCE_MS = 500;
 
 const INITIAL_FILTER_MODEL: GridFilterModel = { items: [], quickFilterValues: [] };
+const AUTO_ROW_HEIGHT = () => 'auto' as const;
+// Pairing getRowHeight='auto' with an estimated height stops the virtualizer's
+// dimensions ResizeObserver loop (sub-pixel measurement feedback) on flex parents.
+const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
+const GRID_ROOT_SX = { width: '100%' } as const;
+const GRID_SLOTS = { toolbar: EditToolbar } as const;
+
+function arePaginationModelsEqual(left: GridPaginationModel, right: GridPaginationModel): boolean {
+  return left.page === right.page && left.pageSize === right.pageSize;
+}
 
 function resolveDeleteMutationKind(gridType: string): MutationKind | null {
   if (QUADRAT_GRID_TYPES.has(gridType)) return 'delete-quadrat';
@@ -965,8 +976,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           ailogger.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
         }
       });
+      if (JSON.stringify(updatedModel) === JSON.stringify(prevModel)) {
+        return prevModel;
+      }
       return updatedModel;
     });
+  }, []);
+
+  const handlePaginationModelChange = useCallback((newPaginationModel: GridPaginationModel) => {
+    setPaginationModel(prevModel => (arePaginationModelsEqual(prevModel, newPaginationModel) ? prevModel : newPaginationModel));
   }, []);
 
   const handleCloseSnackbar = useCallback(() => setSnackbar(null), []);
@@ -1035,6 +1053,72 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
 
+  const handleCellDoubleClick = useCallback<GridEventListener<'cellDoubleClick'>>(
+    params => {
+      if (locked) return;
+      setRowModesModel(prevModel => ({
+        ...prevModel,
+        [params.id]: { mode: GridRowModes.Edit }
+      }));
+    },
+    [locked]
+  );
+
+  const handleCellKeyDown = useCallback<GridEventListener<'cellKeyDown'>>(
+    (_params, event) => {
+      if (event.key === 'Enter' && !locked) {
+        event.defaultMuiPrevented = true;
+      }
+      if (event.key === 'Escape') {
+        event.defaultMuiPrevented = true;
+      }
+    },
+    [locked]
+  );
+
+  const handleProcessRowUpdateError = useCallback((error: Error) => {
+    ailogger.error('Row update error:', error);
+    setSnackbar({
+      children: 'Error updating row',
+      severity: 'error'
+    });
+  }, []);
+
+  const rowsRef = useRef(rows);
+  const rowModesModelRef = useRef(rowModesModel);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+  useEffect(() => {
+    rowModesModelRef.current = rowModesModel;
+  }, [rowModesModel]);
+
+  const handleProcessRowUpdate = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      const waitForStateUpdates = async () => {
+        return new Promise<void>(resolve => {
+          const checkUpdates = () => {
+            if (rowsRef.current.length > 0 && Object.keys(rowModesModelRef.current).length > 0) {
+              resolve();
+            } else {
+              setTimeout(checkUpdates, 50);
+            }
+          };
+          checkUpdates();
+        });
+      };
+      await waitForStateUpdates();
+      try {
+        return await processRowUpdate(newRow, oldRow);
+      } catch (error: unknown) {
+        ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
+        setSnackbar({ children: 'Error updating row', severity: 'error' });
+        return Promise.reject(error);
+      }
+    },
+    [processRowUpdate]
+  );
+
   const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
   const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
 
@@ -1097,26 +1181,39 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     else return columns;
   }, [rows, columns, hidingEmpty]);
 
-  const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
-    if (locked) return;
-    setRowModesModel(prevModel => ({
-      ...prevModel,
-      [params.id]: { mode: GridRowModes.Edit }
-    }));
-  };
-
-  const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (_params, event) => {
-    if (event.key === 'Enter' && !locked) {
-      event.defaultMuiPrevented = true;
-    }
-    if (event.key === 'Escape') {
-      event.defaultMuiPrevented = true;
-    }
-  };
-
   // Grid types under "Stem & Plot Details" that don't require a census selection
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
+
+  const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
+
+  const gridInitialState = useMemo(
+    () => ({
+      columns: {
+        columnVisibilityModel: getColumnVisibilityModel(gridType)
+      }
+    }),
+    [gridType]
+  );
+
+  const slotProps = useMemo(
+    () => ({
+      toolbar: {
+        handleAddNewRow,
+        handleRefresh,
+        handleExportAll: fetchFullData,
+        handleExportCSV: exportAllCSV,
+        handleQuickFilterChange: onQuickFilterChange,
+        filterModel: gridFilterModel,
+        dynamicButtons,
+        gridColumns,
+        gridType,
+        hidingEmpty,
+        setHidingEmpty
+      } as GridToolbarProps & Partial<EditToolbarCustomProps>
+    }),
+    [handleAddNewRow, handleRefresh, fetchFullData, exportAllCSV, onQuickFilterChange, gridFilterModel, dynamicButtons, gridColumns, gridType, hidingEmpty]
+  );
 
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
   // Census-independent grids only need site + plot; others need all three
@@ -1142,7 +1239,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           ) : (
             <StyledDataGrid
               apiRef={localApiRef}
-              sx={{ width: '100%' }}
+              sx={GRID_ROOT_SX}
               rows={rows}
               columns={filteredColumns}
               editMode="row"
@@ -1152,70 +1249,22 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               onRowEditStop={handleRowEditStop}
               onCellDoubleClick={handleCellDoubleClick}
               onCellKeyDown={handleCellKeyDown}
-              processRowUpdate={async (newRow, oldRow) => {
-                const waitForStateUpdates = async () => {
-                  return new Promise<void>(resolve => {
-                    const checkUpdates = () => {
-                      if (rows.length > 0 && Object.keys(rowModesModel).length > 0) {
-                        resolve();
-                      } else {
-                        setTimeout(checkUpdates, 50);
-                      }
-                    };
-                    checkUpdates();
-                  });
-                };
-                await waitForStateUpdates();
-                try {
-                  return await processRowUpdate(newRow, oldRow);
-                } catch (error: unknown) {
-                  ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
-                  setSnackbar({ children: 'Error updating row', severity: 'error' });
-                  return Promise.reject(error);
-                }
-              }}
-              onProcessRowUpdateError={(error: Error) => {
-                ailogger.error('Row update error:', error);
-                setSnackbar({
-                  children: 'Error updating row',
-                  severity: 'error'
-                });
-              }}
+              processRowUpdate={handleProcessRowUpdate}
+              onProcessRowUpdateError={handleProcessRowUpdateError}
               loading={showGridLoading}
               paginationMode="server"
               filterMode="server"
-              onPaginationModelChange={setPaginationModel}
+              onPaginationModelChange={handlePaginationModelChange}
               paginationModel={paginationModel}
               rowCount={rowCount}
-              pageSizeOptions={[paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10]}
+              pageSizeOptions={pageSizeOptions}
               filterModel={gridFilterModel}
               onFilterModelChange={handleFilterModelChange}
               ignoreDiacritics
-              initialState={{
-                columns: {
-                  columnVisibilityModel: getColumnVisibilityModel(gridType)
-                }
-              }}
-              slots={{
-                toolbar: EditToolbar
-              }}
-              slotProps={{
-                toolbar: {
-                  handleAddNewRow: handleAddNewRow,
-                  handleRefresh: handleRefresh,
-                  handleExportAll: fetchFullData,
-                  handleExportCSV: exportAllCSV,
-                  handleQuickFilterChange: onQuickFilterChange,
-                  filterModel: gridFilterModel,
-                  dynamicButtons: dynamicButtons,
-                  gridColumns: gridColumns,
-                  gridType: gridType,
-                  hidingEmpty: hidingEmpty,
-                  setHidingEmpty: setHidingEmpty
-                } as GridToolbarProps & Partial<EditToolbarCustomProps>
-              }}
+              initialState={gridInitialState}
+              slots={GRID_SLOTS}
+              slotProps={slotProps}
               showToolbar
-              getRowHeight={() => 'auto'}
             />
           )}
         </Box>

@@ -50,6 +50,9 @@ export function useDebouncedFilterModel<TModel extends object>(
   const applyChange = useCallback(
     (partial: Partial<TModel> | TModel) => {
       const nextUi = { ...uiModelRef.current, ...partial } as TModel;
+      if (equals(uiModelRef.current, nextUi)) {
+        return;
+      }
       uiModelRef.current = nextUi;
       setUiModel(nextUi);
 
