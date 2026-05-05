@@ -78,6 +78,7 @@ weekly-notes/
 # agent/tool scratch dirs & generated artifacts
 .claude/
 .codex/
+.worktrees/
 graphify-out/
 skills-lock.json
 AGENTS.md
