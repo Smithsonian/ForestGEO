@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-55 in order against a target schema.
+# Runs migrations 16-58 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -68,6 +68,7 @@ ORDERED_MIGRATIONS=(
     "55_extend_edit_operations_bulk_rows.sql"
     "56_relax_edit_operations_target_id.sql"
     "57_backfill_measurementssummary_stemguid.sql"
+    "58_refresh_rawcodes_empty_token_handling.sql"
 )
 
 # ---------------------------------------------------------------------------
@@ -388,7 +389,7 @@ main() {
         applied_count=$((applied_count + 1))
 
         # Some migrations rely on the canonical storedprocedures.sql deployment
-        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" || "$file" == "49_add_duplicate_tag_stemtag_detection.sql" ]]; then
+        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" || "$file" == "49_add_duplicate_tag_stemtag_detection.sql" || "$file" == "58_refresh_rawcodes_empty_token_handling.sql" ]]; then
             log_info "Migration $file requires a stored procedure redeploy. Deploying stored procedures..."
             if ! deploy_stored_procedures; then
                 log_error "Stored procedure deployment failed after $file."

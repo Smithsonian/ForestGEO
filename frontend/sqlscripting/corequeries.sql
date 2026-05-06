@@ -289,6 +289,7 @@ where cm.IsValidated is null
   and cm.IsActive is true
   and cm.RawCodes is not null
   and TRIM(cm.RawCodes) != ''''
+  and TRIM(jt.code) != ''''
   and a.Code is null  -- Attribute code doesn''t exist in attributes table
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)

@@ -1464,6 +1464,7 @@ where cm.IsValidated is null
   and cm.IsActive is true
   and cm.RawCodes is not null
   and TRIM(cm.RawCodes) != ''''
+  and TRIM(jt.code) != ''''
   and a.Code is null  -- Attribute code doesn''t exist in attributes table
   and e.MeasurementID is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -2970,7 +2971,7 @@ BEGIN
                CONCAT('["', REPLACE(TRIM(rcm.Codes), ';', '","'), '"]')),
             '$[*]' columns (code varchar(10) COLLATE utf8mb4_0900_ai_ci path '$')
         ) jt
-        WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '';
+        WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';
 
         INSERT IGNORE INTO cmattributes (CoreMeasurementID, Code)
         SELECT tc.CoreMeasurementID, tc.Code

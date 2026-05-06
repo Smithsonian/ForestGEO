@@ -69,6 +69,11 @@ POST_STORED_PROCEDURE_MIGRATIONS=(
     "51_backfill_hard_failure_error_log.sql"
     "52_fix_validation14_rawcodes_replay.sql"
     "53_reapply_validation14_rawcodes_replay.sql"
+    "54_create_edit_operations.sql"
+    "55_extend_edit_operations_bulk_rows.sql"
+    "56_relax_edit_operations_target_id.sql"
+    "57_backfill_measurementssummary_stemguid.sql"
+    "58_refresh_rawcodes_empty_token_handling.sql"
 )
 
 REQUIRED_BASE_TABLES=(
