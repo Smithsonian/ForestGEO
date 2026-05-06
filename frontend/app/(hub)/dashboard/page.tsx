@@ -15,7 +15,9 @@ import {
   useOrgCensusListContext,
   useOrgCensusListDispatch,
   usePlotContext,
-  useSiteContext
+  usePlotDispatch,
+  useSiteContext,
+  useSiteDispatch
 } from '@/app/contexts/compat-hooks';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -71,6 +73,8 @@ export default function DashboardPage() {
   const censusListContext = useOrgCensusListContext();
   const censusListDispatch = useOrgCensusListDispatch();
   const censusDispatch = useOrgCensusDispatch();
+  const siteDispatch = useSiteDispatch();
+  const plotDispatch = usePlotDispatch();
   const { validity } = useDataValidityContext();
   const userName = session?.user?.name;
   const userEmail = session?.user?.email;
@@ -595,6 +599,12 @@ export default function DashboardPage() {
               })) || []
             }
             isLoading={false}
+            onSelectSite={selected => {
+              if (siteDispatch) {
+                const fullSite = allowedSites?.find(s => s.siteID === selected.siteID);
+                siteDispatch({ site: fullSite });
+              }
+            }}
           />
         </Box>
       ) : !currentPlot ? (
@@ -627,6 +637,12 @@ export default function DashboardPage() {
             isLoading={false}
             onPlotEdit={handlePlotEdit}
             onAddPlot={handleAddPlot}
+            onSelectPlot={selected => {
+              if (plotDispatch) {
+                const fullPlot = (Array.isArray(plotList) ? plotList : []).find(p => p.plotID === selected.plotID);
+                plotDispatch({ plot: fullPlot });
+              }
+            }}
           />
         </Box>
       ) : !currentCensus ? (
