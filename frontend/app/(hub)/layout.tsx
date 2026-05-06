@@ -26,7 +26,6 @@ import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal'
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
-import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)
@@ -494,7 +493,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 justifyContent: 'center'
               }}
             >
-              <AcaciaVersionTypography>{siteConfig.name}</AcaciaVersionTypography>
+              {siteConfig.name}
             </Typography>
           </Stack>
           <IconButton
