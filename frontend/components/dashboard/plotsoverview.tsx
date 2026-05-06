@@ -54,6 +54,7 @@ export interface PlotsOverviewProps {
   isLoading?: boolean;
   onPlotEdit?: (plot: PlotWithCensusCount) => void;
   onAddPlot?: () => void;
+  onSelectPlot?: (plot: PlotWithCensusCount) => void;
 }
 
 function PlotCardSkeleton() {
@@ -64,6 +65,7 @@ interface PlotCardProps {
   plot: PlotWithCensusCount;
   index: number;
   onEdit?: (plot: PlotWithCensusCount) => void;
+  onSelect?: (plot: PlotWithCensusCount) => void;
 }
 
 // Get grid size category based on quadrat count
@@ -83,7 +85,7 @@ function getGridSizeCategory(numQuadrats: number | undefined): { label: string; 
   return { label: 'Very Large', color: 'rgba(255,255,255,0.95)', dots: 25 }; // 5x5
 }
 
-function PlotCard({ plot, index, onEdit }: PlotCardProps) {
+function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
   const gradient = PLOT_GRADIENTS[index % PLOT_GRADIENTS.length];
   const ShapeIcon = SHAPE_ICONS[plot.plotShape?.toLowerCase() ?? 'default'] || SHAPE_ICONS.default;
 
@@ -128,10 +130,24 @@ function PlotCard({ plot, index, onEdit }: PlotCardProps) {
   };
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
       component="article"
       variant="solid"
-      aria-label={`Plot: ${plot.plotName}.${plot.locationName ? ` Location: ${plot.locationName}.` : ''}${plot.numQuadrats !== undefined ? ` ${plot.numQuadrats} quadrats.` : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Plot: ${plot.plotName}.${plot.locationName ? ` Location: ${plot.locationName}.` : ''}${plot.numQuadrats !== undefined ? ` ${plot.numQuadrats} quadrats.` : ''}${onSelect ? ' Click to select.' : ''}`}
+      onClick={onSelect ? () => onSelect(plot) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(plot);
+              }
+            }
+          : undefined
+      }
       sx={{
         background: gradient,
         color: 'white',
@@ -139,6 +155,14 @@ function PlotCard({ plot, index, onEdit }: PlotCardProps) {
         position: 'relative',
         overflow: 'hidden',
         border: 'none',
+        ...(onSelect && {
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
+          }
+        }),
 
         // Decorative gradient overlay
         '&::before': {
@@ -451,7 +475,7 @@ function AddPlotCard({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-export default function PlotsOverview({ plots, siteName, isLoading = false, onPlotEdit, onAddPlot }: PlotsOverviewProps) {
+export default function PlotsOverview({ plots, siteName, isLoading = false, onPlotEdit, onAddPlot, onSelectPlot }: PlotsOverviewProps) {
   // Separate plots with and without quadrats, sort alphabetically within each group
   const { plotsWithQuadrats, plotsWithoutQuadrats } = useMemo(() => {
     if (!Array.isArray(plots)) {
@@ -542,7 +566,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
           <Box component="ul" sx={gridStyles}>
             {plotsWithQuadrats.map((plot, index) => (
               <Box component="li" key={plot.plotID ?? `with-${index}`}>
-                <PlotCard plot={plot} index={index} onEdit={onPlotEdit} />
+                <PlotCard plot={plot} index={index} onEdit={onPlotEdit} onSelect={onSelectPlot} />
               </Box>
             ))}
           </Box>
@@ -567,7 +591,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
           <Box component="ul" sx={gridStyles}>
             {plotsWithoutQuadrats.map((plot, index) => (
               <Box component="li" key={plot.plotID ?? `without-${index}`}>
-                <PlotCard plot={plot} index={plotsWithQuadrats.length + index} onEdit={onPlotEdit} />
+                <PlotCard plot={plot} index={plotsWithQuadrats.length + index} onEdit={onPlotEdit} onSelect={onSelectPlot} />
               </Box>
             ))}
           </Box>
