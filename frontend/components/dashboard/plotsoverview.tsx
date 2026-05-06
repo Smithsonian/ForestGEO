@@ -132,7 +132,7 @@ function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
   return (
     /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
-      component="article"
+      component={onSelect ? 'div' : 'article'}
       variant="solid"
       role={onSelect ? 'button' : undefined}
       tabIndex={onSelect ? 0 : undefined}
