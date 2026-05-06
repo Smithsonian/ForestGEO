@@ -27,8 +27,7 @@ import { TransitionComponent } from '@/components/client/clientmacros';
 import ListDivider from '@mui/joy/ListDivider';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from '@mui/joy/Avatar';
-import { CensusLogo, PlotLogo } from '@/components/icons';
-import { RainbowIcon } from '@/styles/rainbowicon';
+import { CensusLogo, Logo, PlotLogo } from '@/components/icons';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusRDS } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -813,7 +812,7 @@ export default function Sidebar(props: SidebarProps) {
                 <Typography level="h1">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
-                      <RainbowIcon />
+                      <Logo />
                     </Box>
                     ForestGEO
                   </Box>

@@ -17,9 +17,8 @@ import SidebarContainer from './sidebarcontainer';
 import SiteSelector from './siteselector';
 import PlotSelector from './plotselector';
 import CensusSelector from './censusselector';
-import { RainbowIcon } from '@/styles/rainbowicon';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
-import { PlotLogo, CensusLogo } from '@/components/icons';
+import { PlotLogo, CensusLogo, Logo } from '@/components/icons';
 export default function NewSidebar() {
   const currentSite = useAppStore(state => state.currentSite);
   const currentPlot = useAppStore(state => state.currentPlot);
@@ -48,7 +47,7 @@ export default function NewSidebar() {
             <Typography level="h1">
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Box sx={{ marginRight: 1.5 }}>
-                  <RainbowIcon />
+                  <Logo />
                 </Box>
                 ForestGEO
               </Box>
