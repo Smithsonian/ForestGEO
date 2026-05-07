@@ -38,10 +38,13 @@ function createFakeConnection() {
 }
 
 describe('PoolMonitor', () => {
+  const originalAzureSqlServer = process.env.AZURE_SQL_SERVER;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllTimers();
     vi.resetModules();
+    delete process.env.AZURE_SQL_SERVER;
     loggerMock.info.mockReset();
     loggerMock.warn.mockReset();
     loggerMock.error.mockReset();
@@ -50,6 +53,11 @@ describe('PoolMonitor', () => {
   afterEach(() => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
+    if (originalAzureSqlServer === undefined) {
+      delete process.env.AZURE_SQL_SERVER;
+    } else {
+      process.env.AZURE_SQL_SERVER = originalAzureSqlServer;
+    }
   });
 
   it('reinitializes and retries when getConnection hits a closed pool', async () => {
@@ -107,5 +115,36 @@ describe('PoolMonitor', () => {
 
     await expect(monitor.closeAllConnections()).resolves.toBeUndefined();
     expect(monitor.isPoolClosed()).toBe(true);
+  });
+
+  it('observes sleeping pooled connections without killing or reinitializing them', async () => {
+    const sleepingRows = Array.from({ length: 12 }, (_, index) => ({
+      ID: 100 + index,
+      COMMAND: 'Sleep',
+      TIME: 1000
+    }));
+    const pool = createFakePool({
+      query: vi.fn().mockResolvedValue([sleepingRows]),
+      end: vi.fn().mockResolvedValue(undefined)
+    });
+
+    const { PoolMonitor } = await vi.importActual<typeof import('./poolmonitor')>('./poolmonitor');
+    const monitor = new PoolMonitor({}) as unknown as {
+      pool: ReturnType<typeof createFakePool>;
+      poolClosed: boolean;
+      isPoolClosed: () => boolean;
+      closeAllConnections: () => Promise<void>;
+    };
+    monitor.pool = pool;
+    monitor.poolClosed = false;
+
+    await vi.advanceTimersByTimeAsync(30000);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('information_schema.processlist'));
+    expect(pool.query).not.toHaveBeenCalledWith(expect.stringMatching(/^KILL /));
+    expect(pool.end).not.toHaveBeenCalled();
+    expect(monitor.isPoolClosed()).toBe(false);
+
+    await monitor.closeAllConnections();
   });
 });

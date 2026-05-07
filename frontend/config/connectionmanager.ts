@@ -17,6 +17,17 @@ interface MySQLError extends Error {
   sqlMessage?: string;
 }
 
+interface QueryTimingDetails {
+  schema: string | null;
+  transactionId?: string;
+  acquireMs: number;
+  schemaUseMs: number;
+  queryMs: number;
+  totalMs: number;
+  failed: boolean;
+  queryPreview: string;
+}
+
 /**
  * Extracts schema name from a query containing fully-qualified table names
  * Matches patterns like: schema.tablename, `schema`.`tablename`, schema.tablename AS alias
@@ -124,11 +135,19 @@ class ConnectionManager {
   // Note: Return type is any[] to maintain backward compatibility with numerous callers
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public async executeQuery(query: string, params?: unknown[], transactionId?: string): Promise<any> {
+    const startedAt = Date.now();
+    const acquireStartedAt = Date.now();
     const connection = transactionId ? this.transactionConnections.get(transactionId) : await this.acquireConnectionInternal();
+    const acquireMs = transactionId ? 0 : Date.now() - acquireStartedAt;
 
     if (!connection) {
       throw new Error(transactionId ? `No connection found for transaction: ${transactionId}` : 'Unable to acquire connection.');
     }
+
+    const schema = extractSchemaFromQuery(query);
+    let schemaUseMs = 0;
+    let queryMs = 0;
+    let failed = false;
 
     try {
       // Extract schema from query and ensure database context is set
@@ -140,11 +159,12 @@ class ConnectionManager {
       // configuration, not just the current connection. See:
       // https://github.com/sidorares/node-mysql2/issues/477
       // https://github.com/sidorares/node-mysql2/issues/1469
-      const schema = extractSchemaFromQuery(query);
       if (schema && connectionSchemaCache.get(connection) !== schema) {
         try {
+          const schemaUseStartedAt = Date.now();
           // Use simple query protocol (not prepared statements) to switch database
           await connection.query(`USE \`${schema}\``);
+          schemaUseMs = Date.now() - schemaUseStartedAt;
           connectionSchemaCache.set(connection, schema);
         } catch (useError: unknown) {
           // Log but don't fail - the query may still work with fully-qualified names
@@ -153,12 +173,27 @@ class ConnectionManager {
         }
       }
 
-      return await runQuery(connection, query, params);
+      const queryStartedAt = Date.now();
+      const result = await runQuery(connection, query, params);
+      queryMs = Date.now() - queryStartedAt;
+      return result;
     } catch (error: unknown) {
+      failed = true;
+      queryMs = queryMs || Date.now() - startedAt - acquireMs - schemaUseMs;
       const errMsg = error instanceof Error ? error.message : String(error);
       ailogger.error(chalk.red(`Error executing query: ${errMsg}`));
       throw error;
     } finally {
+      this.logQueryTiming({
+        schema,
+        transactionId,
+        acquireMs,
+        schemaUseMs,
+        queryMs,
+        totalMs: Date.now() - startedAt,
+        failed,
+        queryPreview: this.queryPreview(query)
+      });
       if (!transactionId) {
         connection.release(); // Release if not part of a transaction
       }
@@ -639,9 +674,36 @@ class ConnectionManager {
     );
   }
 
-  // Acquire a connection for the current operation. `getConn` (in
-  // processormacros.ts) already pings the connection after pool acquisition,
-  // so re-pinging here would be a redundant round-trip on every query.
+  private queryPreview(query: string): string {
+    return query.replace(/\s+/g, ' ').trim().slice(0, 180);
+  }
+
+  private connectionTimingThresholdMs(): number {
+    const threshold = Number(process.env.CONNECTION_QUERY_TIMING_THRESHOLD_MS ?? '250');
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 250;
+  }
+
+  private logQueryTiming(details: QueryTimingDetails): void {
+    const threshold = this.connectionTimingThresholdMs();
+    if (!details.failed && details.totalMs < threshold && details.acquireMs < threshold && details.schemaUseMs < threshold && details.queryMs < threshold) {
+      return;
+    }
+
+    ailogger.info('ConnectionManager.executeQuery timing', {
+      schema: details.schema,
+      transactionId: details.transactionId,
+      acquireMs: details.acquireMs,
+      schemaUseMs: details.schemaUseMs,
+      queryMs: details.queryMs,
+      totalMs: details.totalMs,
+      failed: details.failed,
+      queryPreview: details.queryPreview
+    });
+  }
+
+  // Acquire a connection for the current operation. Validation is left to the
+  // query path itself so read-heavy endpoints do not pay an unconditional ping
+  // round-trip before every statement.
   private async acquireConnectionInternal(): Promise<PoolConnection> {
     try {
       return await getConn();

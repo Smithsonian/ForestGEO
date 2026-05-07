@@ -136,9 +136,10 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       expect(body.countTrees).toBeDefined();
       expect(body.countStems).toBeDefined();
 
-      // Transaction should be started and committed
-      expect(beginTx).toHaveBeenCalled();
-      expect(commitTx).toHaveBeenCalled();
+      // Informational dashboard reads should not use a shared transaction.
+      expect(beginTx).not.toHaveBeenCalled();
+      expect(commitTx).not.toHaveBeenCalled();
+      expect(exec.mock.calls.every(call => call[2] === undefined)).toBe(true);
     });
   });
 
@@ -285,10 +286,10 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
   });
 
   describe('error handling', () => {
-    it('returns 500 on database error and rolls back transaction', async () => {
+    it('returns 500 on database error without opening or rolling back a read transaction', async () => {
       const cm = (ConnectionManager as any).getInstance();
       const exec = vi.spyOn(cm, 'executeQuery').mockRejectedValueOnce(new Error('DB connection failed'));
-      vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
+      const beginTx = vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
       const rollbackTx = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValue(undefined);
 
       const res = await callGET('testschema', '1', '2');
@@ -297,8 +298,8 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       const body = await res.json();
       expect(body.error).toMatch(/Failed to retrieve aggregated dashboard metrics/i);
 
-      // Transaction should be rolled back
-      expect(rollbackTx).toHaveBeenCalledWith('tx123');
+      expect(beginTx).not.toHaveBeenCalled();
+      expect(rollbackTx).not.toHaveBeenCalled();
     });
 
     it('logs error when query fails', async () => {
@@ -349,6 +350,30 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
       // Verify parameters include the previous census ID (5)
       // Parameters: censusID, censusID, previousCensusID, previousCensusID, previousCensusID
       expect(stemTypesCall![1]).toEqual([6, 6, 5, 5, 5]);
+    });
+
+    it('does not pass a shared transaction ID to dashboard read queries', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+      const beginTx = vi.spyOn(cm, 'beginTransaction').mockResolvedValue('tx123');
+      const commitTx = vi.spyOn(cm, 'commitTransaction').mockResolvedValue(undefined);
+      const rollbackTx = vi.spyOn(cm, 'rollbackTransaction').mockResolvedValue(undefined);
+
+      exec.mockResolvedValueOnce([{ PrevCensusID: 5 }]);
+      exec.mockResolvedValueOnce([{ total_quadrats: 10, populated_quadrats: 5, populated_pct: 50, unpopulated_quadrats: '' }]);
+      exec.mockResolvedValueOnce([{ PersonnelCount: 1 }]);
+      exec.mockResolvedValueOnce([{ CountTrees: 10 }]);
+      exec.mockResolvedValueOnce([{ CountStems: 15 }]);
+      exec.mockResolvedValueOnce([{ CountOldStems: 10, CountMultiStems: 3, CountNewRecruits: 2 }]);
+
+      const res = await callGET('testschema', '1', '6');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      expect(beginTx).not.toHaveBeenCalled();
+      expect(commitTx).not.toHaveBeenCalled();
+      expect(rollbackTx).not.toHaveBeenCalled();
+      expect(exec).toHaveBeenCalledTimes(6);
+      expect(exec.mock.calls.every(call => call[2] === undefined)).toBe(true);
     });
 
     it('uses fast path query for first census (no complex CTEs)', async () => {

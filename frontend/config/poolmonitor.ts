@@ -213,18 +213,6 @@ export class PoolMonitor {
     }
   }
 
-  private async terminateSleepingConnections(): Promise<void> {
-    const { sleeping } = await this.logAndReturnConnections();
-    for (const id of sleeping) {
-      try {
-        await this.pool.query(`KILL ${id}`);
-        ailogger.info(chalk.red(`Terminated sleeping connection: ${id}`));
-      } catch (error: any) {
-        ailogger.error(chalk.red(`Error terminating connection ${id}:`, error));
-      }
-    }
-  }
-
   private resetInactivityTimer(): void {
     if (this.inactivityTimer) {
       clearTimeout(this.inactivityTimer);
@@ -265,23 +253,18 @@ export class PoolMonitor {
     // Store interval ID for cleanup
     this.healthMonitorIntervalId = setInterval(async () => {
       try {
-        const { sleeping } = await this.logAndReturnConnections();
+        const { sleeping, live } = await this.logAndReturnConnections();
         if (sleeping.length > 0) {
           ailogger.info(chalk.cyan('Pool Health Check:'));
           ailogger.info(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
-
-          if (sleeping.length > 10) {
-            // Lowered threshold from 50 to 10 for more aggressive cleanup
-            ailogger.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
-            await this.reinitializePool();
-          } else if (sleeping.length > 0) {
-            await this.terminateSleepingConnections();
-          }
+          ailogger.info(chalk.cyan(`Live connections: ${live.length}`));
         }
       } catch (error: any) {
         ailogger.error(chalk.red('Error during pool health check:', error));
-        ailogger.warn(chalk.yellow('Attempting to reinitialize pool.'));
-        await this.reinitializePool();
+        if (this.poolClosed || this.isPoolClosedError(error)) {
+          ailogger.warn(chalk.yellow('Pool health check found a closed pool. Reinitializing pool.'));
+          await this.reinitializePool();
+        }
       }
     }, 30000); // Poll every 30 seconds
   }

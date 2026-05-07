@@ -72,25 +72,17 @@ export async function GET(
   }
 
   const connectionManager = ConnectionManager.getInstance();
-  let transactionID: string | undefined;
 
   try {
-    // Start transaction for consistent data
-    transactionID = await connectionManager.beginTransaction();
-
-    // First, check if a previous census exists (fast query)
-    const prevCensusResult = await connectionManager.executeQuery(
+    const previousCensusPromise = connectionManager.executeQuery(
       `SELECT MAX(c.CensusID) as PrevCensusID FROM ${schema}.census c WHERE c.PlotID = ? AND c.CensusID < ?`,
-      [plotID, censusID],
-      transactionID
+      [plotID, censusID]
     );
-    const previousCensusID = prevCensusResult[0]?.PrevCensusID;
 
-    // Execute simple queries in parallel
-    const [progressTachoResults, activeUsersResults, countTreesResults, countStemsResults] = await Promise.all([
-      // 1. Progress Tachometer Query
-      connectionManager.executeQuery(
-        `
+    // Start independent dashboard reads immediately. These cards are
+    // informational and can tolerate eventual consistency.
+    const progressTachoPromise = connectionManager.executeQuery(
+      `
           WITH measured_quads AS (
             SELECT DISTINCT s.QuadratID
             FROM ${schema}.coremeasurements cm
@@ -111,64 +103,69 @@ export async function GET(
           WHERE q.PlotID = ?
           GROUP BY q.PlotID;
         `,
-        [censusID, plotID, plotID],
-        transactionID
-      ),
+      [censusID, plotID, plotID]
+    );
 
-      // 2. Count Active Users Query
-      connectionManager.executeQuery(
-        `
+    const activeUsersPromise = connectionManager.executeQuery(
+      `
           SELECT COUNT(p.PersonnelID) as PersonnelCount
           FROM ${schema}.personnel p
           JOIN ${schema}.censusactivepersonnel cap ON p.PersonnelID = cap.PersonnelID
           JOIN ${schema}.census c ON c.CensusID = cap.CensusID
           WHERE c.CensusID = ? AND c.PlotID = ?
         `,
-        [censusID, plotID],
-        transactionID
-      ),
+      [censusID, plotID]
+    );
 
-      // 3. Count Trees Query
-      connectionManager.executeQuery(
-        `
+    const countTreesPromise = connectionManager.executeQuery(
+      `
           SELECT COUNT(t.TreeID) AS CountTrees
           FROM ${schema}.trees t
           JOIN ${schema}.census c ON t.CensusID = c.CensusID
           WHERE t.CensusID = ? AND c.PlotID = ?
         `,
-        [censusID, plotID],
-        transactionID
-      ),
+      [censusID, plotID]
+    );
 
-      // 4. Count Stems Query
-      connectionManager.executeQuery(
-        `
+    const countStemsPromise = connectionManager.executeQuery(
+      `
           SELECT COUNT(st.StemGUID) AS CountStems
           FROM ${schema}.stems st
           JOIN ${schema}.census c ON st.CensusID = c.CensusID
           WHERE st.CensusID = ? AND c.PlotID = ?
         `,
-        [censusID, plotID],
-        transactionID
-      )
-    ]);
+      [censusID, plotID]
+    );
+
+    const independentMetricPromises = [progressTachoPromise, activeUsersPromise, countTreesPromise, countStemsPromise] as const;
+    const prevCensusResult = await previousCensusPromise.catch(async error => {
+      await Promise.allSettled(independentMetricPromises);
+      throw error;
+    });
+    const previousCensusID = prevCensusResult[0]?.PrevCensusID;
 
     // 5. Stem Types Query - Handle first census (no previous) as fast path
-    let stemTypesResults: any[];
+    let stemTypesPromise: Promise<any[]>;
     if (!previousCensusID) {
       // First census: all measured stems are new recruits
-      const countResult = await connectionManager.executeQuery(
-        `SELECT COUNT(DISTINCT s.StemGUID) as CountNewRecruits
+      stemTypesPromise = connectionManager
+        .executeQuery(
+          `SELECT COUNT(DISTINCT s.StemGUID) as CountNewRecruits
          FROM ${schema}.coremeasurements cm
          JOIN ${schema}.stems s ON cm.StemGUID = s.StemGUID
          WHERE cm.CensusID = ? AND s.CensusID = ?`,
-        [censusID, censusID],
-        transactionID
-      );
-      stemTypesResults = [{ CountOldStems: 0, CountMultiStems: 0, CountNewRecruits: countResult[0]?.CountNewRecruits || 0 }];
+          [censusID, censusID]
+        )
+        .then(countResult => [
+          {
+            CountOldStems: 0,
+            CountMultiStems: 0,
+            CountNewRecruits: countResult[0]?.CountNewRecruits || 0
+          }
+        ]);
     } else {
       // Subsequent census: use optimized comparison query with explicit census ID
-      stemTypesResults = await connectionManager.executeQuery(
+      stemTypesPromise = connectionManager.executeQuery(
         `
           WITH measured_stems AS (
             SELECT DISTINCT s.StemGUID, t.TreeTag, s.StemTag
@@ -197,13 +194,14 @@ export async function GET(
           LEFT JOIN previous_stems ps ON ms.TreeTag = ps.TreeTag AND ms.StemTag = ps.StemTag
           LEFT JOIN previous_trees pt ON ms.TreeTag = pt.TreeTag
         `,
-        [censusID, censusID, previousCensusID, previousCensusID, previousCensusID],
-        transactionID
+        [censusID, censusID, previousCensusID, previousCensusID, previousCensusID]
       );
     }
 
-    // Commit transaction
-    await connectionManager.commitTransaction(transactionID);
+    const [progressTachoResults, activeUsersResults, countTreesResults, countStemsResults, stemTypesResults] = await Promise.all([
+      ...independentMetricPromises,
+      stemTypesPromise
+    ]);
 
     // Format response with all metrics
     const metrics: DashboardMetrics = {
@@ -234,15 +232,6 @@ export async function GET(
     return NextResponse.json(metrics, { status: HTTPResponses.OK });
   } catch (error: any) {
     ailogger.error('Aggregated dashboard metrics error:', error);
-
-    // Rollback transaction on error
-    if (transactionID) {
-      try {
-        await connectionManager.rollbackTransaction(transactionID);
-      } catch (rollbackError: any) {
-        ailogger.error('Failed to rollback transaction:', rollbackError);
-      }
-    }
 
     return NextResponse.json(
       {
