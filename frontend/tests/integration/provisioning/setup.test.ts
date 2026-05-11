@@ -10,6 +10,7 @@ const PROVISIONING_STEPS_FK_NAME = 'fk_provisioning_steps_run';
 const DDL_FILE_PATH = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
 
 const EXPECTED_PROVISIONING_RUNS_COLUMNS = ['RunID', 'Status', 'StartedBy', 'StartedAt', 'FinishedAt', 'SiteName', 'SchemaName', 'InputPayload'];
+const EXPECTED_PROVISIONING_STEPS_COLUMNS = ['StepID', 'RunID', 'StepIndex', 'StepKey', 'Status', 'StartedAt', 'FinishedAt', 'ErrorMessage', 'ErrorStack'];
 
 describe('catalog provisioning tables', () => {
   let conn: mysql.Connection;
@@ -71,6 +72,23 @@ describe('catalog provisioning tables', () => {
       .filter(Boolean)) {
       await conn.query(stmt);
     }
-    // No throw = idempotent re-application succeeded
+    const [rows]: any = await conn.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = ? AND table_name IN (?, ?)`,
+      [CATALOG_SCHEMA, PROVISIONING_RUNS_TABLE, PROVISIONING_STEPS_TABLE]
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it('creates provisioning_steps with expected columns', async () => {
+    const [rows]: any = await conn.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = ?
+       ORDER BY ordinal_position`,
+      [CATALOG_SCHEMA, PROVISIONING_STEPS_TABLE]
+    );
+    const cols = rows.map((r: any) => r.column_name ?? r.COLUMN_NAME);
+    expect(cols).toEqual(EXPECTED_PROVISIONING_STEPS_COLUMNS);
   });
 });
