@@ -48,6 +48,25 @@ describe('splitSqlFile', () => {
     expect(stmts[1].sql).toBe('SELECT 1');
   });
 
+  it('preserves comments and blank lines inside DELIMITER blocks', () => {
+    const content = `
+DELIMITER $$
+CREATE PROCEDURE foo()
+BEGIN
+  -- this comment must survive
+  SELECT 1;
+
+  SELECT 2;
+END$$
+DELIMITER ;
+`;
+    const stmts = splitSqlFile(content);
+    expect(stmts).toHaveLength(1);
+    expect(stmts[0].sql).toContain('-- this comment must survive');
+    // Empty line preserved between SELECT 1 and SELECT 2
+    expect(stmts[0].sql).toMatch(/SELECT 1;\n\s*\n\s*SELECT 2;/);
+  });
+
   it('handles DELIMITER $$ blocks', () => {
     const content = `
 DELIMITER $$
@@ -105,7 +124,7 @@ describe('executeSqlFile', () => {
     await expect(executeSqlFile(pool, TABLES_FILE, SCHEMA_NAME)).rejects.toMatchObject({
       file: TABLES_FILE,
       lineNumber: expect.any(Number),
-      statementPreview: expect.stringMatching(/^[^\n\r]{1,200}$/),
+      statementPreview: expect.stringMatching(new RegExp(`^[^\\n\\r]{1,${STATEMENT_PREVIEW_MAX_LENGTH}}$`)),
       sqlState: expect.any(String),
       errno: expect.any(Number),
       cause: expect.any(Error)

@@ -1,5 +1,6 @@
 import { readFile } from 'fs/promises';
 import type { Pool } from 'mysql2/promise';
+import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
 
 export const STATEMENT_PREVIEW_MAX_LENGTH = 200;
 
@@ -29,7 +30,11 @@ export function splitSqlFile(content: string): ParsedStatement[] {
     const trimmed = rawLine.trim();
 
     if (trimmed === '' || trimmed.startsWith('--') || trimmed.startsWith('#')) {
-      if (buffer === '') bufferStartLine = lineNo + 1;
+      if (buffer === '') {
+        bufferStartLine = lineNo + 1;
+      } else {
+        buffer += rawLine + '\n';
+      }
       continue;
     }
 
@@ -69,9 +74,7 @@ export async function executeSqlFile(pool: Pool, filePath: string, schemaName?: 
   const statements = splitSqlFile(content);
 
   if (schemaName) {
-    if (!/^[a-zA-Z0-9_]+$/.test(schemaName)) {
-      throw new Error(`Unsafe schema name: ${schemaName}`);
-    }
+    validateSchemaOrThrow(schemaName);
     await pool.query(`USE \`${schemaName}\``);
   }
 
