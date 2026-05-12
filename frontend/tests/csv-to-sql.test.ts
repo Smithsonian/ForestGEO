@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, type StagingRow } from '../lib/csv-to-sql';
+import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, type StagingRow } from '../lib/csv-to-sql';
 
 describe('parseCliArgs', () => {
   const baseArgv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -203,5 +203,80 @@ describe('mapCsvRowToStagingRow', () => {
     const partial = { ...baseRow } as Record<string, string>;
     delete partial.dbh;
     expect(() => mapCsvRowToStagingRow(partial, 1, 2)).toThrow(/dbh/);
+  });
+});
+
+describe('renderCreateTable', () => {
+  const ddl = renderCreateTable('TempAllTrees');
+
+  it('includes a DROP TABLE IF EXISTS for the table', () => {
+    expect(ddl).toMatch(/DROP TABLE IF EXISTS `TempAllTrees`;/);
+  });
+
+  it('includes CREATE TABLE for the table with backticks', () => {
+    expect(ddl).toMatch(/CREATE TABLE `TempAllTrees`/);
+  });
+
+  it('includes ENGINE=MyISAM', () => {
+    expect(ddl).toMatch(/ENGINE=MyISAM/);
+  });
+
+  it('declares all 25 columns from the legacy DDL', () => {
+    const columns = [
+      'TempID',
+      'QuadratName',
+      'Subquad',
+      'Tag',
+      'StemTag',
+      'Mnemonic',
+      'DBH',
+      'Codes',
+      'HOM',
+      'Comments',
+      'TreeID',
+      'StemID',
+      'ExactDate',
+      'QuadratID',
+      'X',
+      'Y',
+      'SpeciesID',
+      'SubSpeciesID',
+      'DBHID',
+      'PlotCensusNumber',
+      'CensusID',
+      'PrimaryStem',
+      'PlotID',
+      'Errors',
+      'Tagged'
+    ];
+    for (const col of columns) {
+      expect(ddl).toContain(col);
+    }
+  });
+
+  it('declares the legacy types/widths', () => {
+    expect(ddl).toMatch(/TempID\s+INT UNSIGNED AUTO_INCREMENT/);
+    expect(ddl).toMatch(/QuadratName\s+VARCHAR\(12\)/);
+    expect(ddl).toMatch(/StemTag\s+VARCHAR\(32\)/);
+    expect(ddl).toMatch(/DBH\s+FLOAT\(8\) DEFAULT NULL/);
+    expect(ddl).toMatch(/Codes\s+VARCHAR\(50\) DEFAULT NULL/);
+    expect(ddl).toMatch(/Comments\s+VARCHAR\(256\) DEFAULT NULL/);
+    expect(ddl).toMatch(/PrimaryStem\s+VARCHAR\(20\)/);
+    expect(ddl).toMatch(/ExactDate\s+DATE/);
+  });
+
+  it('declares PRIMARY KEY and the four indexes', () => {
+    expect(ddl).toMatch(/PRIMARY KEY \(TempID\)/);
+    expect(ddl).toMatch(/KEY `indexTagStemTag` \(`Tag`,`StemTag`\)/);
+    expect(ddl).toMatch(/KEY `indexTreeIDStemID` \(`TreeID`,`StemID`\)/);
+    expect(ddl).toMatch(/KEY `indexQuadratNamePlotID` \(`QuadratName`,`PlotID`\)/);
+    expect(ddl).toMatch(/KEY `indexMnemonic` \(`Mnemonic`\)/);
+  });
+
+  it('honors a different table name', () => {
+    const other = renderCreateTable('MyStaging');
+    expect(other).toMatch(/DROP TABLE IF EXISTS `MyStaging`;/);
+    expect(other).toMatch(/CREATE TABLE `MyStaging`/);
+    expect(other).not.toMatch(/`TempAllTrees`/);
   });
 });

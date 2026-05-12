@@ -105,6 +105,44 @@ function coerceDate(raw: string): string | null {
   return trimmed;
 }
 
+export function renderCreateTable(tableName: string): string {
+  return [
+    `DROP TABLE IF EXISTS \`${tableName}\`;`,
+    `CREATE TABLE \`${tableName}\` (`,
+    `  TempID           INT UNSIGNED AUTO_INCREMENT,`,
+    `  QuadratName      VARCHAR(12),`,
+    `  Subquad          INT UNSIGNED,`,
+    `  Tag              VARCHAR(10),`,
+    `  StemTag          VARCHAR(32),`,
+    `  Mnemonic         VARCHAR(10),`,
+    `  DBH              FLOAT(8) DEFAULT NULL,`,
+    `  Codes            VARCHAR(50) DEFAULT NULL,`,
+    `  HOM              FLOAT(8) DEFAULT NULL,`,
+    `  Comments         VARCHAR(256) DEFAULT NULL,`,
+    `  TreeID           INT UNSIGNED,`,
+    `  StemID           INT UNSIGNED,`,
+    `  ExactDate        DATE,`,
+    `  QuadratID        INT UNSIGNED,`,
+    `  X                FLOAT(8),`,
+    `  Y                FLOAT(8),`,
+    `  SpeciesID        INT UNSIGNED,`,
+    `  SubSpeciesID     INT UNSIGNED,`,
+    `  DBHID            INT UNSIGNED,`,
+    `  PlotCensusNumber INT UNSIGNED,`,
+    `  CensusID         INT UNSIGNED,`,
+    `  PrimaryStem      VARCHAR(20),`,
+    `  PlotID           INT UNSIGNED,`,
+    `  Errors           VARCHAR(256),`,
+    `  Tagged           VARCHAR(1),`,
+    `  PRIMARY KEY (TempID),`,
+    `  KEY \`indexTagStemTag\` (\`Tag\`,\`StemTag\`),`,
+    `  KEY \`indexTreeIDStemID\` (\`TreeID\`,\`StemID\`),`,
+    `  KEY \`indexQuadratNamePlotID\` (\`QuadratName\`,\`PlotID\`),`,
+    `  KEY \`indexMnemonic\` (\`Mnemonic\`)`,
+    `) ENGINE=MyISAM;`
+  ].join('\n');
+}
+
 export function parseCliArgs(argv: string[]): CliArgs {
   const { values } = parseArgs({
     args: argv,
