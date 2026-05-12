@@ -1,6 +1,8 @@
 import { readFile } from 'fs/promises';
 import type { Pool } from 'mysql2/promise';
 
+export const STATEMENT_PREVIEW_MAX_LENGTH = 200;
+
 export interface ParsedStatement {
   sql: string;
   lineNumber: number;
@@ -77,7 +79,7 @@ export async function executeSqlFile(pool: Pool, filePath: string, schemaName?: 
     try {
       await pool.query(stmt.sql);
     } catch (err: any) {
-      const preview = stmt.sql.slice(0, 200).replace(/\s+/g, ' ');
+      const preview = stmt.sql.slice(0, STATEMENT_PREVIEW_MAX_LENGTH).replace(/\s+/g, ' ');
       const wrapped: any = new Error(`SQL error in ${filePath}:${stmt.lineNumber}: ${err.message}\nStatement: ${preview}`);
       wrapped.file = filePath;
       wrapped.lineNumber = stmt.lineNumber;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import { readFileSync } from 'fs';
 import mysql from 'mysql2/promise';
-import { splitSqlFile, executeSqlFile } from './sql-runner';
+import { splitSqlFile, executeSqlFile, STATEMENT_PREVIEW_MAX_LENGTH } from './sql-runner';
 
 const TABLES_FILE = path.join(process.cwd(), 'sqlscripting/tablestructures.sql');
 const PROCS_FILE = path.join(process.cwd(), 'sqlscripting/storedprocedures.sql');
@@ -101,10 +101,14 @@ describe('executeSqlFile', () => {
   });
 
   it('attaches file and lineNumber metadata on SQL errors', async () => {
-    // Force a duplicate-table error by running tablestructures.sql against the already-initialized schema
+    // Re-running tablestructures.sql triggers ER_DUP_KEYNAME on the first standalone CREATE INDEX
     await expect(executeSqlFile(pool, TABLES_FILE, SCHEMA_NAME)).rejects.toMatchObject({
       file: TABLES_FILE,
-      lineNumber: expect.any(Number)
+      lineNumber: expect.any(Number),
+      statementPreview: expect.stringMatching(/^[^\n\r]{1,200}$/),
+      sqlState: expect.any(String),
+      errno: expect.any(Number),
+      cause: expect.any(Error)
     });
   });
 });
