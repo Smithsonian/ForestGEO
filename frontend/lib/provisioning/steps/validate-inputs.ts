@@ -3,7 +3,7 @@ import { ProvisioningError } from '../types';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
 
-function rectsOverlap(a: QuadratCsvRow, b: QuadratCsvRow): boolean {
+export function rectsOverlap(a: QuadratCsvRow, b: QuadratCsvRow): boolean {
   return a.startX < b.startX + b.dimensionX && a.startX + a.dimensionX > b.startX && a.startY < b.startY + b.dimensionY && a.startY + a.dimensionY > b.startY;
 }
 
