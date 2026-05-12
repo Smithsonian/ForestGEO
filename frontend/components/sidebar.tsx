@@ -13,6 +13,7 @@ import ListItemButton from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
@@ -856,6 +857,20 @@ export default function Sidebar(props: SidebarProps) {
                         ))}
                       </Box>
                     </Box>
+                  )}
+                  {session?.user?.userStatus === 'global' && (
+                    <ListItemButton
+                      selected={pathname === '/admin/provision'}
+                      color={pathname === '/admin/provision' ? 'primary' : undefined}
+                      onClick={() => router.push('/admin/provision')}
+                      sx={{ borderRadius: 'sm', mb: 1 }}
+                      aria-label="Navigate to Provision New Site"
+                    >
+                      <AddCircleOutlineIcon />
+                      <ListItemContent>
+                        <Typography level="title-sm">Provision Site</Typography>
+                      </ListItemContent>
+                    </ListItemButton>
                   )}
                   <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1 }}>
                     Select a site to exit admin and go to dashboard:

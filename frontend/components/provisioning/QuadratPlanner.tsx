@@ -114,15 +114,16 @@ function GridModePanel({
       </Stack>
 
       <FormControl>
-        <FormLabel>Naming Pattern</FormLabel>
+        <FormLabel htmlFor="naming-pattern-group">Naming Pattern</FormLabel>
         <RadioGroup
+          id="naming-pattern-group"
           aria-label="Naming Pattern"
           value={value.namingPattern}
           onChange={e => onChange({ ...value, namingPattern: e.target.value as typeof value.namingPattern })}
           orientation="horizontal"
         >
-          <Radio value={NAMING_PATTERN_SEQUENTIAL} label="Sequential (Q0001, Q0002…)" />
-          <Radio value={NAMING_PATTERN_ROW_COL} label="Row-Col (1-1, 1-2…)" />
+          <Radio value={NAMING_PATTERN_SEQUENTIAL} label="Sequential (Q0001, Q0002…)" aria-label="Sequential naming pattern" />
+          <Radio value={NAMING_PATTERN_ROW_COL} label="Row-Col (1-1, 1-2…)" aria-label="Row-column naming pattern" />
         </RadioGroup>
       </FormControl>
 
@@ -183,10 +184,16 @@ export default function QuadratPlanner({ value, onChange, plot }: QuadratPlanner
       <Typography level="title-md">Quadrat Configuration</Typography>
 
       <FormControl>
-        <FormLabel>Mode</FormLabel>
-        <RadioGroup aria-label="Quadrat Mode" value={value.mode} onChange={e => switchMode(e.target.value as 'grid' | 'csv')} orientation="horizontal">
-          <Radio value="grid" label="Grid (auto-generate)" />
-          <Radio value="csv" label="CSV (upload custom layout)" />
+        <FormLabel htmlFor="quadrat-mode-group">Mode</FormLabel>
+        <RadioGroup
+          id="quadrat-mode-group"
+          aria-label="Quadrat Mode"
+          value={value.mode}
+          onChange={e => switchMode(e.target.value as 'grid' | 'csv')}
+          orientation="horizontal"
+        >
+          <Radio value="grid" label="Grid (auto-generate)" aria-label="Grid mode: auto-generate quadrats" />
+          <Radio value="csv" label="CSV (upload custom layout)" aria-label="CSV mode: upload custom quadrat layout" />
         </RadioGroup>
       </FormControl>
 
