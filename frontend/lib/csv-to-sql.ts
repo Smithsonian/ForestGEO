@@ -143,6 +143,36 @@ export function renderCreateTable(tableName: string): string {
   ].join('\n');
 }
 
+const INSERT_COLUMNS: ReadonlyArray<keyof StagingRow> = [
+  'QuadratName',
+  'Tag',
+  'StemTag',
+  'Mnemonic',
+  'DBH',
+  'HOM',
+  'Codes',
+  'ExactDate',
+  'X',
+  'Y',
+  'PlotID',
+  'PlotCensusNumber'
+] as const;
+
+const DEFAULT_CHUNK_SIZE = 1000;
+
+export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkSize: number = DEFAULT_CHUNK_SIZE): string[] {
+  if (rows.length === 0) return [];
+  const chunks: string[] = [];
+  const columnList = INSERT_COLUMNS.join(', ');
+  const insertHead = `INSERT INTO \`${tableName}\` (${columnList}) VALUES`;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const slice = rows.slice(i, i + chunkSize);
+    const tuples = slice.map(row => '(' + INSERT_COLUMNS.map(col => escapeSqlValue(row[col])).join(',') + ')');
+    chunks.push(`${insertHead}\n  ${tuples.join(',\n  ')};`);
+  }
+  return chunks;
+}
+
 export function parseCliArgs(argv: string[]): CliArgs {
   const { values } = parseArgs({
     args: argv,

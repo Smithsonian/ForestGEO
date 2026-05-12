@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, type StagingRow } from '../lib/csv-to-sql';
+import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, renderInsertChunks, type StagingRow } from '../lib/csv-to-sql';
 
 describe('parseCliArgs', () => {
   const baseArgv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -278,5 +278,90 @@ describe('renderCreateTable', () => {
     expect(other).toMatch(/DROP TABLE IF EXISTS `MyStaging`;/);
     expect(other).toMatch(/CREATE TABLE `MyStaging`/);
     expect(other).not.toMatch(/`TempAllTrees`/);
+  });
+});
+
+function makeRow(overrides: Partial<StagingRow> = {}): StagingRow {
+  return {
+    QuadratName: '121',
+    Tag: '10001',
+    StemTag: '10001',
+    Mnemonic: 'FRPE',
+    DBH: 15,
+    HOM: 1.3,
+    Codes: 'LI',
+    ExactDate: '2014-05-27',
+    X: 4.1,
+    Y: 5.2,
+    PlotID: 1,
+    PlotCensusNumber: 2,
+    ...overrides
+  };
+}
+
+describe('renderInsertChunks', () => {
+  it('returns [] for 0 rows', () => {
+    expect(renderInsertChunks('TempAllTrees', [])).toEqual([]);
+  });
+
+  it('returns one INSERT for 1 row', () => {
+    const out = renderInsertChunks('TempAllTrees', [makeRow()]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/^INSERT INTO `TempAllTrees`/);
+    expect(out[0]).toMatch(/;$/);
+  });
+
+  it('lists columns in the documented order', () => {
+    const out = renderInsertChunks('TempAllTrees', [makeRow()]);
+    expect(out[0]).toContain('(QuadratName, Tag, StemTag, Mnemonic, DBH, HOM, Codes, ExactDate, X, Y, PlotID, PlotCensusNumber)');
+  });
+
+  it('emits NULL for null fields', () => {
+    const out = renderInsertChunks('TempAllTrees', [makeRow({ DBH: null, HOM: null, Codes: null })]);
+    const valuesMatch = out[0].match(/VALUES\s*(\(.*\))/s);
+    expect(valuesMatch).not.toBeNull();
+    const occurrences = (valuesMatch![1].match(/NULL/g) ?? []).length;
+    expect(occurrences).toBe(3);
+  });
+
+  it('emits one INSERT for 1000 rows', () => {
+    const rows = Array.from({ length: 1000 }, () => makeRow());
+    expect(renderInsertChunks('TempAllTrees', rows)).toHaveLength(1);
+  });
+
+  it('emits two INSERTs for 1001 rows', () => {
+    const rows = Array.from({ length: 1001 }, () => makeRow());
+    const out = renderInsertChunks('TempAllTrees', rows);
+    expect(out).toHaveLength(2);
+  });
+
+  it('emits three INSERTs for 2500 rows (1000+1000+500)', () => {
+    const rows = Array.from({ length: 2500 }, () => makeRow());
+    const out = renderInsertChunks('TempAllTrees', rows);
+    expect(out).toHaveLength(3);
+    const firstTupleCount = out[0].split('),').length;
+    expect(firstTupleCount).toBe(1000);
+    const lastTupleCount = out[2].split('),').length;
+    expect(lastTupleCount).toBe(500);
+  });
+
+  it('respects a custom chunkSize', () => {
+    const rows = Array.from({ length: 5 }, () => makeRow());
+    const out = renderInsertChunks('TempAllTrees', rows, 2);
+    expect(out).toHaveLength(3);
+  });
+
+  it('quotes the table name with backticks', () => {
+    const out = renderInsertChunks('MyStaging', [makeRow()]);
+    expect(out[0]).toMatch(/^INSERT INTO `MyStaging`/);
+  });
+
+  it('serializes a row with mixed values correctly', () => {
+    const out = renderInsertChunks('TempAllTrees', [makeRow({ Tag: "O'Brien", Codes: 'LI;M;A', DBH: 0, HOM: null })]);
+    expect(out[0]).toContain("'121'");
+    expect(out[0]).toContain("'O''Brien'");
+    expect(out[0]).toContain("'LI;M;A'");
+    expect(out[0]).toContain(',0,');
+    expect(out[0]).toMatch(/,NULL,/);
   });
 });
