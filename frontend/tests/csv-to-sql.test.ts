@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, renderInsertChunks, type StagingRow } from '../lib/csv-to-sql';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, renderInsertChunks, readCsvFile, type StagingRow } from '../lib/csv-to-sql';
 
 describe('parseCliArgs', () => {
   const baseArgv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -363,5 +366,65 @@ describe('renderInsertChunks', () => {
     expect(out[0]).toContain("'LI;M;A'");
     expect(out[0]).toContain(',0,');
     expect(out[0]).toMatch(/,NULL,/);
+  });
+});
+
+function makeTempCsv(content: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'csv-to-sql-test-'));
+  const path = join(dir, 'sample.csv');
+  writeFileSync(path, content, 'utf-8');
+  return path;
+}
+
+describe('readCsvFile', () => {
+  it('reads a small CSV with the standard header order', () => {
+    const path = makeTempCsv('tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n');
+    const rows = readCsvFile(path);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      tag: '10001',
+      stemtag: '10001',
+      spcode: 'FRPE',
+      quadrat: '121',
+      lx: '4.1',
+      ly: '5.2',
+      dbh: '15',
+      hom: '1.30',
+      date: '2014-05-27',
+      codes: 'LI'
+    });
+    rmSync(path, { recursive: true, force: true });
+  });
+
+  it('reads a CSV with quadrat-first header order', () => {
+    const path = makeTempCsv('quadrat,tag,stemtag,spcode,lx,ly,dbh,hom,date,codes\n' + '121,10001,10001,FRPE,4.1,5.2,15,1.30,2014-05-27,LI\n');
+    const rows = readCsvFile(path);
+    expect(rows[0].quadrat).toBe('121');
+    expect(rows[0].tag).toBe('10001');
+    rmSync(path, { recursive: true, force: true });
+  });
+
+  it('throws when a required header is missing', () => {
+    const path = makeTempCsv('tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27\n');
+    expect(() => readCsvFile(path)).toThrow(/codes/);
+    rmSync(path, { recursive: true, force: true });
+  });
+
+  it('warns about extra headers but does not throw', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const path = makeTempCsv('tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes,foo\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI,extra\n');
+    const rows = readCsvFile(path);
+    expect(rows).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalled();
+    expect(warnSpy.mock.calls[0][0]).toMatch(/foo/);
+    warnSpy.mockRestore();
+    rmSync(path, { recursive: true, force: true });
+  });
+
+  it('skips trailing blank lines', () => {
+    const path = makeTempCsv('tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n\n\n');
+    const rows = readCsvFile(path);
+    expect(rows).toHaveLength(1);
+    rmSync(path, { recursive: true, force: true });
   });
 });

@@ -18,6 +18,8 @@
  */
 
 import { parseArgs } from 'node:util';
+import { readFileSync } from 'node:fs';
+import Papa from 'papaparse';
 
 export interface CliArgs {
   input: string;
@@ -171,6 +173,27 @@ export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkS
     chunks.push(`${insertHead}\n  ${tuples.join(',\n  ')};`);
   }
   return chunks;
+}
+
+export function readCsvFile(path: string): Record<string, string>[] {
+  const content = readFileSync(path, 'utf-8');
+  const result = Papa.parse<Record<string, string>>(content, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: h => h.trim()
+  });
+
+  const actualHeaders = result.meta.fields ?? [];
+  const missing = REQUIRED_CSV_HEADERS.filter(h => !actualHeaders.includes(h));
+  if (missing.length > 0) {
+    throw new Error(`CSV is missing required header(s): ${missing.join(', ')}`);
+  }
+  const extras = actualHeaders.filter(h => !(REQUIRED_CSV_HEADERS as ReadonlyArray<string>).includes(h));
+  if (extras.length > 0) {
+    console.warn(`CSV has extra columns that will be ignored: ${extras.join(', ')}`);
+  }
+
+  return result.data;
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
