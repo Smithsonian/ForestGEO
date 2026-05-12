@@ -38,7 +38,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
     return NextResponse.json({ error: `Database unavailable: ${message}` }, { status: HTTP_SERVICE_UNAVAILABLE });
   }
 
-  const result = await getRunWithSteps(runId, catalogPool);
+  let result: Awaited<ReturnType<typeof getRunWithSteps>>;
+  try {
+    result = await getRunWithSteps(runId, catalogPool);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Failed to load run: ${message}` }, { status: 500 });
+  }
+
   if (!result) {
     return NextResponse.json({ error: `Run ${runId} not found` }, { status: HTTP_NOT_FOUND });
   }

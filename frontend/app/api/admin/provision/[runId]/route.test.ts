@@ -127,6 +127,18 @@ describe('GET /api/admin/provision/[runId]', () => {
     expect(mocks.getRunWithSteps).not.toHaveBeenCalled();
   });
 
+  it('returns 500 when getRunWithSteps throws a database error', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+    mocks.getRunWithSteps.mockRejectedValue(new Error('Connection lost'));
+
+    const res = await GET(makeGetRequest('7'), makeParams('7'));
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body).toHaveProperty('error');
+    expect(body.error).toContain('Connection lost');
+  });
+
   it('returns 404 when the runId does not match any run', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     mocks.getRunWithSteps.mockResolvedValue(null);

@@ -27,6 +27,13 @@ export async function GET(_req: Request) {
     return NextResponse.json({ error: `Database unavailable: ${message}` }, { status: HTTP_SERVICE_UNAVAILABLE });
   }
 
-  const runs = await listRuns(catalogPool);
+  let runs: Awaited<ReturnType<typeof listRuns>>;
+  try {
+    runs = await listRuns(catalogPool);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Failed to list runs: ${message}` }, { status: 500 });
+  }
+
   return NextResponse.json(runs);
 }
