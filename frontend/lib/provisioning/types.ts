@@ -69,6 +69,16 @@ export interface ProvisioningInput {
   quadrats: QuadratConfig;
 }
 
+export interface ProvisioningRunListRow {
+  RunID: number;
+  Status: RunStatus;
+  StartedBy: string;
+  StartedAt: string;
+  FinishedAt: string | null;
+  SiteName: string;
+  SchemaName: string;
+}
+
 export interface ProvisioningRunRecord {
   runId: number;
   status: RunStatus;

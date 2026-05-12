@@ -4,18 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { Alert, Box, Chip, CircularProgress, Sheet, Stack, Table, Typography } from '@mui/joy';
-
-type RunStatus = 'running' | 'completed' | 'failed' | 'aborted';
-
-interface RunRow {
-  RunID: number;
-  Status: RunStatus;
-  StartedBy: string;
-  StartedAt: string;
-  FinishedAt: string | null;
-  SiteName: string;
-  SchemaName: string;
-}
+import type { ProvisioningRunListRow, RunStatus } from '@/lib/provisioning/types';
 
 const STATUS_CHIP_COLOR: Record<RunStatus, 'success' | 'danger' | 'warning' | 'neutral'> = {
   completed: 'success',
@@ -31,17 +20,20 @@ function formatDate(value: string | null): string {
 
 export default function ProvisioningRunsPage() {
   const { data: session, status: sessionStatus } = useSession();
-  const [runs, setRuns] = useState<RunRow[] | null>(null);
+  const [runs, setRuns] = useState<ProvisioningRunListRow[] | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (sessionStatus !== 'authenticated') return;
+    if ((session?.user as any)?.userStatus !== 'global') return;
+
     let cancelled = false;
 
     async function loadRuns() {
       try {
         const res = await fetch('/api/admin/provision/list');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body: RunRow[] = await res.json();
+        const body: ProvisioningRunListRow[] = await res.json();
         if (!cancelled) setRuns(body);
       } catch (err: unknown) {
         if (!cancelled) {
@@ -55,7 +47,7 @@ export default function ProvisioningRunsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessionStatus, session?.user]);
 
   if (sessionStatus === 'loading') {
     return (
