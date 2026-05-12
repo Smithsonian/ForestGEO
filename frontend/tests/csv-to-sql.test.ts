@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgs, escapeSqlValue } from '../lib/csv-to-sql';
+import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, type StagingRow } from '../lib/csv-to-sql';
 
 describe('parseCliArgs', () => {
   const baseArgv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -101,5 +101,107 @@ describe('escapeSqlValue', () => {
 
   it('emits empty quoted string for empty input (caller maps empty->NULL upstream)', () => {
     expect(escapeSqlValue('')).toBe("''");
+  });
+});
+
+describe('mapCsvRowToStagingRow', () => {
+  const baseRow = {
+    tag: '10001',
+    stemtag: '10001',
+    spcode: 'FRPE',
+    quadrat: '121',
+    lx: '4.1',
+    ly: '5.2',
+    dbh: '15',
+    hom: '1.30',
+    date: '2014-05-27',
+    codes: 'LI'
+  };
+
+  it('maps a fully-populated row', () => {
+    const result = mapCsvRowToStagingRow(baseRow, 1, 2);
+    expect(result).toEqual<StagingRow>({
+      QuadratName: '121',
+      Tag: '10001',
+      StemTag: '10001',
+      Mnemonic: 'FRPE',
+      DBH: 15,
+      HOM: 1.3,
+      Codes: 'LI',
+      ExactDate: '2014-05-27',
+      X: 4.1,
+      Y: 5.2,
+      PlotID: 1,
+      PlotCensusNumber: 2
+    });
+  });
+
+  it('maps empty string cells to null for all columns', () => {
+    const result = mapCsvRowToStagingRow(
+      {
+        tag: '',
+        stemtag: '',
+        spcode: '',
+        quadrat: '',
+        lx: '',
+        ly: '',
+        dbh: '',
+        hom: '',
+        date: '',
+        codes: ''
+      },
+      1,
+      2
+    );
+    expect(result.Tag).toBeNull();
+    expect(result.StemTag).toBeNull();
+    expect(result.Mnemonic).toBeNull();
+    expect(result.QuadratName).toBeNull();
+    expect(result.DBH).toBeNull();
+    expect(result.HOM).toBeNull();
+    expect(result.X).toBeNull();
+    expect(result.Y).toBeNull();
+    expect(result.ExactDate).toBeNull();
+    expect(result.Codes).toBeNull();
+  });
+
+  it('trims string columns and treats whitespace-only as null', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, tag: '  10001  ', codes: '   ' }, 1, 2);
+    expect(result.Tag).toBe('10001');
+    expect(result.Codes).toBeNull();
+  });
+
+  it('passes plot/census constants onto every row', () => {
+    const r1 = mapCsvRowToStagingRow(baseRow, 7, 3);
+    expect(r1.PlotID).toBe(7);
+    expect(r1.PlotCensusNumber).toBe(3);
+  });
+
+  it('preserves DBH=0 verbatim (does NOT convert to null in v1)', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: '0' }, 1, 2);
+    expect(result.DBH).toBe(0);
+  });
+
+  it('preserves codes with semicolons as a single string', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'LI;M;A' }, 1, 2);
+    expect(result.Codes).toBe('LI;M;A');
+  });
+
+  it('throws when dbh is not numeric', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: 'abc' }, 1, 2)).toThrow(/dbh.*abc/);
+  });
+
+  it('throws when lx is not numeric', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, lx: 'NaN' }, 1, 2)).toThrow(/lx/);
+  });
+
+  it('throws when date is not YYYY-MM-DD', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, date: '5/27/2014' }, 1, 2)).toThrow(/date.*5\/27\/2014/);
+  });
+
+  it('throws when a required header is missing from the row object', () => {
+    const partial = { ...baseRow } as Record<string, string>;
+    delete partial.dbh;
+    expect(() => mapCsvRowToStagingRow(partial, 1, 2)).toThrow(/dbh/);
   });
 });

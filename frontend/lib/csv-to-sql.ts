@@ -39,6 +39,72 @@ export function escapeSqlValue(value: SqlValue): string {
   return `'${escaped}'`;
 }
 
+const REQUIRED_CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'] as const;
+type CsvHeader = (typeof REQUIRED_CSV_HEADERS)[number];
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export interface StagingRow {
+  QuadratName: string | null;
+  Tag: string | null;
+  StemTag: string | null;
+  Mnemonic: string | null;
+  DBH: number | null;
+  HOM: number | null;
+  Codes: string | null;
+  ExactDate: string | null;
+  X: number | null;
+  Y: number | null;
+  PlotID: number;
+  PlotCensusNumber: number;
+}
+
+export function mapCsvRowToStagingRow(row: Record<string, string>, plotId: number, censusNumber: number): StagingRow {
+  for (const header of REQUIRED_CSV_HEADERS) {
+    if (!(header in row)) {
+      throw new Error(`Missing required CSV header: ${header}`);
+    }
+  }
+  return {
+    QuadratName: coerceString(row.quadrat),
+    Tag: coerceString(row.tag),
+    StemTag: coerceString(row.stemtag),
+    Mnemonic: coerceString(row.spcode),
+    DBH: coerceNumber('dbh', row.dbh),
+    HOM: coerceNumber('hom', row.hom),
+    Codes: coerceString(row.codes),
+    ExactDate: coerceDate(row.date),
+    X: coerceNumber('lx', row.lx),
+    Y: coerceNumber('ly', row.ly),
+    PlotID: plotId,
+    PlotCensusNumber: censusNumber
+  };
+}
+
+function coerceString(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function coerceNumber(column: CsvHeader, raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Column "${column}" expected a numeric value, got: ${raw}`);
+  }
+  return n;
+}
+
+function coerceDate(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (!DATE_RE.test(trimmed)) {
+    throw new Error(`Column "date" expected YYYY-MM-DD, got: ${raw}`);
+  }
+  return trimmed;
+}
+
 export function parseCliArgs(argv: string[]): CliArgs {
   const { values } = parseArgs({
     args: argv,
