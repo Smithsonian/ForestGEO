@@ -3,7 +3,7 @@
  * a `TempAllTrees` staging table matching the legacy ctfsweb schema.
  *
  * Usage:
- *   npx tsx scripts/csv-to-sql.ts \
+ *   npx tsx lib/csv-to-sql.ts \
  *     --input <path/to/census.csv> \
  *     --site SERC \
  *     --plot-id 1 \
@@ -29,6 +29,15 @@ export interface CliArgs {
 }
 
 const DEFAULT_TEMP_TABLE = 'TempAllTrees';
+
+export type SqlValue = string | number | null;
+
+export function escapeSqlValue(value: SqlValue): string {
+  if (value === null) return 'NULL';
+  if (typeof value === 'number') return String(value);
+  const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "''");
+  return `'${escaped}'`;
+}
 
 export function parseCliArgs(argv: string[]): CliArgs {
   const { values } = parseArgs({
