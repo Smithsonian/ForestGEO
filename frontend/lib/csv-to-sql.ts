@@ -25,10 +25,12 @@ export interface CliArgs {
   input: string;
   site: string;
   plotId: number;
-  censusNumber: number;
+  censusNumber: string;
   output: string;
   tempTable: string;
 }
+
+const MAX_CENSUS_NUMBER_LEN = 16;
 
 const DEFAULT_TEMP_TABLE = 'TempAllTrees';
 
@@ -58,10 +60,10 @@ export interface StagingRow {
   X: number | null;
   Y: number | null;
   PlotID: number;
-  PlotCensusNumber: number;
+  PlotCensusNumber: string;
 }
 
-export function mapCsvRowToStagingRow(row: Record<string, string>, plotId: number, censusNumber: number): StagingRow {
+export function mapCsvRowToStagingRow(row: Record<string, string>, plotId: number, censusNumber: string): StagingRow {
   for (const header of REQUIRED_CSV_HEADERS) {
     if (!(header in row)) {
       throw new Error(`Missing required CSV header: ${header}`);
@@ -134,7 +136,7 @@ export function renderCreateTable(tableName: string): string {
     `  SpeciesID        INT UNSIGNED,`,
     `  SubSpeciesID     INT UNSIGNED,`,
     `  DBHID            INT UNSIGNED,`,
-    `  PlotCensusNumber INT UNSIGNED,`,
+    `  PlotCensusNumber VARCHAR(16),`,
     `  CensusID         INT UNSIGNED,`,
     `  PrimaryStem      VARCHAR(20),`,
     `  PlotID           INT UNSIGNED,`,
@@ -222,8 +224,10 @@ export function parseCliArgs(argv: string[]): CliArgs {
   const plotId = Number(values['plot-id']);
   if (!Number.isInteger(plotId)) throw new Error(`--plot-id must be an integer, got: ${values['plot-id']}`);
 
-  const censusNumber = Number(values['census-number']);
-  if (!Number.isInteger(censusNumber)) throw new Error(`--census-number must be an integer, got: ${values['census-number']}`);
+  const censusNumber = values['census-number'];
+  if (censusNumber.length > MAX_CENSUS_NUMBER_LEN) {
+    throw new Error(`--census-number must be at most ${MAX_CENSUS_NUMBER_LEN} characters, got: ${censusNumber}`);
+  }
 
   const output = values.output ?? defaultOutputPath(values.input);
   const tempTable = values['temp-table'] ?? DEFAULT_TEMP_TABLE;

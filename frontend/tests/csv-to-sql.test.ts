@@ -24,7 +24,7 @@ describe('parseCliArgs', () => {
       input: 'foo.csv',
       site: 'SERC',
       plotId: 1,
-      censusNumber: 2,
+      censusNumber: '2',
       output: 'foo.sql',
       tempTable: 'TempAllTrees'
     });
@@ -55,9 +55,21 @@ describe('parseCliArgs', () => {
     expect(() => parseCliArgs(argv)).toThrow(/plot-id.*integer/i);
   });
 
-  it('throws when --census-number is not an integer', () => {
+  it('accepts non-integer --census-number (e.g. "2a")', () => {
+    const argv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2a'];
+    const args = parseCliArgs(argv);
+    expect(args.censusNumber).toBe('2a');
+  });
+
+  it('accepts decimal --census-number (e.g. "2.5")', () => {
     const argv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2.5'];
-    expect(() => parseCliArgs(argv)).toThrow(/census-number.*integer/i);
+    const args = parseCliArgs(argv);
+    expect(args.censusNumber).toBe('2.5');
+  });
+
+  it('throws when --census-number is longer than 16 characters', () => {
+    const argv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', 'this-is-too-long-for-the-column'];
+    expect(() => parseCliArgs(argv)).toThrow(/census-number.*16/);
   });
 
   it('honors explicit --output', () => {
@@ -133,7 +145,7 @@ describe('mapCsvRowToStagingRow', () => {
   };
 
   it('maps a fully-populated row', () => {
-    const result = mapCsvRowToStagingRow(baseRow, 1, 2);
+    const result = mapCsvRowToStagingRow(baseRow, 1, '2');
     expect(result).toEqual<StagingRow>({
       QuadratName: '121',
       Tag: '10001',
@@ -146,7 +158,7 @@ describe('mapCsvRowToStagingRow', () => {
       X: 4.1,
       Y: 5.2,
       PlotID: 1,
-      PlotCensusNumber: 2
+      PlotCensusNumber: '2'
     });
   });
 
@@ -180,47 +192,47 @@ describe('mapCsvRowToStagingRow', () => {
   });
 
   it('trims string columns and treats whitespace-only as null', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, tag: '  10001  ', codes: '   ' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, tag: '  10001  ', codes: '   ' }, 1, '2');
     expect(result.Tag).toBe('10001');
     expect(result.Codes).toBeNull();
   });
 
   it('passes plot/census constants onto every row', () => {
-    const r1 = mapCsvRowToStagingRow(baseRow, 7, 3);
+    const r1 = mapCsvRowToStagingRow(baseRow, 7, '3');
     expect(r1.PlotID).toBe(7);
-    expect(r1.PlotCensusNumber).toBe(3);
+    expect(r1.PlotCensusNumber).toBe('3');
   });
 
   it('preserves DBH=0 verbatim (does NOT convert to null in v1)', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: '0' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: '0' }, 1, '2');
     expect(result.DBH).toBe(0);
   });
 
   it('preserves codes with semicolons as a single string', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'LI;M;A' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'LI;M;A' }, 1, '2');
     expect(result.Codes).toBe('LI;M;A');
   });
 
   it('treats the literal string "NULL" as null in numeric columns', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'NULL', hom: 'NULL' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'NULL', hom: 'NULL' }, 1, '2');
     expect(result.DBH).toBeNull();
     expect(result.HOM).toBeNull();
   });
 
   it('treats the literal string "NULL" as null in string columns', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'NULL', tag: 'NULL' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'NULL', tag: 'NULL' }, 1, '2');
     expect(result.Codes).toBeNull();
     expect(result.Tag).toBeNull();
   });
 
   it('treats "null"/"Null" case-insensitively as null', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'null', hom: 'Null' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'null', hom: 'Null' }, 1, '2');
     expect(result.DBH).toBeNull();
     expect(result.HOM).toBeNull();
   });
 
   it('treats "NULL" as null in the date column', () => {
-    const result = mapCsvRowToStagingRow({ ...baseRow, date: 'NULL' }, 1, 2);
+    const result = mapCsvRowToStagingRow({ ...baseRow, date: 'NULL' }, 1, '2');
     expect(result.ExactDate).toBeNull();
   });
 
@@ -302,6 +314,11 @@ describe('renderCreateTable', () => {
     expect(ddl).toMatch(/ExactDate\s+DATE/);
   });
 
+  it('declares PlotCensusNumber as VARCHAR(16) to match canonical Census.PlotCensusNumber', () => {
+    expect(ddl).toMatch(/PlotCensusNumber\s+VARCHAR\(16\)/);
+    expect(ddl).not.toMatch(/PlotCensusNumber\s+INT/);
+  });
+
   it('declares PRIMARY KEY and the four indexes', () => {
     expect(ddl).toMatch(/PRIMARY KEY \(TempID\)/);
     expect(ddl).toMatch(/KEY `indexTagStemTag` \(`Tag`,`StemTag`\)/);
@@ -331,7 +348,7 @@ function makeRow(overrides: Partial<StagingRow> = {}): StagingRow {
     X: 4.1,
     Y: 5.2,
     PlotID: 1,
-    PlotCensusNumber: 2,
+    PlotCensusNumber: '2',
     ...overrides
   };
 }
