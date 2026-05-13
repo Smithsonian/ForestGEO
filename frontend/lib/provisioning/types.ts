@@ -121,13 +121,4 @@ export interface ProvisioningStep {
   run(ctx: StepContext): Promise<void>;
 }
 
-export class ProvisioningError extends Error {
-  constructor(
-    message: string,
-    public readonly stepKey: StepKey,
-    public readonly meta: { file?: string; lineNumber?: number; sqlState?: string; errno?: number } = {}
-  ) {
-    super(message);
-    this.name = 'ProvisioningError';
-  }
-}
+export { ProvisioningError, type ProvisioningErrorKind } from './errors';
