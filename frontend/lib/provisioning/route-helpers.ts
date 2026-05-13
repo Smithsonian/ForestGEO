@@ -15,7 +15,7 @@ export function requireGlobalAdmin(session: Session | null): NextResponse | null
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: HTTPResponses.UNAUTHORIZED });
   }
-  if ((session.user as any)?.userStatus !== 'global') {
+  if (session.user?.userStatus !== 'global') {
     return NextResponse.json({ error: 'Forbidden — global role required' }, { status: HTTPResponses.FORBIDDEN });
   }
   return null;
@@ -25,5 +25,5 @@ export function provisioningErrorResponse(err: unknown): NextResponse {
   if (err instanceof ProvisioningError) {
     return NextResponse.json({ error: errorToClientMessage(err), kind: err.kind }, { status: errorToHttpStatus(err.kind) });
   }
-  return NextResponse.json({ error: 'Internal provisioning error' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+  return NextResponse.json({ error: 'Internal provisioning error', kind: 'internal' as const }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
 }
