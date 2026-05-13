@@ -2,7 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseCliArgs, escapeSqlValue, mapCsvRowToStagingRow, renderCreateTable, renderInsertChunks, readCsvFile, type StagingRow } from '../lib/csv-to-sql';
+import { readFileSync as readFile } from 'fs';
+import {
+  parseCliArgs,
+  escapeSqlValue,
+  mapCsvRowToStagingRow,
+  renderCreateTable,
+  renderInsertChunks,
+  readCsvFile,
+  main,
+  type StagingRow
+} from '../lib/csv-to-sql';
+import { splitSqlFile } from '../lib/provisioning/sql-runner';
 
 describe('parseCliArgs', () => {
   const baseArgv = ['--input', 'foo.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -188,6 +199,29 @@ describe('mapCsvRowToStagingRow', () => {
   it('preserves codes with semicolons as a single string', () => {
     const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'LI;M;A' }, 1, 2);
     expect(result.Codes).toBe('LI;M;A');
+  });
+
+  it('treats the literal string "NULL" as null in numeric columns', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'NULL', hom: 'NULL' }, 1, 2);
+    expect(result.DBH).toBeNull();
+    expect(result.HOM).toBeNull();
+  });
+
+  it('treats the literal string "NULL" as null in string columns', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, codes: 'NULL', tag: 'NULL' }, 1, 2);
+    expect(result.Codes).toBeNull();
+    expect(result.Tag).toBeNull();
+  });
+
+  it('treats "null"/"Null" case-insensitively as null', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: 'null', hom: 'Null' }, 1, 2);
+    expect(result.DBH).toBeNull();
+    expect(result.HOM).toBeNull();
+  });
+
+  it('treats "NULL" as null in the date column', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, date: 'NULL' }, 1, 2);
+    expect(result.ExactDate).toBeNull();
   });
 
   it('throws when dbh is not numeric', () => {
@@ -426,5 +460,63 @@ describe('readCsvFile', () => {
     const rows = readCsvFile(path);
     expect(rows).toHaveLength(1);
     rmSync(path, { recursive: true, force: true });
+  });
+});
+
+describe('main (end-to-end)', () => {
+  it('writes a SQL file with DDL + one INSERT for a 5-row CSV', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'csv-to-sql-e2e-'));
+    const inputPath = join(dir, 'tiny.csv');
+    const outputPath = join(dir, 'tiny.sql');
+
+    writeFileSync(
+      inputPath,
+      'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' +
+        '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n' +
+        '10002,10002,FRPE,121,6.3,4.2,6.1,1.30,2014-05-27,LI;M;A\n' +
+        '10003,10003,FRPE,121,5.6,7.1,20.5,1.30,2014-05-27,LI\n' +
+        '10004,10004,PAQU2,111,9.5,7.8,1.1,1.30,2014-05-27,LI\n' +
+        '10005,10005,PAQU2,111,2.0,3.0,,,2014-05-27,\n',
+      'utf-8'
+    );
+
+    await main(['--input', inputPath, '--site', 'SERC', '--plot-id', '1', '--census-number', '2', '--output', outputPath]);
+
+    const sql = readFile(outputPath, 'utf-8');
+    expect(sql).toMatch(/DROP TABLE IF EXISTS `TempAllTrees`;/);
+    expect(sql).toMatch(/CREATE TABLE `TempAllTrees`/);
+    expect(sql).toMatch(/INSERT INTO `TempAllTrees`/);
+
+    const insertCount = (sql.match(/INSERT INTO/g) ?? []).length;
+    expect(insertCount).toBe(1);
+
+    const tupleCount = (sql.match(/^\s+\(/gm) ?? []).length;
+    expect(tupleCount).toBe(5);
+
+    const stmts = splitSqlFile(sql);
+    expect(stmts.length).toBe(3);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('respects --temp-table override', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'csv-to-sql-e2e-'));
+    const inputPath = join(dir, 't.csv');
+    const outputPath = join(dir, 't.sql');
+    writeFileSync(inputPath, 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n', 'utf-8');
+    await main(['--input', inputPath, '--site', 'SERC', '--plot-id', '1', '--census-number', '2', '--output', outputPath, '--temp-table', 'MyStaging']);
+    const sql = readFile(outputPath, 'utf-8');
+    expect(sql).toMatch(/`MyStaging`/);
+    expect(sql).not.toMatch(/`TempAllTrees`/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('throws when a CSV row has a non-numeric dbh', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'csv-to-sql-e2e-'));
+    const inputPath = join(dir, 'bad.csv');
+    const outputPath = join(dir, 'bad.sql');
+    writeFileSync(inputPath, 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '10001,10001,FRPE,121,4.1,5.2,abc,1.30,2014-05-27,LI\n', 'utf-8');
+    await expect(main(['--input', inputPath, '--site', 'SERC', '--plot-id', '1', '--census-number', '2', '--output', outputPath])).rejects.toThrow(/dbh/);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -18,7 +18,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import Papa from 'papaparse';
 
 export interface CliArgs {
@@ -83,15 +83,19 @@ export function mapCsvRowToStagingRow(row: Record<string, string>, plotId: numbe
   };
 }
 
-function coerceString(raw: string): string | null {
+function isNullToken(raw: string): boolean {
   const trimmed = raw.trim();
-  return trimmed === '' ? null : trimmed;
+  return trimmed === '' || trimmed.toLowerCase() === 'null';
+}
+
+function coerceString(raw: string): string | null {
+  if (isNullToken(raw)) return null;
+  return raw.trim();
 }
 
 function coerceNumber(column: CsvHeader, raw: string): number | null {
-  const trimmed = raw.trim();
-  if (trimmed === '') return null;
-  const n = Number(trimmed);
+  if (isNullToken(raw)) return null;
+  const n = Number(raw.trim());
   if (!Number.isFinite(n)) {
     throw new Error(`Column "${column}" expected a numeric value, got: ${raw}`);
   }
@@ -99,8 +103,8 @@ function coerceNumber(column: CsvHeader, raw: string): number | null {
 }
 
 function coerceDate(raw: string): string | null {
+  if (isNullToken(raw)) return null;
   const trimmed = raw.trim();
-  if (trimmed === '') return null;
   if (!DATE_RE.test(trimmed)) {
     throw new Error(`Column "date" expected YYYY-MM-DD, got: ${raw}`);
   }
@@ -231,10 +235,24 @@ function defaultOutputPath(input: string): string {
   return input.endsWith('.csv') ? input.slice(0, -'.csv'.length) + '.sql' : input + '.sql';
 }
 
-async function main(): Promise<void> {
-  const args = parseCliArgs(process.argv.slice(2));
-  // Wired in Task 6. For now, echo the parsed args.
-  process.stdout.write(JSON.stringify(args, null, 2) + '\n');
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const args = parseCliArgs(argv);
+  const rawRows = readCsvFile(args.input);
+  const stagingRows = rawRows.map(row => mapCsvRowToStagingRow(row, args.plotId, args.censusNumber));
+
+  const header = [
+    `-- Generated ${new Date().toISOString()} from ${args.input}`,
+    `-- Source rows: ${stagingRows.length}`,
+    `-- Site: ${args.site}, PlotID: ${args.plotId}, PlotCensusNumber: ${args.censusNumber}`,
+    `-- Target staging table: ${args.tempTable}`,
+    ''
+  ].join('\n');
+
+  const ddl = renderCreateTable(args.tempTable);
+  const inserts = renderInsertChunks(args.tempTable, stagingRows);
+
+  const sql = [header, ddl, '', ...inserts].join('\n') + '\n';
+  writeFileSync(args.output, sql, 'utf-8');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
