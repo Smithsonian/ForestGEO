@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import path from 'path';
-import { startRun, retryRun, abortRun, getRunWithSteps, listRuns } from './orchestrator';
+import { startRun, retryRun, abortRun, markStepFailed, getRunWithSteps, listRuns } from './orchestrator';
 import type { ProvisioningInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
@@ -50,6 +50,16 @@ async function waitForTerminal(runId: number, pool: mysql.Pool): Promise<string>
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
   throw new Error(`Run ${runId} did not reach terminal state within ${RUN_TIMEOUT_MS}ms`);
+}
+
+async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'running' | 'failed' | 'completed' = 'running'): Promise<number> {
+  const [result]: any = await pool.query(
+    `INSERT INTO catalog.provisioning_runs
+      (Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName, InputPayload)
+     VALUES (?, 'test@manual', NOW(), NULL, 'ManualRun', ?, ?)`,
+    [status, schemaName, JSON.stringify(makeInput(schemaName))]
+  );
+  return result.insertId;
 }
 
 describe('orchestrator', () => {
@@ -124,38 +134,46 @@ describe('orchestrator', () => {
       const schemaName = `forestgeo_orch_concurrent_${process.pid}`;
       createdSchemas.push(schemaName);
 
-      const { runId } = await startRun({
-        input: makeInput(schemaName),
-        startedBy: 'test@1',
-        catalogPool: pool
-      });
-
-      // Immediate second start should reject before it can pick up state
-      await expect(
+      const results = await Promise.allSettled([
+        startRun({
+          input: makeInput(schemaName),
+          startedBy: 'test@1',
+          catalogPool: pool
+        }),
         startRun({
           input: makeInput(schemaName),
           startedBy: 'test@2',
           catalogPool: pool
         })
-      ).rejects.toThrow(/already in progress/);
+      ]);
+
+      const fulfilled = results.filter((result): result is PromiseFulfilledResult<{ runId: number }> => result.status === 'fulfilled');
+      const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(String(rejected[0].reason?.message ?? rejected[0].reason)).toMatch(/already in progress/);
 
       // Let the first complete
-      await waitForTerminal(runId, pool);
+      await waitForTerminal(fulfilled[0].value.runId, pool);
     },
     RUN_TIMEOUT_MS + 5000
   );
 
   it(
-    'abort: drops schema and deletes catalog row',
+    'abort: drops schema and deletes catalog row for failed runs',
     async () => {
       const schemaName = `forestgeo_orch_abort_${process.pid}`;
       createdSchemas.push(schemaName);
+
+      // Create the schema manually so validate_inputs fails before catalog row insertion.
+      await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
       const { runId } = await startRun({
         input: makeInput(schemaName),
         startedBy: 'test@abort',
         catalogPool: pool
       });
-      await waitForTerminal(runId, pool);
+      const finalStatus = await waitForTerminal(runId, pool);
+      expect(finalStatus).toBe('failed');
 
       await abortRun(runId, pool);
 
@@ -167,6 +185,28 @@ describe('orchestrator', () => {
 
       const [siteRows]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
       expect(siteRows).toHaveLength(0);
+    },
+    RUN_TIMEOUT_MS + 5000
+  );
+
+  it(
+    'abort: refuses to destroy a completed run',
+    async () => {
+      const schemaName = `forestgeo_orch_abort_completed_${process.pid}`;
+      createdSchemas.push(schemaName);
+      const { runId } = await startRun({
+        input: makeInput(schemaName),
+        startedBy: 'test@abort-completed',
+        catalogPool: pool
+      });
+      await waitForTerminal(runId, pool);
+
+      await expect(abortRun(runId, pool)).rejects.toThrow(/must be failed/);
+
+      const result = await getRunWithSteps(runId, pool);
+      expect(result!.run.status).toBe('completed');
+      const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+      expect(schemaRows).toHaveLength(1);
     },
     RUN_TIMEOUT_MS + 5000
   );
@@ -210,6 +250,55 @@ describe('orchestrator', () => {
     },
     RUN_TIMEOUT_MS * 2 + 5000
   );
+
+  it(
+    'retry: refuses non-failed runs',
+    async () => {
+      const schemaName = `forestgeo_orch_retry_completed_${process.pid}`;
+      createdSchemas.push(schemaName);
+      const { runId } = await startRun({
+        input: makeInput(schemaName),
+        startedBy: 'test@retry-completed',
+        catalogPool: pool
+      });
+      await waitForTerminal(runId, pool);
+
+      await expect(retryRun(runId, pool)).rejects.toThrow(/must be failed/);
+    },
+    RUN_TIMEOUT_MS + 5000
+  );
+
+  it('markStepFailed: only marks old running steps and leaves healthy steps alone', async () => {
+    const schemaName = `forestgeo_orch_mark_recent_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+       VALUES (?, 0, 'validate_inputs', 'running', NOW())`,
+      [runId]
+    );
+
+    await expect(markStepFailed(runId, 0, pool)).rejects.toThrow(/not stuck yet/);
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('running');
+    expect(result!.steps[0].status).toBe('running');
+  });
+
+  it('markStepFailed: marks an old running step failed and flips the run failed', async () => {
+    const schemaName = `forestgeo_orch_mark_old_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+       VALUES (?, 0, 'validate_inputs', 'running', NOW() - INTERVAL 10 MINUTE)`,
+      [runId]
+    );
+
+    await markStepFailed(runId, 0, pool);
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('failed');
+    expect(result!.steps[0].status).toBe('failed');
+  });
 
   it('listRuns: returns runs in reverse chronological order', async () => {
     const all = await listRuns(pool, 100);

@@ -109,6 +109,15 @@ describe('GET /api/admin/provision/[runId]', () => {
     expect(mocks.getRunWithSteps).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when runId contains trailing characters', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+
+    const res = await GET(makeGetRequest('7abc'), makeParams('7abc'));
+
+    expect(res.status).toBe(400);
+    expect(mocks.getRunWithSteps).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when runId is zero', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
 

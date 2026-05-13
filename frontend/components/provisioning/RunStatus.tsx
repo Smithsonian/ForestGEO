@@ -47,6 +47,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [showStackFor, setShowStackFor] = useState<number | null>(null);
   const [actionInFlight, setActionInFlight] = useState<ActionKey | null>(null);
+  const [pollGeneration, setPollGeneration] = useState(0);
 
   // We use a ref so the poll callback can read the latest status without being
   // recreated on every state update, which would cause the interval to reset.
@@ -95,7 +96,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [poll]);
+  }, [poll, pollGeneration]);
 
   async function handleRetry() {
     setActionInFlight('retry');
@@ -110,6 +111,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
       // Optimistically mark as running so polling resumes immediately.
       latestStatusRef.current = 'running';
       setData(prev => (prev ? { ...prev, run: { ...prev.run, status: 'running' } } : prev));
+      setPollGeneration(prev => prev + 1);
     } finally {
       setActionInFlight(null);
     }
@@ -147,7 +149,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
         setActionError(body.error ?? `Abort failed (HTTP ${res.status})`);
         return;
       }
-      // Next poll will reflect the aborted status.
+      await poll();
     } finally {
       setActionInFlight(null);
     }

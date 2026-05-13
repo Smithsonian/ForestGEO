@@ -11,6 +11,12 @@ const HTTP_BAD_REQUEST = 400;
 const HTTP_CONFLICT = 409;
 const HTTP_SERVICE_UNAVAILABLE = 503;
 
+function parseRunId(raw: string): number | null {
+  if (!/^[1-9]\d*$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export async function POST(_req: Request, { params }: { params: Promise<{ runId: string }> }) {
   const session = await auth();
 
@@ -22,8 +28,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ runId:
   }
 
   const { runId: runIdStr } = await params;
-  const runId = parseInt(runIdStr, 10);
-  if (!Number.isInteger(runId) || runId < 1) {
+  const runId = parseRunId(runIdStr);
+  if (runId == null) {
     return NextResponse.json({ error: 'Invalid runId — must be a positive integer' }, { status: HTTP_BAD_REQUEST });
   }
 

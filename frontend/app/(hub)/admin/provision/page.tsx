@@ -8,7 +8,9 @@ import SiteForm from '@/components/provisioning/SiteForm';
 import PlotForm from '@/components/provisioning/PlotForm';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
+import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { ProvisioningInputSchema } from '@/lib/provisioning/input-schema';
+import { rectsOverlap } from '@/lib/provisioning/steps/validate-inputs';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
@@ -61,12 +63,40 @@ function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
     case STEP_PLOT_INDEX:
       return ProvisioningInputSchema.shape.plot.safeParse(input.plot).success;
     case STEP_QUADRATS_INDEX:
-      return ProvisioningInputSchema.shape.quadrats.safeParse(input.quadrats).success;
+      return quadratLayoutIsValid(input);
     case STEP_REVIEW_INDEX:
       return true;
     default:
       return false;
   }
+}
+
+function quadratLayoutIsValid(input: ProvisioningInput): boolean {
+  if (!ProvisioningInputSchema.shape.quadrats.safeParse(input.quadrats).success) return false;
+
+  if (input.quadrats.mode === 'grid') {
+    try {
+      generateGrid(input.plot, input.quadrats);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const rows = input.quadrats.rows;
+  for (const row of rows) {
+    if (row.startX < 0 || row.startY < 0) return false;
+    if (row.startX + row.dimensionX > input.plot.dimensionX) return false;
+    if (row.startY + row.dimensionY > input.plot.dimensionY) return false;
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      if (rectsOverlap(rows[i], rows[j])) return false;
+    }
+  }
+
+  return true;
 }
 
 export default function ProvisionWizardPage() {

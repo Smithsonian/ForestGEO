@@ -44,8 +44,11 @@ describe('SQL-file steps', () => {
     expect(ctx.sitePool).not.toBeNull();
   });
 
-  it('init_tables: false before, run, true after; plots/census/quadrats/coremeasurements exist', async () => {
+  it('init_tables: resets a partial schema, then runs to completion', async () => {
     expect(await initTablesStep.alreadyDone(ctx)).toBe(false);
+    await ctx.sitePool!.query(`CREATE TABLE \`${SCHEMA_NAME}\`.plots (PlotID INT PRIMARY KEY)`);
+    expect(await initTablesStep.alreadyDone(ctx)).toBe(false);
+
     await initTablesStep.run(ctx);
     expect(await initTablesStep.alreadyDone(ctx)).toBe(true);
 
@@ -55,6 +58,7 @@ describe('SQL-file steps', () => {
     expect(names).toContain('census');
     expect(names).toContain('quadrats');
     expect(names).toContain('coremeasurements');
+    expect(names).toContain('validation_runs');
   });
 
   it('deploy_procedures: false before, run, true after; bulkingestionprocess exists', async () => {

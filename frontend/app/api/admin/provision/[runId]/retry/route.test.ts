@@ -84,6 +84,15 @@ describe('POST /api/admin/provision/[runId]/retry', () => {
     expect(mocks.retryRun).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when runId has trailing non-numeric characters', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+
+    const res = await retryPOST(makeRequest('http://localhost/api/admin/provision/7abc/retry'), makeParams('7abc'));
+
+    expect(res.status).toBe(400);
+    expect(mocks.retryRun).not.toHaveBeenCalled();
+  });
+
   it('returns { ok: true } when a global admin retries a failed run', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     mocks.retryRun.mockResolvedValue(undefined);
@@ -155,6 +164,15 @@ describe('POST /api/admin/provision/[runId]/abort', () => {
     expect(mocks.abortRun).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when runId has trailing non-numeric characters', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+
+    const res = await abortPOST(makeRequest('http://localhost/api/admin/provision/7abc/abort'), makeParams('7abc'));
+
+    expect(res.status).toBe(400);
+    expect(mocks.abortRun).not.toHaveBeenCalled();
+  });
+
   it('returns { ok: true } when a global admin aborts a run', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     mocks.abortRun.mockResolvedValue(undefined);
@@ -220,6 +238,15 @@ describe('POST /api/admin/provision/[runId]/mark-failed', () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
 
     const res = await markFailedPOST(makeRequest('http://localhost/api/admin/provision/-1/mark-failed', { stepIndex: 2 }), makeParams('-1'));
+
+    expect(res.status).toBe(400);
+    expect(mocks.markStepFailed).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when runId has trailing non-numeric characters', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+
+    const res = await markFailedPOST(makeRequest('http://localhost/api/admin/provision/7abc/mark-failed', { stepIndex: 2 }), makeParams('7abc'));
 
     expect(res.status).toBe(400);
     expect(mocks.markStepFailed).not.toHaveBeenCalled();
