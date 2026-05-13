@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import path from 'path';
+
+// Silence ailogger output during DB-backed tests so audit calls (introduced
+// by the orchestrator's destructive paths) don't print or hit Application
+// Insights from this suite.
+vi.mock('@/ailogger', () => ({
+  default: { info: () => undefined, warn: () => undefined, error: () => undefined }
+}));
+
 import { startRun, retryRun, abortRun, teardownProvisionedSite, markStepFailed, reconcileStaleRun, getRunWithSteps, listRuns } from './orchestrator';
 import type { ProvisioningInput } from './types';
 
@@ -204,7 +212,7 @@ describe('orchestrator', () => {
       const finalStatus = await waitForTerminal(runId, pool);
       expect(finalStatus).toBe('failed');
 
-      await abortRun(runId, pool);
+      await abortRun(runId, pool, 'test@abort');
 
       const result = await getRunWithSteps(runId, pool);
       expect(result!.run.status).toBe('aborted');
@@ -230,7 +238,7 @@ describe('orchestrator', () => {
       });
       await waitForTerminal(runId, pool);
 
-      await expect(abortRun(runId, pool)).rejects.toThrow(/must be failed/);
+      await expect(abortRun(runId, pool, 'test@abort-completed')).rejects.toThrow(/must be failed/);
 
       const result = await getRunWithSteps(runId, pool);
       expect(result!.run.status).toBe('completed');
@@ -269,7 +277,7 @@ describe('orchestrator', () => {
       await pool.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
 
       // Retry the run
-      await retryRun(runId, pool);
+      await retryRun(runId, pool, 'test@retry');
       const retryStatus = await waitForTerminal(runId, pool);
       expect(retryStatus).toBe('completed');
 
@@ -292,7 +300,7 @@ describe('orchestrator', () => {
       });
       await waitForTerminal(runId, pool);
 
-      await expect(retryRun(runId, pool)).rejects.toThrow(/must be failed/);
+      await expect(retryRun(runId, pool, 'test@retry-completed')).rejects.toThrow(/must be failed/);
     },
     RUN_TIMEOUT_MS + 5000
   );
@@ -302,7 +310,7 @@ describe('orchestrator', () => {
     createdSchemas.push(schemaName);
     const { runId, siteId } = await createCompletedRunWithSite(pool, schemaName);
 
-    await teardownProvisionedSite(runId, schemaName, pool);
+    await teardownProvisionedSite(runId, schemaName, pool, 'test@teardown');
 
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe('aborted');
@@ -321,7 +329,7 @@ describe('orchestrator', () => {
     const schemaName = `forestgeo_orch_teardown_${status}_${process.pid}`;
     const runId = await createManualRun(pool, schemaName, status);
 
-    await expect(teardownProvisionedSite(runId, schemaName, pool)).rejects.toThrow(/must be completed/);
+    await expect(teardownProvisionedSite(runId, schemaName, pool, 'test@teardown-status')).rejects.toThrow(/must be completed/);
 
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe(status);
@@ -332,7 +340,7 @@ describe('orchestrator', () => {
     createdSchemas.push(schemaName);
     const { runId } = await createCompletedRunWithSite(pool, schemaName);
 
-    await expect(teardownProvisionedSite(runId, `${schemaName}_wrong`, pool)).rejects.toThrow(/confirmation does not match/);
+    await expect(teardownProvisionedSite(runId, `${schemaName}_wrong`, pool, 'test@teardown-mismatch')).rejects.toThrow(/confirmation does not match/);
 
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe('completed');
@@ -348,7 +356,7 @@ describe('orchestrator', () => {
     const schemaName = `forestgeo_orch_unsafe-${process.pid}`;
     const runId = await createManualRun(pool, schemaName, 'completed');
 
-    await expect(teardownProvisionedSite(runId, schemaName, pool)).rejects.toThrow(/unsafe schema name/);
+    await expect(teardownProvisionedSite(runId, schemaName, pool, 'test@teardown-unsafe')).rejects.toThrow(/unsafe schema name/);
   });
 
   it('markStepFailed: only marks old running steps and leaves healthy steps alone', async () => {
@@ -360,7 +368,7 @@ describe('orchestrator', () => {
       [runId]
     );
 
-    await expect(markStepFailed(runId, 0, pool)).rejects.toThrow(/not stuck yet/);
+    await expect(markStepFailed(runId, 0, pool, 'test@mark-recent')).rejects.toThrow(/not stuck yet/);
 
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe('running');
@@ -376,7 +384,7 @@ describe('orchestrator', () => {
       [runId]
     );
 
-    await markStepFailed(runId, 0, pool);
+    await markStepFailed(runId, 0, pool, 'test@mark-old');
 
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe('failed');
