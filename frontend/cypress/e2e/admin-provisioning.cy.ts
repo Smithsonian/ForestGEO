@@ -52,13 +52,13 @@ function buildSteps(status: 'pending' | 'running' | 'completed' | 'failed') {
   }));
 }
 
-function buildRunRecord(status: 'running' | 'completed' | 'failed') {
+function buildRunRecord(status: 'running' | 'completed' | 'failed' | 'aborted') {
   return {
     runId: RUN_ID,
     status,
     startedBy: 'admin@e2e.test',
     startedAt: new Date().toISOString(),
-    finishedAt: status === 'completed' || status === 'failed' ? new Date().toISOString() : null,
+    finishedAt: status === 'running' ? null : new Date().toISOString(),
     siteName: SITE_NAME,
     schemaName: SCHEMA_NAME,
     input: {}
@@ -141,6 +141,7 @@ describe('Admin: site provisioning wizard', () => {
     // Second poll: completed state — "Go to site" button appears
     cy.wait('@pollStatus');
     cy.contains('button', 'Go to site', { timeout: 5000 }).should('be.visible');
+    cy.contains('button', 'Delete provisioned site').should('be.visible');
   });
 
   it('blocks review when grid quadrat dimensions are invalid', () => {
@@ -199,5 +200,40 @@ describe('Admin: site provisioning wizard', () => {
     cy.wait('@pollStatus');
     cy.contains('button', 'Go to site', { timeout: 5000 }).should('be.visible');
     cy.then(() => expect(pollCount).to.be.greaterThan(1));
+  });
+
+  it('tears down a completed provisioned site after exact schema confirmation', () => {
+    let tornDown = false;
+    cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, req => {
+      req.reply({
+        run: buildRunRecord(tornDown ? 'aborted' : 'completed'),
+        steps: buildSteps('completed'),
+        stuckStepIndex: null
+      });
+    }).as('pollStatus');
+
+    cy.intercept('DELETE', `/api/admin/provision/${RUN_ID}/teardown`, req => {
+      expect(req.body).to.deep.equal({ confirmSchemaName: SCHEMA_NAME });
+      tornDown = true;
+      req.reply({
+        statusCode: 200,
+        body: { ok: true }
+      });
+    }).as('teardownRun');
+
+    cy.visit(`/admin/provision/${RUN_ID}`);
+    cy.wait('@pollStatus');
+    cy.contains('button', 'Delete provisioned site').click();
+
+    cy.contains('button', 'Delete site').should('be.disabled');
+    cy.get('[aria-label="Confirm schema name"]').type(`${SCHEMA_NAME}_wrong`);
+    cy.contains('button', 'Delete site').should('be.disabled');
+    cy.get('[aria-label="Confirm schema name"]').clear().type(SCHEMA_NAME);
+    cy.contains('button', 'Delete site').should('not.be.disabled').click();
+
+    cy.wait('@teardownRun');
+    cy.wait('@pollStatus');
+    cy.contains('aborted').should('be.visible');
+    cy.contains('button', 'Delete provisioned site').should('not.exist');
   });
 });

@@ -140,6 +140,58 @@ describe('POST /api/admin/provision', () => {
     expect(mocks.startRun).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when grid generation would exceed the quadrat cap', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com', userStatus: 'global' } });
+
+    const tooLarge = {
+      ...VALID_INPUT,
+      plot: {
+        ...VALID_INPUT.plot,
+        dimensionX: 10001,
+        dimensionY: 1,
+        area: 10001
+      },
+      quadrats: {
+        mode: 'grid' as const,
+        quadratSizeX: 1,
+        quadratSizeY: 1,
+        namingPattern: 'sequential' as const
+      }
+    };
+
+    const res = await POST(makePostRequest(tooLarge));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.errors.map((error: { message: string }) => error.message).join(' ')).toMatch(/maximum allowed/);
+    expect(mocks.startRun).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when CSV mode submits more than the quadrat cap', async () => {
+    mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com', userStatus: 'global' } });
+
+    const tooManyCsvRows = {
+      ...VALID_INPUT,
+      quadrats: {
+        mode: 'csv' as const,
+        rows: Array.from({ length: 10001 }, (_, index) => ({
+          quadratName: `Q${index}`,
+          startX: index,
+          startY: 0,
+          dimensionX: 1,
+          dimensionY: 1
+        }))
+      }
+    };
+
+    const res = await POST(makePostRequest(tooManyCsvRows));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.errors.map((error: { message: string }) => error.message).join(' ')).toMatch(/Too big|maximum/i);
+    expect(mocks.startRun).not.toHaveBeenCalled();
+  });
+
   it('returns 202 with runId when a global admin submits valid provisioning input', async () => {
     mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com', userStatus: 'global' } });
     mocks.startRun.mockResolvedValue({ runId: 42 });

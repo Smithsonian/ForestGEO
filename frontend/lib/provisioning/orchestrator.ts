@@ -14,14 +14,14 @@ async function loadRun(catalogPool: Pool, runId: number): Promise<ProvisioningRu
   if (rows.length === 0) return null;
   const r = rows[0];
   return {
-    runId: r.RunID,
-    status: r.Status,
-    startedBy: r.StartedBy,
-    startedAt: r.StartedAt,
-    finishedAt: r.FinishedAt,
-    siteName: r.SiteName,
-    schemaName: r.SchemaName,
-    input: typeof r.InputPayload === 'string' ? JSON.parse(r.InputPayload) : r.InputPayload
+    runId: r.RunID ?? r.runid,
+    status: r.Status ?? r.status,
+    startedBy: r.StartedBy ?? r.startedby,
+    startedAt: r.StartedAt ?? r.startedat,
+    finishedAt: r.FinishedAt ?? r.finishedat,
+    siteName: r.SiteName ?? r.sitename,
+    schemaName: r.SchemaName ?? r.schemaname,
+    input: typeof (r.InputPayload ?? r.inputpayload) === 'string' ? JSON.parse(r.InputPayload ?? r.inputpayload) : (r.InputPayload ?? r.inputpayload)
   };
 }
 
@@ -124,7 +124,8 @@ export async function setRunStatus(catalogPool: Pool, runId: number, status: Run
 }
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
-const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+export const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+const STALLED_RUN_ERROR_MESSAGE = 'Run stalled without an active provisioning worker';
 
 function lockNameForSchema(schemaName: string): string {
   return `provisioning:${createHash('sha256').update(schemaName).digest('hex').slice(0, 48)}`;
@@ -195,24 +196,26 @@ export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {
 }
 
 export async function runProvisioning(runId: number, catalogPool: Pool): Promise<void> {
-  const run = await loadRun(catalogPool, runId);
-  if (!run) return;
-  const steps = await loadSteps(catalogPool, runId);
-
-  const ctx: StepContext = {
-    runId,
-    schemaName: run.schemaName,
-    input: run.input,
-    catalogPool,
-    sitePool: null,
-    state: {},
-    logger: {
-      info: (m, meta) => console.log('[provisioning]', runId, m, meta ?? ''),
-      error: (m, meta) => console.error('[provisioning]', runId, m, meta ?? '')
-    }
-  };
+  let ctx: StepContext | null = null;
 
   try {
+    const run = await loadRun(catalogPool, runId);
+    if (!run) return;
+    const steps = await loadSteps(catalogPool, runId);
+
+    ctx = {
+      runId,
+      schemaName: run.schemaName,
+      input: run.input,
+      catalogPool,
+      sitePool: null,
+      state: {},
+      logger: {
+        info: (m, meta) => console.log('[provisioning]', runId, m, meta ?? ''),
+        error: (m, meta) => console.error('[provisioning]', runId, m, meta ?? '')
+      }
+    };
+
     for (const stepRow of steps) {
       const currentRunStatus = await getRunStatus(catalogPool, runId);
       if (currentRunStatus !== 'running') return;
@@ -249,12 +252,17 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
          WHERE RunID = ? AND Status = 'running'`,
         [fatal.message ?? String(fatal), runId]
       );
-      await setRunStatus(catalogPool, runId, 'failed');
+      await catalogPool.query(
+        `UPDATE catalog.provisioning_runs
+         SET Status = 'failed', FinishedAt = NOW()
+         WHERE RunID = ? AND Status = 'running'`,
+        [runId]
+      );
     } catch {
       // Swallow secondary errors — the original failure has already been recorded
     }
   } finally {
-    if (ctx.sitePool && typeof ctx.sitePool.end === 'function') {
+    if (ctx?.sitePool && typeof ctx.sitePool.end === 'function') {
       try {
         await ctx.sitePool.end();
       } catch {
@@ -287,19 +295,113 @@ export async function abortRun(runId: number, catalogPool: Pool): Promise<void> 
   if (!run) throw new Error(`Run ${runId} not found`);
   if (run.status !== 'failed') throw new Error(`Run ${runId} must be failed before aborting`);
 
-  if (!SCHEMA_PATTERN.test(run.schemaName)) {
-    throw new Error(`Refusing to abort run with unsafe schema name: ${run.schemaName}`);
+  await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, { actionLabel: 'abort run', ignoreUserRelationsDeleteError: true });
+  await setRunStatus(catalogPool, runId, 'aborted');
+}
+
+async function getRunIdleAgeMs(catalogPool: Pool, runId: number): Promise<number | null> {
+  const [rows]: any = await catalogPool.query(
+    `SELECT TIMESTAMPDIFF(
+       SECOND,
+       GREATEST(
+         COALESCE(pr.StartedAt, '1970-01-01 00:00:00'),
+         COALESCE(MAX(ps.StartedAt), '1970-01-01 00:00:00'),
+         COALESCE(MAX(ps.FinishedAt), '1970-01-01 00:00:00')
+       ),
+       NOW()
+     ) AS IdleSeconds
+     FROM catalog.provisioning_runs pr
+     LEFT JOIN catalog.provisioning_steps ps ON ps.RunID = pr.RunID
+     WHERE pr.RunID = ?
+     GROUP BY pr.RunID, pr.StartedAt`,
+    [runId]
+  );
+  if (rows.length === 0) return null;
+  const seconds = Number(rows[0]?.IdleSeconds ?? rows[0]?.idleseconds);
+  return Number.isFinite(seconds) ? seconds * 1000 : null;
+}
+
+export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleThresholdMs = STUCK_THRESHOLD_MS): Promise<boolean> {
+  const result = await getRunWithSteps(runId, catalogPool);
+  if (!result || result.run.status !== 'running') return false;
+
+  const steps = result.steps;
+  const runningStep = steps.find(step => step.status === 'running');
+  if (runningStep) return false;
+
+  const failedStep = steps.find(step => step.status === 'failed');
+  if (failedStep) {
+    await setRunStatus(catalogPool, runId, 'failed');
+    return true;
   }
 
-  const [siteRows]: any = await catalogPool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [run.schemaName]);
-  if (siteRows.length > 0) {
-    const siteId = siteRows[0].SiteID ?? siteRows[0].siteid;
-    await catalogPool.query(`DELETE FROM catalog.usersiterelations WHERE SiteID = ?`, [siteId]).catch(() => {
-      // usersiterelations may not exist in test envs; non-fatal
-    });
+  if (steps.length > 0 && steps.every(step => step.status === 'completed')) {
+    await setRunStatus(catalogPool, runId, 'completed');
+    return true;
+  }
+
+  const idleAgeMs = await getRunIdleAgeMs(catalogPool, runId);
+  if (idleAgeMs == null || idleAgeMs <= staleThresholdMs) return false;
+
+  const pendingStep = steps.find(step => step.status === 'pending' || step.status === 'skipped');
+  if (pendingStep) {
+    const now = new Date();
+    await catalogPool.query(
+      `UPDATE catalog.provisioning_steps
+       SET Status = 'failed', StartedAt = COALESCE(StartedAt, ?), FinishedAt = ?, ErrorMessage = ?, ErrorStack = NULL
+       WHERE RunID = ? AND StepIndex = ? AND Status IN ('pending', 'skipped')`,
+      [now, now, STALLED_RUN_ERROR_MESSAGE, runId, pendingStep.stepIndex]
+    );
+  }
+
+  await setRunStatus(catalogPool, runId, 'failed');
+  return true;
+}
+
+interface DeleteCatalogSiteRowsAndSchemaOptions {
+  actionLabel: string;
+  ignoreUserRelationsDeleteError?: boolean;
+  requireExactlyOneCatalogSite?: boolean;
+}
+
+async function deleteCatalogSiteRowsAndSchema(catalogPool: Pool, schemaName: string, options: DeleteCatalogSiteRowsAndSchemaOptions): Promise<void> {
+  if (!SCHEMA_PATTERN.test(schemaName)) {
+    throw new Error(`Refusing to ${options.actionLabel} with unsafe schema name: ${schemaName}`);
+  }
+
+  const [siteRows]: any = await catalogPool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
+  if (options.requireExactlyOneCatalogSite && siteRows.length !== 1) {
+    throw new Error(`Catalog state mismatch for schema ${schemaName}: expected 1 site row, found ${siteRows.length}`);
+  }
+
+  await catalogPool.query(`DROP DATABASE IF EXISTS \`${schemaName}\``);
+
+  for (const row of siteRows) {
+    const siteId = row.SiteID ?? row.siteid;
+    const deleteRelations = catalogPool.query(`DELETE FROM catalog.usersiterelations WHERE SiteID = ?`, [siteId]);
+    if (options.ignoreUserRelationsDeleteError) {
+      await deleteRelations.catch(() => {
+        // usersiterelations may not exist in test envs; non-fatal for failed-run abort cleanup
+      });
+    } else {
+      await deleteRelations;
+    }
     await catalogPool.query(`DELETE FROM catalog.sites WHERE SiteID = ?`, [siteId]);
   }
-  await catalogPool.query(`DROP DATABASE IF EXISTS \`${run.schemaName}\``);
+}
+
+export async function teardownProvisionedSite(runId: number, confirmSchemaName: string, catalogPool: Pool): Promise<void> {
+  const run = await loadRun(catalogPool, runId);
+  if (!run) throw new Error(`Run ${runId} not found`);
+  if (run.status !== 'completed') throw new Error(`Run ${runId} must be completed before teardown`);
+  if (confirmSchemaName !== run.schemaName) {
+    throw new Error(`Schema confirmation does not match run schema ${run.schemaName}`);
+  }
+
+  await deleteCatalogSiteRowsAndSchema(catalogPool, run.schemaName, {
+    actionLabel: 'teardown provisioned site',
+    requireExactlyOneCatalogSite: true
+  });
   await setRunStatus(catalogPool, runId, 'aborted');
 }
 

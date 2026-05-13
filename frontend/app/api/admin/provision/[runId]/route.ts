@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { requireAdmin } from '@/lib/auth-helpers';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
-import { getRunWithSteps } from '@/lib/provisioning/orchestrator';
+import { getRunWithSteps, reconcileStaleRun } from '@/lib/provisioning/orchestrator';
 
 // Force Node.js runtime — mysql2 is not compatible with Edge Runtime
 export const runtime = 'nodejs';
@@ -54,6 +54,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
 
   if (!result) {
     return NextResponse.json({ error: `Run ${runId} not found` }, { status: HTTP_NOT_FOUND });
+  }
+
+  if (result.run.status === 'running') {
+    const reconciled = await reconcileStaleRun(runId, catalogPool);
+    if (reconciled) {
+      result = await getRunWithSteps(runId, catalogPool);
+      if (!result) {
+        return NextResponse.json({ error: `Run ${runId} not found after reconciliation` }, { status: HTTP_NOT_FOUND });
+      }
+    }
   }
 
   const now = Date.now();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateGrid } from './grid-generator';
+import { generateGrid, MAX_GENERATED_QUADRATS } from './grid-generator';
 import type { ProvisioningInput, QuadratGridConfig } from './types';
 
 const PLOT_100x100: ProvisioningInput['plot'] = {
@@ -79,5 +79,21 @@ describe('generateGrid', () => {
       namingPattern: 'sequential'
     };
     expect(() => generateGrid(PLOT_100x100, cfg)).toThrow(/not divisible/);
+  });
+
+  it('throws before materializing more than the allowed quadrat cap', () => {
+    const cfg: QuadratGridConfig = {
+      mode: 'grid',
+      quadratSizeX: 1,
+      quadratSizeY: 1,
+      namingPattern: 'sequential'
+    };
+    const hugePlot = {
+      ...PLOT_100x100,
+      dimensionX: MAX_GENERATED_QUADRATS + 1,
+      dimensionY: 1
+    };
+
+    expect(() => generateGrid(hugePlot, cfg)).toThrow(/maximum allowed/);
   });
 });

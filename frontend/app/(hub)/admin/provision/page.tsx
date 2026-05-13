@@ -9,7 +9,7 @@ import PlotForm from '@/components/provisioning/PlotForm';
 import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
-import { ProvisioningInputSchema } from '@/lib/provisioning/input-schema';
+import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
 import { rectsOverlap } from '@/lib/provisioning/steps/validate-inputs';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
 
@@ -59,9 +59,9 @@ const DEFAULT_INPUT: ProvisioningInput = {
 function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
   switch (step) {
     case STEP_SITE_INDEX:
-      return ProvisioningInputSchema.shape.site.safeParse(input.site).success;
+      return ProvisioningSiteSchema.safeParse(input.site).success;
     case STEP_PLOT_INDEX:
-      return ProvisioningInputSchema.shape.plot.safeParse(input.plot).success;
+      return ProvisioningPlotSchema.safeParse(input.plot).success;
     case STEP_QUADRATS_INDEX:
       return quadratLayoutIsValid(input);
     case STEP_REVIEW_INDEX:
@@ -72,7 +72,7 @@ function deriveCanAdvance(step: number, input: ProvisioningInput): boolean {
 }
 
 function quadratLayoutIsValid(input: ProvisioningInput): boolean {
-  if (!ProvisioningInputSchema.shape.quadrats.safeParse(input.quadrats).success) return false;
+  if (!ProvisioningQuadratsSchema.safeParse(input.quadrats).success) return false;
 
   if (input.quadrats.mode === 'grid') {
     try {

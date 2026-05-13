@@ -2,7 +2,26 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Alert, Box, Button, CircularProgress, Divider, List, ListItem, Stack, Typography } from '@mui/joy';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Input,
+  List,
+  ListItem,
+  Modal,
+  ModalDialog,
+  Stack,
+  Typography
+} from '@mui/joy';
 import type { ProvisioningRunRecord, ProvisioningStepRecord, RunStatus as RunStatusType } from '@/lib/provisioning/types';
 
 interface RunStatusProps {
@@ -15,7 +34,7 @@ interface PollResponse {
   stuckStepIndex: number | null;
 }
 
-type ActionKey = 'retry' | 'abort' | 'mark-failed';
+type ActionKey = 'retry' | 'abort' | 'mark-failed' | 'teardown';
 
 const POLL_INTERVAL_MS = 1000;
 
@@ -48,6 +67,8 @@ export default function RunStatus({ runId }: RunStatusProps) {
   const [showStackFor, setShowStackFor] = useState<number | null>(null);
   const [actionInFlight, setActionInFlight] = useState<ActionKey | null>(null);
   const [pollGeneration, setPollGeneration] = useState(0);
+  const [teardownDialogOpen, setTeardownDialogOpen] = useState(false);
+  const [confirmSchemaName, setConfirmSchemaName] = useState('');
 
   // We use a ref so the poll callback can read the latest status without being
   // recreated on every state update, which would cause the interval to reset.
@@ -149,6 +170,29 @@ export default function RunStatus({ runId }: RunStatusProps) {
         setActionError(body.error ?? `Abort failed (HTTP ${res.status})`);
         return;
       }
+      await poll();
+    } finally {
+      setActionInFlight(null);
+    }
+  }
+
+  async function handleTeardown() {
+    if (!data || confirmSchemaName !== data.run.schemaName) return;
+    setActionInFlight('teardown');
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/provision/${runId}/teardown`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmSchemaName })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setActionError(body.error ?? `Delete failed (HTTP ${res.status})`);
+        return;
+      }
+      setTeardownDialogOpen(false);
+      setConfirmSchemaName('');
       await poll();
     } finally {
       setActionInFlight(null);
@@ -323,14 +367,74 @@ export default function RunStatus({ runId }: RunStatusProps) {
             </>
           )}
           {run.status === 'completed' && (
-            // Note: navigates to /dashboard; the user will need to select the new site manually.
-            // A future task will wire up automatic site-selection state after provisioning.
-            <Button color="success" onClick={() => router.push('/dashboard')}>
-              Go to site
-            </Button>
+            <>
+              {/* Note: navigates to /dashboard; the user will need to select the new site manually. */}
+              <Button color="success" onClick={() => router.push('/dashboard')}>
+                Go to site
+              </Button>
+              <Button
+                color="danger"
+                variant="outlined"
+                loading={actionInFlight === 'teardown'}
+                disabled={actionInFlight !== null}
+                onClick={() => setTeardownDialogOpen(true)}
+              >
+                Delete provisioned site
+              </Button>
+            </>
           )}
         </Stack>
       )}
+
+      <Modal
+        open={teardownDialogOpen}
+        onClose={() => {
+          if (actionInFlight !== 'teardown') setTeardownDialogOpen(false);
+        }}
+      >
+        <ModalDialog role="alertdialog" sx={{ maxWidth: 520 }}>
+          <DialogTitle>Delete provisioned site</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2}>
+              <Alert color="danger" variant="soft">
+                This will delete the catalog site entry and drop schema <strong>{run.schemaName}</strong>.
+              </Alert>
+              <FormControl>
+                <FormLabel>Confirm schema name</FormLabel>
+                <Input
+                  aria-label="Confirm schema name"
+                  value={confirmSchemaName}
+                  onChange={event => setConfirmSchemaName(event.target.value)}
+                  placeholder={run.schemaName}
+                  autoFocus
+                />
+                <FormHelperText>Type {run.schemaName} to confirm.</FormHelperText>
+              </FormControl>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              color="danger"
+              loading={actionInFlight === 'teardown'}
+              disabled={confirmSchemaName !== run.schemaName || actionInFlight !== null}
+              onClick={handleTeardown}
+            >
+              Delete site
+            </Button>
+            <Button
+              variant="plain"
+              color="neutral"
+              disabled={actionInFlight === 'teardown'}
+              onClick={() => {
+                setTeardownDialogOpen(false);
+                setConfirmSchemaName('');
+              }}
+            >
+              Cancel
+            </Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
     </Stack>
   );
 }

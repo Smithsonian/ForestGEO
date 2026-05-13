@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import mysql from 'mysql2/promise';
 import { readFileSync } from 'fs';
 import path from 'path';
-import { startRun, retryRun, abortRun, markStepFailed, getRunWithSteps, listRuns } from './orchestrator';
+import { startRun, retryRun, abortRun, teardownProvisionedSite, markStepFailed, reconcileStaleRun, getRunWithSteps, listRuns } from './orchestrator';
 import type { ProvisioningInput } from './types';
 
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
@@ -52,7 +52,7 @@ async function waitForTerminal(runId: number, pool: mysql.Pool): Promise<string>
   throw new Error(`Run ${runId} did not reach terminal state within ${RUN_TIMEOUT_MS}ms`);
 }
 
-async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'running' | 'failed' | 'completed' = 'running'): Promise<number> {
+async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'running' | 'failed' | 'completed' | 'aborted' = 'running'): Promise<number> {
   const [result]: any = await pool.query(
     `INSERT INTO catalog.provisioning_runs
       (Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName, InputPayload)
@@ -60,6 +60,20 @@ async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'ru
     [status, schemaName, JSON.stringify(makeInput(schemaName))]
   );
   return result.insertId;
+}
+
+async function createCompletedRunWithSite(pool: mysql.Pool, schemaName: string): Promise<{ runId: number; siteId: number }> {
+  const runId = await createManualRun(pool, schemaName, 'completed');
+  await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
+  const [siteResult]: any = await pool.query(
+    `INSERT INTO catalog.sites
+      (SiteName, SchemaName, SQDimX, SQDimY, DefaultUOMDBH, DefaultUOMHOM, DoubleDataEntry)
+     VALUES ('TeardownSite', ?, 5, 5, 'mm', 'm', 0)`,
+    [schemaName]
+  );
+  const siteId = siteResult.insertId;
+  await pool.query(`INSERT INTO catalog.usersiterelations (UserID, SiteID) VALUES (999, ?)`, [siteId]);
+  return { runId, siteId };
 }
 
 describe('orchestrator', () => {
@@ -95,11 +109,26 @@ describe('orchestrator', () => {
         DoubleDataEntry TINYINT(1) NOT NULL DEFAULT 0
       ) ENGINE=InnoDB
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog.usersiterelations (
+        UserSiteRelationID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        UserID INT NOT NULL,
+        SiteID INT NOT NULL
+      ) ENGINE=InnoDB
+    `);
   }, 30000);
 
   afterAll(async () => {
     for (const schema of createdSchemas) {
       await pool.query(`DROP DATABASE IF EXISTS \`${schema}\``).catch(() => {});
+      await pool
+        .query(
+          `DELETE usr FROM catalog.usersiterelations usr
+           JOIN catalog.sites s ON usr.SiteID = s.SiteID
+           WHERE s.SchemaName = ?`,
+          [schema]
+        )
+        .catch(() => {});
       await pool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]).catch(() => {});
     }
     await pool.query(`DELETE FROM catalog.provisioning_runs WHERE SchemaName LIKE 'forestgeo_orch%'`).catch(() => {});
@@ -268,6 +297,60 @@ describe('orchestrator', () => {
     RUN_TIMEOUT_MS + 5000
   );
 
+  it('teardownProvisionedSite: drops schema and removes catalog rows for a completed run', async () => {
+    const schemaName = `forestgeo_orch_teardown_${process.pid}`;
+    createdSchemas.push(schemaName);
+    const { runId, siteId } = await createCompletedRunWithSite(pool, schemaName);
+
+    await teardownProvisionedSite(runId, schemaName, pool);
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('aborted');
+
+    const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+    expect(schemaRows).toHaveLength(0);
+
+    const [siteRows]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
+    expect(siteRows).toHaveLength(0);
+
+    const [relationRows]: any = await pool.query(`SELECT UserSiteRelationID FROM catalog.usersiterelations WHERE SiteID = ?`, [siteId]);
+    expect(relationRows).toHaveLength(0);
+  });
+
+  it.each(['running', 'failed', 'aborted'] as const)('teardownProvisionedSite: refuses %s runs', async status => {
+    const schemaName = `forestgeo_orch_teardown_${status}_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, status);
+
+    await expect(teardownProvisionedSite(runId, schemaName, pool)).rejects.toThrow(/must be completed/);
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe(status);
+  });
+
+  it('teardownProvisionedSite: rejects mismatched confirmation and leaves schema/catalog rows intact', async () => {
+    const schemaName = `forestgeo_orch_teardown_mismatch_${process.pid}`;
+    createdSchemas.push(schemaName);
+    const { runId } = await createCompletedRunWithSite(pool, schemaName);
+
+    await expect(teardownProvisionedSite(runId, `${schemaName}_wrong`, pool)).rejects.toThrow(/confirmation does not match/);
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('completed');
+
+    const [schemaRows]: any = await pool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?`, [schemaName]);
+    expect(schemaRows).toHaveLength(1);
+
+    const [siteRows]: any = await pool.query(`SELECT SiteID FROM catalog.sites WHERE SchemaName = ?`, [schemaName]);
+    expect(siteRows).toHaveLength(1);
+  });
+
+  it('teardownProvisionedSite: rejects unsafe schema names', async () => {
+    const schemaName = `forestgeo_orch_unsafe-${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'completed');
+
+    await expect(teardownProvisionedSite(runId, schemaName, pool)).rejects.toThrow(/unsafe schema name/);
+  });
+
   it('markStepFailed: only marks old running steps and leaves healthy steps alone', async () => {
     const schemaName = `forestgeo_orch_mark_recent_${process.pid}`;
     const runId = await createManualRun(pool, schemaName, 'running');
@@ -298,6 +381,48 @@ describe('orchestrator', () => {
     const result = await getRunWithSteps(runId, pool);
     expect(result!.run.status).toBe('failed');
     expect(result!.steps[0].status).toBe('failed');
+  });
+
+  it('reconcileStaleRun: marks stale pending runs failed so admins can retry or abort', async () => {
+    const schemaName = `forestgeo_orch_stale_pending_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(`UPDATE catalog.provisioning_runs SET StartedAt = NOW() - INTERVAL 10 MINUTE WHERE RunID = ?`, [runId]);
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status)
+       VALUES
+         (?, 0, 'validate_inputs', 'completed'),
+         (?, 1, 'create_schema', 'pending'),
+         (?, 2, 'init_tables', 'pending')`,
+      [runId, runId, runId]
+    );
+
+    const reconciled = await reconcileStaleRun(runId, pool);
+
+    expect(reconciled).toBe(true);
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('failed');
+    expect(result!.steps[1].status).toBe('failed');
+    expect(result!.steps[1].errorMessage).toMatch(/stalled/);
+    expect(result!.steps[2].status).toBe('pending');
+  });
+
+  it('reconcileStaleRun: completes a stale running run when every step already completed', async () => {
+    const schemaName = `forestgeo_orch_stale_completed_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(`UPDATE catalog.provisioning_runs SET StartedAt = NOW() - INTERVAL 10 MINUTE WHERE RunID = ?`, [runId]);
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt, FinishedAt)
+       VALUES
+         (?, 0, 'validate_inputs', 'completed', NOW() - INTERVAL 10 MINUTE, NOW() - INTERVAL 9 MINUTE),
+         (?, 1, 'create_schema', 'completed', NOW() - INTERVAL 9 MINUTE, NOW() - INTERVAL 8 MINUTE)`,
+      [runId, runId]
+    );
+
+    const reconciled = await reconcileStaleRun(runId, pool);
+
+    expect(reconciled).toBe(true);
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('completed');
   });
 
   it('listRuns: returns runs in reverse chronological order', async () => {

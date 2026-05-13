@@ -1,6 +1,9 @@
 -- Provisioning run state tables. Live in the catalog schema, not in per-site
 -- schemas, because they coordinate cross-schema work.
 
+CREATE DATABASE IF NOT EXISTS catalog
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS catalog.provisioning_runs (
   RunID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
   Status ENUM('running','completed','failed','aborted') NOT NULL,

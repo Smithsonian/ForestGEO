@@ -3,11 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   getRunWithSteps: vi.fn(),
+  reconcileStaleRun: vi.fn(),
   poolInstance: { pool: {} }
 }));
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
-vi.mock('@/lib/provisioning/orchestrator', () => ({ getRunWithSteps: mocks.getRunWithSteps }));
+vi.mock('@/lib/provisioning/orchestrator', () => ({
+  getRunWithSteps: mocks.getRunWithSteps,
+  reconcileStaleRun: mocks.reconcileStaleRun
+}));
 vi.mock('@/config/poolmonitorsingleton', () => ({
   getPoolMonitorInstance: () => mocks.poolInstance
 }));
@@ -80,6 +84,7 @@ function makeRunRecord(
 describe('GET /api/admin/provision/[runId]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.reconcileStaleRun.mockResolvedValue(false);
   });
 
   it('returns 401 when there is no session', async () => {
@@ -191,6 +196,25 @@ describe('GET /api/admin/provision/[runId]', () => {
 
     expect(res.status).toBe(200);
     expect(body.stuckStepIndex).toBeNull();
+    expect(mocks.reconcileStaleRun).toHaveBeenCalledWith(7, mocks.poolInstance.pool);
+  });
+
+  it('rechecks the run after stale-run reconciliation mutates state', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+    const runningRun = makeRunRecord({ status: 'running', finishedAt: null, startedAt: new Date(Date.now() - 10 * 60 * 1000) });
+    const failedRun = makeRunRecord({ status: 'failed', finishedAt: new Date() });
+    const beforeSteps = [makeStepRecord({ stepIndex: 0, status: 'pending', startedAt: null, finishedAt: null })];
+    const afterSteps = [makeStepRecord({ stepIndex: 0, status: 'failed', errorMessage: 'Run stalled without an active provisioning worker' })];
+    mocks.getRunWithSteps.mockResolvedValueOnce({ run: runningRun, steps: beforeSteps }).mockResolvedValueOnce({ run: failedRun, steps: afterSteps });
+    mocks.reconcileStaleRun.mockResolvedValue(true);
+
+    const res = await GET(makeGetRequest('7'), makeParams('7'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.run.status).toBe('failed');
+    expect(body.steps[0].status).toBe('failed');
+    expect(mocks.getRunWithSteps).toHaveBeenCalledTimes(2);
   });
 
   it('returns 200 with stuckStepIndex: 2 when step at index 2 has been running for 10 minutes', async () => {

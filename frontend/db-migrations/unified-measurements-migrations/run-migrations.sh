@@ -22,6 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STORED_PROCEDURES_FILE="$REPO_ROOT/sqlscripting/storedprocedures.sql"
+CATALOG_PROVISIONING_FILE="$REPO_ROOT/sqlscripting/catalog-provisioning-tables.sql"
 MIGRATION_TRACKING_TABLE="_migration_log"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 
@@ -287,6 +288,21 @@ deploy_stored_procedures() {
     log_success "Stored procedures deployed."
 }
 
+deploy_catalog_provisioning_tables() {
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Catalog provisioning DDL not found: $CATALOG_PROVISIONING_FILE"
+        return 1
+    fi
+    local start_time
+    start_time=$(date +%s)
+    log_info "Ensuring catalog provisioning tables exist..."
+    run_sql_file "$CATALOG_PROVISIONING_FILE"
+    local end_time
+    end_time=$(date +%s)
+    mark_applied "catalog::provisioning_tables.sql" "$(( end_time - start_time ))"
+    log_success "Catalog provisioning tables are present."
+}
+
 # ---------------------------------------------------------------------------
 # Run migrations
 # ---------------------------------------------------------------------------
@@ -304,6 +320,11 @@ main() {
     if [[ ! -f "$STORED_PROCEDURES_FILE" ]]; then
         log_error "Missing: $STORED_PROCEDURES_FILE"
         log_error "This file is required after migration 23. Aborting."
+        exit 1
+    fi
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Missing: $CATALOG_PROVISIONING_FILE"
+        log_error "This file is required for admin site provisioning. Aborting."
         exit 1
     fi
 
@@ -333,16 +354,18 @@ main() {
         migrations_to_run+=("$file")
     done
 
-    if [[ ${#migrations_to_run[@]} -eq 0 ]]; then
-        log_success "All migrations already applied. Nothing to do."
-        exit 0
-    fi
-
     echo ""
-    log_info "Migrations to apply (${#migrations_to_run[@]}):"
-    for file in "${migrations_to_run[@]}"; do
-        echo "         $file"
-    done
+    log_info "Catalog provisioning DDL:"
+    echo "         always: catalog-provisioning-tables.sql"
+    echo ""
+    if [[ ${#migrations_to_run[@]} -eq 0 ]]; then
+        log_info "Site migrations to apply: 0 (all already applied)"
+    else
+        log_info "Migrations to apply (${#migrations_to_run[@]}):"
+        for file in "${migrations_to_run[@]}"; do
+            echo "         $file"
+        done
+    fi
     echo ""
 
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -361,7 +384,15 @@ main() {
     local failed_migration=""
     local applied_count=0
 
+    if ! deploy_catalog_provisioning_tables; then
+        failed_migration="catalog-provisioning-tables.sql"
+    fi
+
     for file in "${migrations_to_run[@]}"; do
+        if [[ -n "$failed_migration" ]]; then
+            break
+        fi
+
         local filepath="$SCRIPT_DIR/$file"
 
         if [[ ! -f "$filepath" ]]; then
