@@ -147,4 +147,25 @@ describe('middleware /api/* gating', () => {
       expect(res?.status).toBe(200);
     });
   });
+
+  it.each(['/api/clearallcookies', '/api/diagnostics/streaming-timeout', '/api/animations/startup.lottie'])(
+    'lets public legacy API %s through unauthenticated',
+    async pathname => {
+      await withE2EDisabled(async () => {
+        const mod = await import('./middleware');
+        const req = makeRequest(pathname, false);
+        const res = await mod.default(req as any);
+        expect(res?.status).toBe(200);
+      });
+    }
+  );
+
+  it('keeps catalog user lookup behind API auth', async () => {
+    await withE2EDisabled(async () => {
+      const mod = await import('./middleware');
+      const req = makeRequest('/api/catalog/Ada/Lovelace', false);
+      const res = await mod.default(req as any);
+      expect(res?.status).toBe(401);
+    });
+  });
 });

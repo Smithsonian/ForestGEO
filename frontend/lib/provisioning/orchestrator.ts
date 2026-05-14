@@ -4,7 +4,7 @@ import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, 
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
-import { dispatchRun, HEARTBEAT_STALE_MS } from './worker';
+import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
 import ailogger from '@/ailogger';
 
 function toError(err: unknown): Error {
@@ -63,31 +63,38 @@ async function setStepStatus(catalogPool: Pool, runId: number, stepIndex: number
   let result: unknown;
   if (status === 'running') {
     [result] = await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = ?, StartedAt = ?, FinishedAt = NULL, ErrorMessage = NULL, ErrorStack = NULL
-       WHERE RunID = ? AND StepIndex = ?`,
-      [status, now, runId, stepIndex]
+      `UPDATE catalog.provisioning_steps s
+       JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+       SET s.Status = ?, s.StartedAt = ?, s.FinishedAt = NULL, s.ErrorMessage = NULL, s.ErrorStack = NULL
+       WHERE s.RunID = ? AND s.StepIndex = ? AND s.Status IN ('pending', 'running', 'skipped')
+         AND r.Status = 'running' AND r.WorkerPID = ?`,
+      [status, now, runId, stepIndex, getWorkerPid()]
     );
   } else if (status === 'failed') {
     [result] = await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = ?, FinishedAt = ?, ErrorMessage = ?, ErrorStack = ?
-       WHERE RunID = ? AND StepIndex = ?`,
-      [status, now, error?.message ?? null, error?.stack ?? null, runId, stepIndex]
+      `UPDATE catalog.provisioning_steps s
+       JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+       SET s.Status = ?, s.FinishedAt = ?, s.ErrorMessage = ?, s.ErrorStack = ?
+       WHERE s.RunID = ? AND s.StepIndex = ?
+         AND r.Status = 'running' AND r.WorkerPID = ?`,
+      [status, now, error?.message ?? null, error?.stack ?? null, runId, stepIndex, getWorkerPid()]
     );
   } else {
     [result] = await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = ?, FinishedAt = ?
-       WHERE RunID = ? AND StepIndex = ?`,
-      [status, now, runId, stepIndex]
+      `UPDATE catalog.provisioning_steps s
+       JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+       SET s.Status = ?, s.FinishedAt = ?
+       WHERE s.RunID = ? AND s.StepIndex = ?
+         AND r.Status = 'running' AND r.WorkerPID = ?`,
+      [status, now, runId, stepIndex, getWorkerPid()]
     );
   }
   return affectedRows(result);
 }
 
-async function setRunningStep(catalogPool: Pool, runId: number, stepIndex: number): Promise<Date> {
-  await setStepStatus(catalogPool, runId, stepIndex, 'running');
+async function setRunningStep(catalogPool: Pool, runId: number, stepIndex: number): Promise<Date | null> {
+  const updated = await setStepStatus(catalogPool, runId, stepIndex, 'running');
+  if (updated === 0) return null;
   const [rows]: any = await catalogPool.query(`SELECT StartedAt FROM catalog.provisioning_steps WHERE RunID = ? AND StepIndex = ?`, [runId, stepIndex]);
   return rows[0]?.StartedAt ?? rows[0]?.startedat ?? new Date();
 }
@@ -104,19 +111,34 @@ async function setStepStatusIfStillRunning(
   let result: unknown;
   if (status === 'failed') {
     [result] = await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = ?, FinishedAt = ?, ErrorMessage = ?, ErrorStack = ?
-       WHERE RunID = ? AND StepIndex = ? AND Status = 'running' AND StartedAt = ?`,
-      [status, now, error?.message ?? null, error?.stack ?? null, runId, stepIndex, startedAt]
+      `UPDATE catalog.provisioning_steps s
+       JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+       SET s.Status = ?, s.FinishedAt = ?, s.ErrorMessage = ?, s.ErrorStack = ?
+       WHERE s.RunID = ? AND s.StepIndex = ? AND s.Status = 'running' AND s.StartedAt = ?
+         AND r.Status = 'running' AND r.WorkerPID = ?`,
+      [status, now, error?.message ?? null, error?.stack ?? null, runId, stepIndex, startedAt, getWorkerPid()]
     );
   } else {
     [result] = await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = ?, FinishedAt = ?
-       WHERE RunID = ? AND StepIndex = ? AND Status = 'running' AND StartedAt = ?`,
-      [status, now, runId, stepIndex, startedAt]
+      `UPDATE catalog.provisioning_steps s
+       JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+       SET s.Status = ?, s.FinishedAt = ?
+       WHERE s.RunID = ? AND s.StepIndex = ? AND s.Status = 'running' AND s.StartedAt = ?
+         AND r.Status = 'running' AND r.WorkerPID = ?`,
+      [status, now, runId, stepIndex, startedAt, getWorkerPid()]
     );
   }
+  return affectedRows(result);
+}
+
+async function setRunStatusIfOwned(catalogPool: Pool, runId: number, status: Exclude<RunStatus, 'running'>): Promise<number> {
+  const now = new Date();
+  const [result] = await catalogPool.query(
+    `UPDATE catalog.provisioning_runs
+     SET Status = ?, FinishedAt = ?
+     WHERE RunID = ? AND Status = 'running' AND WorkerPID = ?`,
+    [status, now, runId, getWorkerPid()]
+  );
   return affectedRows(result);
 }
 
@@ -127,7 +149,12 @@ export async function setRunStatus(catalogPool: Pool, runId: number, status: Run
     const guard = status === 'aborted' ? '' : ` AND Status <> 'aborted'`;
     await catalogPool.query(`UPDATE catalog.provisioning_runs SET Status = ?, FinishedAt = ? WHERE RunID = ?${guard}`, [status, now, runId]);
   } else {
-    await catalogPool.query(`UPDATE catalog.provisioning_runs SET Status = ?, FinishedAt = NULL WHERE RunID = ? AND Status <> 'aborted'`, [status, runId]);
+    await catalogPool.query(
+      `UPDATE catalog.provisioning_runs
+       SET Status = ?, FinishedAt = NULL, WorkerHeartbeatAt = NOW(), WorkerPID = ?
+       WHERE RunID = ? AND Status <> 'aborted'`,
+      [status, getWorkerPid(), runId]
+    );
   }
 }
 
@@ -174,9 +201,9 @@ export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {
 
     const [result]: any = await conn.query(
       `INSERT INTO catalog.provisioning_runs
-        (Status, StartedBy, StartedAt, SiteName, SchemaName, InputPayload)
-       VALUES ('running', ?, NOW(), ?, ?, ?)`,
-      [startedBy, input.site.siteName, schemaName, JSON.stringify(input)]
+        (Status, StartedBy, StartedAt, WorkerHeartbeatAt, WorkerPID, SiteName, SchemaName, InputPayload)
+       VALUES ('running', ?, NOW(), NOW(), ?, ?, ?, ?)`,
+      [startedBy, getWorkerPid(), input.site.siteName, schemaName, JSON.stringify(input)]
     );
     runId = result.insertId;
 
@@ -233,6 +260,7 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
     for (const stepRow of steps) {
       const currentRunStatus = await getRunStatus(catalogPool, runId);
       if (currentRunStatus !== 'running') return;
+      if (!(await isRunOwnedByCurrentWorker(catalogPool, runId))) return;
 
       if (stepRow.status === 'completed') {
         // Replay alreadyDone so ctx.state is populated for downstream steps
@@ -246,31 +274,34 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
         continue;
       }
       const startedAt = await setRunningStep(catalogPool, runId, stepRow.stepIndex);
+      if (!startedAt) return;
       try {
         await step.run(ctx);
       } catch (err: any) {
         const failed = await setStepStatusIfStillRunning(catalogPool, runId, stepRow.stepIndex, startedAt, 'failed', err);
-        if (failed > 0) await setRunStatus(catalogPool, runId, 'failed');
+        if (failed > 0) await setRunStatusIfOwned(catalogPool, runId, 'failed');
         return;
       }
       const completed = await setStepStatusIfStillRunning(catalogPool, runId, stepRow.stepIndex, startedAt, 'completed');
       if (completed === 0) return;
     }
-    await setRunStatus(catalogPool, runId, 'completed');
+    await setRunStatusIfOwned(catalogPool, runId, 'completed');
   } catch (fatal: any) {
     // Unexpected error outside step.run() — mark any 'running' steps failed
     try {
       await catalogPool.query(
-        `UPDATE catalog.provisioning_steps
-         SET Status = 'failed', ErrorMessage = ?, FinishedAt = NOW()
-         WHERE RunID = ? AND Status = 'running'`,
-        [fatal.message ?? String(fatal), runId]
+        `UPDATE catalog.provisioning_steps s
+         JOIN catalog.provisioning_runs r ON r.RunID = s.RunID
+         SET s.Status = 'failed', s.ErrorMessage = ?, s.FinishedAt = NOW()
+         WHERE s.RunID = ? AND s.Status = 'running'
+           AND r.Status = 'running' AND r.WorkerPID = ?`,
+        [fatal.message ?? String(fatal), runId, getWorkerPid()]
       );
       await catalogPool.query(
         `UPDATE catalog.provisioning_runs
          SET Status = 'failed', FinishedAt = NOW()
-         WHERE RunID = ? AND Status = 'running'`,
-        [runId]
+         WHERE RunID = ? AND Status = 'running' AND WorkerPID = ?`,
+        [runId, getWorkerPid()]
       );
     } catch {
       // Swallow secondary errors — the original failure has already been recorded
@@ -367,8 +398,25 @@ export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleT
   if (!result || result.run.status !== 'running') return false;
 
   const steps = result.steps;
+  const heartbeatAgeMs = await getHeartbeatAgeMs(catalogPool, runId);
+  // Null heartbeat means the worker never wrote one (or the run was created
+  // before this column existed). Treat that as "no proof of life" and proceed
+  // to reconcile based on the steps state.
+  const heartbeatIsFresh = heartbeatAgeMs != null && heartbeatAgeMs < staleThresholdMs;
+
   const runningStep = steps.find(step => step.status === 'running');
-  if (runningStep) return false;
+  if (runningStep) {
+    if (heartbeatIsFresh) return false;
+    const now = new Date();
+    await catalogPool.query(
+      `UPDATE catalog.provisioning_steps
+       SET Status = 'failed', FinishedAt = ?, ErrorMessage = ?, ErrorStack = NULL
+       WHERE RunID = ? AND StepIndex = ? AND Status = 'running'`,
+      [now, STALLED_RUN_ERROR_MESSAGE, runId, runningStep.stepIndex]
+    );
+    await setRunStatus(catalogPool, runId, 'failed');
+    return true;
+  }
 
   const failedStep = steps.find(step => step.status === 'failed');
   if (failedStep) {
@@ -381,11 +429,7 @@ export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleT
     return true;
   }
 
-  const heartbeatAgeMs = await getHeartbeatAgeMs(catalogPool, runId);
-  // Null heartbeat means the worker never wrote one (or the run was created
-  // before this column existed). Treat that as "no proof of life" and proceed
-  // to reconcile based on the steps state.
-  if (heartbeatAgeMs != null && heartbeatAgeMs < staleThresholdMs) return false;
+  if (heartbeatIsFresh) return false;
 
   const pendingStep = steps.find(step => step.status === 'pending' || step.status === 'skipped');
   if (pendingStep) {

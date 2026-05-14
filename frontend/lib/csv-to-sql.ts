@@ -38,6 +38,7 @@ const DEFAULT_TEMP_TABLE = 'TempAllTrees';
 const UTF8_BOM = '﻿';
 
 const STRICT_NUMERIC = /^-?(\d+\.?\d*|\.\d+)$/;
+const MYSQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export type SqlValue = string | number | null;
 
@@ -51,6 +52,13 @@ export type SqlValue = string | number | null;
 export function escapeSqlValue(value: SqlValue): string {
   if (value === null) return 'NULL';
   return sqlEscape(value);
+}
+
+export function escapeSqlIdentifier(identifier: string): string {
+  if (!MYSQL_IDENTIFIER.test(identifier)) {
+    throw new Error(`Invalid SQL identifier: ${identifier}. Use letters, numbers, and underscores, starting with a letter or underscore.`);
+  }
+  return `\`${identifier}\``;
 }
 
 const REQUIRED_CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'] as const;
@@ -128,9 +136,10 @@ function coerceDate(raw: string): string | null {
 }
 
 export function renderCreateTable(tableName: string): string {
+  const tableIdentifier = escapeSqlIdentifier(tableName);
   return [
-    `DROP TABLE IF EXISTS \`${tableName}\`;`,
-    `CREATE TABLE \`${tableName}\` (`,
+    `DROP TABLE IF EXISTS ${tableIdentifier};`,
+    `CREATE TABLE ${tableIdentifier} (`,
     `  TempID           INT UNSIGNED AUTO_INCREMENT,`,
     `  QuadratName      VARCHAR(12),`,
     `  Subquad          INT UNSIGNED,`,
@@ -183,10 +192,11 @@ const INSERT_COLUMNS: ReadonlyArray<keyof StagingRow> = [
 const DEFAULT_CHUNK_SIZE = 1000;
 
 export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkSize: number = DEFAULT_CHUNK_SIZE): string[] {
+  const tableIdentifier = escapeSqlIdentifier(tableName);
   if (rows.length === 0) return [];
   const chunks: string[] = [];
   const columnList = INSERT_COLUMNS.join(', ');
-  const insertHead = `INSERT INTO \`${tableName}\` (${columnList}) VALUES`;
+  const insertHead = `INSERT INTO ${tableIdentifier} (${columnList}) VALUES`;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const slice = rows.slice(i, i + chunkSize);
     const tuples = slice.map(row => '(' + INSERT_COLUMNS.map(col => escapeSqlValue(row[col])).join(',') + ')');
@@ -257,6 +267,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
 
   const output = values.output ?? defaultOutputPath(values.input);
   const tempTable = values['temp-table'] ?? DEFAULT_TEMP_TABLE;
+  escapeSqlIdentifier(tempTable);
 
   return { input: values.input, site: values.site, plotId, censusNumber, output, tempTable };
 }

@@ -5,6 +5,7 @@ import { join } from 'path';
 import { readFileSync as readFile } from 'fs';
 import {
   parseCliArgs,
+  escapeSqlIdentifier,
   escapeSqlValue,
   mapCsvRowToStagingRow,
   renderCreateTable,
@@ -83,6 +84,11 @@ describe('parseCliArgs', () => {
     expect(args.tempTable).toBe('MyStaging');
   });
 
+  it('rejects unsafe --temp-table identifiers', () => {
+    expect(() => parseCliArgs([...baseArgv, '--temp-table', 'Bad`Name'])).toThrow(/Invalid SQL identifier/);
+    expect(() => parseCliArgs([...baseArgv, '--temp-table', 'bad-name'])).toThrow(/Invalid SQL identifier/);
+  });
+
   it('defaults --output by replacing .csv with .sql', () => {
     const args = parseCliArgs(['--input', '/path/to/SERC_c2_no_priors.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2']);
     expect(args.output).toBe('/path/to/SERC_c2_no_priors.sql');
@@ -158,6 +164,16 @@ describe('escapeSqlValue', () => {
       expect(inner).not.toContain('\0');
       expect(inner).not.toContain('\x1A');
     }
+  });
+});
+
+describe('escapeSqlIdentifier', () => {
+  it('wraps valid identifiers in backticks', () => {
+    expect(escapeSqlIdentifier('TempAllTrees_2')).toBe('`TempAllTrees_2`');
+  });
+
+  it('rejects identifiers that would escape the backtick context', () => {
+    expect(() => escapeSqlIdentifier('Temp`AllTrees')).toThrow(/Invalid SQL identifier/);
   });
 });
 
@@ -395,6 +411,10 @@ describe('renderCreateTable', () => {
     expect(other).toMatch(/DROP TABLE IF EXISTS `MyStaging`;/);
     expect(other).toMatch(/CREATE TABLE `MyStaging`/);
     expect(other).not.toMatch(/`TempAllTrees`/);
+  });
+
+  it('rejects unsafe table names', () => {
+    expect(() => renderCreateTable('TempAllTrees`; DROP TABLE catalog.users; --')).toThrow(/Invalid SQL identifier/);
   });
 });
 

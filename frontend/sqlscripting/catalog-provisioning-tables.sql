@@ -36,13 +36,31 @@ CREATE TABLE IF NOT EXISTS catalog.provisioning_steps (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Idempotent migration for existing installs. The CREATE TABLE above already
--- includes the heartbeat columns on fresh installs. This block adds them to
--- previously-deployed catalogs the first time this DDL file is replayed.
+-- includes the heartbeat columns/index on fresh installs. These blocks add
+-- each piece independently so a partially-applied prior deploy can self-heal.
 SET @col_exists := (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND COLUMN_NAME = 'WorkerHeartbeatAt');
 SET @stmt := IF(@col_exists = 0,
-  'ALTER TABLE catalog.provisioning_runs ADD COLUMN WorkerHeartbeatAt DATETIME NULL AFTER FinishedAt, ADD COLUMN WorkerPID VARCHAR(64) NULL AFTER WorkerHeartbeatAt, ADD KEY idx_provisioning_runs_heartbeat (Status, WorkerHeartbeatAt)',
+  'ALTER TABLE catalog.provisioning_runs ADD COLUMN WorkerHeartbeatAt DATETIME NULL AFTER FinishedAt',
   'SELECT 1');
 PREPARE migrate_heartbeat FROM @stmt;
 EXECUTE migrate_heartbeat;
 DEALLOCATE PREPARE migrate_heartbeat;
+
+SET @col_exists := (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND COLUMN_NAME = 'WorkerPID');
+SET @stmt := IF(@col_exists = 0,
+  'ALTER TABLE catalog.provisioning_runs ADD COLUMN WorkerPID VARCHAR(64) NULL AFTER WorkerHeartbeatAt',
+  'SELECT 1');
+PREPARE migrate_worker_pid FROM @stmt;
+EXECUTE migrate_worker_pid;
+DEALLOCATE PREPARE migrate_worker_pid;
+
+SET @idx_exists := (SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND INDEX_NAME = 'idx_provisioning_runs_heartbeat');
+SET @stmt := IF(@idx_exists = 0,
+  'ALTER TABLE catalog.provisioning_runs ADD KEY idx_provisioning_runs_heartbeat (Status, WorkerHeartbeatAt)',
+  'SELECT 1');
+PREPARE migrate_heartbeat_idx FROM @stmt;
+EXECUTE migrate_heartbeat_idx;
+DEALLOCATE PREPARE migrate_heartbeat_idx;

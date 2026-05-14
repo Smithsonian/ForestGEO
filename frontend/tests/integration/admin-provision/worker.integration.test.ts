@@ -19,7 +19,7 @@ import { createTestPool, seedCatalogTables, clearProvisioningState, seedRun, TES
 
 vi.mock('@/ailogger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { findStaleRunIds, pickupStaleRuns, _resetForTests, HEARTBEAT_STALE_MS } from '@/lib/provisioning/worker';
+import { claimStaleRun, findStaleRunIds, getWorkerPid, pickupStaleRuns, _resetForTests, HEARTBEAT_STALE_MS } from '@/lib/provisioning/worker';
 
 const TEST_SCHEMA = TEST_SCHEMA_PREFIX + 'worker';
 const FRESH_HEARTBEAT_AGE_SECONDS = 5;
@@ -100,5 +100,19 @@ describe('provisioning worker (integration)', () => {
     expect(picked).not.toContain(freshRunId);
 
     await testPool.query(`DELETE FROM catalog.sites WHERE SchemaName LIKE ?`, [TEST_SCHEMA + '_%']);
+  });
+
+  it('claimStaleRun claims a stale run exactly once and stamps this worker', async () => {
+    const runId = await seedRun(testPool, TEST_SCHEMA, 'running');
+    await testPool.query(
+      `UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = DATE_SUB(NOW(), INTERVAL ? SECOND), WorkerPID = 'old-worker' WHERE RunID = ?`,
+      [STALE_HEARTBEAT_AGE_SECONDS, runId]
+    );
+
+    await expect(claimStaleRun(testPool, runId)).resolves.toBe(true);
+    await expect(claimStaleRun(testPool, runId)).resolves.toBe(false);
+
+    const [rows]: any = await testPool.query(`SELECT WorkerPID FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
+    expect(rows[0].WorkerPID ?? rows[0].workerpid).toBe(getWorkerPid());
   });
 });

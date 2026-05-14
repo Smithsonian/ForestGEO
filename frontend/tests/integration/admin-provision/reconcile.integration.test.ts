@@ -119,6 +119,7 @@ describe('POST /api/admin/provision/[runId]/reconcile (integration)', () => {
   it('returns reconciled:false for a recently-active running run', async () => {
     mocks.auth.mockResolvedValue(GLOBAL_SESSION);
     const runId = await seedRun(testPool, TEST_SCHEMA, 'running');
+    await testPool.query(`UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = NOW() WHERE RunID = ?`, [runId]);
     await seedSteps(testPool, runId, [{ stepIndex: 0, stepKey: 'validate_inputs', status: 'running', startedAtSecondsAgo: 1 }]);
 
     const res = await POST(makeRequest(URL_FOR(String(runId)), { method: 'POST' }), makeParams(runId));

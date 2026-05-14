@@ -491,6 +491,42 @@ describe('orchestrator', () => {
     expect(result!.steps[2].status).toBe('pending');
   });
 
+  it('reconcileStaleRun: marks a stale running step failed', async () => {
+    const schemaName = `forestgeo_orch_stale_running_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+       VALUES (?, 0, 'validate_inputs', 'running', NOW() - INTERVAL 10 MINUTE)`,
+      [runId]
+    );
+
+    const reconciled = await reconcileStaleRun(runId, pool);
+
+    expect(reconciled).toBe(true);
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('failed');
+    expect(result!.steps[0].status).toBe('failed');
+    expect(result!.steps[0].errorMessage).toMatch(/stalled/);
+  });
+
+  it('reconcileStaleRun: leaves a fresh running step alone', async () => {
+    const schemaName = `forestgeo_orch_fresh_running_${process.pid}`;
+    const runId = await createManualRun(pool, schemaName, 'running');
+    await pool.query(`UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = NOW() WHERE RunID = ?`, [runId]);
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps (RunID, StepIndex, StepKey, Status, StartedAt)
+       VALUES (?, 0, 'validate_inputs', 'running', NOW())`,
+      [runId]
+    );
+
+    const reconciled = await reconcileStaleRun(runId, pool);
+
+    expect(reconciled).toBe(false);
+    const result = await getRunWithSteps(runId, pool);
+    expect(result!.run.status).toBe('running');
+    expect(result!.steps[0].status).toBe('running');
+  });
+
   it('reconcileStaleRun: completes a stale running run when every step already completed', async () => {
     const schemaName = `forestgeo_orch_stale_completed_${process.pid}`;
     const runId = await createManualRun(pool, schemaName, 'running');

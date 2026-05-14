@@ -18,7 +18,7 @@
  *   - `pickupStaleRuns` runs at process start (via instrumentation.ts) to dispatch
  *     any `running` rows whose heartbeat is older than HEARTBEAT_STALE_MS or null.
  */
-import type { Pool, RowDataPacket } from 'mysql2/promise';
+import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 // `runProvisioning` is imported lazily inside `dispatchRun` to avoid a
 // module-load circular import between worker.ts ↔ orchestrator.ts. The
 // orchestrator imports `dispatchRun` at module load; if worker.ts also
@@ -31,8 +31,13 @@ export const HEARTBEAT_STALE_MS = 60_000;
 const WORKER_PID = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
 const activeHeartbeats = new Map<number, NodeJS.Timeout>();
+const activeRuns = new Set<number>();
 let shuttingDown = false;
 let shutdownInstalled = false;
+
+function affectedRows(result: unknown): number {
+  return (result as ResultSetHeader).affectedRows ?? 0;
+}
 
 export function isShuttingDown(): boolean {
   return shuttingDown;
@@ -45,9 +50,9 @@ export function getWorkerPid(): string {
 async function writeHeartbeat(catalogPool: Pool, runId: number): Promise<void> {
   if (shuttingDown) return;
   try {
-    await catalogPool.query(`UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = NOW(), WorkerPID = ? WHERE RunID = ? AND Status = 'running'`, [
-      WORKER_PID,
-      runId
+    await catalogPool.query(`UPDATE catalog.provisioning_runs SET WorkerHeartbeatAt = NOW() WHERE RunID = ? AND Status = 'running' AND WorkerPID = ?`, [
+      runId,
+      WORKER_PID
     ]);
   } catch {
     // Heartbeat failures are non-fatal — runProvisioning is still progressing,
@@ -81,20 +86,23 @@ export function stopHeartbeat(runId: number): void {
  * writes that `startRun`/`retryRun` perform inline.
  */
 export function dispatchRun(runId: number, catalogPool: Pool): void {
-  if (shuttingDown) return;
+  if (shuttingDown || activeRuns.has(runId)) return;
+  activeRuns.add(runId);
   setImmediate(() => {
     void runWithHeartbeat(runId, catalogPool);
   });
 }
 
 async function runWithHeartbeat(runId: number, catalogPool: Pool): Promise<void> {
-  if (shuttingDown) return;
-  startHeartbeat(catalogPool, runId);
   try {
+    if (shuttingDown) return;
+    if (!(await isRunOwnedByCurrentWorker(catalogPool, runId))) return;
+    startHeartbeat(catalogPool, runId);
     const { runProvisioning } = await import('./orchestrator');
     await runProvisioning(runId, catalogPool);
   } finally {
     stopHeartbeat(runId);
+    activeRuns.delete(runId);
   }
 }
 
@@ -117,16 +125,44 @@ export async function findStaleRunIds(catalogPool: Pool): Promise<number[]> {
   return rows.map(r => Number(r.RunID ?? (r as Record<string, unknown>).runid));
 }
 
+export async function isRunOwnedByCurrentWorker(catalogPool: Pool, runId: number): Promise<boolean> {
+  const [rows] = await catalogPool.query<RowDataPacket[]>(
+    `SELECT RunID FROM catalog.provisioning_runs
+     WHERE RunID = ? AND Status = 'running' AND WorkerPID = ?
+     LIMIT 1`,
+    [runId, WORKER_PID]
+  );
+  return rows.length > 0;
+}
+
+export async function claimStaleRun(catalogPool: Pool, runId: number): Promise<boolean> {
+  const [result] = await catalogPool.query<ResultSetHeader>(
+    `UPDATE catalog.provisioning_runs
+     SET WorkerPID = ?, WorkerHeartbeatAt = NOW()
+     WHERE RunID = ?
+       AND Status = 'running'
+       AND (WorkerHeartbeatAt IS NULL
+            OR TIMESTAMPDIFF(SECOND, WorkerHeartbeatAt, NOW()) * 1000 > ?)`,
+    [WORKER_PID, runId, HEARTBEAT_STALE_MS]
+  );
+  return affectedRows(result) > 0;
+}
+
 /**
- * Selects all stale `running` runs and dispatches each. Returns the list of
- * RunIDs that were picked up. Intended to run once at process startup.
+ * Selects stale `running` runs, atomically claims each one, then dispatches
+ * only the rows this process successfully claimed. Intended to run once at
+ * process startup.
  */
 export async function pickupStaleRuns(catalogPool: Pool): Promise<number[]> {
   const ids = await findStaleRunIds(catalogPool);
+  const picked: number[] = [];
   for (const runId of ids) {
-    dispatchRun(runId, catalogPool);
+    if (await claimStaleRun(catalogPool, runId)) {
+      picked.push(runId);
+      dispatchRun(runId, catalogPool);
+    }
   }
-  return ids;
+  return picked;
 }
 
 /**
@@ -154,4 +190,5 @@ export function _resetForTests(): void {
   shutdownInstalled = false;
   for (const handle of activeHeartbeats.values()) clearInterval(handle);
   activeHeartbeats.clear();
+  activeRuns.clear();
 }
