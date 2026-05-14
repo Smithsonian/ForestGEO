@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - development
+      - forestgeo-app-development
     paths:
       - "frontend/docs/**"
   workflow_dispatch:
