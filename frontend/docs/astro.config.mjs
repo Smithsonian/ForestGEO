@@ -26,6 +26,7 @@ export default defineConfig({
         {
           label: 'Onboarding & Getting Started',
           items: [
+            { label: 'Quick Start', slug: 'quick-start' },
             { label: 'Getting Started', slug: 'getting-started' },
             { label: 'Navigation, Dashboard & Tools', slug: 'navigation-dashboard-tools' },
             { label: 'Adding Historical Data', slug: 'adding-historical-data' }
