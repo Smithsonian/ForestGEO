@@ -5,6 +5,7 @@ import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, HEARTBEAT_STALE_MS } from './worker';
+import ailogger from '@/ailogger';
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -224,8 +225,8 @@ export async function runProvisioning(runId: number, catalogPool: Pool): Promise
       sitePool: null,
       state: {},
       logger: {
-        info: (m, meta) => console.log('[provisioning]', runId, m, meta ?? ''),
-        error: (m, meta) => console.error('[provisioning]', runId, m, meta ?? '')
+        info: (m, meta) => ailogger.info(`[provisioning runId=${runId}] ${m}`, meta as any),
+        error: (m, meta) => ailogger.error(`[provisioning runId=${runId}] ${m}`, undefined, meta as any)
       }
     };
 
@@ -294,12 +295,19 @@ export async function retryRun(runId: number, catalogPool: Pool, startedBy: stri
       throw new ProvisioningError(`Run ${runId} must be failed before retrying`, 'conflict', { runId });
     }
 
-    await catalogPool.query(
-      `UPDATE catalog.provisioning_steps
-       SET Status = 'pending', StartedAt = NULL, FinishedAt = NULL, ErrorMessage = NULL, ErrorStack = NULL
-       WHERE RunID = ? AND Status IN ('failed', 'pending')`,
+    const [failedStepRows]: any = await catalogPool.query(
+      `SELECT MIN(StepIndex) AS firstFailed FROM catalog.provisioning_steps WHERE RunID = ? AND Status = 'failed'`,
       [runId]
     );
+    const firstFailed = failedStepRows[0]?.firstFailed ?? failedStepRows[0]?.firstfailed;
+    if (firstFailed != null) {
+      await catalogPool.query(
+        `UPDATE catalog.provisioning_steps
+         SET Status = 'pending', StartedAt = NULL, FinishedAt = NULL, ErrorMessage = NULL, ErrorStack = NULL
+         WHERE RunID = ? AND StepIndex >= ?`,
+        [runId, firstFailed]
+      );
+    }
     await setRunStatus(catalogPool, runId, 'running');
     auditSuccess({ action: 'retry', user: startedBy, runId, schemaName: run.schemaName });
 

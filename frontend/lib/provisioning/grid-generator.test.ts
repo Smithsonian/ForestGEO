@@ -31,7 +31,7 @@ describe('generateGrid', () => {
     expect(rows).toHaveLength(25);
   });
 
-  it('sequential naming: Q0001 to Q0025, zero-padded to 4 digits', () => {
+  it('sequential naming: zero-padded to digits matching the MAX cap (so no overflow at 10000)', () => {
     const cfg: QuadratGridConfig = {
       mode: 'grid',
       quadratSizeX: 20,
@@ -39,8 +39,22 @@ describe('generateGrid', () => {
       namingPattern: 'sequential'
     };
     const rows = generateGrid(PLOT_100x100, cfg);
-    expect(rows[0].quadratName).toBe('Q0001');
-    expect(rows[24].quadratName).toBe('Q0025');
+    expect(rows[0].quadratName).toBe('Q00001');
+    expect(rows[24].quadratName).toBe('Q00025');
+  });
+
+  it('sequential naming: pad width does not truncate at MAX_GENERATED_QUADRATS', () => {
+    const cfg: QuadratGridConfig = {
+      mode: 'grid',
+      quadratSizeX: 1,
+      quadratSizeY: 1,
+      namingPattern: 'sequential'
+    };
+    // 100 x 100 = 10000 quadrats (== MAX cap). Last name must be Q10000 (5 digits) — no overflow past the pad.
+    const rows = generateGrid({ ...PLOT_100x100, dimensionX: 100, dimensionY: 100 }, cfg);
+    expect(rows).toHaveLength(MAX_GENERATED_QUADRATS);
+    expect(rows[MAX_GENERATED_QUADRATS - 1].quadratName).toBe(`Q${MAX_GENERATED_QUADRATS}`);
+    expect(rows[0].quadratName).toBe('Q00001');
   });
 
   it('row-col naming: <row>-<col>, 1-indexed', () => {

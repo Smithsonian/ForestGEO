@@ -1,7 +1,7 @@
 import type { ProvisioningInput, QuadratCsvRow, QuadratGridConfig } from './types';
 
-const SEQUENTIAL_PAD_WIDTH = 4;
 export const MAX_GENERATED_QUADRATS = 10000;
+const SEQUENTIAL_PAD_WIDTH = String(MAX_GENERATED_QUADRATS).length;
 
 export function estimateGridQuadratCount(plot: ProvisioningInput['plot'], config: QuadratGridConfig): number {
   const cols = plot.dimensionX / config.quadratSizeX;

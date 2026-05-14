@@ -77,6 +77,20 @@ describe('validateInputsStep', () => {
         DoubleDataEntry TINYINT(1) NOT NULL DEFAULT 0
       ) ENGINE=InnoDB
     `);
+    // provisioning_steps is consulted by validate_inputs to detect retry-after-create_schema.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${CATALOG_SCHEMA}.provisioning_steps (
+        StepID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        RunID INT NOT NULL,
+        StepIndex INT NOT NULL,
+        StepKey VARCHAR(64) NOT NULL,
+        Status VARCHAR(32) NOT NULL,
+        StartedAt DATETIME NULL,
+        FinishedAt DATETIME NULL,
+        ErrorMessage TEXT NULL,
+        ErrorStack TEXT NULL
+      ) ENGINE=InnoDB
+    `);
   });
 
   afterAll(async () => {
@@ -132,6 +146,43 @@ describe('validateInputsStep', () => {
       await expect(validateInputsStep.run(ctx)).rejects.toThrow(/already exists in MySQL/);
     } finally {
       await pool.query(`DROP DATABASE IF EXISTS ${orphanSchema}`);
+    }
+  });
+
+  it('idempotent on retry: accepts an existing MySQL schema when create_schema for this run is completed', async () => {
+    const retrySchema = 'forestgeo_retry_validinputs_test';
+    // provisioning_steps has a FK to provisioning_runs, so we must create the parent run row first.
+    const [runResult]: any = await pool.query(
+      `INSERT INTO ${CATALOG_SCHEMA}.provisioning_runs
+        (Status, StartedBy, StartedAt, SiteName, SchemaName, InputPayload)
+       VALUES ('failed', 'test@validate-retry', NOW(), 'RetryValidateTest', ?, '{}')`,
+      [retrySchema]
+    );
+    const retryRunId = runResult.insertId;
+    await pool.query(`CREATE DATABASE IF NOT EXISTS ${retrySchema}`);
+    await pool.query(
+      `INSERT INTO ${CATALOG_SCHEMA}.provisioning_steps (RunID, StepIndex, StepKey, Status)
+       VALUES (?, 1, 'create_schema', 'completed')`,
+      [retryRunId]
+    );
+    try {
+      const baseInput = makeInput({
+        site: { ...makeInput().site, schemaName: retrySchema }
+      });
+      const ctx: StepContext = {
+        runId: retryRunId,
+        schemaName: baseInput.site.schemaName,
+        input: baseInput,
+        catalogPool: pool,
+        sitePool: null,
+        state: {},
+        logger: { info: () => {}, error: () => {} }
+      };
+      await expect(validateInputsStep.run(ctx)).resolves.toBeUndefined();
+    } finally {
+      await pool.query(`DELETE FROM ${CATALOG_SCHEMA}.provisioning_steps WHERE RunID = ?`, [retryRunId]).catch(() => {});
+      await pool.query(`DELETE FROM ${CATALOG_SCHEMA}.provisioning_runs WHERE RunID = ?`, [retryRunId]).catch(() => {});
+      await pool.query(`DROP DATABASE IF EXISTS ${retrySchema}`);
     }
   });
 

@@ -30,8 +30,16 @@ export const validateInputsStep: ProvisioningStep = {
       });
     }
 
+    // On retry, the MySQL schema may already exist because create_schema completed
+    // on a previous attempt. Treat that as expected, not an orphan.
+    const [createSchemaStepRows]: any = await catalogPool.query(`SELECT Status FROM catalog.provisioning_steps WHERE RunID = ? AND StepKey = 'create_schema'`, [
+      ctx.runId
+    ]);
+    const createSchemaStatus = createSchemaStepRows[0]?.Status ?? createSchemaStepRows[0]?.status;
+    const createSchemaAlreadyComplete = createSchemaStatus === 'completed';
+
     const [schemaRows]: any = await catalogPool.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = ? LIMIT 1`, [schemaName]);
-    if (schemaRows.length > 0) {
+    if (schemaRows.length > 0 && !createSchemaAlreadyComplete) {
       throw new ProvisioningError(
         `Schema "${schemaName}" already exists in MySQL but is not in catalog.sites. Investigate before provisioning over it.`,
         'conflict',

@@ -288,6 +288,83 @@ describe('orchestrator', () => {
     RUN_TIMEOUT_MS * 2 + 5000
   );
 
+  it('retry: only resets steps at or after the first failed step; earlier completed steps are preserved', async () => {
+    const schemaName = `forestgeo_orch_retry_scope_${process.pid}`;
+    createdSchemas.push(schemaName);
+    // Suppress the worker dispatch so retryRun is observed purely as catalog mutations.
+    // (Per worker.ts:79, vi.spyOn(globalThis, 'setImmediate') is the documented seam for this.)
+    const setImmediateSpy = vi.spyOn(globalThis, 'setImmediate').mockImplementation((() => 0) as any);
+    const runId = await createManualRun(pool, schemaName, 'failed');
+    const completedStartedAt = new Date(Date.now() - 60_000);
+    const completedFinishedAt = new Date(Date.now() - 30_000);
+    const failedStartedAt = new Date(Date.now() - 20_000);
+    const failedFinishedAt = new Date(Date.now() - 10_000);
+    // Layout: 0=completed, 1=completed, 2=failed, 3..9=pending.
+    // Only indices >= 2 (the first failed) should be reset.
+    await pool.query(
+      `INSERT INTO catalog.provisioning_steps
+        (RunID, StepIndex, StepKey, Status, StartedAt, FinishedAt, ErrorMessage, ErrorStack)
+       VALUES
+        (?, 0, 'validate_inputs', 'completed', ?, ?, NULL, NULL),
+        (?, 1, 'create_schema',   'completed', ?, ?, NULL, NULL),
+        (?, 2, 'init_tables',     'failed',    ?, ?, 'boom', 'stack-here'),
+        (?, 3, 'deploy_procedures','pending',  NULL, NULL, NULL, NULL),
+        (?, 4, 'seed_validations','pending',   NULL, NULL, NULL, NULL),
+        (?, 5, 'insert_catalog_row','pending', NULL, NULL, NULL, NULL),
+        (?, 6, 'insert_plot',     'pending',   NULL, NULL, NULL, NULL),
+        (?, 7, 'insert_census',   'pending',   NULL, NULL, NULL, NULL),
+        (?, 8, 'insert_quadrats', 'pending',   NULL, NULL, NULL, NULL),
+        (?, 9, 'verify',          'pending',   NULL, NULL, NULL, NULL)`,
+      [
+        runId,
+        completedStartedAt,
+        completedFinishedAt,
+        runId,
+        completedStartedAt,
+        completedFinishedAt,
+        runId,
+        failedStartedAt,
+        failedFinishedAt,
+        runId,
+        runId,
+        runId,
+        runId,
+        runId,
+        runId,
+        runId
+      ]
+    );
+
+    await retryRun(runId, pool, 'test@retry-scope');
+
+    const result = await getRunWithSteps(runId, pool);
+    expect(result).not.toBeNull();
+    // Indices 0 and 1 must remain completed with their original timestamps and no error fields.
+    expect(result!.steps[0].status).toBe('completed');
+    expect(result!.steps[0].errorMessage).toBeNull();
+    expect(result!.steps[0].startedAt).not.toBeNull();
+    expect(result!.steps[0].finishedAt).not.toBeNull();
+    expect(result!.steps[1].status).toBe('completed');
+    expect(result!.steps[1].errorMessage).toBeNull();
+    expect(result!.steps[1].startedAt).not.toBeNull();
+    expect(result!.steps[1].finishedAt).not.toBeNull();
+    // Index 2 (failed) must reset to pending with cleared error/timestamps.
+    expect(result!.steps[2].status).toBe('pending');
+    expect(result!.steps[2].startedAt).toBeNull();
+    expect(result!.steps[2].finishedAt).toBeNull();
+    expect(result!.steps[2].errorMessage).toBeNull();
+    expect(result!.steps[2].errorStack).toBeNull();
+    // Indices 3..9 should all be pending (they already were, but still pending after reset).
+    for (let i = 3; i <= 9; i++) {
+      expect(result!.steps[i].status).toBe('pending');
+    }
+    // Run is flipped back to running.
+    expect(result!.run.status).toBe('running');
+
+    setImmediateSpy.mockRestore();
+    await pool.query(`UPDATE catalog.provisioning_runs SET Status = 'failed', FinishedAt = NOW() WHERE RunID = ?`, [runId]);
+  });
+
   it(
     'retry: refuses non-failed runs',
     async () => {
