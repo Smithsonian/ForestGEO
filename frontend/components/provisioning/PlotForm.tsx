@@ -12,6 +12,8 @@ const PLOT_SHAPE_OPTIONS: Array<{ value: ProvisioningInput['plot']['plotShape'];
 
 type PlotValue = ProvisioningInput['plot'];
 
+type NumericPlotField = 'dimensionX' | 'dimensionY' | 'area' | 'globalX' | 'globalY' | 'globalZ';
+
 interface PlotFormProps {
   value: PlotValue;
   onChange: (next: PlotValue) => void;
@@ -25,6 +27,29 @@ function isPositiveNumber(n: number): boolean {
 
 export default function PlotForm({ value, onChange, showErrors = false }: PlotFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof PlotValue, boolean>>>({});
+
+  // Local string-typed mirror of numeric fields so an empty input stays empty
+  // instead of being forced to 0 by Number(''). Only valid numeric strings are
+  // propagated to the parent via onChange; empty input keeps the last valid value.
+  const [numericDrafts, setNumericDrafts] = useState<Record<NumericPlotField, string>>(() => ({
+    dimensionX: String(value.dimensionX ?? ''),
+    dimensionY: String(value.dimensionY ?? ''),
+    area: String(value.area ?? ''),
+    globalX: String(value.globalX ?? ''),
+    globalY: String(value.globalY ?? ''),
+    globalZ: String(value.globalZ ?? '')
+  }));
+
+  function handleNumericChange(field: NumericPlotField, raw: string) {
+    setNumericDrafts(prev => ({ ...prev, [field]: raw }));
+    if (raw === '' || raw === '-') {
+      return;
+    }
+    const n = Number(raw);
+    if (Number.isFinite(n)) {
+      onChange({ ...value, [field]: n });
+    }
+  }
 
   function markTouched(field: keyof PlotValue) {
     setTouched(prev => ({ ...prev, [field]: true }));
@@ -91,8 +116,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="dimension-x-input"
             aria-label="Dimension X"
             type="number"
-            value={value.dimensionX}
-            onChange={e => onChange({ ...value, dimensionX: Number(e.target.value) })}
+            value={numericDrafts.dimensionX}
+            onChange={e => handleNumericChange('dimensionX', e.target.value)}
             onBlur={() => markTouched('dimensionX')}
             slotProps={{ input: { min: 0, step: 0.1 } }}
           />
@@ -105,8 +130,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="dimension-y-input"
             aria-label="Dimension Y"
             type="number"
-            value={value.dimensionY}
-            onChange={e => onChange({ ...value, dimensionY: Number(e.target.value) })}
+            value={numericDrafts.dimensionY}
+            onChange={e => handleNumericChange('dimensionY', e.target.value)}
             onBlur={() => markTouched('dimensionY')}
             slotProps={{ input: { min: 0, step: 0.1 } }}
           />
@@ -119,8 +144,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="area-input"
             aria-label="Area"
             type="number"
-            value={value.area}
-            onChange={e => onChange({ ...value, area: Number(e.target.value) })}
+            value={numericDrafts.area}
+            onChange={e => handleNumericChange('area', e.target.value)}
             onBlur={() => markTouched('area')}
             slotProps={{ input: { min: 0, step: 0.01 } }}
           />
@@ -136,8 +161,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="global-x-input"
             aria-label="Global X"
             type="number"
-            value={value.globalX}
-            onChange={e => onChange({ ...value, globalX: Number(e.target.value) })}
+            value={numericDrafts.globalX}
+            onChange={e => handleNumericChange('globalX', e.target.value)}
             onBlur={() => markTouched('globalX')}
             slotProps={{ input: { step: 0.0001 } }}
           />
@@ -149,8 +174,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="global-y-input"
             aria-label="Global Y"
             type="number"
-            value={value.globalY}
-            onChange={e => onChange({ ...value, globalY: Number(e.target.value) })}
+            value={numericDrafts.globalY}
+            onChange={e => handleNumericChange('globalY', e.target.value)}
             onBlur={() => markTouched('globalY')}
             slotProps={{ input: { step: 0.0001 } }}
           />
@@ -162,8 +187,8 @@ export default function PlotForm({ value, onChange, showErrors = false }: PlotFo
             id="global-z-input"
             aria-label="Global Z"
             type="number"
-            value={value.globalZ}
-            onChange={e => onChange({ ...value, globalZ: Number(e.target.value) })}
+            value={numericDrafts.globalZ}
+            onChange={e => handleNumericChange('globalZ', e.target.value)}
             onBlur={() => markTouched('globalZ')}
             slotProps={{ input: { step: 0.0001 } }}
           />

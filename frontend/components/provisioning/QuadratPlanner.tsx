@@ -154,11 +154,24 @@ function CsvResultSummary({ rows, plot, overlap }: { rows: QuadratCsvRow[]; plot
   );
 }
 
-export default function QuadratPlanner({ value, onChange, plot }: QuadratPlannerProps) {
+export default function QuadratPlanner({ value, onChange, plot, showErrors = false }: QuadratPlannerProps) {
   const [csvParseErrors, setCsvParseErrors] = React.useState<Array<{ rowNumber: number; message: string }>>([]);
 
   const csvRows = value.mode === 'csv' ? value.rows : null;
   const overlap = useMemo(() => (csvRows ? findFirstOverlap(csvRows) : null), [csvRows]);
+
+  // CSV-mode aggregate validation issues used to surface a top-level error banner
+  // when the wizard signals showErrors=true (e.g. user clicked Next on an invalid step).
+  const csvValidationIssues = useMemo(() => {
+    if (value.mode !== 'csv') return [];
+    const issues = collectBoundsIssues(value.rows, plot);
+    if (overlap) {
+      issues.push({ quadratName: overlap[0].quadratName, message: `overlaps with "${overlap[1].quadratName}"` });
+    }
+    return issues;
+  }, [value, plot, overlap]);
+
+  const csvIsEmpty = value.mode === 'csv' && value.rows.length === 0 && csvParseErrors.length === 0;
 
   function handleFileSelected(file: File) {
     file.text().then(content => {
@@ -180,6 +193,18 @@ export default function QuadratPlanner({ value, onChange, plot }: QuadratPlanner
   return (
     <Stack spacing={3}>
       <Typography level="title-md">Quadrat Configuration</Typography>
+
+      {showErrors && value.mode === 'csv' && csvIsEmpty && (
+        <Alert color="danger" variant="soft" size="sm" aria-label="CSV required">
+          Upload a quadrat CSV before continuing.
+        </Alert>
+      )}
+
+      {showErrors && csvValidationIssues.length > 0 && (
+        <Alert color="danger" variant="soft" size="sm" aria-label="CSV validation summary">
+          {csvValidationIssues.length} validation issue{csvValidationIssues.length === 1 ? '' : 's'} in CSV — review and re-upload.
+        </Alert>
+      )}
 
       <FormControl>
         <FormLabel htmlFor="quadrat-mode-group">Mode</FormLabel>

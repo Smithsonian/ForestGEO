@@ -8,6 +8,8 @@ const SCHEMA_NAME_REGEX = /^forestgeo_[a-z0-9_]+$/;
 
 type SiteValue = ProvisioningInput['site'];
 
+type NumericSiteField = 'sqDimX' | 'sqDimY';
+
 interface SiteFormProps {
   value: SiteValue;
   onChange: (next: SiteValue) => void;
@@ -21,6 +23,25 @@ function isPositiveInteger(n: number): boolean {
 
 export default function SiteForm({ value, onChange, showErrors = false }: SiteFormProps) {
   const [touched, setTouched] = useState<Partial<Record<keyof SiteValue, boolean>>>({});
+
+  // Local string-typed mirror of numeric fields so an empty input stays empty
+  // instead of being coerced to 0 by Number(''). Only valid numeric strings
+  // propagate via onChange; empty input keeps the last valid value.
+  const [numericDrafts, setNumericDrafts] = useState<Record<NumericSiteField, string>>(() => ({
+    sqDimX: String(value.sqDimX ?? ''),
+    sqDimY: String(value.sqDimY ?? '')
+  }));
+
+  function handleNumericChange(field: NumericSiteField, raw: string) {
+    setNumericDrafts(prev => ({ ...prev, [field]: raw }));
+    if (raw === '') {
+      return;
+    }
+    const n = Number(raw);
+    if (Number.isFinite(n)) {
+      onChange({ ...value, [field]: n });
+    }
+  }
 
   function markTouched(field: keyof SiteValue) {
     setTouched(prev => ({ ...prev, [field]: true }));
@@ -80,10 +101,8 @@ export default function SiteForm({ value, onChange, showErrors = false }: SiteFo
             id="sq-dim-x-input"
             aria-label="Subquadrat Dimension X"
             type="number"
-            value={value.sqDimX}
-            onChange={e => {
-              onChange({ ...value, sqDimX: Number(e.target.value) });
-            }}
+            value={numericDrafts.sqDimX}
+            onChange={e => handleNumericChange('sqDimX', e.target.value)}
             onBlur={() => markTouched('sqDimX')}
             slotProps={{ input: { min: 1, step: 1 } }}
           />
@@ -96,10 +115,8 @@ export default function SiteForm({ value, onChange, showErrors = false }: SiteFo
             id="sq-dim-y-input"
             aria-label="Subquadrat Dimension Y"
             type="number"
-            value={value.sqDimY}
-            onChange={e => {
-              onChange({ ...value, sqDimY: Number(e.target.value) });
-            }}
+            value={numericDrafts.sqDimY}
+            onChange={e => handleNumericChange('sqDimY', e.target.value)}
             onBlur={() => markTouched('sqDimY')}
             slotProps={{ input: { min: 1, step: 1 } }}
           />

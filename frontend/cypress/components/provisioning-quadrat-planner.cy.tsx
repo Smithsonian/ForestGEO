@@ -245,6 +245,36 @@ describe('QuadratPlanner', () => {
     });
   });
 
+  describe('showErrors prop', () => {
+    it('renders a "CSV required" alert when showErrors is true and CSV mode has no rows', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} showErrors />);
+
+      cy.get('[aria-label="CSV required"]').should('be.visible');
+      cy.contains('Upload a quadrat CSV before continuing.').should('be.visible');
+    });
+
+    it('does not render the "CSV required" alert when showErrors is false even with empty CSV rows', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} />);
+
+      cy.get('[aria-label="CSV required"]').should('not.exist');
+    });
+
+    it('renders an aggregate validation alert when showErrors is true and CSV has out-of-bounds rows', () => {
+      const onChangeSpy = cy.stub().as('onChange');
+      cy.mount(<StatefulPlanner initial={DEFAULT_CSV_VALUE} onChangeSpy={onChangeSpy} showErrors />);
+
+      uploadCsvFixture('quadrats-out-of-bounds.csv');
+
+      // Wait for parse to complete (the in-panel result summary appears)
+      cy.contains('extends past plot dimensionX').should('be.visible');
+      // Aggregate banner from showErrors=true also surfaces above the form
+      cy.get('[aria-label="CSV validation summary"]').should('be.visible');
+      cy.contains(/validation issue/).should('be.visible');
+    });
+  });
+
   describe('Mode switching', () => {
     it('switching from grid to CSV clears grid state and shows file input', () => {
       const onChangeSpy = cy.stub().as('onChange');

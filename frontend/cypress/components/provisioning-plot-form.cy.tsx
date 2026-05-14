@@ -128,4 +128,30 @@ describe('PlotForm', () => {
     // Each unit FormControl should show a 'Required.' helper text
     cy.get('[aria-label="Default Dimension Units"]').closest('[class*="MuiFormControl"]').contains('Required.').should('be.visible');
   });
+
+  it('keeps the dimensionX input empty (not 0) when the user clears it', () => {
+    // Regression: Number('') === 0 used to force the input to '0' the moment a user
+    // tried to clear it, fighting against in-progress edits. The form now mirrors
+    // numeric fields with string drafts so empty stays empty.
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Dimension X"]').focus().clear();
+    cy.get('[aria-label="Dimension X"]').should('have.value', '');
+  });
+
+  it('does not emit onChange when the dimensionX input is cleared to empty', () => {
+    // Empty input means "mid-edit" — keep the last valid numeric value in the parent's
+    // state rather than coercing to 0 (which historically caused validation to flip
+    // unexpectedly while typing).
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulPlotForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Dimension X"]').focus().clear();
+    cy.get('@onChangeSpy').then((stub: any) => {
+      const lastCall = stub.getCalls().at(-1);
+      // Either no call was made (most likely) or the last propagated value retained dimensionX
+      if (lastCall) {
+        expect(lastCall.args[0].dimensionX).to.equal(DEFAULT_VALUE.dimensionX);
+      }
+    });
+  });
 });

@@ -160,22 +160,10 @@ export default function Sidebar(props: SidebarProps) {
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
   const [censusToDelete, setCensusToDelete] = useState<OrgCensusRDS | null>(null);
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
-  const [adminResetDone, setAdminResetDone] = useState(false);
 
-  // Clear selections when entering admin pages
-  useEffect(() => {
-    if (isAdminPage && !adminResetDone) {
-      const clearSelections = async () => {
-        if (currentSite && siteDispatch) await siteDispatch({ site: undefined });
-        if (currentPlot && plotDispatch) await plotDispatch({ plot: undefined });
-        if (currentCensus && censusDispatch) await censusDispatch({ census: undefined });
-      };
-      clearSelections();
-      setAdminResetDone(true);
-    } else if (!isAdminPage) {
-      setAdminResetDone(false);
-    }
-  }, [isAdminPage, adminResetDone, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch]);
+  // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
+  // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
+  // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
 
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout | null = null;

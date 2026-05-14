@@ -84,6 +84,7 @@ function quadratLayoutIsValid(input: ProvisioningInput): boolean {
   }
 
   const rows = input.quadrats.rows;
+  if (rows.length === 0) return false;
   for (const row of rows) {
     if (row.startX < 0 || row.startY < 0) return false;
     if (row.startX + row.dimensionX > input.plot.dimensionX) return false;
@@ -96,7 +97,7 @@ function quadratLayoutIsValid(input: ProvisioningInput): boolean {
 }
 
 export default function ProvisionWizardPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   const [step, setStep] = useState(0);
@@ -112,9 +113,17 @@ export default function ProvisionWizardPage() {
     };
   }, []);
 
+  if (status === 'loading') {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   const isGlobalUser = session?.user?.userStatus === 'global';
 
-  if (session && !isGlobalUser) {
+  if (!isGlobalUser) {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
         <Alert color="danger" variant="soft">

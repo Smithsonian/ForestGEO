@@ -111,4 +111,14 @@ describe('SiteForm', () => {
     cy.get('[aria-label="Double Data Entry"]').click();
     cy.get('@onChangeSpy').should('have.been.calledWithMatch', { doubleDataEntry: true });
   });
+
+  it('keeps the sqDimX input empty (not 0) when the user clears it', () => {
+    // Regression: Number('') used to coerce empty input to 0 and force the
+    // displayed value back to '0'. The form now mirrors the field with a string
+    // draft so the empty state survives.
+    const onChangeSpy = cy.stub().as('onChangeSpy');
+    cy.mount(<StatefulSiteForm initial={DEFAULT_VALUE} onChangeSpy={onChangeSpy} />);
+    cy.get('[aria-label="Subquadrat Dimension X"]').focus().clear();
+    cy.get('[aria-label="Subquadrat Dimension X"]').should('have.value', '');
+  });
 });
