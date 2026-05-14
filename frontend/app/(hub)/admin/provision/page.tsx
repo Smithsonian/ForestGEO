@@ -10,7 +10,7 @@ import QuadratPlanner from '@/components/provisioning/QuadratPlanner';
 import Review from '@/components/provisioning/Review';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { ProvisioningPlotSchema, ProvisioningQuadratsSchema, ProvisioningSiteSchema } from '@/lib/provisioning/input-schema';
-import { rectsOverlap } from '@/lib/provisioning/steps/validate-inputs';
+import { findFirstOverlap } from '@/lib/provisioning/geometry';
 import type { ProvisioningInput } from '@/lib/provisioning/types';
 
 const STEPS = ['Site', 'Plot', 'Quadrats', 'Review'] as const;
@@ -90,11 +90,7 @@ function quadratLayoutIsValid(input: ProvisioningInput): boolean {
     if (row.startY + row.dimensionY > input.plot.dimensionY) return false;
   }
 
-  for (let i = 0; i < rows.length; i++) {
-    for (let j = i + 1; j < rows.length; j++) {
-      if (rectsOverlap(rows[i], rows[j])) return false;
-    }
-  }
+  if (findFirstOverlap(rows)) return false;
 
   return true;
 }

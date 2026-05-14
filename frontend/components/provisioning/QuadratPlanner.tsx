@@ -1,11 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Alert, Box, FormControl, FormHelperText, FormLabel, Input, Radio, RadioGroup, Stack, Typography } from '@mui/joy';
 import type { ProvisioningInput, QuadratConfig, QuadratCsvRow } from '@/lib/provisioning/types';
 import { generateGrid } from '@/lib/provisioning/grid-generator';
 import { parseQuadratCsv } from '@/lib/provisioning/csv-parser';
-import { rectsOverlap } from '@/lib/provisioning/steps/validate-inputs';
+import { findFirstOverlap } from '@/lib/provisioning/geometry';
 
 const QUADRAT_SIZE_MIN = 1;
 const QUADRAT_SIZE_MAX = 10_000;
@@ -25,7 +25,7 @@ export interface QuadratPlannerProps {
   showErrors?: boolean;
 }
 
-function validateCsvRows(rows: QuadratCsvRow[], plot: ProvisioningInput['plot']): CsvValidationIssue[] {
+function collectBoundsIssues(rows: QuadratCsvRow[], plot: ProvisioningInput['plot']): CsvValidationIssue[] {
   const issues: CsvValidationIssue[] = [];
 
   for (const row of rows) {
@@ -40,17 +40,6 @@ function validateCsvRows(rows: QuadratCsvRow[], plot: ProvisioningInput['plot'])
     if (row.startY + row.dimensionY > plot.dimensionY) {
       issues.push({ quadratName: row.quadratName, message: 'extends past plot dimensionY' });
       continue;
-    }
-  }
-
-  for (let i = 0; i < rows.length; i++) {
-    for (let j = i + 1; j < rows.length; j++) {
-      if (rectsOverlap(rows[i], rows[j])) {
-        issues.push({
-          quadratName: rows[i].quadratName,
-          message: `overlaps with "${rows[j].quadratName}"`
-        });
-      }
     }
   }
 
@@ -132,8 +121,14 @@ function GridModePanel({
   );
 }
 
-function CsvResultSummary({ rows, plot }: { rows: QuadratCsvRow[]; plot: ProvisioningInput['plot'] }) {
-  const validationIssues = validateCsvRows(rows, plot);
+function CsvResultSummary({ rows, plot, overlap }: { rows: QuadratCsvRow[]; plot: ProvisioningInput['plot']; overlap: [QuadratCsvRow, QuadratCsvRow] | null }) {
+  const validationIssues = collectBoundsIssues(rows, plot);
+  if (overlap) {
+    validationIssues.push({
+      quadratName: overlap[0].quadratName,
+      message: `overlaps with "${overlap[1].quadratName}"`
+    });
+  }
 
   if (validationIssues.length === 0) {
     return (
@@ -161,6 +156,9 @@ function CsvResultSummary({ rows, plot }: { rows: QuadratCsvRow[]; plot: Provisi
 
 export default function QuadratPlanner({ value, onChange, plot }: QuadratPlannerProps) {
   const [csvParseErrors, setCsvParseErrors] = React.useState<Array<{ rowNumber: number; message: string }>>([]);
+
+  const csvRows = value.mode === 'csv' ? value.rows : null;
+  const overlap = useMemo(() => (csvRows ? findFirstOverlap(csvRows) : null), [csvRows]);
 
   function handleFileSelected(file: File) {
     file.text().then(content => {
@@ -232,7 +230,7 @@ export default function QuadratPlanner({ value, onChange, plot }: QuadratPlanner
             </Stack>
           )}
 
-          {csvParseErrors.length === 0 && value.rows.length > 0 && <CsvResultSummary rows={value.rows} plot={plot} />}
+          {csvParseErrors.length === 0 && value.rows.length > 0 && <CsvResultSummary rows={value.rows} plot={plot} overlap={overlap} />}
         </Stack>
       )}
     </Stack>

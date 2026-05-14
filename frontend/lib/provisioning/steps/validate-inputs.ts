@@ -1,11 +1,8 @@
-import type { ProvisioningStep, StepContext, QuadratCsvRow } from '../types';
+import type { ProvisioningStep, StepContext } from '../types';
 import { ProvisioningError } from '../types';
+import { findFirstOverlap } from '../geometry';
 
 const SCHEMA_PATTERN = /^forestgeo_[a-z0-9_]+$/;
-
-export function rectsOverlap(a: QuadratCsvRow, b: QuadratCsvRow): boolean {
-  return a.startX < b.startX + b.dimensionX && a.startX + a.dimensionX > b.startX && a.startY < b.startY + b.dimensionY && a.startY + a.dimensionY > b.startY;
-}
 
 export const validateInputsStep: ProvisioningStep = {
   key: 'validate_inputs',
@@ -74,14 +71,11 @@ export const validateInputsStep: ProvisioningStep = {
           throw new ProvisioningError(`Quadrat "${row.quadratName}" extends past plot dimensionY`, 'invalid_input', { stepKey: 'validate_inputs' });
         }
       }
-      for (let i = 0; i < rows.length; i++) {
-        for (let j = i + 1; j < rows.length; j++) {
-          if (rectsOverlap(rows[i], rows[j])) {
-            throw new ProvisioningError(`Quadrats "${rows[i].quadratName}" and "${rows[j].quadratName}" overlap`, 'invalid_input', {
-              stepKey: 'validate_inputs'
-            });
-          }
-        }
+      const overlap = findFirstOverlap(rows);
+      if (overlap) {
+        throw new ProvisioningError(`Quadrats "${overlap[0].quadratName}" and "${overlap[1].quadratName}" overlap`, 'invalid_input', {
+          stepKey: 'validate_inputs'
+        });
       }
     }
   }
