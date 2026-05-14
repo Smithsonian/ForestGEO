@@ -9,7 +9,7 @@
  * Behavior:
  * - In E2E mode (NEXT_PUBLIC_E2E_TESTING=true AND NODE_ENV !== 'production')
  *   middleware is bypassed so Cypress can mock auth client-side.
- * - /api/health, /api/auth/*, /api/customsignin are public (no auth required).
+ * - Public API routes listed below pass through without auth.
  * - Unauthenticated requests to /api/* return 401 JSON (not a redirect).
  * - Unauthenticated requests to protected pages → redirect to /login.
  * - Authenticated requests to / → redirect to /dashboard.
@@ -26,6 +26,17 @@ function isPathOrChild(pathname: string, path: string): boolean {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
+function isPublicApiPath(pathname: string): boolean {
+  return (
+    pathname === '/api/health' ||
+    pathname === '/api/clearallcookies' ||
+    pathname === '/api/diagnostics/streaming-timeout' ||
+    isPathOrChild(pathname, '/api/animations') ||
+    isPathOrChild(pathname, '/api/auth') ||
+    isPathOrChild(pathname, '/api/customsignin')
+  );
+}
+
 export default auth(req => {
   const { pathname } = req.nextUrl;
 
@@ -33,12 +44,7 @@ export default auth(req => {
     return NextResponse.next();
   }
 
-  // PUBLIC API allowlist — no auth required.
-  // /api/health: deployment health check.
-  // /api/auth/*: NextAuth's own sign-in/callback handlers.
-  // /api/customsignin: legacy custom sign-in path.
-  const isPublicApi = pathname === '/api/health' || isPathOrChild(pathname, '/api/auth') || isPathOrChild(pathname, '/api/customsignin');
-  if (isPublicApi) return NextResponse.next();
+  if (isPublicApiPath(pathname)) return NextResponse.next();
 
   const isApi = pathname.startsWith('/api/');
   const isAuthenticated = !!req.auth;

@@ -26,6 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STORED_PROCEDURES_FILE="$REPO_ROOT/sqlscripting/storedprocedures.sql"
 UPLOAD_TRACKING_HELPER_FILE="$SCRIPT_DIR/branch_refresh_00_ensure_upload_tracking_tables.sql"
+CATALOG_PROVISIONING_FILE="$REPO_ROOT/sqlscripting/catalog-provisioning-tables.sql"
 MIGRATION_TRACKING_TABLE="_migration_log"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 
@@ -314,6 +315,22 @@ deploy_stored_procedures() {
     log_success "Stored procedures deployed."
 }
 
+deploy_catalog_provisioning_tables() {
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Catalog provisioning DDL not found: $CATALOG_PROVISIONING_FILE"
+        return 1
+    fi
+
+    local start_time
+    start_time=$(date +%s)
+    log_info "Ensuring catalog provisioning tables exist..."
+    run_sql_file "$CATALOG_PROVISIONING_FILE"
+    local end_time
+    end_time=$(date +%s)
+    mark_applied "branch_refresh::catalog_provisioning_tables.sql" "$(( end_time - start_time ))"
+    log_success "Catalog provisioning tables are present."
+}
+
 run_refresh_sql_file() {
     local label="$1"
     local filepath="$2"
@@ -350,12 +367,17 @@ main() {
         log_error "Missing helper SQL: $UPLOAD_TRACKING_HELPER_FILE"
         exit 1
     fi
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Missing helper SQL: $CATALOG_PROVISIONING_FILE"
+        exit 1
+    fi
 
     assert_required_base_tables
 
     local file
     log_info "Branch refresh plan:"
     echo "         always: branch_refresh_00_ensure_upload_tracking_tables.sql"
+    echo "         always: catalog-provisioning-tables.sql"
     for file in "${PRE_STORED_PROCEDURE_MIGRATIONS[@]}"; do
         if is_already_applied "$file"; then
             echo "         skip:   $file"
@@ -389,6 +411,12 @@ main() {
 
     if ! run_refresh_sql_file "branch_refresh::ensure_upload_tracking_tables.sql" "$UPLOAD_TRACKING_HELPER_FILE"; then
         failed_step="branch_refresh::ensure_upload_tracking_tables.sql"
+    fi
+
+    if [[ -z "$failed_step" ]]; then
+        if ! deploy_catalog_provisioning_tables; then
+            failed_step="branch_refresh::catalog_provisioning_tables.sql"
+        fi
     fi
 
     if [[ -z "$failed_step" ]]; then
@@ -451,6 +479,7 @@ main() {
              FROM $MIGRATION_TRACKING_TABLE
              WHERE status='applied'
                AND (migration_file IN ('branch_refresh::ensure_upload_tracking_tables.sql',
+                                       'branch_refresh::catalog_provisioning_tables.sql',
                                        'branch_refresh::storedprocedures.sql',
                                        '17_create_upload_errors.sql',
                                        '18_create_measurement_error_tables.sql',
