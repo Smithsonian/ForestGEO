@@ -4,6 +4,7 @@ import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, 
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
+import { dispatchRun, HEARTBEAT_STALE_MS } from './worker';
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -203,9 +204,7 @@ export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {
   }
   const createdRunId = runId;
   auditSuccess({ action: 'start', user: startedBy, runId: createdRunId, schemaName });
-  setImmediate(() => {
-    void runProvisioning(createdRunId, catalogPool);
-  });
+  dispatchRun(createdRunId, catalogPool);
   return { runId: createdRunId };
 }
 
@@ -304,9 +303,7 @@ export async function retryRun(runId: number, catalogPool: Pool, startedBy: stri
     await setRunStatus(catalogPool, runId, 'running');
     auditSuccess({ action: 'retry', user: startedBy, runId, schemaName: run.schemaName });
 
-    setImmediate(() => {
-      void runProvisioning(runId, catalogPool);
-    });
+    dispatchRun(runId, catalogPool);
   } catch (err) {
     auditFailure({ action: 'retry', user: startedBy, runId, error: toError(err) });
     throw err;
@@ -335,29 +332,29 @@ export async function abortRun(runId: number, catalogPool: Pool, startedBy: stri
   }
 }
 
-async function getRunIdleAgeMs(catalogPool: Pool, runId: number): Promise<number | null> {
+async function getHeartbeatAgeMs(catalogPool: Pool, runId: number): Promise<number | null> {
   const [rows]: any = await catalogPool.query(
-    `SELECT TIMESTAMPDIFF(
-       SECOND,
-       GREATEST(
-         COALESCE(pr.StartedAt, '1970-01-01 00:00:00'),
-         COALESCE(MAX(ps.StartedAt), '1970-01-01 00:00:00'),
-         COALESCE(MAX(ps.FinishedAt), '1970-01-01 00:00:00')
-       ),
-       NOW()
-     ) AS IdleSeconds
-     FROM catalog.provisioning_runs pr
-     LEFT JOIN catalog.provisioning_steps ps ON ps.RunID = pr.RunID
-     WHERE pr.RunID = ?
-     GROUP BY pr.RunID, pr.StartedAt`,
+    `SELECT WorkerHeartbeatAt,
+            TIMESTAMPDIFF(SECOND, WorkerHeartbeatAt, NOW()) * 1000 AS HeartbeatAgeMs
+     FROM catalog.provisioning_runs
+     WHERE RunID = ?`,
     [runId]
   );
   if (rows.length === 0) return null;
-  const seconds = Number(rows[0]?.IdleSeconds ?? rows[0]?.idleseconds);
-  return Number.isFinite(seconds) ? seconds * 1000 : null;
+  const heartbeatAt = rows[0]?.WorkerHeartbeatAt ?? rows[0]?.workerheartbeatat;
+  if (heartbeatAt == null) return null;
+  const ageMs = Number(rows[0]?.HeartbeatAgeMs ?? rows[0]?.heartbeatagems);
+  return Number.isFinite(ageMs) ? ageMs : null;
 }
 
-export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleThresholdMs = STUCK_THRESHOLD_MS): Promise<boolean> {
+/**
+ * Reconciles a `running` run whose worker has gone silent. Uses the heartbeat
+ * column (not an idle-step aggregate) as the source of truth for "is a worker
+ * actually still progressing this run." If the heartbeat is fresh, returns
+ * false even when no step appears to be running — the worker may simply be
+ * between steps.
+ */
+export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleThresholdMs = HEARTBEAT_STALE_MS): Promise<boolean> {
   const result = await getRunWithSteps(runId, catalogPool);
   if (!result || result.run.status !== 'running') return false;
 
@@ -376,8 +373,11 @@ export async function reconcileStaleRun(runId: number, catalogPool: Pool, staleT
     return true;
   }
 
-  const idleAgeMs = await getRunIdleAgeMs(catalogPool, runId);
-  if (idleAgeMs == null || idleAgeMs <= staleThresholdMs) return false;
+  const heartbeatAgeMs = await getHeartbeatAgeMs(catalogPool, runId);
+  // Null heartbeat means the worker never wrote one (or the run was created
+  // before this column existed). Treat that as "no proof of life" and proceed
+  // to reconcile based on the steps state.
+  if (heartbeatAgeMs != null && heartbeatAgeMs < staleThresholdMs) return false;
 
   const pendingStep = steps.find(step => step.status === 'pending' || step.status === 'skipped');
   if (pendingStep) {

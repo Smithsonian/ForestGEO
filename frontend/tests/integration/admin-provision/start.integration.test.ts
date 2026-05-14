@@ -2,9 +2,10 @@
  * Integration tests for POST /api/admin/provision.
  *
  * Verifies the route's auth, validation, and transactional DB-write behavior
- * against a real catalog. The orchestrator's background `runProvisioning` is
- * suppressed via `setImmediate` no-op so we observe only the synchronous
- * insert-runs-and-steps work that startRun does inline.
+ * against a real catalog. The orchestrator dispatches the run via
+ * `worker.dispatchRun`, which schedules the actual work through `setImmediate`.
+ * The test mocks `setImmediate` to a no-op so we observe only the synchronous
+ * insert-runs-and-steps work that `startRun` does inline.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import type { Pool } from 'mysql2/promise';
@@ -77,7 +78,8 @@ describe('POST /api/admin/provision (integration)', () => {
     await seedCatalogTables(testPool);
     // Prevent the orchestrator's background runProvisioning kickoff from
     // actually executing — we only need to verify the synchronous catalog
-    // insertions that startRun performs inline before calling setImmediate.
+    // insertions that startRun performs inline before `dispatchRun` schedules
+    // the real work through setImmediate.
     setImmediateSpy = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((_cb: any) => 0) as any);
   });
 

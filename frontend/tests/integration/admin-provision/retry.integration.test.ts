@@ -2,9 +2,9 @@
  * Integration tests for POST /api/admin/provision/[runId]/retry.
  *
  * Retry resets failed/pending steps back to 'pending' and flips the run row
- * back to 'running'. The route also schedules `runProvisioning` via
- * setImmediate — we no-op that here so we observe only the synchronous SQL
- * mutations the route performs inline.
+ * back to 'running'. The route also dispatches `runProvisioning` via the
+ * worker, which schedules the work through setImmediate — we no-op that here
+ * so we observe only the synchronous SQL mutations the route performs inline.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import type { Pool } from 'mysql2/promise';
