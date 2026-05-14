@@ -75,4 +75,29 @@ describe('SQL-file steps', () => {
     const [rows]: any = await ctx.sitePool!.query(`SELECT COUNT(*) AS c FROM \`${SCHEMA_NAME}\`.sitespecificvalidations`);
     expect(Number(rows[0]?.c ?? rows[0]?.C)).toBeGreaterThan(0);
   });
+
+  it('schema-version stamping: all three per-column timestamps land in _provisioning_meta', async () => {
+    const [rows]: any = await ctx.sitePool!.query(
+      `SELECT SchemaVersion, TablesDeployedAt, ProceduresDeployedAt, ValidationsDeployedAt
+       FROM \`${SCHEMA_NAME}\`.\`_provisioning_meta\``
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].SchemaVersion).toBe('2026-05-13');
+    expect(rows[0].TablesDeployedAt).not.toBeNull();
+    expect(rows[0].ProceduresDeployedAt).not.toBeNull();
+    expect(rows[0].ValidationsDeployedAt).not.toBeNull();
+  });
+
+  it('init_tables alreadyDone: false when meta exists with stale version but objects are present', async () => {
+    // Replace the current row with a stale version. alreadyDone should return false
+    // because no row matches SCHEMA_VERSION = '2026-05-13'.
+    await ctx.sitePool!.query(`DELETE FROM \`${SCHEMA_NAME}\`.\`_provisioning_meta\``);
+    await ctx.sitePool!.query(
+      `INSERT INTO \`${SCHEMA_NAME}\`.\`_provisioning_meta\` (SchemaVersion, TablesDeployedAt, ProceduresDeployedAt, ValidationsDeployedAt)
+       VALUES ('1999-01-01', NOW(), NOW(), NOW())`
+    );
+    expect(await initTablesStep.alreadyDone(ctx)).toBe(false);
+    expect(await deployProceduresStep.alreadyDone(ctx)).toBe(false);
+    expect(await seedValidationsStep.alreadyDone(ctx)).toBe(false);
+  });
 });
