@@ -1,3 +1,4 @@
+import Papa from 'papaparse';
 import type { QuadratCsvRow } from './types';
 
 export interface CsvParseError {
@@ -11,48 +12,61 @@ export interface CsvParseResult {
 }
 
 const REQUIRED_HEADERS = ['quadratname', 'startx', 'starty', 'dimensionx', 'dimensiony'] as const;
+const UTF8_BOM = '﻿';
 
 export function parseQuadratCsv(content: string): CsvParseResult {
-  const lines = content.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) {
-    return { rows: [], errors: [{ rowNumber: 0, message: 'CSV is empty or missing data rows' }] };
+  const stripped = content.startsWith(UTF8_BOM) ? content.slice(1) : content;
+  if (!stripped.trim()) {
+    return { rows: [], errors: [{ rowNumber: 1, message: 'CSV is empty or missing data rows' }] };
   }
 
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const parsed = Papa.parse<Record<string, string>>(stripped, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: h => h.trim().toLowerCase()
+  });
+
   for (const expected of REQUIRED_HEADERS) {
-    if (!headers.includes(expected)) {
+    if (!parsed.meta.fields?.includes(expected)) {
       return { rows: [], errors: [{ rowNumber: 1, message: `Missing required column: ${expected}` }] };
     }
   }
 
-  const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+  if (!parsed.data.length) {
+    return { rows: [], errors: [{ rowNumber: 1, message: 'CSV is empty or missing data rows' }] };
+  }
+
   const rows: QuadratCsvRow[] = [];
   const errors: CsvParseError[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(',').map(c => c.trim());
-    const get = (k: string) => cells[idx[k]];
-    const num = (k: string) => Number(get(k));
+  for (const parseErr of parsed.errors) {
+    const rowNumber = (parseErr.row ?? 0) + 2;
+    errors.push({ rowNumber, message: parseErr.message });
+  }
+
+  parsed.data.forEach((rec, i) => {
+    const rowNumber = i + 2;
     const row: QuadratCsvRow = {
-      quadratName: get('quadratname'),
-      startX: num('startx'),
-      startY: num('starty'),
-      dimensionX: num('dimensionx'),
-      dimensionY: num('dimensiony')
+      quadratName: (rec.quadratname ?? '').trim(),
+      startX: Number(String(rec.startx ?? '').trim()),
+      startY: Number(String(rec.starty ?? '').trim()),
+      dimensionX: Number(String(rec.dimensionx ?? '').trim()),
+      dimensionY: Number(String(rec.dimensiony ?? '').trim())
     };
     if (!row.quadratName) {
-      errors.push({ rowNumber: i + 1, message: 'Missing quadratName' });
-      continue;
+      errors.push({ rowNumber, message: 'Missing quadratName' });
+      return;
     }
     if ([row.startX, row.startY, row.dimensionX, row.dimensionY].some(v => !Number.isFinite(v))) {
-      errors.push({ rowNumber: i + 1, message: 'Non-numeric value in coordinate or dimension field' });
-      continue;
+      errors.push({ rowNumber, message: 'Non-numeric value in coordinate or dimension field' });
+      return;
     }
     if (row.dimensionX <= 0 || row.dimensionY <= 0) {
-      errors.push({ rowNumber: i + 1, message: 'Dimension must be positive' });
-      continue;
+      errors.push({ rowNumber, message: 'Dimension must be positive' });
+      return;
     }
     rows.push(row);
-  }
+  });
+
   return { rows, errors };
 }

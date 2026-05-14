@@ -46,7 +46,7 @@ describe('parseQuadratCsv', () => {
   it('rejects CSV with fewer than 2 lines as empty', () => {
     const { rows, errors } = parseQuadratCsv('quadratname,startx,starty,dimensionx,dimensiony');
     expect(rows).toEqual([]);
-    expect(errors[0].rowNumber).toBe(0);
+    expect(errors[0].rowNumber).toBe(1);
     expect(errors[0].message).toMatch(/empty or missing data rows/);
   });
 
@@ -54,6 +54,43 @@ describe('parseQuadratCsv', () => {
     const { rows, errors } = parseQuadratCsv('');
     expect(rows).toEqual([]);
     expect(errors[0].message).toMatch(/empty or missing data rows/);
+  });
+
+  it('parses a quoted comma in the quadrat name', () => {
+    const csv = `quadratname,startx,starty,dimensionx,dimensiony\n"NW, A1",0,0,20,20`;
+    const result = parseQuadratCsv(csv);
+    expect(result.errors).toHaveLength(0);
+    expect(result.rows[0].quadratName).toBe('NW, A1');
+  });
+
+  it('strips a UTF-8 BOM from the header line', () => {
+    const csv = `﻿quadratname,startx,starty,dimensionx,dimensiony\nQ001,0,0,20,20`;
+    const result = parseQuadratCsv(csv);
+    expect(result.errors).toHaveLength(0);
+    expect(result.rows[0].quadratName).toBe('Q001');
+  });
+
+  it('reports row 1 for missing header on empty input', () => {
+    const result = parseQuadratCsv('');
+    expect(result.errors[0].rowNumber).toBe(1);
+  });
+
+  it('handles CRLF line endings', () => {
+    const csv = 'quadratname,startx,starty,dimensionx,dimensiony\r\nA,0,0,20,20\r\nB,20,0,20,20\r\n';
+    const { rows, errors } = parseQuadratCsv(csv);
+    expect(errors).toEqual([]);
+    expect(rows.length).toBe(2);
+    expect(rows[0].quadratName).toBe('A');
+    expect(rows[1].quadratName).toBe('B');
+  });
+
+  it('skips blank lines without shifting reported row numbers for valid rows', () => {
+    const csv = ['quadratname,startx,starty,dimensionx,dimensiony', 'A,0,0,20,20', '', 'B,20,0,20,20'].join('\n');
+    const { rows, errors } = parseQuadratCsv(csv);
+    expect(errors).toEqual([]);
+    expect(rows.length).toBe(2);
+    expect(rows[0].quadratName).toBe('A');
+    expect(rows[1].quadratName).toBe('B');
   });
 
   it('rejects a CSV missing the dimensionx column', () => {
