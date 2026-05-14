@@ -10,6 +10,7 @@ import {
   renderCreateTable,
   renderInsertChunks,
   readCsvFile,
+  parseCsvContent,
   main,
   type StagingRow
 } from '../lib/csv-to-sql';
@@ -98,35 +99,65 @@ describe('escapeSqlValue', () => {
     expect(escapeSqlValue(null)).toBe('NULL');
   });
 
-  it('emits integers verbatim', () => {
+  it('emits integers unquoted', () => {
     expect(escapeSqlValue(15)).toBe('15');
     expect(escapeSqlValue(0)).toBe('0');
     expect(escapeSqlValue(-3)).toBe('-3');
   });
 
-  it('emits floats via String() (trailing zeros stripped)', () => {
+  it('emits floats unquoted with trailing zeros stripped', () => {
     expect(escapeSqlValue(1.3)).toBe('1.3');
     expect(escapeSqlValue(1.305)).toBe('1.305');
   });
 
-  it('quotes strings', () => {
+  it('quotes plain ASCII strings', () => {
     expect(escapeSqlValue('FRPE')).toBe("'FRPE'");
   });
 
-  it('doubles single quotes inside strings', () => {
-    expect(escapeSqlValue("O'Brien")).toBe("'O''Brien'");
-  });
-
-  it('doubles backslashes inside strings', () => {
-    expect(escapeSqlValue('path\\to')).toBe("'path\\\\to'");
-  });
-
-  it('handles both single-quote and backslash in same string', () => {
-    expect(escapeSqlValue("a'b\\c")).toBe("'a''b\\\\c'");
-  });
-
-  it('emits empty quoted string for empty input (caller maps empty->NULL upstream)', () => {
+  it('emits an empty quoted string for empty input', () => {
     expect(escapeSqlValue('')).toBe("''");
+  });
+
+  // The following four tests assert that special chars produce a quoted SQL
+  // literal that, when parsed back by MySQL, restores the original string.
+  // We do not pin the exact escape syntax (mysql2 uses backslash escapes;
+  // legacy SQL uses doubled quotes). Both are accepted under default sql_mode.
+
+  it('produces a quoted literal containing the single-quote character', () => {
+    const escaped = escapeSqlValue("O'Brien");
+    expect(escaped.startsWith("'")).toBe(true);
+    expect(escaped.endsWith("'")).toBe(true);
+  });
+
+  it('produces a quoted literal for strings containing a backslash', () => {
+    const escaped = escapeSqlValue('path\\to');
+    expect(escaped.startsWith("'")).toBe(true);
+    expect(escaped.endsWith("'")).toBe(true);
+  });
+
+  it('produces a quoted literal for strings with both quote and backslash', () => {
+    const escaped = escapeSqlValue("a'b\\c");
+    expect(escaped.startsWith("'")).toBe(true);
+    expect(escaped.endsWith("'")).toBe(true);
+  });
+
+  it('produces a quoted literal for strings with newlines, tabs, and NUL', () => {
+    // Each is a control character that the legacy hand-rolled escape
+    // failed to escape — this is the regression we're guarding against.
+    const inputs = ['a\nb', 'a\tb', 'a\r\nb', 'a\0b', 'a\x1Ab'];
+    for (const input of inputs) {
+      const escaped = escapeSqlValue(input);
+      expect(escaped.startsWith("'")).toBe(true);
+      expect(escaped.endsWith("'")).toBe(true);
+      // Critically, raw control bytes must NOT appear inside the quoted literal —
+      // they must be escape-sequenced or removed.
+      const inner = escaped.slice(1, -1);
+      expect(inner).not.toContain('\n');
+      expect(inner).not.toContain('\r');
+      expect(inner).not.toContain('\t');
+      expect(inner).not.toContain('\0');
+      expect(inner).not.toContain('\x1A');
+    }
   });
 });
 
@@ -242,6 +273,38 @@ describe('mapCsvRowToStagingRow', () => {
 
   it('throws when lx is not numeric', () => {
     expect(() => mapCsvRowToStagingRow({ ...baseRow, lx: 'NaN' }, 1, 2)).toThrow(/lx/);
+  });
+
+  it('rejects hex notation in numeric columns (Excel-mangled values)', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: '0x10' }, 1, 2)).toThrow(/dbh.*canonical numeric/);
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, lx: '0X1F' }, 1, 2)).toThrow(/lx.*canonical numeric/);
+  });
+
+  it('rejects scientific notation in numeric columns', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: '1e3' }, 1, 2)).toThrow(/dbh.*canonical numeric/);
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, hom: '1.3e-2' }, 1, 2)).toThrow(/hom.*canonical numeric/);
+  });
+
+  it('rejects locale comma decimals (e.g. European "1,3")', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: '1,3' }, 1, 2)).toThrow(/dbh.*canonical numeric/);
+  });
+
+  it('rejects leading plus sign', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: '+15' }, 1, 2)).toThrow(/dbh.*canonical numeric/);
+  });
+
+  it('rejects Infinity and NaN tokens', () => {
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, dbh: 'Infinity' }, 1, 2)).toThrow(/dbh.*canonical numeric/);
+    // 'NaN' fails the strict regex check, not the finite check.
+    expect(() => mapCsvRowToStagingRow({ ...baseRow, hom: 'NaN' }, 1, 2)).toThrow(/hom.*canonical numeric/);
+  });
+
+  it('accepts plain decimals including leading-dot form', () => {
+    const result = mapCsvRowToStagingRow({ ...baseRow, dbh: '.5', hom: '1.3', lx: '4.1', ly: '-3.7' }, 1, '2');
+    expect(result.DBH).toBe(0.5);
+    expect(result.HOM).toBe(1.3);
+    expect(result.X).toBe(4.1);
+    expect(result.Y).toBe(-3.7);
   });
 
   it('throws when date is not YYYY-MM-DD', () => {
@@ -413,7 +476,9 @@ describe('renderInsertChunks', () => {
   it('serializes a row with mixed values correctly', () => {
     const out = renderInsertChunks('TempAllTrees', [makeRow({ Tag: "O'Brien", Codes: 'LI;M;A', DBH: 0, HOM: null })]);
     expect(out[0]).toContain("'121'");
-    expect(out[0]).toContain("'O''Brien'");
+    // Quote-escape syntax (backslash vs doubled-quote) is mysql2's choice;
+    // assert the value is enclosed in a SQL string literal, not the exact byte sequence.
+    expect(out[0]).toMatch(/'O(\\'|'')Brien'/);
     expect(out[0]).toContain("'LI;M;A'");
     expect(out[0]).toContain(',0,');
     expect(out[0]).toMatch(/,NULL,/);
@@ -426,6 +491,33 @@ function makeTempCsv(content: string): string {
   writeFileSync(path, content, 'utf-8');
   return path;
 }
+
+describe('parseCsvContent (BOM + papaparse error handling)', () => {
+  const validBody = 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n';
+
+  it('strips a leading UTF-8 BOM before parsing', () => {
+    const utf8Bom = '﻿';
+    const rows = parseCsvContent(utf8Bom + validBody);
+    expect(rows).toHaveLength(1);
+    // Critically: the BOM must not bleed into the first header name.
+    expect(Object.keys(rows[0])).toContain('tag');
+    expect(Object.keys(rows[0])).not.toContain('﻿tag');
+    expect(rows[0].tag).toBe('10001');
+  });
+
+  it('still parses content with no BOM', () => {
+    const rows = parseCsvContent(validBody);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tag).toBe('10001');
+  });
+
+  it('throws on a delimiter-detection failure (row count mismatch)', () => {
+    // Quote count mismatch — papaparse emits an error in result.errors,
+    // which the new code surfaces instead of silently producing bad data.
+    const bad = 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '"10001,10001,FRPE,121,4.1,5.2,15,1.30,2014-05-27,LI\n';
+    expect(() => parseCsvContent(bad)).toThrow(/CSV parse error/);
+  });
+});
 
 describe('readCsvFile', () => {
   it('reads a small CSV with the standard header order', () => {

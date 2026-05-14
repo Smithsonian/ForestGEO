@@ -20,6 +20,7 @@
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync } from 'node:fs';
 import Papa from 'papaparse';
+import { escape as sqlEscape } from 'mysql2';
 
 export interface CliArgs {
   input: string;
@@ -34,13 +35,22 @@ const MAX_CENSUS_NUMBER_LEN = 16;
 
 const DEFAULT_TEMP_TABLE = 'TempAllTrees';
 
+const UTF8_BOM = '﻿';
+
+const STRICT_NUMERIC = /^-?(\d+\.?\d*|\.\d+)$/;
+
 export type SqlValue = string | number | null;
 
+/**
+ * Escape a single value for inclusion in a SQL VALUES tuple.
+ *
+ * Delegates to mysql2's `escape()` (which uses the same `sqlstring` library
+ * mysql2 uses internally), so the output handles NUL, \Z, \n, \r, \t, '\\'
+ * and the single-quote character correctly.
+ */
 export function escapeSqlValue(value: SqlValue): string {
   if (value === null) return 'NULL';
-  if (typeof value === 'number') return String(value);
-  const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "''");
-  return `'${escaped}'`;
+  return sqlEscape(value);
 }
 
 const REQUIRED_CSV_HEADERS = ['tag', 'stemtag', 'spcode', 'quadrat', 'lx', 'ly', 'dbh', 'hom', 'date', 'codes'] as const;
@@ -97,9 +107,13 @@ function coerceString(raw: string): string | null {
 
 function coerceNumber(column: CsvHeader, raw: string): number | null {
   if (isNullToken(raw)) return null;
-  const n = Number(raw.trim());
+  const trimmed = raw.trim();
+  if (!STRICT_NUMERIC.test(trimmed)) {
+    throw new Error(`Column "${column}" expected a canonical numeric value (no hex, exponent, locale comma, leading +), got: ${raw}`);
+  }
+  const n = Number(trimmed);
   if (!Number.isFinite(n)) {
-    throw new Error(`Column "${column}" expected a numeric value, got: ${raw}`);
+    throw new Error(`Column "${column}" numeric value is not finite, got: ${raw}`);
   }
   return n;
 }
@@ -181,13 +195,20 @@ export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkS
   return chunks;
 }
 
-export function readCsvFile(path: string): Record<string, string>[] {
-  const content = readFileSync(path, 'utf-8');
-  const result = Papa.parse<Record<string, string>>(content, {
+export function parseCsvContent(content: string): Record<string, string>[] {
+  const stripped = content.startsWith(UTF8_BOM) ? content.slice(UTF8_BOM.length) : content;
+  const result = Papa.parse<Record<string, string>>(stripped, {
     header: true,
     skipEmptyLines: true,
     transformHeader: h => h.trim()
   });
+
+  if (result.errors.length > 0) {
+    const first = result.errors[0];
+    const headerRowOffset = 2;
+    const rowDisplay = typeof first.row === 'number' ? first.row + headerRowOffset : 'unknown';
+    throw new Error(`CSV parse error: ${first.message} (row ${rowDisplay})`);
+  }
 
   const actualHeaders = result.meta.fields ?? [];
   const missing = REQUIRED_CSV_HEADERS.filter(h => !actualHeaders.includes(h));
@@ -200,6 +221,11 @@ export function readCsvFile(path: string): Record<string, string>[] {
   }
 
   return result.data;
+}
+
+export function readCsvFile(path: string): Record<string, string>[] {
+  const content = readFileSync(path, 'utf-8');
+  return parseCsvContent(content);
 }
 
 export function parseCliArgs(argv: string[]): CliArgs {
