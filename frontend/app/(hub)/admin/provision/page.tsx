@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { Alert, Box, Button, CircularProgress, Divider, Stack, Step, StepIndicator, Stepper, Typography } from '@mui/joy';
@@ -108,6 +108,13 @@ export default function ProvisionWizardPage() {
   const [showStepErrors, setShowStepErrors] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      submitAbortRef.current?.abort();
+    };
+  }, []);
 
   const isGlobalUser = session?.user?.userStatus === 'global';
 
@@ -140,11 +147,15 @@ export default function ProvisionWizardPage() {
   async function handleSubmit() {
     setSubmitting(true);
     setSubmitError(null);
+    submitAbortRef.current?.abort();
+    const controller = new AbortController();
+    submitAbortRef.current = controller;
     try {
       const res = await fetch('/api/admin/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input)
+        body: JSON.stringify(input),
+        signal: controller.signal
       });
 
       if (res.status === 202) {
@@ -163,6 +174,7 @@ export default function ProvisionWizardPage() {
 
       setSubmitError(body.error ?? `Unexpected error (HTTP ${res.status})`);
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       const message = err instanceof Error ? err.message : 'Network error';
       setSubmitError(message);
     } finally {

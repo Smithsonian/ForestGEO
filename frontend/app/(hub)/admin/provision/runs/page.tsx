@@ -27,15 +27,17 @@ export default function ProvisioningRunsPage() {
     if (sessionStatus !== 'authenticated') return;
     if ((session?.user as any)?.userStatus !== 'global') return;
 
+    const controller = new AbortController();
     let cancelled = false;
 
     async function loadRuns() {
       try {
-        const res = await fetch('/api/admin/provision/list');
+        const res = await fetch('/api/admin/provision/list', { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const body: ProvisioningRunListRow[] = await res.json();
         if (!cancelled) setRuns(body);
       } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
         if (!cancelled) {
           const message = err instanceof Error ? err.message : 'Failed to load runs';
           setFetchError(message);
@@ -46,6 +48,7 @@ export default function ProvisioningRunsPage() {
     loadRuns();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [sessionStatus, session?.user]);
 

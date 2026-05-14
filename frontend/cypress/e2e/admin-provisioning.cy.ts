@@ -7,6 +7,7 @@
  */
 
 const RUN_ID = 999;
+const POLL_INTERVAL_MS = 1000;
 
 const STEP_KEYS = [
   'validate_inputs',
@@ -127,6 +128,10 @@ describe('Admin: site provisioning wizard', () => {
     cy.contains(SITE_NAME).should('be.visible');
     cy.contains(SCHEMA_NAME).should('be.visible');
 
+    // Install a frozen clock so we drive polling deterministically via cy.tick().
+    // Keep fetch/queueMicrotask/Promise unaffected; we only need setInterval frozen.
+    cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
+
     cy.contains('button', 'Provision Site').click();
 
     cy.wait('@startRun');
@@ -134,13 +139,14 @@ describe('Admin: site provisioning wizard', () => {
     // ── RunStatus page ─────────────────────────────────────────────────────
     cy.url().should('include', `/admin/provision/${RUN_ID}`);
 
-    // First poll: running state renders the step list
+    // First poll: fired immediately on mount (no interval tick needed)
     cy.wait('@pollStatus');
     cy.contains(SCHEMA_NAME).should('be.visible');
 
-    // Second poll: completed state — "Go to site" button appears
+    // Drive the interval forward to trigger the second poll
+    cy.tick(POLL_INTERVAL_MS);
     cy.wait('@pollStatus');
-    cy.contains('button', 'Go to site', { timeout: 5000 }).should('be.visible');
+    cy.contains('button', 'Go to site').should('be.visible');
     cy.contains('button', 'Delete provisioned site').should('be.visible');
   });
 
@@ -193,12 +199,16 @@ describe('Admin: site provisioning wizard', () => {
       });
     }).as('retryRun');
 
+    cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
     cy.visit(`/admin/provision/${RUN_ID}`);
     cy.wait('@pollStatus');
     cy.contains('button', 'Retry from failed step').click();
     cy.wait('@retryRun');
+    // Retry bumps pollGeneration which re-runs the effect; the new effect fires
+    // an immediate safePoll() and a fresh interval. The immediate fetch happens
+    // without a tick.
     cy.wait('@pollStatus');
-    cy.contains('button', 'Go to site', { timeout: 5000 }).should('be.visible');
+    cy.contains('button', 'Go to site').should('be.visible');
     cy.then(() => expect(pollCount).to.be.greaterThan(1));
   });
 
@@ -221,6 +231,7 @@ describe('Admin: site provisioning wizard', () => {
       });
     }).as('teardownRun');
 
+    cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
     cy.visit(`/admin/provision/${RUN_ID}`);
     cy.wait('@pollStatus');
     cy.contains('button', 'Delete provisioned site').click();
@@ -235,5 +246,41 @@ describe('Admin: site provisioning wizard', () => {
     cy.wait('@pollStatus');
     cy.contains('aborted').should('be.visible');
     cy.contains('button', 'Delete provisioned site').should('not.exist');
+  });
+
+  it('aborts a failed run after exact schema confirmation via the abort dialog', () => {
+    let aborted = false;
+    cy.intercept('GET', `/api/admin/provision/${RUN_ID}`, req => {
+      req.reply({
+        run: buildRunRecord(aborted ? 'aborted' : 'failed'),
+        steps: buildSteps('failed'),
+        stuckStepIndex: null
+      });
+    }).as('pollStatus');
+
+    cy.intercept('POST', `/api/admin/provision/${RUN_ID}/abort`, req => {
+      aborted = true;
+      req.reply({ statusCode: 200, body: { ok: true } });
+    }).as('abortRun');
+
+    cy.clock(Date.now(), ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout']);
+    cy.visit(`/admin/provision/${RUN_ID}`);
+    cy.wait('@pollStatus');
+
+    cy.contains('button', 'Abort & drop schema').click();
+
+    // Within the alertdialog, the confirm button is also labelled "Abort & drop schema".
+    // Scope assertions to the dialog so they don't match the underlying trigger button.
+    cy.get('[role="alertdialog"]').within(() => {
+      cy.contains('button', 'Abort & drop schema').should('be.disabled');
+      cy.get('[aria-label="Confirm schema name"]').type(`${SCHEMA_NAME}_wrong`);
+      cy.contains('button', 'Abort & drop schema').should('be.disabled');
+      cy.get('[aria-label="Confirm schema name"]').clear().type(SCHEMA_NAME);
+      cy.contains('button', 'Abort & drop schema').should('not.be.disabled').click();
+    });
+
+    cy.wait('@abortRun');
+    cy.wait('@pollStatus');
+    cy.contains('aborted').should('be.visible');
   });
 });

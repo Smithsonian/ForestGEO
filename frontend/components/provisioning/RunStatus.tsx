@@ -2,27 +2,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  FormHelperText,
-  FormLabel,
-  Input,
-  List,
-  ListItem,
-  Modal,
-  ModalDialog,
-  Stack,
-  Typography
-} from '@mui/joy';
+import { Alert, Box, Button, CircularProgress, Divider, List, ListItem, Stack, Typography } from '@mui/joy';
 import type { ProvisioningRunRecord, ProvisioningStepRecord, RunStatus as RunStatusType } from '@/lib/provisioning/types';
+import AbortConfirmDialog from './AbortConfirmDialog';
 
 interface RunStatusProps {
   runId: number;
@@ -40,6 +22,10 @@ const POLL_INTERVAL_MS = 1000;
 const RECONCILE_THROTTLE_MS = 60_000;
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatusType> = new Set(['completed', 'failed', 'aborted']);
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 function stepStatusIcon(status: ProvisioningStepRecord['status']): React.ReactNode {
   switch (status) {
@@ -69,7 +55,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
   const [actionInFlight, setActionInFlight] = useState<ActionKey | null>(null);
   const [pollGeneration, setPollGeneration] = useState(0);
   const [teardownDialogOpen, setTeardownDialogOpen] = useState(false);
-  const [confirmSchemaName, setConfirmSchemaName] = useState('');
+  const [abortDialogOpen, setAbortDialogOpen] = useState(false);
 
   // We use a ref so the poll callback can read the latest status without being
   // recreated on every state update, which would cause the interval to reset.
@@ -77,43 +63,48 @@ export default function RunStatus({ runId }: RunStatusProps) {
   // Tracks the last time we POSTed to /reconcile so we can throttle to ≤1/min.
   const lastReconcileAtRef = useRef<number>(0);
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/admin/provision/${runId}`);
-      if (!res.ok) {
-        setFetchError(`HTTP ${res.status}`);
-        return;
-      }
-      const body: PollResponse = await res.json();
-      latestStatusRef.current = body.run.status;
-      setData(body);
-      setFetchError(null);
+  const poll = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const res = await fetch(`/api/admin/provision/${runId}`, signal ? { signal } : undefined);
+        if (!res.ok) {
+          setFetchError(`HTTP ${res.status}`);
+          return;
+        }
+        const body: PollResponse = await res.json();
+        latestStatusRef.current = body.run.status;
+        setData(body);
+        setFetchError(null);
 
-      // Fire-and-forget reconcile when a step is stuck. Throttled per-run so
-      // we issue at most one POST per minute, and we never let a reconcile
-      // failure disrupt polling.
-      const now = Date.now();
-      if (body.run.status === 'running' && body.stuckStepIndex !== null && now - lastReconcileAtRef.current > RECONCILE_THROTTLE_MS) {
-        lastReconcileAtRef.current = now;
-        fetch(`/api/admin/provision/${runId}/reconcile`, { method: 'POST' }).catch(() => {
-          // fire-and-forget; reconcile failure doesn't disrupt polling
-        });
+        // Fire-and-forget reconcile when a step is stuck. Throttled per-run so
+        // we issue at most one POST per minute, and we never let a reconcile
+        // failure disrupt polling.
+        const now = Date.now();
+        if (body.run.status === 'running' && body.stuckStepIndex !== null && now - lastReconcileAtRef.current > RECONCILE_THROTTLE_MS) {
+          lastReconcileAtRef.current = now;
+          fetch(`/api/admin/provision/${runId}/reconcile`, { method: 'POST' }).catch(() => {
+            // fire-and-forget; reconcile failure doesn't disrupt polling
+          });
+        }
+      } catch (err: unknown) {
+        if (isAbortError(err)) return;
+        const message = err instanceof Error ? err.message : 'Network error';
+        setFetchError(message);
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Network error';
-      setFetchError(message);
-    }
-  }, [runId]);
+    },
+    [runId]
+  );
 
   // Single polling effect: starts immediately, stops when the run reaches a
   // terminal status. We check the ref (not state) inside the interval so the
   // closure captures the stable ref rather than a stale status snapshot.
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
 
-    async function safePoll() {
+    function safePoll() {
       if (cancelled) return;
-      await poll();
+      void poll(controller.signal);
     }
 
     safePoll();
@@ -129,6 +120,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
 
     return () => {
       cancelled = true;
+      controller.abort();
       clearInterval(intervalId);
     };
   }, [poll, pollGeneration]);
@@ -174,7 +166,6 @@ export default function RunStatus({ runId }: RunStatusProps) {
   }
 
   async function handleAbort() {
-    if (!confirm('This will DROP the schema and delete the catalog row. Are you sure you want to abort?')) return;
     setActionInFlight('abort');
     setActionError(null);
     try {
@@ -184,6 +175,7 @@ export default function RunStatus({ runId }: RunStatusProps) {
         setActionError(body.error ?? `Abort failed (HTTP ${res.status})`);
         return;
       }
+      setAbortDialogOpen(false);
       await poll();
     } finally {
       setActionInFlight(null);
@@ -191,14 +183,14 @@ export default function RunStatus({ runId }: RunStatusProps) {
   }
 
   async function handleTeardown() {
-    if (!data || confirmSchemaName !== data.run.schemaName) return;
     setActionInFlight('teardown');
     setActionError(null);
     try {
+      const schemaName = data?.run.schemaName ?? '';
       const res = await fetch(`/api/admin/provision/${runId}/teardown`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmSchemaName })
+        body: JSON.stringify({ confirmSchemaName: schemaName })
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -206,7 +198,6 @@ export default function RunStatus({ runId }: RunStatusProps) {
         return;
       }
       setTeardownDialogOpen(false);
-      setConfirmSchemaName('');
       await poll();
     } finally {
       setActionInFlight(null);
@@ -375,7 +366,13 @@ export default function RunStatus({ runId }: RunStatusProps) {
               <Button color="primary" loading={actionInFlight === 'retry'} disabled={actionInFlight !== null} onClick={handleRetry}>
                 Retry from failed step
               </Button>
-              <Button color="danger" variant="outlined" loading={actionInFlight === 'abort'} disabled={actionInFlight !== null} onClick={handleAbort}>
+              <Button
+                color="danger"
+                variant="outlined"
+                loading={actionInFlight === 'abort'}
+                disabled={actionInFlight !== null}
+                onClick={() => setAbortDialogOpen(true)}
+              >
                 Abort &amp; drop schema
               </Button>
             </>
@@ -400,55 +397,35 @@ export default function RunStatus({ runId }: RunStatusProps) {
         </Stack>
       )}
 
-      <Modal
+      <AbortConfirmDialog
+        open={abortDialogOpen}
+        schemaName={run.schemaName}
+        inFlight={actionInFlight === 'abort'}
+        title="Abort run"
+        warning={
+          <>
+            This will DROP schema <strong>{run.schemaName}</strong> and delete the catalog row.
+          </>
+        }
+        confirmLabel="Abort & drop schema"
+        onCancel={() => setAbortDialogOpen(false)}
+        onConfirm={handleAbort}
+      />
+
+      <AbortConfirmDialog
         open={teardownDialogOpen}
-        onClose={() => {
-          if (actionInFlight !== 'teardown') setTeardownDialogOpen(false);
-        }}
-      >
-        <ModalDialog role="alertdialog" sx={{ maxWidth: 520 }}>
-          <DialogTitle>Delete provisioned site</DialogTitle>
-          <DialogContent>
-            <Stack spacing={2}>
-              <Alert color="danger" variant="soft">
-                This will delete the catalog site entry and drop schema <strong>{run.schemaName}</strong>.
-              </Alert>
-              <FormControl>
-                <FormLabel>Confirm schema name</FormLabel>
-                <Input
-                  aria-label="Confirm schema name"
-                  value={confirmSchemaName}
-                  onChange={event => setConfirmSchemaName(event.target.value)}
-                  placeholder={run.schemaName}
-                  autoFocus
-                />
-                <FormHelperText>Type {run.schemaName} to confirm.</FormHelperText>
-              </FormControl>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button
-              color="danger"
-              loading={actionInFlight === 'teardown'}
-              disabled={confirmSchemaName !== run.schemaName || actionInFlight !== null}
-              onClick={handleTeardown}
-            >
-              Delete site
-            </Button>
-            <Button
-              variant="plain"
-              color="neutral"
-              disabled={actionInFlight === 'teardown'}
-              onClick={() => {
-                setTeardownDialogOpen(false);
-                setConfirmSchemaName('');
-              }}
-            >
-              Cancel
-            </Button>
-          </DialogActions>
-        </ModalDialog>
-      </Modal>
+        schemaName={run.schemaName}
+        inFlight={actionInFlight === 'teardown'}
+        title="Delete provisioned site"
+        warning={
+          <>
+            This will delete the catalog site entry and drop schema <strong>{run.schemaName}</strong>.
+          </>
+        }
+        confirmLabel="Delete site"
+        onCancel={() => setTeardownDialogOpen(false)}
+        onConfirm={handleTeardown}
+      />
     </Stack>
   );
 }
