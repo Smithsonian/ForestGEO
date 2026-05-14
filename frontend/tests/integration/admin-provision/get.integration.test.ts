@@ -151,4 +151,30 @@ describe('GET /api/admin/provision/[runId] (integration)', () => {
     expect(res.status).toBe(200);
     expect(body.stuckStepIndex).toBe(1);
   });
+
+  // Task 6: reconciliation moved to a separate POST endpoint. GET must be
+  // read-only — even when the run is stale enough that the old inline call
+  // would have flipped it to 'failed'. We seed a stale, idle running run,
+  // snapshot the catalog rows, call GET, then assert the rows are byte-equal.
+  it('does not mutate provisioning_runs or provisioning_steps when called against a stale running run', async () => {
+    mocks.auth.mockResolvedValue(GLOBAL_SESSION);
+    const staleSeconds = 600;
+    const runId = await seedRun(testPool, TEST_SCHEMA, 'running');
+    await seedSteps(testPool, runId, [{ stepIndex: 0, stepKey: 'validate_inputs', status: 'pending', startedAtSecondsAgo: staleSeconds }]);
+    await testPool.query(`UPDATE catalog.provisioning_runs SET StartedAt = DATE_SUB(NOW(), INTERVAL ? SECOND) WHERE RunID = ?`, [staleSeconds, runId]);
+
+    const [runBefore]: any = await testPool.query(`SELECT * FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
+    const [stepsBefore]: any = await testPool.query(`SELECT * FROM catalog.provisioning_steps WHERE RunID = ? ORDER BY StepIndex`, [runId]);
+
+    const res = await GET(makeRequest(GET_URL(String(runId))), makeParams(runId));
+    expect(res.status).toBe(200);
+
+    const [runAfter]: any = await testPool.query(`SELECT * FROM catalog.provisioning_runs WHERE RunID = ?`, [runId]);
+    const [stepsAfter]: any = await testPool.query(`SELECT * FROM catalog.provisioning_steps WHERE RunID = ? ORDER BY StepIndex`, [runId]);
+
+    expect(runAfter[0].Status).toBe(runBefore[0].Status);
+    expect(runAfter[0].Status).toBe('running');
+    expect(runAfter[0].FinishedAt).toEqual(runBefore[0].FinishedAt);
+    expect(stepsAfter).toEqual(stepsBefore);
+  });
 });

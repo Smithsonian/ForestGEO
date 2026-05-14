@@ -3,7 +3,7 @@ import { auth } from '@/auth';
 import { parseRunId, requireGlobalAdmin, provisioningErrorResponse } from '@/lib/provisioning/route-helpers';
 import { ProvisioningError } from '@/lib/provisioning/errors';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
-import { getRunWithSteps, reconcileStaleRun, STUCK_THRESHOLD_MS } from '@/lib/provisioning/orchestrator';
+import { getRunWithSteps, STUCK_THRESHOLD_MS } from '@/lib/provisioning/orchestrator';
 import { HTTPResponses } from '@/config/macros';
 
 // Force Node.js runtime — mysql2 is not compatible with Edge Runtime
@@ -43,20 +43,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ runId: 
   }
 
   try {
-    // NOTE: reconcileStaleRun is still called inline here — Task 6 will move it to a POST endpoint.
-    let result = await getRunWithSteps(runId, catalogPool);
+    // Reconciliation is now a separate POST /reconcile endpoint that the UI
+    // calls (throttled) when a step is stuck. GET is read-only.
+    const result = await getRunWithSteps(runId, catalogPool);
     if (!result) {
       return provisioningErrorResponse(new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId }));
-    }
-
-    if (result.run.status === 'running') {
-      const reconciled = await reconcileStaleRun(runId, catalogPool).catch(() => false);
-      if (reconciled) {
-        result = await getRunWithSteps(runId, catalogPool);
-        if (!result) {
-          return provisioningErrorResponse(new ProvisioningError(`Run ${runId} not found`, 'not_found', { runId }));
-        }
-      }
     }
 
     const stuckStepIndex = computeStuckStepIndex(result.steps);

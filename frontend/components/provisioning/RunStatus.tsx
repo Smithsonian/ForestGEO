@@ -37,6 +37,7 @@ interface PollResponse {
 type ActionKey = 'retry' | 'abort' | 'mark-failed' | 'teardown';
 
 const POLL_INTERVAL_MS = 1000;
+const RECONCILE_THROTTLE_MS = 60_000;
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatusType> = new Set(['completed', 'failed', 'aborted']);
 
@@ -73,6 +74,8 @@ export default function RunStatus({ runId }: RunStatusProps) {
   // We use a ref so the poll callback can read the latest status without being
   // recreated on every state update, which would cause the interval to reset.
   const latestStatusRef = useRef<RunStatusType | null>(null);
+  // Tracks the last time we POSTed to /reconcile so we can throttle to ≤1/min.
+  const lastReconcileAtRef = useRef<number>(0);
 
   const poll = useCallback(async () => {
     try {
@@ -85,6 +88,17 @@ export default function RunStatus({ runId }: RunStatusProps) {
       latestStatusRef.current = body.run.status;
       setData(body);
       setFetchError(null);
+
+      // Fire-and-forget reconcile when a step is stuck. Throttled per-run so
+      // we issue at most one POST per minute, and we never let a reconcile
+      // failure disrupt polling.
+      const now = Date.now();
+      if (body.run.status === 'running' && body.stuckStepIndex !== null && now - lastReconcileAtRef.current > RECONCILE_THROTTLE_MS) {
+        lastReconcileAtRef.current = now;
+        fetch(`/api/admin/provision/${runId}/reconcile`, { method: 'POST' }).catch(() => {
+          // fire-and-forget; reconcile failure doesn't disrupt polling
+        });
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
       setFetchError(message);
