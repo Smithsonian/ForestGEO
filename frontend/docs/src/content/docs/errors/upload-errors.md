@@ -125,7 +125,10 @@ This guide covers errors that may occur during the file upload and processing st
 | "Duplicate entry: Same TreeTag/StemTag/DBH/HOM/Date. Original record ID: [ID]" | Exact duplicate row in file | Remove duplicate rows from your file |
 
 :::note
-Duplicates are automatically detected and moved to Failed Measurements. You can review them there and decide how to proceed.
+Duplicates surface in two places, depending on the upload mode:
+
+- **Initial upload:** flagged rows stay in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved. Review via View Errors or the Failed Measurements modal.
+- **Revision Upload:** any rows in the database that match multiple measurements for the same stem appear in the **Duplicate Cleanup** tab on the review screen. On Apply, the highest-ID row wins and the others are deleted in a single transaction. See [Revision Upload](/ForestGEO/upload-process-breakdown/#revision-upload-correcting-an-ingested-census).
 :::
 
 ---
