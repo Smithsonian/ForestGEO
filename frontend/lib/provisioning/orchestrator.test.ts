@@ -16,6 +16,7 @@ import type { ProvisioningInput } from './types';
 const CATALOG_TABLES_FILE = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
 const POLL_INTERVAL_MS = 200;
 const RUN_TIMEOUT_MS = 60000;
+const ORCH_SCHEMA_PREFIX = 'forestgeo_orch';
 
 function makeInput(schemaName: string): ProvisioningInput {
   return {
@@ -70,6 +71,35 @@ async function createManualRun(pool: mysql.Pool, schemaName: string, status: 'ru
   return result.insertId;
 }
 
+async function applyCatalogDdl(pool: mysql.Pool): Promise<void> {
+  const ddl = readFileSync(CATALOG_TABLES_FILE, 'utf-8');
+  for (const stmt of ddl
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean)) {
+    await pool.query(stmt);
+  }
+}
+
+async function assertOnlyOrchestratorRuns(pool: mysql.Pool): Promise<void> {
+  const [tableRows]: any = await pool.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs'`
+  );
+  if (tableRows.length === 0) return;
+
+  const [rows]: any = await pool.query(
+    `SELECT COUNT(*) AS NonTestRuns
+     FROM catalog.provisioning_runs
+     WHERE SchemaName NOT LIKE ?`,
+    [`${ORCH_SCHEMA_PREFIX}%`]
+  );
+  const nonTestRuns = Number(rows[0]?.NonTestRuns ?? rows[0]?.nontestruns ?? 0);
+  if (nonTestRuns > 0) {
+    throw new Error(`Refusing to drop catalog.provisioning_* tables with ${nonTestRuns} non-orchestrator test runs present`);
+  }
+}
+
 async function createCompletedRunWithSite(pool: mysql.Pool, schemaName: string): Promise<{ runId: number; siteId: number }> {
   const runId = await createManualRun(pool, schemaName, 'completed');
   await pool.query(`CREATE DATABASE IF NOT EXISTS \`${schemaName}\``);
@@ -97,33 +127,7 @@ describe('orchestrator', () => {
       multipleStatements: true,
       connectionLimit: 10
     });
-    await pool.query(`CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
-    const ddl = readFileSync(CATALOG_TABLES_FILE, 'utf-8');
-    for (const stmt of ddl
-      .split(';')
-      .map(s => s.trim())
-      .filter(Boolean)) {
-      await pool.query(stmt);
-    }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS catalog.sites (
-        SiteID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        SiteName VARCHAR(255) NOT NULL,
-        SchemaName VARCHAR(255) NOT NULL,
-        SQDimX INT NOT NULL,
-        SQDimY INT NOT NULL,
-        DefaultUOMDBH VARCHAR(16) NOT NULL,
-        DefaultUOMHOM VARCHAR(16) NOT NULL,
-        DoubleDataEntry TINYINT(1) NOT NULL DEFAULT 0
-      ) ENGINE=InnoDB
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS catalog.usersiterelations (
-        UserSiteRelationID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        UserID INT NOT NULL,
-        SiteID INT NOT NULL
-      ) ENGINE=InnoDB
-    `);
+    await applyCatalogDdl(pool);
   }, 30000);
 
   afterAll(async () => {
@@ -139,7 +143,7 @@ describe('orchestrator', () => {
         .catch(() => {});
       await pool.query(`DELETE FROM catalog.sites WHERE SchemaName = ?`, [schema]).catch(() => {});
     }
-    await pool.query(`DELETE FROM catalog.provisioning_runs WHERE SchemaName LIKE 'forestgeo_orch%'`).catch(() => {});
+    await pool.query(`DELETE FROM catalog.provisioning_runs WHERE SchemaName LIKE ?`, [`${ORCH_SCHEMA_PREFIX}%`]).catch(() => {});
     await pool.end();
   });
 
@@ -556,4 +560,57 @@ describe('orchestrator', () => {
       expect(prev.getTime()).toBeGreaterThanOrEqual(cur.getTime());
     }
   });
+
+  it(
+    'startRun: bootstraps provisioning catalog tables when state tables are missing',
+    async () => {
+      // Use a dedicated pool so the WeakMap-cached bootstrap promise from the
+      // shared `pool` does not short-circuit the test.
+      const isolatedPool = mysql.createPool({
+        host: process.env.TEST_DB_HOST || 'localhost',
+        port: Number(process.env.TEST_DB_PORT || 3306),
+        user: process.env.TEST_DB_USER || 'root',
+        password: process.env.TEST_DB_PASSWORD || 'testpassword',
+        multipleStatements: true,
+        connectionLimit: 4
+      });
+
+      const schemaName = `forestgeo_orch_bootstrap_${process.pid}`;
+      createdSchemas.push(schemaName);
+
+      try {
+        await isolatedPool.query(`CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+        await assertOnlyOrchestratorRuns(isolatedPool);
+        await isolatedPool.query(`DROP TABLE IF EXISTS catalog.provisioning_steps`);
+        await isolatedPool.query(`DROP TABLE IF EXISTS catalog.provisioning_runs`);
+        const [missing]: any = await isolatedPool.query(
+          `SELECT TABLE_NAME FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME IN ('provisioning_runs', 'provisioning_steps')`
+        );
+        expect(missing.length).toBe(0);
+
+        const { runId } = await startRun({
+          input: makeInput(schemaName),
+          startedBy: 'test@bootstrap',
+          catalogPool: isolatedPool
+        });
+
+        expect(runId).toBeGreaterThan(0);
+        await expect(waitForTerminal(runId, isolatedPool)).resolves.toBe('completed');
+
+        const [present]: any = await isolatedPool.query(
+          `SELECT TABLE_NAME FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = 'catalog'
+           AND TABLE_NAME IN ('provisioning_runs', 'provisioning_steps', 'sites', 'usersiterelations')`
+        );
+        expect(present.length).toBe(4);
+      } finally {
+        // Re-seed the shared pool's catalog state for any later tests (none today,
+        // but keep this defensive in case the suite grows).
+        await applyCatalogDdl(isolatedPool);
+        await isolatedPool.end();
+      }
+    },
+    RUN_TIMEOUT_MS + 5000
+  );
 });

@@ -9,7 +9,18 @@ const PROVISIONING_STEPS_TABLE = 'provisioning_steps';
 const PROVISIONING_STEPS_FK_NAME = 'fk_provisioning_steps_run';
 const DDL_FILE_PATH = path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
 
-const EXPECTED_PROVISIONING_RUNS_COLUMNS = ['RunID', 'Status', 'StartedBy', 'StartedAt', 'FinishedAt', 'SiteName', 'SchemaName', 'InputPayload'];
+const EXPECTED_PROVISIONING_RUNS_COLUMNS = [
+  'RunID',
+  'Status',
+  'StartedBy',
+  'StartedAt',
+  'FinishedAt',
+  'WorkerHeartbeatAt',
+  'WorkerPID',
+  'SiteName',
+  'SchemaName',
+  'InputPayload'
+];
 const EXPECTED_PROVISIONING_STEPS_COLUMNS = ['StepID', 'RunID', 'StepIndex', 'StepKey', 'Status', 'StartedAt', 'FinishedAt', 'ErrorMessage', 'ErrorStack'];
 
 describe('catalog provisioning tables', () => {
@@ -36,8 +47,6 @@ describe('catalog provisioning tables', () => {
   });
 
   afterAll(async () => {
-    await conn.query(`DROP TABLE IF EXISTS ${CATALOG_SCHEMA}.${PROVISIONING_STEPS_TABLE}`);
-    await conn.query(`DROP TABLE IF EXISTS ${CATALOG_SCHEMA}.${PROVISIONING_RUNS_TABLE}`);
     await conn.end();
   });
 

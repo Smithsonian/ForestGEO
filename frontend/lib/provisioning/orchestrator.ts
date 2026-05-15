@@ -1,11 +1,33 @@
 import { createHash } from 'crypto';
+import path from 'path';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
+import { executeSqlFile } from './sql-runner';
 import ailogger from '@/ailogger';
+
+const CATALOG_PROVISIONING_DDL_PATH = () => path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+
+// Bootstrap promise is cached per-pool so concurrent callers share a single
+// run of the idempotent catalog DDL and we don't re-execute it on every
+// admin request after the first success.
+const catalogBootstrapPromises = new WeakMap<Pool, Promise<void>>();
+
+export async function ensureCatalogTables(catalogPool: Pool): Promise<void> {
+  const cached = catalogBootstrapPromises.get(catalogPool);
+  if (cached) return cached;
+  const promise = executeSqlFile(catalogPool, CATALOG_PROVISIONING_DDL_PATH()).catch(err => {
+    // Failure leaves the cache empty so the next caller retries the bootstrap
+    // instead of inheriting a permanently-broken catalog pool.
+    catalogBootstrapPromises.delete(catalogPool);
+    throw err;
+  });
+  catalogBootstrapPromises.set(catalogPool, promise);
+  return promise;
+}
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -182,6 +204,13 @@ export async function startRun(args: StartRunArgs): Promise<{ runId: number }> {
   const { input, startedBy, catalogPool } = args;
   const schemaName = input.site.schemaName;
   auditAttempt({ action: 'start', user: startedBy, schemaName });
+
+  try {
+    await ensureCatalogTables(catalogPool);
+  } catch (err) {
+    auditFailure({ action: 'start', user: startedBy, schemaName, error: toError(err) });
+    throw new ProvisioningError('Failed to initialize catalog tables', 'internal', { schemaName, cause: err });
+  }
 
   const conn = await catalogPool.getConnection();
   let runId: number | null = null;
@@ -538,6 +567,7 @@ export async function getRunWithSteps(runId: number, catalogPool: Pool): Promise
 }
 
 export async function listRuns(catalogPool: Pool, limit = 50): Promise<any[]> {
+  await ensureCatalogTables(catalogPool);
   const [rows]: any = await catalogPool.query(
     `SELECT RunID, Status, StartedBy, StartedAt, FinishedAt, SiteName, SchemaName
      FROM catalog.provisioning_runs
