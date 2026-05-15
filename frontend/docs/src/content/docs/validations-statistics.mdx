@@ -58,15 +58,20 @@ The following table lists all validation checks and their default status:
 | **ValidateScreenMeasuredDiameterMinMax**                          | Flag DBH measurements outside species-defined min/max bounds             | Enabled       |
 | **ValidateScreenStemsWithMeasurementsButDeadAttributes**          | Flag stems marked as dead but still have measurements                    | **Disabled**  |
 | **ValidateScreenStemsWithMissingMeasurementsButLiveAttributes**   | Flag live stems that are missing measurements                            | **Disabled**  |
+| **ValidateDeadToAliveRegression** *(new V17)*                     | Flag stems that were dead in a prior census but appear alive again       | Enabled       |
+| **ValidateHOMChangeExceedsHalfMeter** *(new V18)*                 | Flag stems whose HOM has shifted more than 0.5 m between censuses        | Enabled       |
 
 ### Understanding Validation Categories
 
 #### Growth Validations
 
-These check for biologically implausible growth patterns:
+These check for biologically implausible growth patterns. **As of 2026, cross-census growth checks operate correctly** — earlier versions of the app had a comparison bug that has since been fixed.
 
 - **Growth > 65mm**: Trees typically don't grow more than 65mm diameter between censuses
 - **Shrinkage > 5%**: Trees rarely shrink significantly; large shrinkage often indicates measurement error
+- **HOM change > 0.5 m** *(V18, new)*: A stem's measurement-height-of-measure shifting by more than half a metre between censuses usually means the field crew measured at a different point on the stem
+- **Dead → alive regression** *(V17, new)*: A stem recorded as dead in a prior census now showing as alive — almost always a tag or species error
+- **Validation 16 was removed in 2026** because it duplicated checks already run inline during ingestion.
 
 #### Reference Data Validations
 
