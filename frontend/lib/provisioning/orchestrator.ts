@@ -1,15 +1,82 @@
 import { createHash } from 'crypto';
-import path from 'path';
 import type { Pool, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import type { ProvisioningInput, ProvisioningRunRecord, ProvisioningStepRecord, StepContext, RunStatus, StepStatus } from './types';
 import { STEPS } from './steps';
 import { ProvisioningError } from './errors';
 import { auditAttempt, auditSuccess, auditFailure } from './audit';
 import { dispatchRun, getWorkerPid, HEARTBEAT_STALE_MS, isRunOwnedByCurrentWorker } from './worker';
-import { executeSqlFile } from './sql-runner';
 import ailogger from '@/ailogger';
 
-const CATALOG_PROVISIONING_DDL_PATH = () => path.join(process.cwd(), 'sqlscripting/catalog-provisioning-tables.sql');
+// Bootstrap DDL inlined so the catalog tables can be created without any
+// dependency on the sqlscripting/ folder being present in the deploy bundle.
+// Keep this in sync with frontend/sqlscripting/catalog-provisioning-tables.sql,
+// which remains canonical for the run-branch-refresh.sh ops script.
+const CATALOG_BOOTSTRAP_STATEMENTS: readonly string[] = [
+  `CREATE DATABASE IF NOT EXISTS catalog CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+  `CREATE TABLE IF NOT EXISTS catalog.provisioning_runs (
+     RunID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+     Status ENUM('running','completed','failed','aborted') NOT NULL,
+     StartedBy VARCHAR(255) NOT NULL,
+     StartedAt DATETIME NOT NULL,
+     FinishedAt DATETIME NULL,
+     WorkerHeartbeatAt DATETIME NULL,
+     WorkerPID VARCHAR(64) NULL,
+     SiteName VARCHAR(255) NOT NULL,
+     SchemaName VARCHAR(255) NOT NULL,
+     InputPayload JSON NOT NULL,
+     KEY idx_provisioning_runs_schema (SchemaName),
+     KEY idx_provisioning_runs_status (Status),
+     KEY idx_provisioning_runs_heartbeat (Status, WorkerHeartbeatAt)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`,
+  `CREATE TABLE IF NOT EXISTS catalog.provisioning_steps (
+     StepID INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+     RunID INT NOT NULL,
+     StepIndex INT NOT NULL,
+     StepKey VARCHAR(64) NOT NULL,
+     Status ENUM('pending','running','completed','failed','skipped') NOT NULL,
+     StartedAt DATETIME NULL,
+     FinishedAt DATETIME NULL,
+     ErrorMessage TEXT NULL,
+     ErrorStack TEXT NULL,
+     CONSTRAINT fk_provisioning_steps_run
+       FOREIGN KEY (RunID) REFERENCES catalog.provisioning_runs(RunID) ON DELETE CASCADE,
+     UNIQUE KEY uk_provisioning_steps_run_index (RunID, StepIndex)
+   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+];
+
+// Idempotent additive migrations for catalogs that pre-date columns/indexes.
+// Each entry detects the missing piece via information_schema and runs the
+// ALTER only if needed, so re-running on a healthy install is a no-op.
+const CATALOG_MIGRATION_BLOCKS: readonly { check: string; alter: string }[] = [
+  {
+    check: `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND COLUMN_NAME = 'WorkerHeartbeatAt'`,
+    alter: `ALTER TABLE catalog.provisioning_runs ADD COLUMN WorkerHeartbeatAt DATETIME NULL AFTER FinishedAt`
+  },
+  {
+    check: `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND COLUMN_NAME = 'WorkerPID'`,
+    alter: `ALTER TABLE catalog.provisioning_runs ADD COLUMN WorkerPID VARCHAR(64) NULL AFTER WorkerHeartbeatAt`
+  },
+  {
+    check: `SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = 'catalog' AND TABLE_NAME = 'provisioning_runs' AND INDEX_NAME = 'idx_provisioning_runs_heartbeat'`,
+    alter: `ALTER TABLE catalog.provisioning_runs ADD KEY idx_provisioning_runs_heartbeat (Status, WorkerHeartbeatAt)`
+  }
+];
+
+async function runCatalogBootstrap(catalogPool: Pool): Promise<void> {
+  for (const stmt of CATALOG_BOOTSTRAP_STATEMENTS) {
+    await catalogPool.query(stmt);
+  }
+  for (const migration of CATALOG_MIGRATION_BLOCKS) {
+    const [rows]: any = await catalogPool.query(migration.check);
+    const count = Number(rows[0]?.c ?? rows[0]?.C ?? 0);
+    if (count === 0) {
+      await catalogPool.query(migration.alter);
+    }
+  }
+}
 
 // Bootstrap promise is cached per-pool so concurrent callers share a single
 // run of the idempotent catalog DDL and we don't re-execute it on every
@@ -19,7 +86,7 @@ const catalogBootstrapPromises = new WeakMap<Pool, Promise<void>>();
 export async function ensureCatalogTables(catalogPool: Pool): Promise<void> {
   const cached = catalogBootstrapPromises.get(catalogPool);
   if (cached) return cached;
-  const promise = executeSqlFile(catalogPool, CATALOG_PROVISIONING_DDL_PATH()).catch(err => {
+  const promise = runCatalogBootstrap(catalogPool).catch(err => {
     // Failure leaves the cache empty so the next caller retries the bootstrap
     // instead of inheriting a permanently-broken catalog pool.
     catalogBootstrapPromises.delete(catalogPool);

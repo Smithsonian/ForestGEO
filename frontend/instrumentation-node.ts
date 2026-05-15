@@ -15,11 +15,16 @@
  */
 import ailogger from '@/ailogger';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import { ensureCatalogTables } from '@/lib/provisioning/orchestrator';
 import { installShutdownHandler, pickupStaleRuns } from '@/lib/provisioning/worker';
 
 void (async () => {
   try {
     const pool = getPoolMonitorInstance().pool;
+    // Bootstrap the catalog.* tables on first boot so a fresh database
+    // (or a partially-applied prior deploy) self-heals before the worker
+    // tries to read catalog.provisioning_runs.
+    await ensureCatalogTables(pool);
     installShutdownHandler(pool);
     const picked = await pickupStaleRuns(pool);
     if (picked.length > 0) {
