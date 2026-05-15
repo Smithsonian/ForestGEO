@@ -1,5 +1,46 @@
 ---
 title: Understanding Species
-description: An overview of the Species interface
+description: How the Species List works, how to add and remove species, and what changed in 2026.
 ---
 
+The **Species List** is the per-site catalog of every species that can be referenced from a measurement. Every measurement row's `SpeciesCode` must resolve to an entry in this list — if it doesn't, the row will fail validation as **SpCode invalid** until you either add the species or correct the code.
+
+The Species List lives under **Fixed Data → Species List** in the sidebar.
+
+## What a species record contains
+
+| Field | Notes |
+|---|---|
+| **Species Code** | The short code your CSVs reference (e.g. `CRUD02`). Case-sensitive. |
+| **Genus & Species** | Full Latin binomial. |
+| **Family** | Taxonomic family. Stored separately so multiple genera can share a family. |
+| **Authority** | Naming authority for the species. |
+| **IDLevel** | How precise the identification is (species, genus, family, morpho, etc.). |
+| **Validity status** | Whether the entry is current — entries can be flagged as obsolete without being deleted. |
+
+## Adding species
+
+You can add species two ways:
+
+1. **Inline in the grid.** Click **Add Row**, fill in at minimum a Species Code, Genus, and Species, and save.
+2. **Bulk upload.** Use the Species upload form from the Upload page. The upload validates that no duplicate codes are present in your file.
+
+## Changes shipped in 2026
+
+The Species List had several long-standing rough edges that were fixed in spring 2026:
+
+- **Duplicate detection on upload.** Species uploads now **reject** files that contain duplicate `SpeciesCode` rows before any insert happens. Earlier, duplicates could be silently merged or one would overwrite the other.
+- **Duplicate rows can be deleted.** If your site already had duplicate species rows (a common legacy issue), you can now select and delete the redundant rows directly from the grid. Earlier, the delete path didn't handle the duplicates safely.
+- **Lock-wait retries.** Concurrent species uploads used to occasionally hang with stale-transaction lock waits. The upload now retries transient lock waits transparently — you'll see a brief pause rather than a hard failure.
+
+## Common pitfalls
+
+- **Species codes are case-sensitive.** `CRUD2` and `crud2` are different codes. If a measurement upload reports SpCode invalid, double-check capitalisation.
+- **Don't delete species that have measurements.** The grid will refuse to delete a species that's referenced by an existing measurement. If you genuinely need to retire a species, mark it obsolete instead.
+- **Editing taxonomy on a species in use propagates.** Changing the Genus or Family on a referenced species affects every measurement that points at it. If you're correcting a taxonomic identification, this is what you want; if you're not sure, add a new species row and migrate measurements over.
+
+## Related pages
+
+- [Understanding Stem Codes](/ForestGEO/starting/understanding-stem-codes/) — the attribute codes that describe a stem's condition.
+- [Understanding Supporting Data](/ForestGEO/starting/understanding-supporting-data/) — the broader picture of supporting data the app needs before measurements can be uploaded.
+- [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/) — how SpCode invalid rows are handled and recovered.

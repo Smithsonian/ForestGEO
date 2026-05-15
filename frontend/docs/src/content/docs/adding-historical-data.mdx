@@ -160,6 +160,10 @@ Start with the **oldest** census and work forward chronologically. This ensures:
 3. Navigate to **Stem & Plot Details → Stem Codes**
 4. Upload your attribute codes
 
+:::tip
+**Species upload, as of April 2026:** the upload rejects files containing duplicate `spcode` values before any insert — fix the duplicates in your file rather than letting one row silently overwrite another. If your site already has duplicate species rows from a legacy import, you can now select and delete the duplicates directly from the Species grid. The upload also transparently retries transient database lock-waits, so concurrent uploads no longer hang.
+:::
+
 ### Step 3: For Each Historical Census
 
 Repeat these steps for each census, starting with the oldest:
