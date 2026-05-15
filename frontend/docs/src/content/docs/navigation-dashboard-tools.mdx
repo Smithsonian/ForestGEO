@@ -83,18 +83,39 @@ This section contains interfaces for working with measurement data and census an
 
 | Page                         | Description                                                 |
 | ---------------------------- | ----------------------------------------------------------- |
-| **View Data**                | View and edit measurements for the current census           |
+| **View Data**                | View and edit measurements for the current census; failed rows appear inline with successful rows |
+| **View Errors**              | Every row with a validation error, with the consolidated reason and the original CSV codes |
 | **Post-Census Statistics**   | Run statistical analyses on your census data                |
 | **Recent Changes**           | Audit trail showing all data modifications                  |
 | **Uploaded Files**           | History of files uploaded to the system with download links |
 | **View All Historical Data** | Browse measurements across all censuses                     |
 | **Validations**              | Configure and manage data validation rules                  |
 
+### Administration (global role)
+
+Users with the `global` role see an Administration section in the sidebar with these tools:
+
+| Page                       | Description                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| **Sites**                  | Catalog of all sites the app knows about                                             |
+| **Users**                  | Manage user accounts and their roles                                                 |
+| **Users ↔ Sites**          | Grant or revoke site access for individual users                                     |
+| **Provision** *(new)*      | Stand up a brand-new site, plot, census, and quadrat grid through a 4-step wizard. See [Site Provisioning](/ForestGEO/admin/site-provisioning/) |
+| **Provisioning Runs**      | History and status of every provisioning attempt                                     |
+
 ---
 
 ## The Dashboard
 
 The dashboard provides an at-a-glance overview of your census progress and data health.
+
+### Visual conventions (updated May 2026)
+
+- **Clickable site & plot cards.** The overview cards on the dashboard are now active — click a site card to jump straight into that site's plot view; click a plot card to jump into its census view. The dropdown selectors still work the same way; cards are a faster path.
+- **Top loading bar instead of a modal.** Routine reads (loading a list, switching plots) show a slim progress bar at the top of the page instead of blocking the screen with a modal overlay.
+- **Skeleton loaders.** Cards and tables now render shaded placeholders while data streams in, so the page lays out immediately rather than appearing blank.
+- **Prefetched navigation.** The sidebar quietly prefetches likely-next pages, so most navigation feels instant.
+- **Auto-refresh.** Data grids and dashboard cards refresh themselves after edits, deletes, and reingestion — you no longer need to reload the page to see your changes.
 
 ### Census Progress Metrics
 
@@ -161,7 +182,7 @@ Measurements reference Fixed Data records. When you upload a measurement file:
 - **Attribute codes** must exist in Stem Codes
 - **Personnel** should be recorded for the census
 
-If these references don't exist, measurements will fail to process and end up in the Failed Measurements table.
+If these references don't exist, measurements will fail validation. They are **not lost** — failed rows are written into the main `coremeasurements` table with `StemGUID = NULL` so you can review and reingest them once the reference data is in place. See [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/).
 
 ---
 

@@ -243,12 +243,23 @@ Most datagrids support inline editing:
 
 Each row may have an Actions column with:
 
-- **Edit** (pencil icon) - Enter edit mode for the entire row
-- **Delete** (trash icon) - Remove the row
-- **View Details** - See full record information
+- **Edit** (pencil icon) — Enter edit mode for the entire row
+- **Delete** (trash icon) — Remove the row
+- **View Details** — See full record information
+- **Revert** *(measurement rows)* — Roll back the most recent edit on this row
+
+### The Unified Edit Pipeline (April–May 2026)
+
+Edits to measurement rows — whether you start in View Data, View Errors, or the Failed Measurements view — all flow through one shared pipeline. The pieces you'll see:
+
+- **Impact Summary dialog.** Before any write, a dialog shows exactly which fields will change, how many other rows are affected (some edits cascade), and any validation warnings the change would raise. The preview is **tamper-proof** — what you see is what gets applied.
+- **Typed confirmation for destructive edits.** Deletes and mass changes ask you to type `APPLY N` (where N is the row count) as a guard against accidental clicks.
+- **Per-row revert.** After Apply, the row menu offers a Revert action that rolls back the last change on that row.
+- **Auto-refresh.** The grid re-fetches affected rows after Apply — no page reload needed.
+- **Clearing a field actually persists.** Earlier versions silently dropped empty edits in some columns; that bug is fixed.
 
 :::note
-Changes are saved immediately to the database. There is no separate "Save" step for inline edits.
+Most Fixed Data grids (Stem Codes, Personnel, Quadrats, Species List) still use the simpler immediate-save flow — there's no Impact Summary because each row stands alone. The unified pipeline applies to **measurement** edits, where one change can ripple through validations and other rows.
 :::
 
 ---
