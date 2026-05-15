@@ -44,6 +44,10 @@ export default defineConfig({
           slug: 'validations-statistics'
         },
         {
+          label: 'Administration',
+          items: [{ label: 'Site Provisioning', slug: 'admin/site-provisioning' }]
+        },
+        {
           label: 'Error Guide & Troubleshooting',
           items: [
             { label: 'Error Guide Overview', slug: 'errors/error-guide-overview' },
