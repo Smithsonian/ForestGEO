@@ -131,6 +131,39 @@ If a run **fails**, the failure detail tells you exactly which step errored. Aft
 
 **Abort** is available while a run is `running`. It tears down anything that was created in that run transactionally — there are no orphaned half-provisioned schemas left behind.
 
+## Deleting a provisioned site
+
+Sites created through the wizard can be **deleted** from the run's status page (`/admin/provision/[runId]`) using the **Delete provisioned site** button. This drops the entire site schema and removes the catalog entry — it is irreversible.
+
+:::danger
+Deleting a site **destroys every measurement, plot, census, quadrat, and supporting data row** in that schema. There is no undo. Make sure you have a backup if there's any chance you'll need the data later.
+:::
+
+### What "Delete provisioned site" does
+
+1. Verifies the run is in **completed** status — you cannot tear down a run that's still `running`, `failed`, or `aborted` from this button. For those states, use **Abort** (running) or **Retry / Mark failed** as appropriate.
+2. Asks you to **type the exact schema name** (e.g. `forestgeo_rabi`) into the confirmation dialog. This is intentional — a single click can't trigger a teardown.
+3. Runs in a single transaction:
+   - DELETE the row from `catalog.sites`
+   - DELETE any rows in `catalog.usersiterelations` that referenced the site
+   - COMMIT
+   - **DROP DATABASE** for the schema (only after the catalog commit succeeds)
+4. Logs the teardown to the provisioning audit trail with the username and run ID.
+
+Putting the `DROP DATABASE` after the catalog commit guarantees there is **never** a state where the catalog still references a missing schema (no orphans). If anything before the commit fails, nothing has changed and a retry is safe.
+
+### What this **cannot** delete
+
+The teardown button is scoped to **sites that were provisioned through the wizard**. Sites that pre-date the provisioning system don't have a provisioning run associated with them and cannot be deleted from this UI. To remove a legacy site, coordinate with engineering — the catalog row and the underlying schema have to be removed manually with the same `catalog delete → commit → drop schema` order.
+
+### When you'd actually use this
+
+- A test site you stood up to validate the wizard and never plan to use.
+- A provisioning run that was completed but used the wrong schema slug; rather than living with the typo forever, delete and re-provision with the correct name.
+- A pilot site whose data has already been exported elsewhere and is no longer needed in the live app.
+
+For anything else — a site you want to *empty* without destroying — use **partial census deletion** from the census overview instead. That clears measurements while preserving the site, plot, and supporting data.
+
 ## What still needs to happen manually after provisioning
 
 The wizard sets up the **structure**; the **content** still needs to be loaded:
