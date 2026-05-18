@@ -522,6 +522,139 @@ export function renderStage4(opts: Stage4Options): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 5: Eight fail-loud sanity checks
+// ---------------------------------------------------------------------------
+
+export interface Stage5Options {
+  tempTable: string;
+}
+
+/**
+ * Renders the Stage 5 procedure-body fragment.
+ *
+ * Eight sanity checks run in sequence. Each follows the same template:
+ *   - SELECT GROUP_CONCAT(DISTINCT <value>) INTO _bad FROM ... WHERE <predicate>;
+ *   - IF _bad IS NOT NULL THEN SIGNAL SQLSTATE '45000' with a descriptive message.
+ *
+ * The shared `_bad TEXT` variable declared in the procedure envelope is reset to
+ * NULL before each check so a prior NULL aggregate result does not bleed into
+ * the next predicate.
+ *
+ * Checks (in order):
+ *   1. Missing required staged values (Tag/StemTag/Mnemonic/QuadratName/ExactDate)
+ *   2. Unresolved QuadratID after Stage 2
+ *   3. Unresolved SpeciesID after Stage 2
+ *   4. Ambiguous tree lookup (tree_lookup.TreeCount > 1)
+ *   5. Ambiguous stem lookup (stem_lookup.StemCount > 1)
+ *   6. HOM inheritance required but no orderable prior census exists
+ *   7. Unknown TSMCode tokens in staging Codes (recursive CTE split on ';';
+ *      empty tokens and '*' are excluded)
+ *   8. Duplicate (StemID, CensusID) DBH destinations
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage5(opts: Stage5Options): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 5: eight fail-loud sanity checks
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT TempID) INTO _bad
+    FROM ${t}
+    WHERE Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Missing required values in TempIDs: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT QuadratName) INTO _bad
+    FROM ${t}
+    WHERE QuadratID IS NULL;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Unknown quadrats: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT Mnemonic) INTO _bad
+    FROM ${t}
+    WHERE SpeciesID IS NULL;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Unknown species mnemonics: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT t.Tag) INTO _bad
+    FROM ${t} t
+    JOIN tree_lookup tl ON tl.Tag = t.Tag
+    WHERE tl.TreeCount > 1;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Ambiguous tree tags: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT CONCAT(t.Tag, '/', COALESCE(t.StemTag, 'NULL'))) INTO _bad
+    FROM ${t} t
+    JOIN stem_lookup sl ON sl.TreeID = t.TreeID AND sl.StemTag <=> t.StemTag
+    WHERE sl.StemCount > 1;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Ambiguous stem lookup: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE Tagged = 'O')
+              AND (SELECT COUNT(*) FROM prior_census_order) = 0
+              THEN 'no orderable prior census' END INTO _bad;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('HOM inheritance requires prior census ordering but no orderable prior census exists for plot: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  WITH RECURSIVE numbers AS (
+    SELECT 1 AS n
+    UNION ALL
+    SELECT n + 1 FROM numbers
+      WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
+                           FROM ${t} WHERE Codes IS NOT NULL), 1)
+  ),
+  exploded AS (
+    SELECT t.TempID,
+           TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(t.Codes, ';', n.n), ';', -1)) AS token
+      FROM ${t} t
+      JOIN numbers n
+        ON n.n <= LENGTH(t.Codes) - LENGTH(REPLACE(t.Codes, ';', '')) + 1
+      WHERE t.Codes IS NOT NULL AND t.Codes <> ''
+  )
+  SELECT GROUP_CONCAT(DISTINCT e.token) INTO _bad
+    FROM exploded e
+    LEFT JOIN TSMAttributes tsm ON tsm.TSMCode = e.token
+    WHERE tsm.TSMID IS NULL AND e.token NOT IN ('', '*');
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Unknown TSMCodes: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT pair) INTO _bad
+    FROM (
+      SELECT CONCAT(StemID, '/', CensusID) AS pair
+        FROM ${t}
+        WHERE StemID IS NOT NULL AND CensusID IS NOT NULL
+        GROUP BY StemID, CensusID
+        HAVING COUNT(*) > 1
+    ) dup;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Duplicate (StemID, CensusID) DBH destinations: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+`;
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
