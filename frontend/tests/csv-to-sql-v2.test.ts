@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1009,5 +1009,28 @@ describe('main()', () => {
     expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);/);
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('exits 1 with a clear message when the CSV has no data rows', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-empty-'));
+    const input = path.join(tmpDir, 'empty.csv');
+    const output = path.join(tmpDir, 'out.v2.sql');
+    fs.writeFileSync(input, 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n', 'utf8');
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(code => {
+      throw new Error(`__exit_${code}__`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(main(['--input', input, '--site', 'T', '--plot-id', '1', '--census-number', '1', '--output', output])).rejects.toThrow('__exit_1__');
+
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No data rows in CSV'));
+      expect(fs.existsSync(output)).toBe(false);
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

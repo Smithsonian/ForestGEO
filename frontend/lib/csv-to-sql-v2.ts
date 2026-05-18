@@ -1016,18 +1016,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   try {
     args = parseCliArgsV2(argv);
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error('CLI error:', err instanceof Error ? err.message : String(err));
     process.exit(EXIT_CODE_CLI_PARSE_ERROR);
   }
 
+  let rows, stagingRows;
   try {
-    const rows = readCsvFile(args.input);
-    const stagingRows = rows.map(r => mapCsvRowToStagingRow(r, args.plotId, args.censusNumber));
+    rows = readCsvFile(args.input);
+    stagingRows = rows.map(r => mapCsvRowToStagingRow(r, args.plotId, args.censusNumber));
+  } catch (err) {
+    console.error('Failed to read CSV:', err instanceof Error ? err.message : String(err));
+    process.exit(EXIT_CODE_IO_OR_RENDER_ERROR);
+  }
+
+  if (stagingRows.length === 0) {
+    console.error(`No data rows in CSV: ${args.input}. Nothing to load.`);
+    process.exit(EXIT_CODE_IO_OR_RENDER_ERROR);
+  }
+
+  try {
     const sql = renderFullPipeline({ args, stagingRows });
     fs.writeFileSync(args.output, sql, 'utf8');
     console.log(`Wrote ${args.output} (${stagingRows.length} rows)`);
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error('Failed to render or write SQL:', err instanceof Error ? err.message : String(err));
     process.exit(EXIT_CODE_IO_OR_RENDER_ERROR);
   }
 }
