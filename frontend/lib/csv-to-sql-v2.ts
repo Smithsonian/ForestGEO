@@ -933,6 +933,22 @@ export function parseCliArgsV2(argv: string[]): CliArgsV2 {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 10: final tally
+// ---------------------------------------------------------------------------
+
+export function renderStage10(opts: { tempTable: string }): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 10: final tally
+  SELECT
+    SUM(Tagged = 'O') AS old_trees,
+    SUM(Tagged = 'M') AS multi_stems,
+    SUM(Tagged = 'N') AS new_plants,
+    COUNT(*) AS total
+    FROM ${t};
+`;
+}
+
+// ---------------------------------------------------------------------------
 // Entrypoint stub (Task 16 replaces the throw with real logic)
 // ---------------------------------------------------------------------------
 

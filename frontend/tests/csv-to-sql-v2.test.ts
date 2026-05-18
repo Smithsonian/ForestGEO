@@ -12,7 +12,8 @@ import {
   renderStage6NewTrees,
   renderStage7NewStems,
   renderStage8DBH,
-  renderStage9PrimaryAndAttrs
+  renderStage9PrimaryAndAttrs,
+  renderStage10
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
@@ -860,5 +861,14 @@ describe('renderStage9PrimaryAndAttrs', () => {
 
   it('rejects an invalid tempTable identifier (injection guard)', () => {
     expect(() => renderStage9PrimaryAndAttrs({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  });
+});
+
+describe('renderStage10', () => {
+  it('emits final tally with all four counts', () => {
+    const sql = renderStage10({ tempTable: 'TempAllTrees' });
+    expect(sql).toMatch(
+      /SELECT\s+SUM\(Tagged = 'O'\) AS old_trees,\s+SUM\(Tagged = 'M'\) AS multi_stems,\s+SUM\(Tagged = 'N'\) AS new_plants,\s+COUNT\(\*\) AS total\s+FROM `TempAllTrees`;/
+    );
   });
 });
