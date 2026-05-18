@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1, renderStage2, renderStage2bResprout, renderStage3 } from '../lib/csv-to-sql-v2';
+import {
+  parseCliArgsV2,
+  renderProcedureEnvelope,
+  renderStage0,
+  renderStage1,
+  renderStage2,
+  renderStage2bResprout,
+  renderStage3,
+  renderStage4
+} from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('parseCliArgsV2', () => {
@@ -426,5 +435,108 @@ describe('renderStage3', () => {
   it('classifies via case expression', () => {
     const sql = renderStage3({ tempTable: 'TempAllTrees' });
     expect(sql).toMatch(/UPDATE `TempAllTrees` SET Tagged =\s+CASE\s+WHEN TreeID IS NULL THEN 'N'\s+WHEN StemID IS NULL THEN 'M'\s+ELSE 'O'\s+END;/);
+  });
+});
+
+describe('renderStage4', () => {
+  const defaultSql = () => renderStage4({ tempTable: 'TempAllTrees' });
+
+  it('zeroes DBH = NULL WHERE DBH = 0 as the first statement', () => {
+    const sql = defaultSql();
+    const nullifyIdx = sql.indexOf('UPDATE `TempAllTrees` SET DBH = NULL WHERE DBH = 0;');
+    expect(nullifyIdx).toBeGreaterThan(0);
+    // Must appear before the prior_census_order CREATE
+    const createTableIdx = sql.indexOf('CREATE TEMPORARY TABLE prior_census_order');
+    expect(nullifyIdx).toBeLessThan(createTableIdx);
+  });
+
+  it('creates prior_census_order as a TEMPORARY TABLE', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS prior_census_order;/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE prior_census_order AS/);
+  });
+
+  it('WHERE clause filters by PlotID = @target_plot_id AND CensusID <> @target_census_id', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/WHERE PlotID = @target_plot_id\s+AND CensusID <> @target_census_id/);
+  });
+
+  it('StartDate branch uses StartDate < @target_start_date (excludes same-or-later dates)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/StartDate IS NOT NULL AND @target_start_date IS NOT NULL AND StartDate < @target_start_date/);
+  });
+
+  it('numeric fallback uses CAST ... < CAST ... to exclude candidate census numbers >= target', () => {
+    const sql = defaultSql();
+    // The WHERE clause must cast both sides and require strictly less-than
+    expect(sql).toMatch(
+      /CAST\(PlotCensusNumber AS DECIMAL\(20,5\)\)\s+< CAST\(\(SELECT PlotCensusNumber FROM Census WHERE CensusID = @target_census_id\) AS DECIMAL\(20,5\)\)/
+    );
+  });
+
+  it('numeric fallback only fires when StartDate comparison is unavailable (date is NULL on either side)', () => {
+    const sql = defaultSql();
+    // The OR branch for numeric fallback must be guarded by a NULL check on date
+    expect(sql).toMatch(/\(@target_start_date IS NULL OR StartDate IS NULL\)/);
+  });
+
+  it('ORDER BY ranks by StartDate DESC first, then numeric PlotCensusNumber DESC', () => {
+    const sql = defaultSql();
+    const orderByIdx = sql.indexOf('ORDER BY');
+    expect(orderByIdx).toBeGreaterThan(0);
+    const orderByFragment = sql.slice(orderByIdx, orderByIdx + 400);
+    // StartDate CASE must appear before PlotCensusNumber CASE in ORDER BY
+    const startDateCaseIdx = orderByFragment.indexOf('CASE WHEN StartDate IS NOT NULL AND @target_start_date IS NOT NULL');
+    const pcnCaseIdx = orderByFragment.indexOf('CASE WHEN PlotCensusNumber REGEXP');
+    expect(startDateCaseIdx).toBeGreaterThan(0);
+    expect(pcnCaseIdx).toBeGreaterThan(startDateCaseIdx);
+  });
+
+  it('HOM inheritance UPDATE only applies to Tagged = O rows with HOM IS NULL and DBH IS NOT NULL', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/WHERE t\.HOM IS NULL AND t\.DBH IS NOT NULL AND t\.Tagged = 'O'/);
+  });
+
+  it('HOM inheritance joins DBH through prior_census_order on rk = 1', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/JOIN prior_census_order p ON p\.CensusID = d\.CensusID AND p\.rk = 1/);
+  });
+
+  it('final fallback sets HOM = 1.3 WHERE HOM IS NULL AND DBH IS NOT NULL (no Tagged filter)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/UPDATE `TempAllTrees` SET HOM = 1\.3\s+WHERE HOM IS NULL AND DBH IS NOT NULL;/);
+    // The final fallback must NOT restrict to Tagged = 'O'
+    const finalUpdateIdx = sql.lastIndexOf('UPDATE `TempAllTrees` SET HOM = 1.3');
+    expect(finalUpdateIdx).toBeGreaterThan(0);
+    const finalFragment = sql.slice(finalUpdateIdx, finalUpdateIdx + 80);
+    expect(finalFragment).not.toMatch(/Tagged/);
+  });
+
+  it('final fallback UPDATE comes after the HOM inheritance UPDATE', () => {
+    const sql = defaultSql();
+    const inheritanceIdx = sql.indexOf('SET t.HOM = prev.HOM');
+    const fallbackIdx = sql.indexOf('SET HOM = 1.3');
+    expect(inheritanceIdx).toBeGreaterThan(0);
+    expect(fallbackIdx).toBeGreaterThan(inheritanceIdx);
+  });
+
+  it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
+    const sql = defaultSql();
+    expect(sql).not.toMatch(/DROP PROCEDURE/);
+    expect(sql).not.toMatch(/DELIMITER/);
+    expect(sql).not.toMatch(/CREATE PROCEDURE/);
+    expect(sql).not.toMatch(/START TRANSACTION/);
+    expect(sql).not.toMatch(/COMMIT/);
+    expect(sql).toMatch(/^  -- Stage 4:/m);
+  });
+
+  it('uses backtick-quoted identifier for custom tempTable name', () => {
+    const sql = renderStage4({ tempTable: 'MyCustomStaging' });
+    expect(sql).toMatch(/`MyCustomStaging`/);
+    expect(sql).not.toMatch(/TempAllTrees/);
+  });
+
+  it('rejects an invalid tempTable identifier (injection guard)', () => {
+    expect(() => renderStage4({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
   });
 });

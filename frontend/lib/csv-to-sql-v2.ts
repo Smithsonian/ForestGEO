@@ -450,6 +450,78 @@ export function renderStage3(opts: Stage3Options): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 4: Cleanups + deterministic HOM inheritance
+// ---------------------------------------------------------------------------
+
+export interface Stage4Options {
+  tempTable: string;
+}
+
+/**
+ * Renders the Stage 4 procedure-body fragment.
+ *
+ * Emits, in order:
+ *   1. Zero-out DBH=0 rows (treats zero as "not measured")
+ *   2. Build `prior_census_order` temp table ranking prior censuses deterministically:
+ *      - Primary: StartDate DESC when both target and candidate have a StartDate
+ *        and candidate StartDate < target StartDate
+ *      - Fallback: numeric PlotCensusNumber DESC, strictly less than target's numeric value,
+ *        used only when dates cannot be compared (either side is NULL)
+ *      Rows that qualify under neither ordering are excluded from the table entirely.
+ *   3. Inherit HOM from the top-ranked prior census for O-tagged rows with HOM IS NULL
+ *   4. Fall back to 1.3 for any remaining HOM IS NULL rows where DBH IS NOT NULL
+ *
+ * The numeric fallback explicitly excludes candidate PlotCensusNumber >= target's numeric
+ * value to prevent look-back at higher-numbered censuses when StartDate is missing.
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage4(opts: Stage4Options): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 4: cleanups and deterministic HOM inheritance
+
+  UPDATE ${t} SET DBH = NULL WHERE DBH = 0;
+
+  DROP TEMPORARY TABLE IF EXISTS prior_census_order;
+  CREATE TEMPORARY TABLE prior_census_order AS
+    SELECT CensusID, StartDate, PlotCensusNumber,
+           ROW_NUMBER() OVER (
+             ORDER BY
+               CASE WHEN StartDate IS NOT NULL AND @target_start_date IS NOT NULL
+                    THEN StartDate END DESC,
+               CASE WHEN PlotCensusNumber REGEXP '^-?[0-9]+(\\.{1}[0-9]+)?$'
+                         AND (SELECT PlotCensusNumber FROM Census WHERE CensusID = @target_census_id) REGEXP '^-?[0-9]+(\\.{1}[0-9]+)?$'
+                    THEN CAST(PlotCensusNumber AS DECIMAL(20,5)) END DESC
+           ) AS rk
+      FROM Census
+      WHERE PlotID = @target_plot_id
+        AND CensusID <> @target_census_id
+        AND (
+          (StartDate IS NOT NULL AND @target_start_date IS NOT NULL AND StartDate < @target_start_date)
+          OR (
+            (@target_start_date IS NULL OR StartDate IS NULL)
+            AND PlotCensusNumber REGEXP '^-?[0-9]+(\\.{1}[0-9]+)?$'
+            AND (SELECT PlotCensusNumber FROM Census WHERE CensusID = @target_census_id) REGEXP '^-?[0-9]+(\\.{1}[0-9]+)?$'
+            AND CAST(PlotCensusNumber AS DECIMAL(20,5))
+                < CAST((SELECT PlotCensusNumber FROM Census WHERE CensusID = @target_census_id) AS DECIMAL(20,5))
+          )
+        );
+
+  UPDATE ${t} t
+    JOIN (
+      SELECT d.StemID, d.HOM
+        FROM DBH d
+        JOIN prior_census_order p ON p.CensusID = d.CensusID AND p.rk = 1
+    ) prev ON prev.StemID = t.StemID
+    SET t.HOM = prev.HOM
+    WHERE t.HOM IS NULL AND t.DBH IS NOT NULL AND t.Tagged = 'O';
+
+  UPDATE ${t} SET HOM = 1.3
+    WHERE HOM IS NULL AND DBH IS NOT NULL;
+`;
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
