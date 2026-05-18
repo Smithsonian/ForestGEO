@@ -97,9 +97,7 @@ describe('renderProcedureEnvelope', () => {
 describe('renderStage0', () => {
   it('census guard counts rows for (plot, census) pair', () => {
     const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
-    expect(sql).toMatch(
-      /SELECT COUNT\(\*\), MIN\(CensusID\), MIN\(StartDate\), MIN\(PlotCensusNumber\)\s+INTO _census_count, _target_census_id, _target_start_date, _target_census_number/
-    );
+    expect(sql).toMatch(/SELECT COUNT\(\*\), MIN\(CensusID\), MIN\(StartDate\)\s+INTO _census_count, _target_census_id, _target_start_date/);
     expect(sql).toMatch(/PlotID = 1\s+AND PlotCensusNumber = '2'/);
     expect(sql).toMatch(/IF _census_count <> 1 THEN/);
     expect(sql).toMatch(/SIGNAL SQLSTATE '45000'/);

@@ -129,8 +129,8 @@ export function renderStage0(opts: Stage0Options): string {
   const censusLit = SqlString.escape(opts.censusNumber);
 
   const guard = `  -- Stage 0: target census guard
-  SELECT COUNT(*), MIN(CensusID), MIN(StartDate), MIN(PlotCensusNumber)
-    INTO _census_count, _target_census_id, _target_start_date, _target_census_number
+  SELECT COUNT(*), MIN(CensusID), MIN(StartDate)
+    INTO _census_count, _target_census_id, _target_start_date
     FROM Census
     WHERE PlotID = ${opts.plotId}
       AND PlotCensusNumber = ${censusLit};
