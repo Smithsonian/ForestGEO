@@ -309,6 +309,114 @@ export function renderStage2(opts: Stage2Options): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 2b: Legacy resprout look-back
+// ---------------------------------------------------------------------------
+
+export interface Stage2bOptions {
+  tempTable: string;
+}
+
+/**
+ * Renders the Stage 2b procedure-body fragment.
+ *
+ * Mirrors the legacy ctfsweb Dataupload.php:354-400 look-back: when a staging row
+ * has TreeID NOT NULL AND StemID IS NULL after Stage 2 (we know the tree but not
+ * which existing stem), conditionally reuse a prior census's StemID for that stem.
+ *
+ * Eligibility (all must hold for reuse):
+ *   1. Current row's Codes does NOT contain a stem-lost/resprout marker.
+ *   2. There exists a strictly-prior census on the same plot.
+ *   3. That prior census had exactly one measured stem on the tree.
+ *   4. The prior measurement had no dead-code.
+ *   5. Prior DBH >= 10 OR the prior measurement carried a resprout-code.
+ *
+ * When eligible, the most-recent eligible prior CensusID's StemID is written to
+ * the staging row. Otherwise StemID stays NULL — Stage 7 will then insert a new
+ * Stem (normal M-bucket path). Stage 2b never SIGNALs broadly for M rows.
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage2bResprout(opts: Stage2bOptions): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 2b: legacy resprout look-back (Dataupload.php:354-400)
+  DROP TEMPORARY TABLE IF EXISTS resprout_codes;
+  DROP TEMPORARY TABLE IF EXISTS dead_codes;
+  DROP TEMPORARY TABLE IF EXISTS resprout_codes_str;
+  DROP TEMPORARY TABLE IF EXISTS current_row_excluded;
+  DROP TEMPORARY TABLE IF EXISTS resprout_candidates;
+
+  CREATE TEMPORARY TABLE resprout_codes AS
+    SELECT TSMID FROM TSMAttributes WHERE LOWER(Description) LIKE '%stem lost%';
+
+  CREATE TEMPORARY TABLE dead_codes AS
+    SELECT TSMID FROM TSMAttributes WHERE LOWER(Description) LIKE '%dead%';
+
+  CREATE TEMPORARY TABLE resprout_codes_str AS
+    SELECT TSMCode FROM TSMAttributes WHERE LOWER(Description) LIKE '%stem lost%';
+
+  CREATE TEMPORARY TABLE current_row_excluded AS
+    SELECT DISTINCT t.TempID
+      FROM ${t} t
+      JOIN resprout_codes_str rc
+        ON FIND_IN_SET(rc.TSMCode, REPLACE(t.Codes, ';', ',')) > 0
+      WHERE t.TreeID IS NOT NULL AND t.StemID IS NULL;
+
+  CREATE TEMPORARY TABLE resprout_candidates AS
+    SELECT t.TempID,
+           prior_dbh.StemID AS PriorStemID,
+           prior_c.CensusID AS PriorCensusID,
+           prior_dbh.DBH    AS PriorDBH,
+           (CASE WHEN EXISTS (
+              SELECT 1
+                FROM DBHAttributes da
+                JOIN dead_codes dc ON dc.TSMID = da.TSMID
+                WHERE da.DBHID = prior_dbh.DBHID
+              ) THEN 1 ELSE 0 END) AS HasDeadCode,
+           (CASE WHEN EXISTS (
+              SELECT 1
+                FROM DBHAttributes da
+                JOIN resprout_codes rc ON rc.TSMID = da.TSMID
+                WHERE da.DBHID = prior_dbh.DBHID
+              ) THEN 1 ELSE 0 END) AS HasResproutCode
+      FROM ${t} t
+      JOIN Census prior_c
+        ON prior_c.PlotID = @target_plot_id
+       AND prior_c.CensusID <> @target_census_id
+       AND (
+         (prior_c.StartDate IS NOT NULL AND @target_start_date IS NOT NULL AND prior_c.StartDate < @target_start_date)
+         OR (
+           @target_start_date IS NULL
+           AND prior_c.PlotCensusNumber REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$'
+         )
+       )
+      JOIN DBH prior_dbh
+        ON prior_dbh.CensusID = prior_c.CensusID
+      JOIN Stem s ON s.StemID = prior_dbh.StemID AND s.TreeID = t.TreeID
+      LEFT JOIN current_row_excluded x ON x.TempID = t.TempID
+      WHERE t.TreeID IS NOT NULL
+        AND t.StemID IS NULL
+        AND x.TempID IS NULL
+        AND (
+          SELECT COUNT(DISTINCT d2.StemID)
+            FROM DBH d2
+            JOIN Stem s2 ON s2.StemID = d2.StemID
+            WHERE d2.CensusID = prior_c.CensusID
+              AND s2.TreeID = t.TreeID
+        ) = 1;
+
+  UPDATE ${t} t
+    JOIN (
+      SELECT TempID, PriorStemID,
+             ROW_NUMBER() OVER (PARTITION BY TempID ORDER BY PriorCensusID DESC) AS rk
+        FROM resprout_candidates
+        WHERE HasDeadCode = 0
+          AND (PriorDBH >= 10 OR HasResproutCode = 1)
+    ) chosen ON chosen.TempID = t.TempID AND chosen.rk = 1
+    SET t.StemID = chosen.PriorStemID;
+`;
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 

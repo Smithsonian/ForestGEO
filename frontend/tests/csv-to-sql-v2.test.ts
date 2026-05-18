@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1, renderStage2 } from '../lib/csv-to-sql-v2';
+import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1, renderStage2, renderStage2bResprout } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('parseCliArgsV2', () => {
@@ -309,5 +309,115 @@ describe('renderStage2', () => {
 
   it('rejects an invalid tempTable identifier (injection guard)', () => {
     expect(() => renderStage2({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  });
+});
+
+describe('renderStage2bResprout', () => {
+  const defaultSql = () => renderStage2bResprout({ tempTable: 'TempAllTrees' });
+
+  it('builds resprout_codes from TSMAttributes Description LIKE %stem lost%', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_codes AS\s+SELECT TSMID FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%stem lost%'/);
+  });
+
+  it('builds dead_codes from TSMAttributes Description LIKE %dead%', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE dead_codes AS\s+SELECT TSMID FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%dead%'/);
+  });
+
+  it('builds resprout_codes_str (TSMCode form) for staging-Codes string matching', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_codes_str AS\s+SELECT TSMCode FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%stem lost%'/);
+  });
+
+  it('derives current_row_excluded from staging Codes via FIND_IN_SET', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE current_row_excluded AS/);
+    expect(sql).toMatch(/FIND_IN_SET\(rc\.TSMCode, REPLACE\(t\.Codes, ';', ','\)\) > 0/);
+    expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL AND t\.StemID IS NULL/);
+  });
+
+  it('resprout_candidates joins prior Census strictly before target (by date OR numeric PlotCensusNumber)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_candidates AS/);
+    expect(sql).toMatch(/prior_c\.PlotID = @target_plot_id/);
+    expect(sql).toMatch(/prior_c\.CensusID <> @target_census_id/);
+    expect(sql).toMatch(/prior_c\.StartDate < @target_start_date/);
+    expect(sql).toMatch(/PlotCensusNumber REGEXP/);
+  });
+
+  it('resprout_candidates restricts via Stem.TreeID = staging TreeID and prior DBH.CensusID', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/JOIN DBH prior_dbh\s+ON prior_dbh\.CensusID = prior_c\.CensusID/);
+    expect(sql).toMatch(/JOIN Stem s ON s\.StemID = prior_dbh\.StemID AND s\.TreeID = t\.TreeID/);
+  });
+
+  it('resprout_candidates requires prior census to have exactly one measured stem on the tree', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(
+      /SELECT COUNT\(DISTINCT d2\.StemID\)\s+FROM DBH d2\s+JOIN Stem s2 ON s2\.StemID = d2\.StemID\s+WHERE d2\.CensusID = prior_c\.CensusID\s+AND s2\.TreeID = t\.TreeID\s+\) = 1/
+    );
+  });
+
+  it('resprout_candidates restricts to staging rows where TreeID NOT NULL AND StemID IS NULL and not excluded', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL\s+AND t\.StemID IS NULL\s+AND x\.TempID IS NULL/);
+  });
+
+  it('resprout_candidates flags HasDeadCode via DBHAttributes JOIN dead_codes', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(
+      /CASE WHEN EXISTS \(\s+SELECT 1\s+FROM DBHAttributes da\s+JOIN dead_codes dc ON dc\.TSMID = da\.TSMID\s+WHERE da\.DBHID = prior_dbh\.DBHID\s+\) THEN 1 ELSE 0 END\) AS HasDeadCode/
+    );
+  });
+
+  it('resprout_candidates flags HasResproutCode via DBHAttributes JOIN resprout_codes', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(
+      /CASE WHEN EXISTS \(\s+SELECT 1\s+FROM DBHAttributes da\s+JOIN resprout_codes rc ON rc\.TSMID = da\.TSMID\s+WHERE da\.DBHID = prior_dbh\.DBHID\s+\) THEN 1 ELSE 0 END\) AS HasResproutCode/
+    );
+  });
+
+  it('final UPDATE fires only when HasDeadCode = 0 AND (PriorDBH >= 10 OR HasResproutCode = 1)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/WHERE HasDeadCode = 0\s+AND \(PriorDBH >= 10 OR HasResproutCode = 1\)/);
+  });
+
+  it('final UPDATE picks the most recent eligible prior via ROW_NUMBER() ORDER BY PriorCensusID DESC', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/ROW_NUMBER\(\) OVER \(PARTITION BY TempID ORDER BY PriorCensusID DESC\) AS rk/);
+    expect(sql).toMatch(/chosen\.rk = 1/);
+    expect(sql).toMatch(/SET t\.StemID = chosen\.PriorStemID;/);
+  });
+
+  it('does not SIGNAL — Stage 2b never errors broadly for M rows', () => {
+    const sql = defaultSql();
+    expect(sql).not.toMatch(/SIGNAL/);
+  });
+
+  it('never references Tree.PlotID or tr.PlotID', () => {
+    const sql = defaultSql();
+    expect(sql).not.toMatch(/Tree\.PlotID/);
+    expect(sql).not.toMatch(/tr\.PlotID/);
+  });
+
+  it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
+    const sql = defaultSql();
+    expect(sql).not.toMatch(/DROP PROCEDURE/);
+    expect(sql).not.toMatch(/DELIMITER/);
+    expect(sql).not.toMatch(/CREATE PROCEDURE/);
+    expect(sql).not.toMatch(/START TRANSACTION/);
+    expect(sql).not.toMatch(/COMMIT/);
+    expect(sql).toMatch(/^  -- Stage 2b:/m);
+  });
+
+  it('uses backtick-quoted identifier for custom tempTable name', () => {
+    const sql = renderStage2bResprout({ tempTable: 'MyCustomStaging' });
+    expect(sql).toMatch(/`MyCustomStaging`/);
+    expect(sql).not.toMatch(/TempAllTrees/);
+  });
+
+  it('rejects an invalid tempTable identifier (injection guard)', () => {
+    expect(() => renderStage2bResprout({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
   });
 });
