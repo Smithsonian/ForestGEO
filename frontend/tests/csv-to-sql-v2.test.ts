@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1, renderStage2, renderStage2bResprout } from '../lib/csv-to-sql-v2';
+import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1, renderStage2, renderStage2bResprout, renderStage3 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('parseCliArgsV2', () => {
@@ -419,5 +419,12 @@ describe('renderStage2bResprout', () => {
 
   it('rejects an invalid tempTable identifier (injection guard)', () => {
     expect(() => renderStage2bResprout({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  });
+});
+
+describe('renderStage3', () => {
+  it('classifies via case expression', () => {
+    const sql = renderStage3({ tempTable: 'TempAllTrees' });
+    expect(sql).toMatch(/UPDATE `TempAllTrees` SET Tagged =\s+CASE\s+WHEN TreeID IS NULL THEN 'N'\s+WHEN StemID IS NULL THEN 'M'\s+ELSE 'O'\s+END;/);
   });
 });

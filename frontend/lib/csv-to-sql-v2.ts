@@ -417,6 +417,39 @@ export function renderStage2bResprout(opts: Stage2bOptions): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 3: O/M/N classification
+// ---------------------------------------------------------------------------
+
+export interface Stage3Options {
+  tempTable: string;
+}
+
+/**
+ * Renders the Stage 3 procedure-body fragment.
+ *
+ * Classifies each staging row into one of three buckets:
+ *   O (Old)     — TreeID and StemID both resolved by Stage 2/2b
+ *   M (Missing) — TreeID resolved but StemID still NULL (new stem on known tree)
+ *   N (New)     — TreeID NULL (tree not yet in the database)
+ *
+ * A single UPDATE with a CASE expression writes the Tag column, which
+ * later stages use to route rows into the correct insert/update path.
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage3(opts: Stage3Options): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 3: O/M/N classification
+  UPDATE ${t} SET Tagged =
+    CASE
+      WHEN TreeID IS NULL THEN 'N'
+      WHEN StemID IS NULL THEN 'M'
+      ELSE 'O'
+    END;
+`;
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
