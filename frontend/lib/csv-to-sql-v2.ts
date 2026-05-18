@@ -655,6 +655,57 @@ export function renderStage5(opts: Stage5Options): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 6: Cursor-driven new Tree inserts
+// ---------------------------------------------------------------------------
+
+export interface CursorStageResult {
+  cursorDeclaration: string;
+  body: string;
+}
+
+/**
+ * Renders the Stage 6 cursor declaration and body fragment.
+ *
+ * The cursor declaration is bare (no handler) — the envelope emits the single
+ * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ *
+ * The body:
+ *   - Opens cur_new_trees, iterating over DISTINCT (Tag, SpeciesID, SubSpeciesID)
+ *     rows where Tagged = 'N', ordered by first_temp_id for determinism.
+ *   - Inserts one Tree row per distinct tag, captures LAST_INSERT_ID(), and
+ *     back-fills TreeID into every staging row with that Tag.
+ *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
+ *
+ * Tree has no PlotID column; scoping is via the Quadrat join chain, which is
+ * already resolved in Stage 2.
+ */
+export function renderStage6NewTrees(opts: { tempTable: string }): CursorStageResult {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return {
+    cursorDeclaration: `DECLARE cur_new_trees CURSOR FOR
+    SELECT DISTINCT Tag, SpeciesID, SubSpeciesID, MIN(TempID) AS first_temp_id
+      FROM ${t}
+      WHERE Tagged = 'N'
+      GROUP BY Tag, SpeciesID, SubSpeciesID
+      ORDER BY first_temp_id;`,
+    body: `  -- Stage 6: insert new Tree rows row-by-row
+  SET _done = FALSE;
+  OPEN cur_new_trees;
+  read_new_trees: LOOP
+    FETCH cur_new_trees INTO _cur_tag, _cur_species_id, _cur_subspecies_id, _cur_first_temp_id;
+    IF _done THEN LEAVE read_new_trees; END IF;
+    INSERT INTO Tree (Tag, SpeciesID, SubSpeciesID) VALUES (_cur_tag, _cur_species_id, _cur_subspecies_id);
+    SET _new_tree_id = LAST_INSERT_ID();
+    UPDATE ${t} SET TreeID = _new_tree_id
+      WHERE Tagged = 'N' AND Tag = _cur_tag;
+  END LOOP;
+  CLOSE cur_new_trees;
+  SET _done = FALSE;
+`
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 

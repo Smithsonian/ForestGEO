@@ -8,7 +8,8 @@ import {
   renderStage2bResprout,
   renderStage3,
   renderStage4,
-  renderStage5
+  renderStage5,
+  renderStage6NewTrees
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
@@ -656,5 +657,28 @@ describe('renderStage5', () => {
 
   it('rejects an invalid tempTable identifier (injection guard)', () => {
     expect(() => renderStage5({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  });
+});
+
+describe('renderStage6NewTrees', () => {
+  it('returns cursorDeclaration without handler', () => {
+    const { cursorDeclaration } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
+    expect(cursorDeclaration).toMatch(/DECLARE cur_new_trees CURSOR FOR/);
+    expect(cursorDeclaration).not.toMatch(/HANDLER/); // shared handler lives in envelope
+  });
+
+  it('body opens, fetches, inserts, captures LAST_INSERT_ID, updates staging, closes', () => {
+    const { body } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
+    expect(body).toMatch(/OPEN cur_new_trees;/);
+    expect(body).toMatch(/FETCH cur_new_trees INTO/);
+    expect(body).toMatch(/INSERT INTO Tree \(Tag, SpeciesID, SubSpeciesID\) VALUES/);
+    expect(body).toMatch(/SET _new_tree_id = LAST_INSERT_ID\(\);/);
+    expect(body).toMatch(/UPDATE `TempAllTrees` SET TreeID = _new_tree_id/);
+    expect(body).toMatch(/CLOSE cur_new_trees;/);
+  });
+
+  it('does not reference Tree.PlotID', () => {
+    const { body } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
+    expect(body).not.toMatch(/Tree.*PlotID|PlotID.*Tree/);
   });
 });
