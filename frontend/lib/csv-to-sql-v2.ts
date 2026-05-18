@@ -749,6 +749,49 @@ export function renderStage7NewStems(opts: { tempTable: string }): CursorStageRe
 }
 
 // ---------------------------------------------------------------------------
+// Stage 8: Cursor-driven DBH inserts
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the Stage 8 cursor declaration and body fragment.
+ *
+ * The cursor declaration is bare (no handler) — the envelope emits the single
+ * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ *
+ * The body:
+ *   - Opens cur_dbh, iterating over EVERY staging row ordered by TempID.
+ *   - Inserts one DBH row per staging row with explicit MeasureID = 0, then
+ *     captures LAST_INSERT_ID() and writes the generated DBHID back to that
+ *     specific staging row via its TempID primary key.
+ *   - Reads PrimaryStem from staging — that column is populated by Stage 9a
+ *     which runs before Stage 8 in the composer's ordering.
+ *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
+ */
+export function renderStage8DBH(opts: { tempTable: string }): CursorStageResult {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return {
+    cursorDeclaration: `DECLARE cur_dbh CURSOR FOR
+    SELECT TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments
+      FROM ${t}
+      ORDER BY TempID;`,
+    body: `  -- Stage 8: insert DBH rows row-by-row
+  SET _done = FALSE;
+  OPEN cur_dbh;
+  read_dbh: LOOP
+    FETCH cur_dbh INTO _cur_temp_id, _cur_stem_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments;
+    IF _done THEN LEAVE read_dbh; END IF;
+    INSERT INTO DBH (MeasureID, StemID, CensusID, DBH, HOM, PrimaryStem, ExactDate, Comments)
+      VALUES (0, _cur_stem_id, @target_census_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments);
+    SET _new_dbh_id = LAST_INSERT_ID();
+    UPDATE ${t} SET DBHID = _new_dbh_id WHERE TempID = _cur_temp_id;
+  END LOOP;
+  CLOSE cur_dbh;
+  SET _done = FALSE;
+`
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 

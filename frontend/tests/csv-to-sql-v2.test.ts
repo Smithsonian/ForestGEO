@@ -10,7 +10,8 @@ import {
   renderStage4,
   renderStage5,
   renderStage6NewTrees,
-  renderStage7NewStems
+  renderStage7NewStems,
+  renderStage8DBH
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
@@ -707,5 +708,32 @@ describe('renderStage7NewStems', () => {
     const { cursorDeclaration } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
     expect(cursorDeclaration).toMatch(/SELECT TempID, TreeID, StemTag, QuadratID, X, Y/);
     expect(cursorDeclaration).toMatch(/WHERE StemID IS NULL/);
+  });
+});
+
+describe('renderStage8DBH', () => {
+  it('cursor declaration has no handler', () => {
+    const { cursorDeclaration } = renderStage8DBH({ tempTable: 'TempAllTrees' });
+    expect(cursorDeclaration).toMatch(/DECLARE cur_dbh CURSOR FOR/);
+    expect(cursorDeclaration).not.toMatch(/HANDLER/);
+  });
+
+  it('INSERT includes explicit MeasureID=0, StemID, CensusID from @target_census_id, and Comments', () => {
+    const { body } = renderStage8DBH({ tempTable: 'TempAllTrees' });
+    expect(body).toMatch(
+      /INSERT INTO DBH \(MeasureID, StemID, CensusID, DBH, HOM, PrimaryStem, ExactDate, Comments\)\s+VALUES \(0, _cur_stem_id, @target_census_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments\);/
+    );
+  });
+
+  it('per-TempID write-back of DBHID', () => {
+    const { body } = renderStage8DBH({ tempTable: 'TempAllTrees' });
+    expect(body).toMatch(/UPDATE `TempAllTrees` SET DBHID = _new_dbh_id WHERE TempID = _cur_temp_id;/);
+  });
+
+  it('cursor selects TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments over all rows', () => {
+    const { cursorDeclaration } = renderStage8DBH({ tempTable: 'TempAllTrees' });
+    expect(cursorDeclaration).toMatch(/SELECT TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments/);
+    expect(cursorDeclaration).toMatch(/ORDER BY TempID/);
+    expect(cursorDeclaration).not.toMatch(/WHERE/);
   });
 });
