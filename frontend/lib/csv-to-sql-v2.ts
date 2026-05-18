@@ -44,7 +44,7 @@ export function parseCliArgsV2(argv: string[]): CliArgsV2 {
   const effectiveOutput = values.output ?? `${values.input}.v2.sql`;
   const augmentedArgv = values.output ? stripV2Flags(argv) : [...stripV2Flags(argv), '--output', effectiveOutput];
 
-  const shared = parseSharedCliArgs(augmentedArgv, { outputSuffix: '.v2.sql' });
+  const shared = parseSharedCliArgs(augmentedArgv);
   return { ...shared, allowReload: Boolean(values['allow-reload']) };
 }
 
@@ -60,6 +60,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(err => {
     console.error(err instanceof Error ? err.message : String(err));
+    // node:util parseArgs throws TypeError on malformed CLI input; exit 2 matches v1.
     process.exit(err instanceof TypeError ? 2 : 1);
   });
 }

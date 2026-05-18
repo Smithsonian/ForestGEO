@@ -30,4 +30,8 @@ describe('parseCliArgsV2', () => {
   it('honors explicit --output', () => {
     expect(parseCliArgsV2([...baseArgs, '--output', '/tmp/x.sql']).output).toBe('/tmp/x.sql');
   });
+
+  it('rejects unknown flag', () => {
+    expect(() => parseCliArgsV2([...baseArgs, '--garbage'])).toThrow();
+  });
 });
