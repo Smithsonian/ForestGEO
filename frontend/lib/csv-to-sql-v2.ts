@@ -792,6 +792,108 @@ export function renderStage8DBH(opts: { tempTable: string }): CursorStageResult 
 }
 
 // ---------------------------------------------------------------------------
+// Stage 9: PrimaryStem derivation (9a) + DBHAttributes explosion (9b)
+// ---------------------------------------------------------------------------
+
+export interface Stage9Result {
+  bodyPre: string;
+  bodyPost: string;
+}
+
+/**
+ * Renders the Stage 9 body fragments.
+ *
+ * Stage 9 is split around Stage 8 in the composer's ordering:
+ *
+ * **9a (bodyPre)** — runs BEFORE Stage 8:
+ *   Derives PrimaryStem on staging rows by exploding the Codes field and joining
+ *   TSMAttributes to find 'main' and 'secondary' marker tokens. SIGNALs if any
+ *   row carries both markers simultaneously. Writes the resolved marker string
+ *   ('main' or 'secondary') back to PrimaryStem on the staging row.
+ *
+ * **9b (bodyPost)** — runs AFTER Stage 8:
+ *   Explodes Codes into DBHAttributes(DBHID, TSMID), excluding 'main'/'secondary'
+ *   marker tokens, empty tokens, and '*'. Only rows with a non-NULL DBHID
+ *   (written by Stage 8) are eligible.
+ *
+ * MySQL does not permit WITH RECURSIVE inside a derived table in all versions,
+ * so 9b uses a top-level WITH RECURSIVE that wraps the entire INSERT.
+ *
+ * Output is indented two spaces — these are procedure-body fragments, not full procedures.
+ */
+export function renderStage9PrimaryAndAttrs(opts: { tempTable: string }): Stage9Result {
+  const t = escapeSqlIdentifier(opts.tempTable);
+
+  const bodyPre = `  -- Stage 9a: derive PrimaryStem from main/secondary markers in Codes
+  DROP TEMPORARY TABLE IF EXISTS primary_marker_map;
+  CREATE TEMPORARY TABLE primary_marker_map AS
+    WITH RECURSIVE numbers AS (
+      SELECT 1 AS n
+      UNION ALL
+      SELECT n + 1 FROM numbers
+        WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
+                             FROM ${t} WHERE Codes IS NOT NULL), 1)
+    ),
+    exploded AS (
+      SELECT t.TempID,
+             TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(t.Codes, ';', n.n), ';', -1)) AS token
+        FROM ${t} t
+        JOIN numbers n
+          ON n.n <= LENGTH(t.Codes) - LENGTH(REPLACE(t.Codes, ';', '')) + 1
+        WHERE t.Codes IS NOT NULL AND t.Codes <> ''
+    )
+    SELECT e.TempID, LOWER(tsm.Description) AS marker
+      FROM exploded e
+      JOIN TSMAttributes tsm ON tsm.TSMCode = e.token
+      WHERE LOWER(tsm.Description) IN ('main', 'secondary');
+
+  -- Fail if any row has BOTH main and secondary markers
+  SET _bad = NULL;
+  SELECT GROUP_CONCAT(DISTINCT t.TempID) INTO _bad FROM (
+    SELECT TempID
+      FROM primary_marker_map
+      GROUP BY TempID
+      HAVING COUNT(DISTINCT marker) > 1
+  ) t;
+  IF _bad IS NOT NULL THEN
+    SET _message = CONCAT('Both main and secondary markers present on TempIDs: ', _bad);
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+  END IF;
+
+  -- Apply: set PrimaryStem to 'main' or 'secondary' on the affected staging rows
+  UPDATE ${t} t
+    JOIN primary_marker_map m ON m.TempID = t.TempID
+    SET t.PrimaryStem = m.marker;
+`;
+
+  const bodyPost = `  -- Stage 9b: explode Codes into DBHAttributes (DBHID, TSMID), excluding markers/empty/'*'
+  WITH RECURSIVE numbers AS (
+    SELECT 1 AS n
+    UNION ALL
+    SELECT n + 1 FROM numbers
+      WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
+                           FROM ${t} WHERE Codes IS NOT NULL), 1)
+  )
+  INSERT INTO DBHAttributes (DBHID, TSMID)
+    SELECT DISTINCT e.DBHID, tsm.TSMID
+      FROM (
+        SELECT t.DBHID,
+               TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(t.Codes, ';', n.n), ';', -1)) AS token
+          FROM ${t} t
+          JOIN numbers n
+            ON n.n <= LENGTH(t.Codes) - LENGTH(REPLACE(t.Codes, ';', '')) + 1
+          WHERE t.Codes IS NOT NULL AND t.Codes <> ''
+            AND t.DBHID IS NOT NULL
+      ) e
+      JOIN TSMAttributes tsm ON tsm.TSMCode = e.token
+      WHERE LOWER(tsm.Description) NOT IN ('main', 'secondary')
+        AND e.token NOT IN ('', '*');
+`;
+
+  return { bodyPre, bodyPost };
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 

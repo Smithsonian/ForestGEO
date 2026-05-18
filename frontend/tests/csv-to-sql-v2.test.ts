@@ -11,7 +11,8 @@ import {
   renderStage5,
   renderStage6NewTrees,
   renderStage7NewStems,
-  renderStage8DBH
+  renderStage8DBH,
+  renderStage9PrimaryAndAttrs
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
@@ -735,5 +736,129 @@ describe('renderStage8DBH', () => {
     expect(cursorDeclaration).toMatch(/SELECT TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments/);
     expect(cursorDeclaration).toMatch(/ORDER BY TempID/);
     expect(cursorDeclaration).not.toMatch(/WHERE/);
+  });
+});
+
+describe('renderStage9PrimaryAndAttrs', () => {
+  const defaultResult = () => renderStage9PrimaryAndAttrs({ tempTable: 'TempAllTrees' });
+
+  // --- 9a (bodyPre) ---
+
+  it('bodyPre builds primary_marker_map via DROP/CREATE and a recursive CTE', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).toMatch(/DROP TEMPORARY TABLE IF EXISTS primary_marker_map;/);
+    expect(bodyPre).toMatch(/CREATE TEMPORARY TABLE primary_marker_map AS/);
+    expect(bodyPre).toMatch(/WITH RECURSIVE numbers AS/);
+  });
+
+  it('bodyPre CTE explodes Codes on ";" using SUBSTRING_INDEX double-pass', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).toMatch(/TRIM\(SUBSTRING_INDEX\(SUBSTRING_INDEX\(t\.Codes, ';', n\.n\), ';', -1\)\) AS token/);
+  });
+
+  it('bodyPre joins TSMAttributes and filters to main/secondary markers only', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).toMatch(/JOIN TSMAttributes tsm ON tsm\.TSMCode = e\.token/);
+    expect(bodyPre).toMatch(/WHERE LOWER\(tsm\.Description\) IN \('main', 'secondary'\)/);
+    expect(bodyPre).toMatch(/LOWER\(tsm\.Description\) AS marker/);
+  });
+
+  it('bodyPre SIGNALs when a row carries both main and secondary markers', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).toMatch(/SIGNAL SQLSTATE '45000'/);
+    expect(bodyPre).toMatch(/Both main and secondary markers present on TempIDs: /);
+  });
+
+  it('bodyPre both-marker check wraps GROUP BY in a subquery so SELECT INTO gets a scalar', () => {
+    const { bodyPre } = defaultResult();
+    // The outer SELECT...INTO must be wrapped around a subquery that does the HAVING
+    expect(bodyPre).toMatch(
+      /SELECT GROUP_CONCAT\(DISTINCT t\.TempID\) INTO _bad FROM \(\s+SELECT TempID\s+FROM primary_marker_map\s+GROUP BY TempID\s+HAVING COUNT\(DISTINCT marker\) > 1\s+\) t;/
+    );
+  });
+
+  it('bodyPre resets _bad to NULL before the both-marker check', () => {
+    const { bodyPre } = defaultResult();
+    const resetIdx = bodyPre.indexOf('SET _bad = NULL;');
+    const signalIdx = bodyPre.indexOf('SIGNAL SQLSTATE');
+    expect(resetIdx).toBeGreaterThan(0);
+    expect(resetIdx).toBeLessThan(signalIdx);
+  });
+
+  it('bodyPre UPDATE sets staging PrimaryStem to m.marker (the literal string from TSMAttributes)', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).toMatch(/UPDATE `TempAllTrees` t\s+JOIN primary_marker_map m ON m\.TempID = t\.TempID\s+SET t\.PrimaryStem = m\.marker;/);
+  });
+
+  it('bodyPre is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
+    const { bodyPre } = defaultResult();
+    expect(bodyPre).not.toMatch(/DROP PROCEDURE/);
+    expect(bodyPre).not.toMatch(/DELIMITER/);
+    expect(bodyPre).not.toMatch(/CREATE PROCEDURE/);
+    expect(bodyPre).not.toMatch(/START TRANSACTION/);
+    expect(bodyPre).not.toMatch(/COMMIT/);
+    expect(bodyPre).toMatch(/^  -- Stage 9a:/m);
+  });
+
+  // --- 9b (bodyPost) ---
+
+  it('bodyPost inserts into DBHAttributes with columns (DBHID, TSMID) only — no CensusID', () => {
+    const { bodyPost } = defaultResult();
+    // Must match exactly (DBHID, TSMID) with no extra columns
+    expect(bodyPost).toMatch(/INSERT INTO DBHAttributes \(DBHID, TSMID\)/);
+    expect(bodyPost).not.toMatch(/CensusID/);
+  });
+
+  it('bodyPost selects DISTINCT (DBHID, TSMID) pairs', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/SELECT DISTINCT e\.DBHID, tsm\.TSMID/);
+  });
+
+  it('bodyPost only processes rows where DBHID IS NOT NULL', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/AND t\.DBHID IS NOT NULL/);
+  });
+
+  it('bodyPost excludes main and secondary markers via WHERE NOT IN clause on Description', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/WHERE LOWER\(tsm\.Description\) NOT IN \('main', 'secondary'\)/);
+  });
+
+  it('bodyPost excludes empty tokens and "*" tokens', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/AND e\.token NOT IN \('', '\*'\)/);
+  });
+
+  it('bodyPost uses a recursive CTE for the Codes explosion', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/WITH RECURSIVE numbers AS/);
+    expect(bodyPost).toMatch(/TRIM\(SUBSTRING_INDEX\(SUBSTRING_INDEX\(t\.Codes, ';', n\.n\), ';', -1\)\) AS token/);
+  });
+
+  it('bodyPost joins TSMAttributes to resolve TSMID from each token', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).toMatch(/JOIN TSMAttributes tsm ON tsm\.TSMCode = e\.token/);
+  });
+
+  it('bodyPost is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
+    const { bodyPost } = defaultResult();
+    expect(bodyPost).not.toMatch(/DROP PROCEDURE/);
+    expect(bodyPost).not.toMatch(/DELIMITER/);
+    expect(bodyPost).not.toMatch(/CREATE PROCEDURE/);
+    expect(bodyPost).not.toMatch(/START TRANSACTION/);
+    expect(bodyPost).not.toMatch(/COMMIT/);
+    expect(bodyPost).toMatch(/^  -- Stage 9b:/m);
+  });
+
+  it('uses backtick-quoted identifier for custom tempTable name in both fragments', () => {
+    const { bodyPre, bodyPost } = renderStage9PrimaryAndAttrs({ tempTable: 'MyCustomStaging' });
+    expect(bodyPre).toMatch(/`MyCustomStaging`/);
+    expect(bodyPost).toMatch(/`MyCustomStaging`/);
+    expect(bodyPre).not.toMatch(/TempAllTrees/);
+    expect(bodyPost).not.toMatch(/TempAllTrees/);
+  });
+
+  it('rejects an invalid tempTable identifier (injection guard)', () => {
+    expect(() => renderStage9PrimaryAndAttrs({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
   });
 });
