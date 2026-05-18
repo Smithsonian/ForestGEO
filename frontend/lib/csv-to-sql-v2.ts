@@ -1,8 +1,11 @@
+import * as fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import SqlString from 'sqlstring';
 import {
   escapeSqlIdentifier,
+  mapCsvRowToStagingRow,
   parseSharedCliArgs,
+  readCsvFile,
   renderCreateStagingTable,
   renderInsertChunks,
   type SharedCliArgs,
@@ -949,18 +952,89 @@ export function renderStage10(opts: { tempTable: string }): string {
 }
 
 // ---------------------------------------------------------------------------
-// Entrypoint stub (Task 16 replaces the throw with real logic)
+// Pipeline composer
 // ---------------------------------------------------------------------------
 
+export interface RenderFullPipelineOptions {
+  args: CliArgsV2;
+  stagingRows: StagingRow[];
+}
+
+/**
+ * Composes every stage renderer into one .sql file string.
+ *
+ * Stage ordering (critical — Stage 9a must precede Stage 8 because DBH reads
+ * PrimaryStem from staging; Stage 9b must follow Stage 8 because DBHAttributes
+ * needs DBHID from Stage 8):
+ *
+ *   Stage 0 -> 1 -> 2 -> 2b -> 3 -> 4 -> 5 -> 6 -> 7 -> 9a -> 8 -> 9b -> 10
+ *
+ * Cursor declarations from Stages 6/7/8 are collected and emitted by the
+ * procedure envelope between the scalar DECLAREs and the NOT FOUND handler,
+ * matching MySQL's required declaration order.
+ */
+export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
+  const { args, stagingRows } = opts;
+  const tempTable = args.tempTable;
+
+  const stage6 = renderStage6NewTrees({ tempTable });
+  const stage7 = renderStage7NewStems({ tempTable });
+  const stage8 = renderStage8DBH({ tempTable });
+  const stage9 = renderStage9PrimaryAndAttrs({ tempTable });
+
+  const body = [
+    renderStage0({ plotId: args.plotId, censusNumber: args.censusNumber, allowReload: args.allowReload }),
+    renderStage1({ tempTable, stagingRows }),
+    renderStage2({ tempTable }),
+    renderStage2bResprout({ tempTable }),
+    renderStage3({ tempTable }),
+    renderStage4({ tempTable }),
+    renderStage5({ tempTable }),
+    stage6.body,
+    stage7.body,
+    stage9.bodyPre,
+    stage8.body,
+    stage9.bodyPost,
+    renderStage10({ tempTable })
+  ].join('\n\n');
+
+  return renderProcedureEnvelope({
+    cursorDeclarations: [stage6.cursorDeclaration, stage7.cursorDeclaration, stage8.cursorDeclaration],
+    body
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Entrypoint
+// ---------------------------------------------------------------------------
+
+const EXIT_CODE_CLI_PARSE_ERROR = 2;
+const EXIT_CODE_IO_OR_RENDER_ERROR = 1;
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const _args = parseCliArgsV2(argv);
-  throw new Error('csv-to-sql-v2 main() not yet wired — Task 16 finishes this');
+  let args: CliArgsV2;
+  try {
+    args = parseCliArgsV2(argv);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(EXIT_CODE_CLI_PARSE_ERROR);
+  }
+
+  try {
+    const rows = readCsvFile(args.input);
+    const stagingRows = rows.map(r => mapCsvRowToStagingRow(r, args.plotId, args.censusNumber));
+    const sql = renderFullPipeline({ args, stagingRows });
+    fs.writeFileSync(args.output, sql, 'utf8');
+    console.log(`Wrote ${args.output} (${stagingRows.length} rows)`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(EXIT_CODE_IO_OR_RENDER_ERROR);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(err => {
     console.error(err instanceof Error ? err.message : String(err));
-    // node:util parseArgs throws TypeError on malformed CLI input; exit 2 matches v1.
-    process.exit(err instanceof TypeError ? 2 : 1);
+    process.exit(EXIT_CODE_IO_OR_RENDER_ERROR);
   });
 }

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
+  main,
   parseCliArgsV2,
+  renderFullPipeline,
   renderProcedureEnvelope,
   renderStage0,
   renderStage1,
@@ -870,5 +875,139 @@ describe('renderStage10', () => {
     expect(sql).toMatch(
       /SELECT\s+SUM\(Tagged = 'O'\) AS old_trees,\s+SUM\(Tagged = 'M'\) AS multi_stems,\s+SUM\(Tagged = 'N'\) AS new_plants,\s+COUNT\(\*\) AS total\s+FROM `TempAllTrees`;/
     );
+  });
+});
+
+describe('renderFullPipeline', () => {
+  const SAMPLE_CSV_ROW = {
+    tag: 'T001',
+    stemtag: 'S001',
+    spcode: 'QURU',
+    quadrat: 'A01',
+    lx: '1.5',
+    ly: '2.5',
+    dbh: '12.3',
+    hom: '1.3',
+    date: '2024-03-15',
+    codes: 'A'
+  };
+
+  const sampleRow = mapCsvRowToStagingRow(SAMPLE_CSV_ROW, 7, '4');
+
+  const baseArgs = () => parseCliArgsV2(['--input', '/in.csv', '--site', 'SERC', '--plot-id', '7', '--census-number', '4']);
+
+  it('returns a non-empty string', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    expect(typeof sql).toBe('string');
+    expect(sql.length).toBeGreaterThan(0);
+  });
+
+  it('contains the procedure envelope (DROP/CREATE/END/CALL/DROP)', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
+    expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
+    expect(sql).toMatch(/END \/\//);
+    expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);/);
+    expect(sql).toMatch(/DROP PROCEDURE csv_to_sql_v2_load;/);
+  });
+
+  it('emits all 13 stage headers in order: 0, 1, 2, 2b, 3, 4, 5, 6, 7, 9a, 8, 9b, 10', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const headers = [
+      '-- Stage 0:',
+      '-- Stage 1:',
+      '-- Stage 2:',
+      '-- Stage 2b:',
+      '-- Stage 3:',
+      '-- Stage 4:',
+      '-- Stage 5:',
+      '-- Stage 6:',
+      '-- Stage 7:',
+      '-- Stage 9a:',
+      '-- Stage 8:',
+      '-- Stage 9b:',
+      '-- Stage 10:'
+    ];
+    const indices = headers.map(h => sql.indexOf(h));
+    for (let i = 0; i < indices.length; i++) {
+      expect(indices[i], `header missing: ${headers[i]}`).toBeGreaterThan(0);
+    }
+    for (let i = 1; i < indices.length; i++) {
+      expect(indices[i], `expected ${headers[i]} (at ${indices[i]}) to appear after ${headers[i - 1]} (at ${indices[i - 1]})`).toBeGreaterThan(indices[i - 1]);
+    }
+  });
+
+  it('places Stage 9a before Stage 8 (PrimaryStem must be populated before DBH insert reads it)', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const stage9aIdx = sql.indexOf('-- Stage 9a:');
+    const stage8Idx = sql.indexOf('-- Stage 8:');
+    expect(stage9aIdx).toBeGreaterThan(0);
+    expect(stage8Idx).toBeGreaterThan(stage9aIdx);
+  });
+
+  it('places Stage 9b after Stage 8 (DBHAttributes needs DBHID from DBH inserts)', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const stage8Idx = sql.indexOf('-- Stage 8:');
+    const stage9bIdx = sql.indexOf('-- Stage 9b:');
+    expect(stage8Idx).toBeGreaterThan(0);
+    expect(stage9bIdx).toBeGreaterThan(stage8Idx);
+  });
+
+  it('declares cur_new_trees, cur_new_stems, cur_dbh inside main: BEGIN before the EXIT HANDLER', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const mainBeginIdx = sql.indexOf('main: BEGIN');
+    const curTreesIdx = sql.indexOf('cur_new_trees CURSOR');
+    const curStemsIdx = sql.indexOf('cur_new_stems CURSOR');
+    const curDbhIdx = sql.indexOf('cur_dbh CURSOR');
+    const exitHandlerIdx = sql.indexOf('EXIT HANDLER FOR SQLEXCEPTION');
+    expect(mainBeginIdx).toBeGreaterThan(0);
+    expect(curTreesIdx).toBeGreaterThan(mainBeginIdx);
+    expect(curStemsIdx).toBeGreaterThan(mainBeginIdx);
+    expect(curDbhIdx).toBeGreaterThan(mainBeginIdx);
+    expect(curTreesIdx).toBeLessThan(exitHandlerIdx);
+    expect(curStemsIdx).toBeLessThan(exitHandlerIdx);
+    expect(curDbhIdx).toBeLessThan(exitHandlerIdx);
+  });
+
+  it('emits cursor declarations after scalar declares and before the NOT FOUND handler', () => {
+    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const lastScalarIdx = sql.indexOf('_cur_stem_id INT UNSIGNED');
+    const firstCursorIdx = sql.indexOf('cur_new_trees CURSOR');
+    const notFoundIdx = sql.indexOf('CONTINUE HANDLER FOR NOT FOUND');
+    expect(lastScalarIdx).toBeGreaterThan(0);
+    expect(firstCursorIdx).toBeGreaterThan(lastScalarIdx);
+    expect(notFoundIdx).toBeGreaterThan(firstCursorIdx);
+  });
+
+  it('honors a custom tempTable name in every stage', () => {
+    const args = parseCliArgsV2(['--input', '/in.csv', '--site', 'SERC', '--plot-id', '7', '--census-number', '4', '--temp-table', 'MyCustomStaging']);
+    const sql = renderFullPipeline({ args, stagingRows: [sampleRow] });
+    expect(sql).toMatch(/`MyCustomStaging`/);
+    expect(sql).not.toMatch(/`TempAllTrees`/);
+  });
+});
+
+describe('main()', () => {
+  const CSV_CONTENT = `tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes
+1,1,FOO,A1,1,1,10,1.3,2024-01-01,LI
+2,2,FOO,A1,2,2,12,1.3,2024-01-01,
+`;
+
+  it('reads a CSV, renders the pipeline, and writes the output file', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-main-'));
+    const input = path.join(tmpDir, 'in.csv');
+    const output = path.join(tmpDir, 'out.sql');
+    fs.writeFileSync(input, CSV_CONTENT, 'utf8');
+
+    await main(['--input', input, '--site', 'TEST', '--plot-id', '1', '--census-number', '1', '--output', output]);
+
+    expect(fs.existsSync(output)).toBe(true);
+    const sql = fs.readFileSync(output, 'utf8');
+    expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
+    expect(sql).toMatch(/-- Stage 0:/);
+    expect(sql).toMatch(/-- Stage 10:/);
+    expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);/);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
