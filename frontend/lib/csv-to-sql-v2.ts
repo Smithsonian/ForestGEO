@@ -1,6 +1,13 @@
 import { parseArgs } from 'node:util';
 import SqlString from 'sqlstring';
-import { parseSharedCliArgs, renderCreateStagingTable, renderInsertChunks, type SharedCliArgs, type StagingRow } from './csv-to-sql-shared';
+import {
+  escapeSqlIdentifier,
+  parseSharedCliArgs,
+  renderCreateStagingTable,
+  renderInsertChunks,
+  type SharedCliArgs,
+  type StagingRow
+} from './csv-to-sql-shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -227,6 +234,78 @@ export function renderStage1(opts: Stage1Options): string {
 ${ddl}
 
 ${inserts}`;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2: Lookup resolution
+// ---------------------------------------------------------------------------
+
+export interface Stage2Options {
+  tempTable: string;
+}
+
+/**
+ * Renders the Stage 2 procedure-body fragment.
+ *
+ * Emits, in order:
+ *   1. UPDATE tempTable SET CensusID = @target_census_id
+ *   2. UPDATE tempTable JOIN Quadrat to resolve QuadratID
+ *   3. UPDATE tempTable JOIN Species (CurrentTaxonFlag = 1) to resolve SpeciesID
+ *   4. CREATE TEMPORARY TABLE tree_lookup — scoped via Tree → Stem → Quadrat → @target_plot_id
+ *      (Tree has no PlotID column; scope must come from the Stem/Quadrat join chain)
+ *   5. UPDATE tempTable JOIN tree_lookup (TreeCount = 1) to write back TreeID
+ *   6. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
+ *   7. UPDATE tempTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
+ *      to write back StemID
+ *
+ * Ambiguous matches (TreeCount > 1 or StemCount > 1) are intentionally left
+ * unresolved in staging so Stage 5 can SIGNAL them.
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage2(opts: Stage2Options): string {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return `  -- Stage 2: lookup resolution
+  UPDATE ${t} SET CensusID = @target_census_id;
+
+  UPDATE ${t} t
+    JOIN Quadrat q ON q.QuadratName = t.QuadratName AND q.PlotID = @target_plot_id
+    SET t.QuadratID = q.QuadratID;
+
+  UPDATE ${t} t
+    JOIN Species s ON s.Mnemonic = t.Mnemonic AND s.CurrentTaxonFlag = 1
+    SET t.SpeciesID = s.SpeciesID;
+
+  CREATE TEMPORARY TABLE tree_lookup AS
+    SELECT tr.Tag,
+           MIN(tr.TreeID) AS TreeID,
+           COUNT(DISTINCT tr.TreeID) AS TreeCount
+      FROM Tree tr
+      JOIN Stem s ON s.TreeID = tr.TreeID
+      JOIN Quadrat q ON q.QuadratID = s.QuadratID
+     WHERE q.PlotID = @target_plot_id
+     GROUP BY tr.Tag;
+
+  UPDATE ${t} t
+    JOIN tree_lookup tl ON tl.Tag = t.Tag AND tl.TreeCount = 1
+    SET t.TreeID = tl.TreeID;
+
+  CREATE TEMPORARY TABLE stem_lookup AS
+    SELECT s.TreeID,
+           s.StemTag,
+           MIN(s.StemID) AS StemID,
+           COUNT(*) AS StemCount
+      FROM Stem s
+      JOIN Quadrat q ON q.QuadratID = s.QuadratID
+     WHERE q.PlotID = @target_plot_id
+     GROUP BY s.TreeID, s.StemTag;
+
+  UPDATE ${t} t
+    JOIN stem_lookup sl ON sl.TreeID = t.TreeID
+                       AND sl.StemTag <=> t.StemTag
+                       AND sl.StemCount = 1
+    SET t.StemID = sl.StemID;
+`;
 }
 
 // ---------------------------------------------------------------------------
