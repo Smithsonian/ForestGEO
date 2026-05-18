@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import SqlString from 'sqlstring';
-import { parseSharedCliArgs, type SharedCliArgs } from './csv-to-sql-shared';
+import { parseSharedCliArgs, renderCreateStagingTable, renderInsertChunks, type SharedCliArgs, type StagingRow } from './csv-to-sql-shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,6 +195,38 @@ export function renderStage0(opts: Stage0Options): string {
     WHERE remaining.StemID IS NULL;
 `
   );
+}
+
+// ---------------------------------------------------------------------------
+// Stage 1: Temporary InnoDB staging table
+// ---------------------------------------------------------------------------
+
+export interface Stage1Options {
+  tempTable: string;
+  stagingRows: StagingRow[];
+}
+
+/**
+ * Renders the Stage 1 procedure-body fragment.
+ *
+ * Emits:
+ *   - DROP TEMPORARY TABLE IF EXISTS + CREATE TEMPORARY TABLE ... ENGINE=InnoDB
+ *   - INSERT INTO ... VALUES chunks for all staging rows
+ *
+ * Output is indented two spaces at the section boundary — it is a
+ * procedure-body fragment, not a full procedure.
+ */
+export function renderStage1(opts: Stage1Options): string {
+  const ddl = renderCreateStagingTable({
+    tableName: opts.tempTable,
+    engine: 'InnoDB',
+    temporary: true
+  });
+  const inserts = renderInsertChunks(opts.tempTable, opts.stagingRows).join('\n');
+  return `  -- Stage 1: temporary staging
+${ddl}
+
+${inserts}`;
 }
 
 // ---------------------------------------------------------------------------

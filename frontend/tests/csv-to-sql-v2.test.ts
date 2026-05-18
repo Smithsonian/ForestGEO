@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgsV2, renderProcedureEnvelope, renderStage0 } from '../lib/csv-to-sql-v2';
+import { parseCliArgsV2, renderProcedureEnvelope, renderStage0, renderStage1 } from '../lib/csv-to-sql-v2';
+import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('parseCliArgsV2', () => {
   const baseArgs = ['--input', '/in.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -160,5 +161,55 @@ describe('renderStage0', () => {
     expect(sql).not.toMatch(/COMMIT/);
     // Body fragments are indented two spaces
     expect(sql).toMatch(/^  -- Stage 0:/m);
+  });
+});
+
+describe('renderStage1', () => {
+  const SAMPLE_CSV_ROW = {
+    tag: 'T001',
+    stemtag: 'S001',
+    spcode: 'QURU',
+    quadrat: 'A01',
+    lx: '1.5',
+    ly: '2.5',
+    dbh: '12.3',
+    hom: '1.3',
+    date: '2024-03-15',
+    codes: 'A'
+  };
+
+  const sampleRow = mapCsvRowToStagingRow(SAMPLE_CSV_ROW, 7, '4');
+
+  it('renders CREATE TEMPORARY TABLE and ENGINE=InnoDB; no occurrence of MyISAM', () => {
+    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow] });
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE `TempAllTrees`/);
+    expect(sql).toMatch(/ENGINE=InnoDB/);
+    expect(sql).not.toMatch(/MyISAM/);
+  });
+
+  it('renders DROP TEMPORARY TABLE IF EXISTS (not plain DROP TABLE)', () => {
+    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow] });
+    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS `TempAllTrees`;/);
+    // Plain DROP TABLE without TEMPORARY keyword must not appear
+    expect(sql).not.toMatch(/DROP TABLE(?! IF EXISTS|.*TEMPORARY)/);
+    expect(sql).not.toMatch(/DROP TABLE `TempAllTrees`/);
+  });
+
+  it('renders INSERT INTO ... VALUES chunks given staging rows', () => {
+    const secondRow = mapCsvRowToStagingRow({ ...SAMPLE_CSV_ROW, tag: 'T002', stemtag: 'S002' }, 7, '4');
+    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow, secondRow] });
+    expect(sql).toMatch(/INSERT INTO `TempAllTrees` \(QuadratName, Tag, StemTag/);
+    expect(sql).toMatch(/VALUES/);
+    // Both tags should appear as escaped SQL strings
+    expect(sql).toContain("'T001'");
+    expect(sql).toContain("'T002'");
+  });
+
+  it('with zero staging rows, still renders the DDL and does not crash', () => {
+    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [] });
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE `TempAllTrees`/);
+    expect(sql).toMatch(/ENGINE=InnoDB/);
+    // No INSERT statements should appear
+    expect(sql).not.toMatch(/INSERT INTO/);
   });
 });
