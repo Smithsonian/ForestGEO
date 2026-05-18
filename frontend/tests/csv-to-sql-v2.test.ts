@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCliArgsV2, renderProcedureEnvelope } from '../lib/csv-to-sql-v2';
+import { parseCliArgsV2, renderProcedureEnvelope, renderStage0 } from '../lib/csv-to-sql-v2';
 
 describe('parseCliArgsV2', () => {
   const baseArgs = ['--input', '/in.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
@@ -91,5 +91,76 @@ describe('renderProcedureEnvelope', () => {
     // Sanity: the shared NOT FOUND handler appears exactly once.
     const handlerMatches = sql.match(/CONTINUE HANDLER FOR NOT FOUND/g) ?? [];
     expect(handlerMatches.length).toBe(1);
+  });
+});
+
+describe('renderStage0', () => {
+  it('census guard counts rows for (plot, census) pair', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(
+      /SELECT COUNT\(\*\), MIN\(CensusID\), MIN\(StartDate\), MIN\(PlotCensusNumber\)\s+INTO _census_count, _target_census_id, _target_start_date, _target_census_number/
+    );
+    expect(sql).toMatch(/PlotID = 1\s+AND PlotCensusNumber = '2'/);
+    expect(sql).toMatch(/IF _census_count <> 1 THEN/);
+    expect(sql).toMatch(/SIGNAL SQLSTATE '45000'/);
+  });
+
+  it('sets @target_census_id and @target_plot_id session variables', () => {
+    const sql = renderStage0({ plotId: 42, censusNumber: '3', allowReload: false });
+    expect(sql).toMatch(/SET @target_census_id := _target_census_id;/);
+    expect(sql).toMatch(/SET @target_plot_id := 42;/);
+  });
+
+  it('escapes census number to prevent injection', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: "2'; DROP TABLE Tree; --", allowReload: false });
+    expect(sql).toContain("PlotCensusNumber = '2\\'; DROP TABLE Tree; --'");
+    expect(sql).not.toContain("PlotCensusNumber = '2'; DROP TABLE Tree; --'");
+  });
+
+  it('without --allow-reload, refuses populated census', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(/SELECT COUNT\(\*\) INTO _existing_dbh_count\s+FROM DBH\s+WHERE CensusID = @target_census_id/);
+    expect(sql).toMatch(/IF _existing_dbh_count > 0 THEN/);
+    expect(sql).toMatch(/Pass --allow-reload to overwrite/);
+  });
+
+  it('without --allow-reload, does not emit reload temp tables', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).not.toMatch(/reload_stems_to_check/);
+    expect(sql).not.toMatch(/reload_trees_to_check/);
+  });
+
+  it('with --allow-reload, emits scoped cleanup', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: true });
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_stems_to_check/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_trees_to_check/);
+    expect(sql).toMatch(/DELETE da\s+FROM DBHAttributes da/);
+    expect(sql).toMatch(/DELETE FROM DBH WHERE CensusID = @target_census_id;/);
+    expect(sql).toMatch(/DELETE s\s+FROM Stem s\s+JOIN reload_stems_to_check/);
+    expect(sql).toMatch(/DELETE tr\s+FROM Tree tr\s+JOIN reload_trees_to_check/);
+    expect(sql).not.toMatch(/Pass --allow-reload to overwrite/);
+  });
+
+  it('with --allow-reload, DELETEs in FK order (DBHAttributes before DBH, Stem before Tree)', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: true });
+    const dbhAttrIdx = sql.indexOf('DELETE da');
+    const dbhIdx = sql.indexOf('DELETE FROM DBH');
+    const stemIdx = sql.indexOf('DELETE s\n');
+    const treeIdx = sql.indexOf('DELETE tr\n');
+    expect(dbhAttrIdx).toBeGreaterThan(0);
+    expect(dbhIdx).toBeGreaterThan(dbhAttrIdx);
+    expect(stemIdx).toBeGreaterThan(dbhIdx);
+    expect(treeIdx).toBeGreaterThan(stemIdx);
+  });
+
+  it('output is a procedure-body fragment indented two spaces (no procedure envelope)', () => {
+    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).not.toMatch(/DROP PROCEDURE/);
+    expect(sql).not.toMatch(/DELIMITER/);
+    expect(sql).not.toMatch(/CREATE PROCEDURE/);
+    expect(sql).not.toMatch(/START TRANSACTION/);
+    expect(sql).not.toMatch(/COMMIT/);
+    // Body fragments are indented two spaces
+    expect(sql).toMatch(/^  -- Stage 0:/m);
   });
 });
