@@ -9,7 +9,8 @@ import {
   renderStage3,
   renderStage4,
   renderStage5,
-  renderStage6NewTrees
+  renderStage6NewTrees,
+  renderStage7NewStems
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
@@ -680,5 +681,31 @@ describe('renderStage6NewTrees', () => {
   it('does not reference Tree.PlotID', () => {
     const { body } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
     expect(body).not.toMatch(/Tree.*PlotID|PlotID.*Tree/);
+  });
+});
+
+describe('renderStage7NewStems', () => {
+  it('cursor declaration has no handler', () => {
+    const { cursorDeclaration } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
+    expect(cursorDeclaration).toMatch(/DECLARE cur_new_stems CURSOR FOR/);
+    expect(cursorDeclaration).not.toMatch(/HANDLER/);
+  });
+
+  it('INSERT shape includes explicit StemNumber=0', () => {
+    const { body } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
+    expect(body).toMatch(
+      /INSERT INTO Stem \(TreeID, StemTag, QuadratID, StemNumber, QX, QY\)\s+VALUES \(_cur_tree_id, _cur_stem_tag, _cur_quadrat_id, 0, _cur_x, _cur_y\);/
+    );
+  });
+
+  it('per-TempID write-back', () => {
+    const { body } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
+    expect(body).toMatch(/UPDATE `TempAllTrees` SET StemID = _new_stem_id WHERE TempID = _cur_temp_id;/);
+  });
+
+  it('cursor selects per-row TempID, TreeID, StemTag, QuadratID, X, Y where StemID IS NULL', () => {
+    const { cursorDeclaration } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
+    expect(cursorDeclaration).toMatch(/SELECT TempID, TreeID, StemTag, QuadratID, X, Y/);
+    expect(cursorDeclaration).toMatch(/WHERE StemID IS NULL/);
   });
 });

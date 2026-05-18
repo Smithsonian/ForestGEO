@@ -706,6 +706,49 @@ export function renderStage6NewTrees(opts: { tempTable: string }): CursorStageRe
 }
 
 // ---------------------------------------------------------------------------
+// Stage 7: Cursor-driven new Stem inserts
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the Stage 7 cursor declaration and body fragment.
+ *
+ * The cursor declaration is bare (no handler) — the envelope emits the single
+ * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ *
+ * The body:
+ *   - Opens cur_new_stems, iterating over every staging row where StemID IS
+ *     NULL (i.e. rows whose stem was not resolved in Stages 2/2b).
+ *   - Inserts one Stem row per staging row with explicit StemNumber = 0, then
+ *     captures LAST_INSERT_ID() and writes the generated StemID back to that
+ *     specific staging row via its TempID primary key.
+ *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
+ */
+export function renderStage7NewStems(opts: { tempTable: string }): CursorStageResult {
+  const t = escapeSqlIdentifier(opts.tempTable);
+  return {
+    cursorDeclaration: `DECLARE cur_new_stems CURSOR FOR
+    SELECT TempID, TreeID, StemTag, QuadratID, X, Y
+      FROM ${t}
+      WHERE StemID IS NULL
+      ORDER BY TempID;`,
+    body: `  -- Stage 7: insert new Stem rows row-by-row
+  SET _done = FALSE;
+  OPEN cur_new_stems;
+  read_new_stems: LOOP
+    FETCH cur_new_stems INTO _cur_temp_id, _cur_tree_id, _cur_stem_tag, _cur_quadrat_id, _cur_x, _cur_y;
+    IF _done THEN LEAVE read_new_stems; END IF;
+    INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY)
+      VALUES (_cur_tree_id, _cur_stem_tag, _cur_quadrat_id, 0, _cur_x, _cur_y);
+    SET _new_stem_id = LAST_INSERT_ID();
+    UPDATE ${t} SET StemID = _new_stem_id WHERE TempID = _cur_temp_id;
+  END LOOP;
+  CLOSE cur_new_stems;
+  SET _done = FALSE;
+`
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
