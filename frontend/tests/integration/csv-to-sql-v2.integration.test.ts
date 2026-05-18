@@ -31,19 +31,17 @@ const TEST_PLOT_ID = 1;
 const TEST_CENSUS_NUMBER = '1';
 
 /**
- * MySQL error codes for "object does not exist" failures we tolerate when
- * loading the canonical DDL.
- *
- * `DBCHANGES2014f.sql` references three artifacts that exist in production
- * CTFS databases but NOT in a bootstrap schema: the `TAX1temp` table (renamed
- * to `ViewTaxonomy` in a step from a previous migration we don't have) and the
- * `ViewFullTable` view (created elsewhere). Skipping these errors is the
- * standard practice used elsewhere in this repo's test harness (see
- * `loadSchema` in `tests/setup/local-db-setup.ts`).
- *
- * ER_NO_SUCH_TABLE = 1146 (42S02)
+ * Production-only objects referenced by `DBCHANGES2014f.sql` that do not
+ * exist in a bootstrap schema. ALTER / RENAME statements touching these are
+ * the only DDL errors we tolerate — any other ER_NO_SUCH_TABLE means a real
+ * bug (e.g. a typo in canonical-ddl.sql) and must not be swallowed.
  */
-const TOLERATED_DDL_ERROR_CODES = new Set<string>(['ER_NO_SUCH_TABLE']);
+const PRODUCTION_ONLY_OBJECTS = ['ViewTaxonomy', 'ViewFullTable', 'TAX1temp'];
+
+function isTolerableDdlError(errCode: string, stmt: string): boolean {
+  if (errCode !== 'ER_NO_SUCH_TABLE') return false;
+  return PRODUCTION_ONLY_OBJECTS.some(obj => stmt.includes(obj));
+}
 
 /**
  * Strips C-style `/* ... *\/` block comments from a SQL file.
@@ -67,13 +65,14 @@ async function loadCanonicalDdl(connection: mysql.Connection, filePath: string):
     try {
       await connection.query(stmt.sql);
     } catch (err: any) {
-      if (TOLERATED_DDL_ERROR_CODES.has(err.code)) continue;
+      if (isTolerableDdlError(err.code, stmt.sql)) continue;
       const preview = stmt.sql.slice(0, 200).replace(/\s+/g, ' ');
       throw new Error(`Canonical DDL load failed at ${filePath}:${stmt.lineNumber}: ${err.message}\nStatement: ${preview}`);
     }
   }
 }
 
+/** Strict: any SQL error fails the test (no error swallowing — seed files are hand-authored). */
 async function loadSeedFile(connection: mysql.Connection, filePath: string): Promise<void> {
   const content = readFileSync(filePath, 'utf8');
   const statements = splitSqlFile(content);
