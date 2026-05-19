@@ -1,61 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
+import { describe, it, expect } from 'vitest';
 import {
-  main,
-  parseCliArgsV2,
   renderFullPipeline,
   renderProcedureEnvelope,
   renderStage0,
   renderStage1,
   renderStage2,
-  renderStage2bResprout,
-  renderStage3,
-  renderStage4,
   renderStage5,
   renderStage6NewTrees,
   renderStage7NewStems,
   renderStage8DBH,
-  renderStage9PrimaryAndAttrs,
   renderStage10
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
-
-describe('parseCliArgsV2', () => {
-  const baseArgs = ['--input', '/in.csv', '--site', 'SERC', '--plot-id', '1', '--census-number', '2'];
-
-  it('parses required args', () => {
-    expect(parseCliArgsV2(baseArgs)).toMatchObject({
-      input: '/in.csv',
-      site: 'SERC',
-      plotId: 1,
-      censusNumber: '2',
-      allowReload: false,
-      tempTable: 'TempAllTrees'
-    });
-  });
-
-  it('defaults output to <input>.v2.sql', () => {
-    expect(parseCliArgsV2(baseArgs).output).toBe('/in.csv.v2.sql');
-  });
-
-  it('parses --allow-reload as boolean', () => {
-    expect(parseCliArgsV2([...baseArgs, '--allow-reload']).allowReload).toBe(true);
-  });
-
-  it('rejects missing required arg', () => {
-    expect(() => parseCliArgsV2(['--input', '/in.csv'])).toThrow();
-  });
-
-  it('honors explicit --output', () => {
-    expect(parseCliArgsV2([...baseArgs, '--output', '/tmp/x.sql']).output).toBe('/tmp/x.sql');
-  });
-
-  it('rejects unknown flag', () => {
-    expect(() => parseCliArgsV2([...baseArgs, '--garbage'])).toThrow();
-  });
-});
 
 describe('renderProcedureEnvelope', () => {
   it('emits drop/delimiter/create/declares/handler/tx/body/commit/end/call/drop', () => {
@@ -332,250 +288,6 @@ describe('renderStage2', () => {
   });
 });
 
-describe('renderStage2bResprout', () => {
-  const defaultSql = () => renderStage2bResprout({ tempTable: 'TempAllTrees' });
-
-  it('builds resprout_codes from TSMAttributes Description LIKE %stem lost%', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_codes AS\s+SELECT TSMID FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%stem lost%'/);
-  });
-
-  it('builds dead_codes from TSMAttributes Description LIKE %dead%', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE dead_codes AS\s+SELECT TSMID FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%dead%'/);
-  });
-
-  it('builds resprout_codes_str (TSMCode form) for staging-Codes string matching', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_codes_str AS\s+SELECT TSMCode FROM TSMAttributes WHERE LOWER\(Description\) LIKE '%stem lost%'/);
-  });
-
-  it('derives current_row_excluded from staging Codes via FIND_IN_SET', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE current_row_excluded AS/);
-    expect(sql).toMatch(/FIND_IN_SET\(rc\.TSMCode, REPLACE\(t\.Codes, ';', ','\)\) > 0/);
-    expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL AND t\.StemID IS NULL/);
-  });
-
-  it('resprout_candidates joins prior Census strictly before target (by date OR numeric PlotCensusNumber)', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE resprout_candidates AS/);
-    expect(sql).toMatch(/prior_c\.PlotID = @target_plot_id/);
-    expect(sql).toMatch(/prior_c\.CensusID <> @target_census_id/);
-    expect(sql).toMatch(/prior_c\.StartDate < @target_start_date/);
-    expect(sql).toMatch(/PlotCensusNumber REGEXP/);
-  });
-
-  it('resprout_candidates restricts via Stem.TreeID = staging TreeID and prior DBH.CensusID', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN DBH prior_dbh\s+ON prior_dbh\.CensusID = prior_c\.CensusID/);
-    expect(sql).toMatch(/JOIN Stem s ON s\.StemID = prior_dbh\.StemID AND s\.TreeID = t\.TreeID/);
-  });
-
-  it('resprout_candidates requires prior census to have exactly one measured stem on the tree', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(
-      /SELECT COUNT\(DISTINCT d2\.StemID\)\s+FROM DBH d2\s+JOIN Stem s2 ON s2\.StemID = d2\.StemID\s+WHERE d2\.CensusID = prior_c\.CensusID\s+AND s2\.TreeID = t\.TreeID\s+\) = 1/
-    );
-  });
-
-  it('resprout_candidates restricts to staging rows where TreeID NOT NULL AND StemID IS NULL and not excluded', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL\s+AND t\.StemID IS NULL\s+AND x\.TempID IS NULL/);
-  });
-
-  it('materializes a claimed_stem_ids snapshot from staging rows whose StemID is already set', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE claimed_stem_ids AS\s+SELECT t\.TempID, t\.StemID\s+FROM `TempAllTrees` t\s+WHERE t\.StemID IS NOT NULL;/);
-    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS claimed_stem_ids;/);
-  });
-
-  it('resprout_candidates excludes prior stems already claimed by another staging row (within-batch anti-join)', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM claimed_stem_ids c\s+WHERE c\.StemID = prior_dbh\.StemID\s+AND c\.TempID <> t\.TempID\s+\)/);
-  });
-
-  it('claimed_stem_ids snapshot is built before resprout_candidates references it', () => {
-    const sql = defaultSql();
-    const claimedIdx = sql.indexOf('CREATE TEMPORARY TABLE claimed_stem_ids');
-    const candidatesIdx = sql.indexOf('CREATE TEMPORARY TABLE resprout_candidates');
-    expect(claimedIdx).toBeGreaterThan(0);
-    expect(candidatesIdx).toBeGreaterThan(claimedIdx);
-  });
-
-  it('within-batch anti-join honors custom tempTable name via claimed_stem_ids snapshot', () => {
-    const sql = renderStage2bResprout({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE claimed_stem_ids AS\s+SELECT t\.TempID, t\.StemID\s+FROM `MyCustomStaging` t\s+WHERE t\.StemID IS NOT NULL;/);
-  });
-
-  it('resprout_candidates flags HasDeadCode via DBHAttributes JOIN dead_codes', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(
-      /CASE WHEN EXISTS \(\s+SELECT 1\s+FROM DBHAttributes da\s+JOIN dead_codes dc ON dc\.TSMID = da\.TSMID\s+WHERE da\.DBHID = prior_dbh\.DBHID\s+\) THEN 1 ELSE 0 END\) AS HasDeadCode/
-    );
-  });
-
-  it('resprout_candidates flags HasResproutCode via DBHAttributes JOIN resprout_codes', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(
-      /CASE WHEN EXISTS \(\s+SELECT 1\s+FROM DBHAttributes da\s+JOIN resprout_codes rc ON rc\.TSMID = da\.TSMID\s+WHERE da\.DBHID = prior_dbh\.DBHID\s+\) THEN 1 ELSE 0 END\) AS HasResproutCode/
-    );
-  });
-
-  it('final UPDATE fires only when HasDeadCode = 0 AND (PriorDBH >= 10 OR HasResproutCode = 1)', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/WHERE HasDeadCode = 0\s+AND \(PriorDBH >= 10 OR HasResproutCode = 1\)/);
-  });
-
-  it('final UPDATE picks the most recent eligible prior via ROW_NUMBER() ORDER BY PriorCensusID DESC', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/ROW_NUMBER\(\) OVER \(PARTITION BY TempID ORDER BY PriorCensusID DESC\) AS rk/);
-    expect(sql).toMatch(/chosen\.rk = 1/);
-    expect(sql).toMatch(/SET t\.StemID = chosen\.PriorStemID;/);
-  });
-
-  it('does not SIGNAL — Stage 2b never errors broadly for M rows', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/SIGNAL/);
-  });
-
-  it('never references Tree.PlotID or tr.PlotID', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/Tree\.PlotID/);
-    expect(sql).not.toMatch(/tr\.PlotID/);
-  });
-
-  it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/DROP PROCEDURE/);
-    expect(sql).not.toMatch(/DELIMITER/);
-    expect(sql).not.toMatch(/CREATE PROCEDURE/);
-    expect(sql).not.toMatch(/START TRANSACTION/);
-    expect(sql).not.toMatch(/COMMIT/);
-    expect(sql).toMatch(/^  -- Stage 2b:/m);
-  });
-
-  it('uses backtick-quoted identifier for custom tempTable name', () => {
-    const sql = renderStage2bResprout({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/`MyCustomStaging`/);
-    expect(sql).not.toMatch(/TempAllTrees/);
-  });
-
-  it('rejects an invalid tempTable identifier (injection guard)', () => {
-    expect(() => renderStage2bResprout({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
-  });
-});
-
-describe('renderStage3', () => {
-  it('classifies via case expression', () => {
-    const sql = renderStage3({ tempTable: 'TempAllTrees' });
-    expect(sql).toMatch(/UPDATE `TempAllTrees` SET Tagged =\s+CASE\s+WHEN TreeID IS NULL THEN 'N'\s+WHEN StemID IS NULL THEN 'M'\s+ELSE 'O'\s+END;/);
-  });
-});
-
-describe('renderStage4', () => {
-  const defaultSql = () => renderStage4({ tempTable: 'TempAllTrees' });
-
-  it('zeroes DBH = NULL WHERE DBH = 0 as the first statement', () => {
-    const sql = defaultSql();
-    const nullifyIdx = sql.indexOf('UPDATE `TempAllTrees` SET DBH = NULL WHERE DBH = 0;');
-    expect(nullifyIdx).toBeGreaterThan(0);
-    // Must appear before the prior_census_order CREATE
-    const createTableIdx = sql.indexOf('CREATE TEMPORARY TABLE prior_census_order');
-    expect(nullifyIdx).toBeLessThan(createTableIdx);
-  });
-
-  it('creates prior_census_order as a TEMPORARY TABLE', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS prior_census_order;/);
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE prior_census_order AS/);
-  });
-
-  it('WHERE clause filters by PlotID = @target_plot_id AND CensusID <> @target_census_id', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/WHERE PlotID = @target_plot_id\s+AND CensusID <> @target_census_id/);
-  });
-
-  it('StartDate branch uses StartDate < @target_start_date (excludes same-or-later dates)', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/StartDate IS NOT NULL AND @target_start_date IS NOT NULL AND StartDate < @target_start_date/);
-  });
-
-  it('numeric fallback uses CAST ... < CAST ... to exclude candidate census numbers >= target', () => {
-    const sql = defaultSql();
-    // The WHERE clause must cast both sides and require strictly less-than
-    expect(sql).toMatch(
-      /CAST\(PlotCensusNumber AS DECIMAL\(20,5\)\)\s+< CAST\(\(SELECT PlotCensusNumber FROM Census WHERE CensusID = @target_census_id\) AS DECIMAL\(20,5\)\)/
-    );
-  });
-
-  it('numeric fallback only fires when StartDate comparison is unavailable (date is NULL on either side)', () => {
-    const sql = defaultSql();
-    // The OR branch for numeric fallback must be guarded by a NULL check on date
-    expect(sql).toMatch(/\(@target_start_date IS NULL OR StartDate IS NULL\)/);
-  });
-
-  it('ORDER BY ranks by StartDate DESC first, then numeric PlotCensusNumber DESC', () => {
-    const sql = defaultSql();
-    const orderByIdx = sql.indexOf('ORDER BY');
-    expect(orderByIdx).toBeGreaterThan(0);
-    const orderByFragment = sql.slice(orderByIdx, orderByIdx + 400);
-    // StartDate CASE must appear before PlotCensusNumber CASE in ORDER BY
-    const startDateCaseIdx = orderByFragment.indexOf('CASE WHEN StartDate IS NOT NULL AND @target_start_date IS NOT NULL');
-    const pcnCaseIdx = orderByFragment.indexOf('CASE WHEN PlotCensusNumber REGEXP');
-    expect(startDateCaseIdx).toBeGreaterThan(0);
-    expect(pcnCaseIdx).toBeGreaterThan(startDateCaseIdx);
-  });
-
-  it('HOM inheritance UPDATE only applies to Tagged = O rows with HOM IS NULL and DBH IS NOT NULL', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/WHERE t\.HOM IS NULL AND t\.DBH IS NOT NULL AND t\.Tagged = 'O'/);
-  });
-
-  it('HOM inheritance joins DBH through prior_census_order on rk = 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN prior_census_order p ON p\.CensusID = d\.CensusID AND p\.rk = 1/);
-  });
-
-  it("final fallback sets HOM = '1.3' WHERE HOM IS NULL AND DBH IS NOT NULL (no Tagged filter)", () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/UPDATE `TempAllTrees` SET HOM = '1\.3'\s+WHERE HOM IS NULL AND DBH IS NOT NULL;/);
-    // The final fallback must NOT restrict to Tagged = 'O'
-    const finalUpdateIdx = sql.lastIndexOf("UPDATE `TempAllTrees` SET HOM = '1.3'");
-    expect(finalUpdateIdx).toBeGreaterThan(0);
-    const finalFragment = sql.slice(finalUpdateIdx, finalUpdateIdx + 80);
-    expect(finalFragment).not.toMatch(/Tagged/);
-  });
-
-  it('final fallback UPDATE comes after the HOM inheritance UPDATE', () => {
-    const sql = defaultSql();
-    const inheritanceIdx = sql.indexOf('SET t.HOM = prev.HOM');
-    const fallbackIdx = sql.indexOf("SET HOM = '1.3'");
-    expect(inheritanceIdx).toBeGreaterThan(0);
-    expect(fallbackIdx).toBeGreaterThan(inheritanceIdx);
-  });
-
-  it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/DROP PROCEDURE/);
-    expect(sql).not.toMatch(/DELIMITER/);
-    expect(sql).not.toMatch(/CREATE PROCEDURE/);
-    expect(sql).not.toMatch(/START TRANSACTION/);
-    expect(sql).not.toMatch(/COMMIT/);
-    expect(sql).toMatch(/^  -- Stage 4:/m);
-  });
-
-  it('uses backtick-quoted identifier for custom tempTable name', () => {
-    const sql = renderStage4({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/`MyCustomStaging`/);
-    expect(sql).not.toMatch(/TempAllTrees/);
-  });
-
-  it('rejects an invalid tempTable identifier (injection guard)', () => {
-    expect(() => renderStage4({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
-  });
-});
-
 describe('renderStage5', () => {
   const defaultSql = () => renderStage5({ tempTable: 'TempAllTrees' });
 
@@ -769,130 +481,6 @@ describe('renderStage8DBH', () => {
   });
 });
 
-describe('renderStage9PrimaryAndAttrs', () => {
-  const defaultResult = () => renderStage9PrimaryAndAttrs({ tempTable: 'TempAllTrees' });
-
-  // --- 9a (bodyPre) ---
-
-  it('bodyPre builds primary_marker_map via DROP/CREATE and a recursive CTE', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).toMatch(/DROP TEMPORARY TABLE IF EXISTS primary_marker_map;/);
-    expect(bodyPre).toMatch(/CREATE TEMPORARY TABLE primary_marker_map AS/);
-    expect(bodyPre).toMatch(/WITH RECURSIVE numbers AS/);
-  });
-
-  it('bodyPre CTE explodes Codes on ";" using SUBSTRING_INDEX double-pass', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).toMatch(/TRIM\(SUBSTRING_INDEX\(SUBSTRING_INDEX\(t\.Codes, ';', n\.n\), ';', -1\)\) AS token/);
-  });
-
-  it('bodyPre joins TSMAttributes and filters to main/secondary markers only', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).toMatch(/JOIN TSMAttributes tsm ON tsm\.TSMCode = e\.token/);
-    expect(bodyPre).toMatch(/WHERE LOWER\(tsm\.Description\) IN \('main', 'secondary'\)/);
-    expect(bodyPre).toMatch(/LOWER\(tsm\.Description\) AS marker/);
-  });
-
-  it('bodyPre SIGNALs when a row carries both main and secondary markers', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).toMatch(/SIGNAL SQLSTATE '45000'/);
-    expect(bodyPre).toMatch(/Both main and secondary markers present on TempIDs: /);
-  });
-
-  it('bodyPre both-marker check wraps GROUP BY in a subquery so SELECT INTO gets a scalar', () => {
-    const { bodyPre } = defaultResult();
-    // The outer SELECT...INTO must be wrapped around a subquery that does the HAVING
-    expect(bodyPre).toMatch(
-      /SELECT GROUP_CONCAT\(DISTINCT t\.TempID\) INTO _bad FROM \(\s+SELECT TempID\s+FROM primary_marker_map\s+GROUP BY TempID\s+HAVING COUNT\(DISTINCT marker\) > 1\s+\) t;/
-    );
-  });
-
-  it('bodyPre resets _bad to NULL before the both-marker check', () => {
-    const { bodyPre } = defaultResult();
-    const resetIdx = bodyPre.indexOf('SET _bad = NULL;');
-    const signalIdx = bodyPre.indexOf('SIGNAL SQLSTATE');
-    expect(resetIdx).toBeGreaterThan(0);
-    expect(resetIdx).toBeLessThan(signalIdx);
-  });
-
-  it('bodyPre UPDATE sets staging PrimaryStem to m.marker (the literal string from TSMAttributes)', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).toMatch(/UPDATE `TempAllTrees` t\s+JOIN primary_marker_map m ON m\.TempID = t\.TempID\s+SET t\.PrimaryStem = m\.marker;/);
-  });
-
-  it('bodyPre is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const { bodyPre } = defaultResult();
-    expect(bodyPre).not.toMatch(/DROP PROCEDURE/);
-    expect(bodyPre).not.toMatch(/DELIMITER/);
-    expect(bodyPre).not.toMatch(/CREATE PROCEDURE/);
-    expect(bodyPre).not.toMatch(/START TRANSACTION/);
-    expect(bodyPre).not.toMatch(/COMMIT/);
-    expect(bodyPre).toMatch(/^  -- Stage 9a:/m);
-  });
-
-  // --- 9b (bodyPost) ---
-
-  it('bodyPost inserts into DBHAttributes with columns (DBHID, TSMID) only — no CensusID', () => {
-    const { bodyPost } = defaultResult();
-    // Must match exactly (DBHID, TSMID) with no extra columns
-    expect(bodyPost).toMatch(/INSERT INTO DBHAttributes \(DBHID, TSMID\)/);
-    expect(bodyPost).not.toMatch(/CensusID/);
-  });
-
-  it('bodyPost selects DISTINCT (DBHID, TSMID) pairs', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/SELECT DISTINCT e\.DBHID, tsm\.TSMID/);
-  });
-
-  it('bodyPost only processes rows where DBHID IS NOT NULL', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/AND t\.DBHID IS NOT NULL/);
-  });
-
-  it('bodyPost excludes main and secondary markers via WHERE NOT IN clause on Description', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/WHERE LOWER\(tsm\.Description\) NOT IN \('main', 'secondary'\)/);
-  });
-
-  it('bodyPost excludes empty tokens and "*" tokens', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/AND e\.token NOT IN \('', '\*'\)/);
-  });
-
-  it('bodyPost uses a recursive CTE for the Codes explosion', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/WITH RECURSIVE numbers AS/);
-    expect(bodyPost).toMatch(/TRIM\(SUBSTRING_INDEX\(SUBSTRING_INDEX\(t\.Codes, ';', n\.n\), ';', -1\)\) AS token/);
-  });
-
-  it('bodyPost joins TSMAttributes to resolve TSMID from each token', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).toMatch(/JOIN TSMAttributes tsm ON tsm\.TSMCode = e\.token/);
-  });
-
-  it('bodyPost is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const { bodyPost } = defaultResult();
-    expect(bodyPost).not.toMatch(/DROP PROCEDURE/);
-    expect(bodyPost).not.toMatch(/DELIMITER/);
-    expect(bodyPost).not.toMatch(/CREATE PROCEDURE/);
-    expect(bodyPost).not.toMatch(/START TRANSACTION/);
-    expect(bodyPost).not.toMatch(/COMMIT/);
-    expect(bodyPost).toMatch(/^  -- Stage 9b:/m);
-  });
-
-  it('uses backtick-quoted identifier for custom tempTable name in both fragments', () => {
-    const { bodyPre, bodyPost } = renderStage9PrimaryAndAttrs({ tempTable: 'MyCustomStaging' });
-    expect(bodyPre).toMatch(/`MyCustomStaging`/);
-    expect(bodyPost).toMatch(/`MyCustomStaging`/);
-    expect(bodyPre).not.toMatch(/TempAllTrees/);
-    expect(bodyPost).not.toMatch(/TempAllTrees/);
-  });
-
-  it('rejects an invalid tempTable identifier (injection guard)', () => {
-    expect(() => renderStage9PrimaryAndAttrs({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
-  });
-});
-
 describe('renderStage10', () => {
   it('emits final tally with all four counts', () => {
     const sql = renderStage10({ tempTable: 'TempAllTrees' });
@@ -918,16 +506,21 @@ describe('renderFullPipeline', () => {
 
   const sampleRow = mapCsvRowToStagingRow(SAMPLE_CSV_ROW, 7, '4');
 
-  const baseArgs = () => parseCliArgsV2(['--input', '/in.csv', '--site', 'SERC', '--plot-id', '7', '--census-number', '4']);
+  const baseArgs = () => ({
+    plotId: 7,
+    censusNumber: '4',
+    allowReload: false,
+    tempTable: 'TempAllTrees'
+  });
 
   it('returns a non-empty string', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
     expect(typeof sql).toBe('string');
     expect(sql.length).toBeGreaterThan(0);
   });
 
   it('contains the procedure envelope (DROP/CREATE/END/CALL/DROP)', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
     expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
     expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
     expect(sql).toMatch(/END \/\//);
@@ -935,23 +528,9 @@ describe('renderFullPipeline', () => {
     expect(sql).toMatch(/DROP PROCEDURE csv_to_sql_v2_load;/);
   });
 
-  it('emits all 13 stage headers in order: 0, 1, 2, 2b, 3, 4, 5, 6, 7, 9a, 8, 9b, 10', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
-    const headers = [
-      '-- Stage 0:',
-      '-- Stage 1:',
-      '-- Stage 2:',
-      '-- Stage 2b:',
-      '-- Stage 3:',
-      '-- Stage 4:',
-      '-- Stage 5:',
-      '-- Stage 6:',
-      '-- Stage 7:',
-      '-- Stage 9a:',
-      '-- Stage 8:',
-      '-- Stage 9b:',
-      '-- Stage 10:'
-    ];
+  it('emits 8 stage headers in order after pivot: 0, 1, 2, 5, 6, 7, 8, 10', () => {
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
+    const headers = ['-- Stage 0:', '-- Stage 1:', '-- Stage 2:', '-- Stage 5:', '-- Stage 6:', '-- Stage 7:', '-- Stage 8:', '-- Stage 10:'];
     const indices = headers.map(h => sql.indexOf(h));
     for (let i = 0; i < indices.length; i++) {
       expect(indices[i], `header missing: ${headers[i]}`).toBeGreaterThan(0);
@@ -961,24 +540,17 @@ describe('renderFullPipeline', () => {
     }
   });
 
-  it('places Stage 9a before Stage 8 (PrimaryStem must be populated before DBH insert reads it)', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
-    const stage9aIdx = sql.indexOf('-- Stage 9a:');
-    const stage8Idx = sql.indexOf('-- Stage 8:');
-    expect(stage9aIdx).toBeGreaterThan(0);
-    expect(stage8Idx).toBeGreaterThan(stage9aIdx);
-  });
-
-  it('places Stage 9b after Stage 8 (DBHAttributes needs DBHID from DBH inserts)', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
-    const stage8Idx = sql.indexOf('-- Stage 8:');
-    const stage9bIdx = sql.indexOf('-- Stage 9b:');
-    expect(stage8Idx).toBeGreaterThan(0);
-    expect(stage9bIdx).toBeGreaterThan(stage8Idx);
+  it('does not emit deleted stage headers (2b, 3, 4, 9a, 9b)', () => {
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
+    expect(sql).not.toMatch(/-- Stage 2b:/);
+    expect(sql).not.toMatch(/-- Stage 3:/);
+    expect(sql).not.toMatch(/-- Stage 4:/);
+    expect(sql).not.toMatch(/-- Stage 9a:/);
+    expect(sql).not.toMatch(/-- Stage 9b:/);
   });
 
   it('declares cur_new_trees, cur_new_stems, cur_dbh inside main: BEGIN before the EXIT HANDLER', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
     const mainBeginIdx = sql.indexOf('main: BEGIN');
     const curTreesIdx = sql.indexOf('cur_new_trees CURSOR');
     const curStemsIdx = sql.indexOf('cur_new_stems CURSOR');
@@ -994,7 +566,7 @@ describe('renderFullPipeline', () => {
   });
 
   it('emits cursor declarations after scalar declares and before the NOT FOUND handler', () => {
-    const sql = renderFullPipeline({ args: baseArgs(), stagingRows: [sampleRow] });
+    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
     const lastScalarIdx = sql.indexOf('_cur_stem_id INT UNSIGNED');
     const firstCursorIdx = sql.indexOf('cur_new_trees CURSOR');
     const notFoundIdx = sql.indexOf('CONTINUE HANDLER FOR NOT FOUND');
@@ -1004,57 +576,9 @@ describe('renderFullPipeline', () => {
   });
 
   it('honors a custom tempTable name in every stage', () => {
-    const args = parseCliArgsV2(['--input', '/in.csv', '--site', 'SERC', '--plot-id', '7', '--census-number', '4', '--temp-table', 'MyCustomStaging']);
-    const sql = renderFullPipeline({ args, stagingRows: [sampleRow] });
+    const args = { plotId: 7, censusNumber: '4', allowReload: false, tempTable: 'MyCustomStaging' };
+    const sql = renderFullPipeline({ ...args, stagingRows: [sampleRow] });
     expect(sql).toMatch(/`MyCustomStaging`/);
     expect(sql).not.toMatch(/`TempAllTrees`/);
-  });
-});
-
-describe('main()', () => {
-  const CSV_CONTENT = `tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes
-1,1,FOO,A1,1,1,10,1.3,2024-01-01,LI
-2,2,FOO,A1,2,2,12,1.3,2024-01-01,
-`;
-
-  it('reads a CSV, renders the pipeline, and writes the output file', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-main-'));
-    const input = path.join(tmpDir, 'in.csv');
-    const output = path.join(tmpDir, 'out.sql');
-    fs.writeFileSync(input, CSV_CONTENT, 'utf8');
-
-    await main(['--input', input, '--site', 'TEST', '--plot-id', '1', '--census-number', '1', '--output', output]);
-
-    expect(fs.existsSync(output)).toBe(true);
-    const sql = fs.readFileSync(output, 'utf8');
-    expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
-    expect(sql).toMatch(/-- Stage 0:/);
-    expect(sql).toMatch(/-- Stage 10:/);
-    expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);/);
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('exits 1 with a clear message when the CSV has no data rows', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-empty-'));
-    const input = path.join(tmpDir, 'empty.csv');
-    const output = path.join(tmpDir, 'out.v2.sql');
-    fs.writeFileSync(input, 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n', 'utf8');
-
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(code => {
-      throw new Error(`__exit_${code}__`);
-    });
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    try {
-      await expect(main(['--input', input, '--site', 'T', '--plot-id', '1', '--census-number', '1', '--output', output])).rejects.toThrow('__exit_1__');
-
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No data rows in CSV'));
-      expect(fs.existsSync(output)).toBe(false);
-    } finally {
-      exitSpy.mockRestore();
-      errSpy.mockRestore();
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
   });
 });
