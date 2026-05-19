@@ -384,14 +384,28 @@ describe('renderStage2bResprout', () => {
     expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL\s+AND t\.StemID IS NULL\s+AND x\.TempID IS NULL/);
   });
 
-  it('resprout_candidates excludes prior stems already claimed by another staging row (within-batch anti-join)', () => {
+  it('materializes a claimed_stem_ids snapshot from staging rows whose StemID is already set', () => {
     const sql = defaultSql();
-    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM `TempAllTrees` t2\s+WHERE t2\.StemID = prior_dbh\.StemID\s+AND t2\.TempID <> t\.TempID\s+\)/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE claimed_stem_ids AS\s+SELECT t\.TempID, t\.StemID\s+FROM `TempAllTrees` t\s+WHERE t\.StemID IS NOT NULL;/);
+    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS claimed_stem_ids;/);
   });
 
-  it('within-batch anti-join honors custom tempTable name', () => {
+  it('resprout_candidates excludes prior stems already claimed by another staging row (within-batch anti-join)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM claimed_stem_ids c\s+WHERE c\.StemID = prior_dbh\.StemID\s+AND c\.TempID <> t\.TempID\s+\)/);
+  });
+
+  it('claimed_stem_ids snapshot is built before resprout_candidates references it', () => {
+    const sql = defaultSql();
+    const claimedIdx = sql.indexOf('CREATE TEMPORARY TABLE claimed_stem_ids');
+    const candidatesIdx = sql.indexOf('CREATE TEMPORARY TABLE resprout_candidates');
+    expect(claimedIdx).toBeGreaterThan(0);
+    expect(candidatesIdx).toBeGreaterThan(claimedIdx);
+  });
+
+  it('within-batch anti-join honors custom tempTable name via claimed_stem_ids snapshot', () => {
     const sql = renderStage2bResprout({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM `MyCustomStaging` t2\s+WHERE t2\.StemID = prior_dbh\.StemID\s+AND t2\.TempID <> t\.TempID\s+\)/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE claimed_stem_ids AS\s+SELECT t\.TempID, t\.StemID\s+FROM `MyCustomStaging` t\s+WHERE t\.StemID IS NOT NULL;/);
   });
 
   it('resprout_candidates flags HasDeadCode via DBHAttributes JOIN dead_codes', () => {

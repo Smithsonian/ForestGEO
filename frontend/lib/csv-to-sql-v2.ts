@@ -346,6 +346,7 @@ export function renderStage2bResprout(opts: Stage2bOptions): string {
   DROP TEMPORARY TABLE IF EXISTS dead_codes;
   DROP TEMPORARY TABLE IF EXISTS resprout_codes_str;
   DROP TEMPORARY TABLE IF EXISTS current_row_excluded;
+  DROP TEMPORARY TABLE IF EXISTS claimed_stem_ids;
   DROP TEMPORARY TABLE IF EXISTS resprout_candidates;
 
   CREATE TEMPORARY TABLE resprout_codes AS
@@ -363,6 +364,11 @@ export function renderStage2bResprout(opts: Stage2bOptions): string {
       JOIN resprout_codes_str rc
         ON FIND_IN_SET(rc.TSMCode, REPLACE(t.Codes, ';', ',')) > 0
       WHERE t.TreeID IS NOT NULL AND t.StemID IS NULL;
+
+  CREATE TEMPORARY TABLE claimed_stem_ids AS
+    SELECT t.TempID, t.StemID
+      FROM ${t} t
+      WHERE t.StemID IS NOT NULL;
 
   CREATE TEMPORARY TABLE resprout_candidates AS
     SELECT t.TempID,
@@ -400,9 +406,9 @@ export function renderStage2bResprout(opts: Stage2bOptions): string {
         AND t.StemID IS NULL
         AND x.TempID IS NULL
         AND NOT EXISTS (
-          SELECT 1 FROM ${t} t2
-           WHERE t2.StemID = prior_dbh.StemID
-             AND t2.TempID <> t.TempID
+          SELECT 1 FROM claimed_stem_ids c
+           WHERE c.StemID = prior_dbh.StemID
+             AND c.TempID <> t.TempID
         )
         AND (
           SELECT COUNT(DISTINCT d2.StemID)
