@@ -175,6 +175,9 @@ export function renderStage0(opts: Stage0Options): string {
     guard +
     `
   -- Stage 0b: --allow-reload scoped cleanup
+  DROP TEMPORARY TABLE IF EXISTS reload_stems_to_check;
+  DROP TEMPORARY TABLE IF EXISTS reload_trees_to_check;
+
   CREATE TEMPORARY TABLE reload_stems_to_check AS
     SELECT DISTINCT d.StemID
       FROM DBH d
@@ -279,6 +282,7 @@ export function renderStage2(opts: Stage2Options): string {
     JOIN Species s ON s.Mnemonic = t.Mnemonic AND s.CurrentTaxonFlag = 1
     SET t.SpeciesID = s.SpeciesID;
 
+  DROP TEMPORARY TABLE IF EXISTS tree_lookup;
   CREATE TEMPORARY TABLE tree_lookup AS
     SELECT tr.Tag,
            MIN(tr.TreeID) AS TreeID,
@@ -293,6 +297,7 @@ export function renderStage2(opts: Stage2Options): string {
     JOIN tree_lookup tl ON tl.Tag = t.Tag AND tl.TreeCount = 1
     SET t.TreeID = tl.TreeID;
 
+  DROP TEMPORARY TABLE IF EXISTS stem_lookup;
   CREATE TEMPORARY TABLE stem_lookup AS
     SELECT s.TreeID,
            s.StemTag,
