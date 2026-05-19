@@ -616,13 +616,19 @@ export function renderStage5(opts: Stage5Options): string {
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
   END IF;
 
+  -- Precompute max token count in a session variable so the recursive CTE
+  -- only references the TEMPORARY staging table ONCE — MySQL forbids reopening
+  -- a TEMPORARY table within a single statement (ER_CANT_REOPEN_TABLE).
+  SELECT COALESCE(MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1), 1)
+    INTO @max_code_tokens
+    FROM ${t}
+    WHERE Codes IS NOT NULL;
+
   SET _bad = NULL;
   WITH RECURSIVE numbers AS (
     SELECT 1 AS n
     UNION ALL
-    SELECT n + 1 FROM numbers
-      WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
-                           FROM ${t} WHERE Codes IS NOT NULL), 1)
+    SELECT n + 1 FROM numbers WHERE n < @max_code_tokens
   ),
   exploded AS (
     SELECT t.TempID,
@@ -828,14 +834,20 @@ export function renderStage9PrimaryAndAttrs(opts: { tempTable: string }): Stage9
   const t = escapeSqlIdentifier(opts.tempTable);
 
   const bodyPre = `  -- Stage 9a: derive PrimaryStem from main/secondary markers in Codes
+  -- Precompute max token count in a session variable so the recursive CTE
+  -- only references the TEMPORARY staging table ONCE — MySQL forbids reopening
+  -- a TEMPORARY table within a single statement (ER_CANT_REOPEN_TABLE).
+  SELECT COALESCE(MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1), 1)
+    INTO @max_code_tokens
+    FROM ${t}
+    WHERE Codes IS NOT NULL;
+
   DROP TEMPORARY TABLE IF EXISTS primary_marker_map;
   CREATE TEMPORARY TABLE primary_marker_map AS
     WITH RECURSIVE numbers AS (
       SELECT 1 AS n
       UNION ALL
-      SELECT n + 1 FROM numbers
-        WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
-                             FROM ${t} WHERE Codes IS NOT NULL), 1)
+      SELECT n + 1 FROM numbers WHERE n < @max_code_tokens
     ),
     exploded AS (
       SELECT t.TempID,
@@ -870,15 +882,21 @@ export function renderStage9PrimaryAndAttrs(opts: { tempTable: string }): Stage9
 `;
 
   const bodyPost = `  -- Stage 9b: explode Codes into DBHAttributes (DBHID, TSMID), excluding markers/empty/'*'
+  -- Precompute max token count in a session variable so the recursive CTE
+  -- only references the TEMPORARY staging table ONCE — MySQL forbids reopening
+  -- a TEMPORARY table within a single statement (ER_CANT_REOPEN_TABLE).
+  SELECT COALESCE(MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1), 1)
+    INTO @max_code_tokens
+    FROM ${t}
+    WHERE Codes IS NOT NULL;
+
   -- MySQL requires the WITH clause inside INSERT (between INSERT and SELECT),
   -- not before the INSERT keyword — \`WITH ... INSERT\` is a syntax error.
   INSERT INTO DBHAttributes (DBHID, TSMID)
   WITH RECURSIVE numbers AS (
     SELECT 1 AS n
     UNION ALL
-    SELECT n + 1 FROM numbers
-      WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
-                           FROM ${t} WHERE Codes IS NOT NULL), 1)
+    SELECT n + 1 FROM numbers WHERE n < @max_code_tokens
   )
     SELECT DISTINCT e.DBHID, tsm.TSMID
       FROM (
