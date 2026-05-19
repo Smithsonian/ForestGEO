@@ -362,3 +362,262 @@ describe('csv-to-sql-v2 integration — success scenarios (Task 18)', () => {
     expect(dbhRows[0].StemID).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 19: failure rollback scenarios.
+//
+// Each test boots a fresh DB with the canonical DDL + base seed, captures
+// destination-table row counts (Tree/Stem/DBH/DBHAttributes), generates a `.sql`
+// file from a CSV crafted to violate a specific Stage 0/Stage 5 check, executes
+// it, and asserts both (a) the execution throws with a specific error message
+// and (b) all destination table counts are unchanged (i.e. the procedure's
+// EXIT HANDLER FOR SQLEXCEPTION rolled back the transaction).
+// ---------------------------------------------------------------------------
+
+interface DestinationCounts {
+  tree: number;
+  stem: number;
+  dbh: number;
+  dbhAttributes: number;
+}
+
+async function captureDestinationCounts(conn: mysql.Connection): Promise<DestinationCounts> {
+  return {
+    tree: await countRows(conn, 'Tree'),
+    stem: await countRows(conn, 'Stem'),
+    dbh: await countRows(conn, 'DBH'),
+    dbhAttributes: await countRows(conn, 'DBHAttributes')
+  };
+}
+
+function expectCountsUnchanged(after: DestinationCounts, before: DestinationCounts): void {
+  expect(after.tree).toBe(before.tree);
+  expect(after.stem).toBe(before.stem);
+  expect(after.dbh).toBe(before.dbh);
+  expect(after.dbhAttributes).toBe(before.dbhAttributes);
+}
+
+function generateSqlWithReload(inputCsv: string, outSql: string, censusNumber: string): void {
+  execSync(
+    [
+      'npx tsx lib/csv-to-sql-v2.ts',
+      `--input ${inputCsv}`,
+      `--site ${TEST_SITE_NAME}`,
+      `--plot-id ${TEST_PLOT_ID}`,
+      `--census-number ${censusNumber}`,
+      `--output ${outSql}`,
+      '--allow-reload'
+    ].join(' '),
+    { cwd: PROJECT_ROOT, stdio: 'pipe' }
+  );
+}
+
+describe('csv-to-sql-v2 integration — failure rollback scenarios (Task 19)', () => {
+  let connection: mysql.Connection;
+  const dbName = `forestgeo_csv_v2_failure_${process.pid}_${Date.now()}`;
+  const config = { ...DEFAULT_TEST_CONFIG, database: dbName };
+
+  beforeEach(async () => {
+    connection = await createTestDatabase(config);
+    await loadCanonicalDdl(connection, CANONICAL_DDL_PATH);
+    await loadSeedFile(connection, SEED_CENSUS_1_PATH);
+  });
+
+  afterEach(async () => {
+    if (connection) {
+      await teardownTestDatabase(connection, config);
+    }
+  });
+
+  it('Scenario 1 — rollback on unknown species mnemonic', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f1-'));
+    const inputCsv = writeCsv(tmp, ['1,1,ZZZ,A1,1,1,10,1.3,2024-01-01,']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown species mnemonics/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 2 — rollback on unknown quadrat name', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f2-'));
+    const inputCsv = writeCsv(tmp, ['1,1,FOO,Z99,1,1,10,1.3,2024-01-01,']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown quadrats/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 3 — rollback on unknown TSMCode token', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f3-'));
+    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,ZZ;LI']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown TSMCodes/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 4 — rollback on duplicate (StemID, CensusID) DBH destination', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    const before = await captureDestinationCounts(connection);
+
+    // Two CSV rows both reference the prior (Tag=1, StemTag=1) which resolves to
+    // StemID=1. Both rows therefore target (StemID=1, CensusID=2) — check 8 fires.
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f4-'));
+    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,11,1.3,2025-01-15,', '1,1,FOO,A1,1,1,13,1.3,2025-01-15,']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER_2);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Duplicate \(StemID, CensusID\) DBH destinations/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 5 — rollback on ambiguous tree lookup', async () => {
+    // Seed two Tree rows with Tag='X' on the same plot. Both need at least one
+    // Stem joined through a Quadrat on PlotID=1 so tree_lookup picks them up.
+    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID) VALUES (10, 'X', 1), (11, 'X', 1)");
+    await connection.query(
+      'INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES ' + "(10, 10, '1', 1, 0, 1.0, 1.0), (11, 11, '1', 1, 0, 2.0, 2.0)"
+    );
+
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f5-'));
+    const inputCsv = writeCsv(tmp, ['X,1,FOO,A1,1,1,10,1.3,2024-01-15,']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Ambiguous tree tags/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 6 — rollback on ambiguous stem lookup', async () => {
+    // Seed one Tree (Tag='Y') with two stems sharing the same (TreeID, StemTag).
+    // tree_lookup resolves uniquely to TreeID=20, but stem_lookup has
+    // StemCount=2 for (TreeID=20, StemTag='S1') so check 5 fires.
+    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID) VALUES (20, 'Y', 1)");
+    await connection.query(
+      'INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES ' + "(20, 20, 'S1', 1, 0, 1.0, 1.0), (21, 20, 'S1', 1, 0, 2.0, 2.0)"
+    );
+
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f6-'));
+    const inputCsv = writeCsv(tmp, ['Y,S1,FOO,A1,1,1,10,1.3,2024-01-15,']);
+    const outSql = path.join(tmp, 'out.sql');
+    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Ambiguous stem lookup/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 7 — rollback on missing Census row (--census-number=99)', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f7-'));
+    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,']);
+    const outSql = path.join(tmp, 'out.sql');
+    // census-number 99 does not exist in the seed — Stage 0 SIGNALs immediately.
+    generateSql(inputCsv, outSql, '99');
+
+    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Expected exactly one Census row/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  it('Scenario 8 — rollback on already-loaded census without --allow-reload', async () => {
+    // First load: populate census 1 successfully.
+    const tmpFirst = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f8a-'));
+    const firstCsv = writeCsv(tmpFirst, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,']);
+    const firstSql = path.join(tmpFirst, 'out.sql');
+    generateSql(firstCsv, firstSql, TEST_CENSUS_NUMBER);
+    await executeGeneratedSql(connection, readFileSync(firstSql, 'utf8'));
+
+    // Capture post-first-load counts — these are what the rolled-back retry must preserve.
+    const afterFirstLoad = await captureDestinationCounts(connection);
+    expect(afterFirstLoad.dbh).toBe(1);
+
+    // Second load (same census, no --allow-reload) must SIGNAL at Stage 0b.
+    const tmpSecond = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f8b-'));
+    const secondCsv = writeCsv(tmpSecond, ['2,1,BAR,A1,2,2,12,1.3,2024-01-01,']);
+    const secondSql = path.join(tmpSecond, 'out.sql');
+    generateSql(secondCsv, secondSql, TEST_CENSUS_NUMBER);
+
+    await expect(executeGeneratedSql(connection, readFileSync(secondSql, 'utf8'))).rejects.toThrow(/Census already loaded/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), afterFirstLoad);
+  });
+
+  it('Scenario 9 — --allow-reload replaces target-census rows and leaves other censuses intact', async () => {
+    // Prior-census seed adds CensusID=2 + 3 trees/stems/DBH rows for CensusID=1.
+    // We load CensusID=2 with one CSV, then reload with --allow-reload using a
+    // different DBH value, and verify (a) the new value replaces the old,
+    // (b) the other census's DBH rows are untouched.
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+
+    // Snapshot Census-1 DBH rows BEFORE the target-census load — these must
+    // survive both the load and the reload byte-for-byte.
+    const [census1Before] = await connection.query<mysql.RowDataPacket[]>(
+      'SELECT MeasureID, StemID, DBH, HOM, ExactDate FROM DBH WHERE CensusID = 1 ORDER BY StemID'
+    );
+    expect(census1Before.length).toBe(3);
+
+    // First load into CensusID=2 — three O-rows reusing prior trees/stems.
+    const tmpFirst = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-r9a-'));
+    const firstCsv = writeCsv(tmpFirst, ['1,1,FOO,A1,1,1,11,1.3,2025-01-15,', '2,1,BAR,A1,2,2,19,2.0,2025-01-15,', '3,OLD,BAZ,A2,3,3,16,1.3,2025-01-15,']);
+    const firstSql = path.join(tmpFirst, 'out.sql');
+    generateSql(firstCsv, firstSql, TEST_CENSUS_NUMBER_2);
+    await executeGeneratedSql(connection, readFileSync(firstSql, 'utf8'));
+
+    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
+    const [firstDbhValues] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 2 ORDER BY StemID');
+    expect(firstDbhValues.map(r => Number(r.DBH))).toEqual([11, 19, 16]);
+
+    // Reload CensusID=2 with --allow-reload and different DBH values.
+    const tmpReload = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-r9b-'));
+    const reloadCsv = writeCsv(tmpReload, ['1,1,FOO,A1,1,1,99,1.3,2025-01-15,', '2,1,BAR,A1,2,2,88,2.0,2025-01-15,', '3,OLD,BAZ,A2,3,3,77,1.3,2025-01-15,']);
+    const reloadSql = path.join(tmpReload, 'out.sql');
+    generateSqlWithReload(reloadCsv, reloadSql, TEST_CENSUS_NUMBER_2);
+
+    await executeGeneratedSql(connection, readFileSync(reloadSql, 'utf8'));
+
+    // Target census shows replaced — not merged — values.
+    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
+    const [reloadDbhValues] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 2 ORDER BY StemID');
+    expect(reloadDbhValues.map(r => Number(r.DBH))).toEqual([99, 88, 77]);
+
+    // Old DBH values for CensusID=2 are gone (not merged in alongside the new ones).
+    const [staleRows] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS n FROM DBH WHERE CensusID = 2 AND DBH IN (11, 19, 16)');
+    expect(Number(staleRows[0].n)).toBe(0);
+
+    // Unrelated census DBH rows must be byte-for-byte unchanged.
+    const [census1After] = await connection.query<mysql.RowDataPacket[]>(
+      'SELECT MeasureID, StemID, DBH, HOM, ExactDate FROM DBH WHERE CensusID = 1 ORDER BY StemID'
+    );
+    expect(census1After.length).toBe(3);
+    for (let i = 0; i < census1Before.length; i++) {
+      expect(census1After[i].StemID).toBe(census1Before[i].StemID);
+      expect(Number(census1After[i].DBH)).toBeCloseTo(Number(census1Before[i].DBH), 5);
+      expect(String(census1After[i].HOM)).toBe(String(census1Before[i].HOM));
+    }
+
+    // Tree count is preserved (reload deletes orphaned trees but every prior
+    // tree still has the reloaded stem attached, so none should be orphaned).
+    expect(await countRows(connection, 'Tree')).toBe(3);
+    expect(await countRows(connection, 'Stem')).toBe(3);
+  });
+});
