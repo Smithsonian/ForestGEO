@@ -870,6 +870,9 @@ export function renderStage9PrimaryAndAttrs(opts: { tempTable: string }): Stage9
 `;
 
   const bodyPost = `  -- Stage 9b: explode Codes into DBHAttributes (DBHID, TSMID), excluding markers/empty/'*'
+  -- MySQL requires the WITH clause inside INSERT (between INSERT and SELECT),
+  -- not before the INSERT keyword — \`WITH ... INSERT\` is a syntax error.
+  INSERT INTO DBHAttributes (DBHID, TSMID)
   WITH RECURSIVE numbers AS (
     SELECT 1 AS n
     UNION ALL
@@ -877,7 +880,6 @@ export function renderStage9PrimaryAndAttrs(opts: { tempTable: string }): Stage9
       WHERE n < COALESCE((SELECT MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1)
                            FROM ${t} WHERE Codes IS NOT NULL), 1)
   )
-  INSERT INTO DBHAttributes (DBHID, TSMID)
     SELECT DISTINCT e.DBHID, tsm.TSMID
       FROM (
         SELECT t.DBHID,
