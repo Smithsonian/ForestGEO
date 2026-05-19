@@ -59,7 +59,7 @@ const SCALAR_DECLARES = [
   'DECLARE _cur_x FLOAT;',
   'DECLARE _cur_y FLOAT;',
   'DECLARE _cur_dbh FLOAT;',
-  'DECLARE _cur_hom FLOAT;',
+  'DECLARE _cur_hom VARCHAR(16);',
   'DECLARE _cur_primary_stem VARCHAR(20);',
   'DECLARE _cur_exact_date DATE;',
   'DECLARE _cur_comments VARCHAR(256);',
@@ -530,7 +530,7 @@ export function renderStage4(opts: Stage4Options): string {
     SET t.HOM = prev.HOM
     WHERE t.HOM IS NULL AND t.DBH IS NOT NULL AND t.Tagged = 'O';
 
-  UPDATE ${t} SET HOM = 1.3
+  UPDATE ${t} SET HOM = '1.3'
     WHERE HOM IS NULL AND DBH IS NOT NULL;
 `;
 }

@@ -35,7 +35,7 @@ export interface StagingRow {
   StemTag: string | null;
   Mnemonic: string | null;
   DBH: number | null;
-  HOM: number | null;
+  HOM: string | null;
   Codes: string | null;
   ExactDate: string | null;
   X: number | null;
@@ -110,7 +110,7 @@ export function mapCsvRowToStagingRow(row: Record<string, string>, plotId: numbe
     StemTag: coerceString(row.stemtag),
     Mnemonic: coerceString(row.spcode),
     DBH: coerceNumber('dbh', row.dbh),
-    HOM: coerceNumber('hom', row.hom),
+    HOM: coerceNumericString('hom', row.hom),
     Codes: coerceString(row.codes),
     ExactDate: coerceDate(row.date),
     X: coerceNumber('lx', row.lx),
@@ -141,6 +141,28 @@ function coerceNumber(column: CsvHeader, raw: string): number | null {
     throw new Error(`Column "${column}" numeric value is not finite, got: ${raw}`);
   }
   return n;
+}
+
+/**
+ * Coerce a CSV cell to a trimmed numeric-looking string (or NULL).
+ *
+ * Used for columns whose destination is a CHAR/VARCHAR column where we want to
+ * preserve the source lexical form (e.g. HOM '2.0' rather than the float
+ * round-tripped '2'). Applies the same fail-fast canonical-numeric guard as
+ * `coerceNumber` to reject hex / exponent / locale-comma / leading-plus, but
+ * returns the trimmed string instead of a JS number.
+ */
+function coerceNumericString(column: CsvHeader, raw: string): string | null {
+  if (isNullToken(raw)) return null;
+  const trimmed = raw.trim();
+  if (!STRICT_NUMERIC.test(trimmed)) {
+    throw new Error(`Column "${column}" expected a canonical numeric value (no hex, exponent, locale comma, leading +), got: ${raw}`);
+  }
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Column "${column}" numeric value is not finite, got: ${raw}`);
+  }
+  return trimmed;
 }
 
 function coerceDate(raw: string): string | null {
@@ -177,7 +199,7 @@ export function renderCreateStagingTable({ tableName, engine, temporary }: Creat
     `  Mnemonic         VARCHAR(10),`,
     `  DBH              FLOAT(8) DEFAULT NULL,`,
     `  Codes            VARCHAR(50) DEFAULT NULL,`,
-    `  HOM              FLOAT(8) DEFAULT NULL,`,
+    `  HOM              VARCHAR(16) DEFAULT NULL,`,
     `  Comments         VARCHAR(256) DEFAULT NULL,`,
     `  TreeID           INT UNSIGNED,`,
     `  StemID           INT UNSIGNED,`,

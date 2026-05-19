@@ -537,11 +537,11 @@ describe('renderStage4', () => {
     expect(sql).toMatch(/JOIN prior_census_order p ON p\.CensusID = d\.CensusID AND p\.rk = 1/);
   });
 
-  it('final fallback sets HOM = 1.3 WHERE HOM IS NULL AND DBH IS NOT NULL (no Tagged filter)', () => {
+  it("final fallback sets HOM = '1.3' WHERE HOM IS NULL AND DBH IS NOT NULL (no Tagged filter)", () => {
     const sql = defaultSql();
-    expect(sql).toMatch(/UPDATE `TempAllTrees` SET HOM = 1\.3\s+WHERE HOM IS NULL AND DBH IS NOT NULL;/);
+    expect(sql).toMatch(/UPDATE `TempAllTrees` SET HOM = '1\.3'\s+WHERE HOM IS NULL AND DBH IS NOT NULL;/);
     // The final fallback must NOT restrict to Tagged = 'O'
-    const finalUpdateIdx = sql.lastIndexOf('UPDATE `TempAllTrees` SET HOM = 1.3');
+    const finalUpdateIdx = sql.lastIndexOf("UPDATE `TempAllTrees` SET HOM = '1.3'");
     expect(finalUpdateIdx).toBeGreaterThan(0);
     const finalFragment = sql.slice(finalUpdateIdx, finalUpdateIdx + 80);
     expect(finalFragment).not.toMatch(/Tagged/);
@@ -550,7 +550,7 @@ describe('renderStage4', () => {
   it('final fallback UPDATE comes after the HOM inheritance UPDATE', () => {
     const sql = defaultSql();
     const inheritanceIdx = sql.indexOf('SET t.HOM = prev.HOM');
-    const fallbackIdx = sql.indexOf('SET HOM = 1.3');
+    const fallbackIdx = sql.indexOf("SET HOM = '1.3'");
     expect(inheritanceIdx).toBeGreaterThan(0);
     expect(fallbackIdx).toBeGreaterThan(inheritanceIdx);
   });

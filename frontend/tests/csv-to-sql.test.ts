@@ -199,7 +199,7 @@ describe('mapCsvRowToStagingRow', () => {
       StemTag: '10001',
       Mnemonic: 'FRPE',
       DBH: 15,
-      HOM: 1.3,
+      HOM: '1.30',
       Codes: 'LI',
       ExactDate: '2014-05-27',
       X: 4.1,
@@ -318,9 +318,14 @@ describe('mapCsvRowToStagingRow', () => {
   it('accepts plain decimals including leading-dot form', () => {
     const result = mapCsvRowToStagingRow({ ...baseRow, dbh: '.5', hom: '1.3', lx: '4.1', ly: '-3.7' }, 1, '2');
     expect(result.DBH).toBe(0.5);
-    expect(result.HOM).toBe(1.3);
+    expect(result.HOM).toBe('1.3');
     expect(result.X).toBe(4.1);
     expect(result.Y).toBe(-3.7);
+  });
+
+  it('preserves HOM lexical form (does NOT float-round-trip: "2.0" stays "2.0", "1.30" stays "1.30")', () => {
+    expect(mapCsvRowToStagingRow({ ...baseRow, hom: '2.0' }, 1, '2').HOM).toBe('2.0');
+    expect(mapCsvRowToStagingRow({ ...baseRow, hom: '1.30' }, 1, '2').HOM).toBe('1.30');
   });
 
   it('throws when date is not YYYY-MM-DD', () => {
@@ -425,7 +430,7 @@ function makeRow(overrides: Partial<StagingRow> = {}): StagingRow {
     StemTag: '10001',
     Mnemonic: 'FRPE',
     DBH: 15,
-    HOM: 1.3,
+    HOM: '1.3',
     Codes: 'LI',
     ExactDate: '2014-05-27',
     X: 4.1,
