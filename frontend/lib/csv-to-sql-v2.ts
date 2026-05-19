@@ -399,6 +399,11 @@ export function renderStage2bResprout(opts: Stage2bOptions): string {
       WHERE t.TreeID IS NOT NULL
         AND t.StemID IS NULL
         AND x.TempID IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM ${t} t2
+           WHERE t2.StemID = prior_dbh.StemID
+             AND t2.TempID <> t.TempID
+        )
         AND (
           SELECT COUNT(DISTINCT d2.StemID)
             FROM DBH d2

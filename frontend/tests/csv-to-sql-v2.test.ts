@@ -384,6 +384,16 @@ describe('renderStage2bResprout', () => {
     expect(sql).toMatch(/WHERE t\.TreeID IS NOT NULL\s+AND t\.StemID IS NULL\s+AND x\.TempID IS NULL/);
   });
 
+  it('resprout_candidates excludes prior stems already claimed by another staging row (within-batch anti-join)', () => {
+    const sql = defaultSql();
+    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM `TempAllTrees` t2\s+WHERE t2\.StemID = prior_dbh\.StemID\s+AND t2\.TempID <> t\.TempID\s+\)/);
+  });
+
+  it('within-batch anti-join honors custom tempTable name', () => {
+    const sql = renderStage2bResprout({ tempTable: 'MyCustomStaging' });
+    expect(sql).toMatch(/AND NOT EXISTS \(\s+SELECT 1 FROM `MyCustomStaging` t2\s+WHERE t2\.StemID = prior_dbh\.StemID\s+AND t2\.TempID <> t\.TempID\s+\)/);
+  });
+
   it('resprout_candidates flags HasDeadCode via DBHAttributes JOIN dead_codes', () => {
     const sql = defaultSql();
     expect(sql).toMatch(
