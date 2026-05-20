@@ -10,6 +10,7 @@ import {
   renderStage6NewTrees,
   renderStage7NewStems,
   renderStage8DBH,
+  renderStage9DBHAttributes,
   renderStage10,
   LEGACY_DEFAULT_STEM_NUMBER,
   LEGACY_DEFAULT_MEASURE_ID,
@@ -655,12 +656,64 @@ describe('legacy default constants', () => {
   });
 });
 
-describe('renderStage10', () => {
-  it('emits final tally with all four counts', () => {
-    const sql = renderStage10({ tempTable: 'TempAllTrees' });
-    expect(sql).toMatch(
-      /SELECT\s+SUM\(Tagged = 'O'\) AS old_trees,\s+SUM\(Tagged = 'M'\) AS multi_stems,\s+SUM\(Tagged = 'N'\) AS new_plants,\s+COUNT\(\*\) AS total\s+FROM `TempAllTrees`;/
+describe('renderStage9DBHAttributes', () => {
+  const sql = () => renderStage9DBHAttributes({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' });
+
+  it('emits two statements: DBHID join-back + bulk INSERT', () => {
+    expect(sql()).toMatch(/UPDATE `staging_attributes` a\s+JOIN `staging_measurements` m ON m\.TempID = a\.TempMeasurementID\s+SET a\.DBHID = m\.DBHID/);
+    expect(sql()).toMatch(/INSERT INTO DBHAttributes \(TSMID, DBHID\)\s+SELECT TSMID, DBHID\s+FROM `staging_attributes`/);
+  });
+
+  it('filters out staging_attributes rows with NULL DBHID or TSMID', () => {
+    expect(sql()).toMatch(/WHERE DBHID IS NOT NULL AND TSMID IS NOT NULL/);
+  });
+
+  it('orders inserts by TempAttrID for deterministic output', () => {
+    expect(sql()).toMatch(/ORDER BY TempAttrID/);
+  });
+
+  it('does NOT emit a capability-probe IF/ELSE branch', () => {
+    const s = sql();
+    expect(s).not.toMatch(/@dbhattrs_has_census_id/);
+    expect(s).not.toMatch(/IF .+ THEN/);
+    expect(s).not.toMatch(/END IF/);
+  });
+
+  it('does NOT include CensusID in the DBHAttributes INSERT column list', () => {
+    expect(sql()).not.toMatch(/INSERT INTO DBHAttributes \([^)]*CensusID[^)]*\)/);
+    expect(sql()).not.toMatch(/SELECT @target_census_id, TSMID, DBHID/);
+  });
+
+  it('rejects invalid table identifiers', () => {
+    expect(() => renderStage9DBHAttributes({ measurementsTable: 'a; DROP TABLE x', attributesTable: 'staging_attributes' })).toThrow(/Invalid SQL identifier/);
+    expect(() => renderStage9DBHAttributes({ measurementsTable: 'staging_measurements', attributesTable: 'b; DROP TABLE y' })).toThrow(
+      /Invalid SQL identifier/
     );
+  });
+});
+
+describe('renderStage10', () => {
+  const sql = () => renderStage10({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' });
+
+  it('emits a single SELECT with four named columns', () => {
+    const s = sql();
+    expect(s).toMatch(/\(SELECT COUNT\(\*\) FROM `staging_measurements`\) AS measurement_rows/);
+    expect(s).toMatch(/\(SELECT COUNT\(\*\) FROM `staging_attributes`\)\s+AS attribute_rows/);
+    expect(s).toMatch(/\(SELECT COUNT\(DISTINCT TreeID\) FROM `staging_measurements`\) AS tree_count/);
+    expect(s).toMatch(/\(SELECT COUNT\(DISTINCT StemID\) FROM `staging_measurements`\) AS stem_count/);
+  });
+
+  it('does NOT emit any DELETE, INSERT, or UPDATE — read-only tally', () => {
+    const s = sql();
+    expect(s).not.toMatch(/\b(DELETE|INSERT|UPDATE)\b/i);
+  });
+
+  it('does NOT reference the old tempTable shape', () => {
+    expect(sql()).not.toMatch(/TempAllTrees/);
+  });
+
+  it('rejects invalid table identifiers', () => {
+    expect(() => renderStage10({ measurementsTable: 'a; DROP TABLE x', attributesTable: 'staging_attributes' })).toThrow(/Invalid SQL identifier/);
   });
 });
 
@@ -703,9 +756,9 @@ describe('renderFullPipeline', () => {
     expect(sql).toMatch(/DROP PROCEDURE csv_to_sql_v2_load;/);
   });
 
-  it('emits 8 stage headers in order after pivot: 0, 1, 2, 5, 6, 7, 8, 10', () => {
+  it('emits 9 stage headers in order after pivot: 0, 1, 2, 5, 6, 7, 8, 9, 10', () => {
     const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    const headers = ['-- Stage 0:', '-- Stage 1:', '-- Stage 2:', '-- Stage 5:', '-- Stage 6:', '-- Stage 7:', '-- Stage 8:', '-- Stage 10:'];
+    const headers = ['-- Stage 0:', '-- Stage 1:', '-- Stage 2:', '-- Stage 5:', '-- Stage 6:', '-- Stage 7:', '-- Stage 8:', '-- Stage 9:', '-- Stage 10:'];
     const indices = headers.map(h => sql.indexOf(h));
     for (let i = 0; i < indices.length; i++) {
       expect(indices[i], `header missing: ${headers[i]}`).toBeGreaterThan(0);
@@ -731,10 +784,10 @@ describe('renderFullPipeline', () => {
     expect(sql).not.toContain('cur_dbh CURSOR');
   });
 
-  it('honors a custom tempTable name in every stage', () => {
+  it('uses hardcoded staging_measurements and staging_attributes in all stages (tempTable field now unused)', () => {
     const args = { plotId: 7, censusNumber: '4', allowReload: false, tempTable: 'MyCustomStaging' };
     const sql = renderFullPipeline({ ...args, stagingRows: [sampleRow] });
-    expect(sql).toMatch(/`MyCustomStaging`/);
-    expect(sql).not.toMatch(/`TempAllTrees`/);
+    expect(sql).toMatch(/`staging_measurements`/);
+    expect(sql).toMatch(/`staging_attributes`/);
   });
 });

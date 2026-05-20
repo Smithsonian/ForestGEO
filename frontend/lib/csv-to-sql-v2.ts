@@ -650,18 +650,38 @@ export function renderStage8DBH(opts: StageBulkInsertOptions): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stage 9: Bulk insert DBHAttributes
+// ---------------------------------------------------------------------------
+
+export function renderStage9DBHAttributes(opts: { measurementsTable: string; attributesTable: string }): string {
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  const a = escapeSqlIdentifier(opts.attributesTable);
+  return `  -- Stage 9: populate DBHAttributes (post-DBCHANGES2014f shape: TSMID, DBHID)
+  UPDATE ${a} a
+    JOIN ${m} m ON m.TempID = a.TempMeasurementID
+    SET a.DBHID = m.DBHID;
+
+  INSERT INTO DBHAttributes (TSMID, DBHID)
+    SELECT TSMID, DBHID
+      FROM ${a}
+     WHERE DBHID IS NOT NULL AND TSMID IS NOT NULL
+     ORDER BY TempAttrID;
+`;
+}
+
+// ---------------------------------------------------------------------------
 // Stage 10: final tally
 // ---------------------------------------------------------------------------
 
-export function renderStage10(opts: { tempTable: string }): string {
-  const t = escapeSqlIdentifier(opts.tempTable);
+export function renderStage10(opts: { measurementsTable: string; attributesTable: string }): string {
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  const a = escapeSqlIdentifier(opts.attributesTable);
   return `  -- Stage 10: final tally
   SELECT
-    SUM(Tagged = 'O') AS old_trees,
-    SUM(Tagged = 'M') AS multi_stems,
-    SUM(Tagged = 'N') AS new_plants,
-    COUNT(*) AS total
-    FROM ${t};
+    (SELECT COUNT(*) FROM ${m}) AS measurement_rows,
+    (SELECT COUNT(*) FROM ${a}) AS attribute_rows,
+    (SELECT COUNT(DISTINCT TreeID) FROM ${m}) AS tree_count,
+    (SELECT COUNT(DISTINCT StemID) FROM ${m}) AS stem_count;
 `;
 }
 
@@ -717,7 +737,8 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
     stage6,
     stage7,
     stage8,
-    renderStage10({ tempTable: opts.tempTable })
+    renderStage9DBHAttributes({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
+    renderStage10({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' })
   ]
     .filter(Boolean)
     .join('\n\n');
