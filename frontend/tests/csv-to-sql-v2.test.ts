@@ -10,9 +10,10 @@ import {
   renderStage6NewTrees,
   renderStage7NewStems,
   renderStage8DBH,
-  renderStage10
+  renderStage10,
+  type Stage1Options
 } from '../lib/csv-to-sql-v2';
-import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
+import { mapCsvRowToStagingRow, type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('renderProcedureEnvelope', () => {
   const baseOpts = {
@@ -265,52 +266,138 @@ describe('renderStage0bReload', () => {
 });
 
 describe('renderStage1', () => {
-  const SAMPLE_CSV_ROW = {
-    tag: 'T001',
-    stemtag: 'S001',
-    spcode: 'QURU',
-    quadrat: 'A01',
-    lx: '1.5',
-    ly: '2.5',
-    dbh: '12.3',
-    hom: '1.3',
-    date: '2024-03-15',
-    codes: 'A'
-  };
-
-  const sampleRow = mapCsvRowToStagingRow(SAMPLE_CSV_ROW, 7, '4');
-
-  it('renders CREATE TEMPORARY TABLE and ENGINE=InnoDB; no occurrence of MyISAM', () => {
-    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow] });
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE `TempAllTrees`/);
-    expect(sql).toMatch(/ENGINE=InnoDB/);
-    expect(sql).not.toMatch(/MyISAM/);
+  const opts = (overrides: Partial<Stage1Options> = {}): Stage1Options => ({
+    measurementsTable: 'staging_measurements',
+    attributesTable: 'staging_attributes',
+    measurementRows: [],
+    attributeRows: [],
+    ...overrides
   });
 
-  it('renders DROP TEMPORARY TABLE IF EXISTS (not plain DROP TABLE)', () => {
-    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow] });
-    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS `TempAllTrees`;/);
-    // Plain DROP TABLE without TEMPORARY keyword must not appear
-    expect(sql).not.toMatch(/DROP TABLE(?! IF EXISTS|.*TEMPORARY)/);
-    expect(sql).not.toMatch(/DROP TABLE `TempAllTrees`/);
+  it('emits DROP + CREATE for both tables, both ENGINE=InnoDB TEMPORARY', () => {
+    const sql = renderStage1(opts());
+    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS `staging_measurements`;/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE `staging_measurements` \(/);
+    expect(sql).toMatch(/DROP TEMPORARY TABLE IF EXISTS `staging_attributes`;/);
+    expect(sql).toMatch(/CREATE TEMPORARY TABLE `staging_attributes` \(/);
+    expect((sql.match(/ENGINE=InnoDB/g) || []).length).toBe(2);
   });
 
-  it('renders INSERT INTO ... VALUES chunks given staging rows', () => {
-    const secondRow = mapCsvRowToStagingRow({ ...SAMPLE_CSV_ROW, tag: 'T002', stemtag: 'S002' }, 7, '4');
-    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [sampleRow, secondRow] });
-    expect(sql).toMatch(/INSERT INTO `TempAllTrees` \(QuadratName, Tag, StemTag/);
-    expect(sql).toMatch(/VALUES/);
-    // Both tags should appear as escaped SQL strings
-    expect(sql).toContain("'T001'");
-    expect(sql).toContain("'T002'");
+  it('staging_measurements has all required columns including taxonomy context and Errors', () => {
+    const sql = renderStage1(opts());
+    for (const col of [
+      'TempID',
+      'CoreMeasurementID',
+      'SourceRowIndex',
+      'Tag',
+      'StemTag',
+      'Mnemonic',
+      'QuadratName',
+      'PlotCensusNumber',
+      'Family',
+      'Genus',
+      'SpeciesName',
+      'SpeciesAuthority',
+      'SubspeciesName',
+      'SubspeciesAuthority',
+      'IDLevel',
+      'DBH',
+      'HOM',
+      'ExactDate',
+      'Comments',
+      'LX',
+      'LY',
+      'PrimaryStem',
+      'TreeID',
+      'StemID',
+      'SpeciesID',
+      'SubSpeciesID',
+      'QuadratID',
+      'CensusID',
+      'DBHID',
+      'Errors'
+    ]) {
+      expect(sql).toContain(col);
+    }
   });
 
-  it('with zero staging rows, still renders the DDL and does not crash', () => {
-    const sql = renderStage1({ tempTable: 'TempAllTrees', stagingRows: [] });
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE `TempAllTrees`/);
-    expect(sql).toMatch(/ENGINE=InnoDB/);
-    // No INSERT statements should appear
+  it('staging_attributes has all required columns including Errors', () => {
+    const sql = renderStage1(opts());
+    for (const col of ['TempAttrID', 'CoreMeasurementID', 'TempMeasurementID', 'TSMCode', 'TSMID', 'DBHID', 'Errors']) {
+      expect(sql).toContain(col);
+    }
+  });
+
+  it('emits no INSERT statements when both row arrays are empty', () => {
+    const sql = renderStage1(opts());
     expect(sql).not.toMatch(/INSERT INTO/);
+  });
+
+  it('emits INSERT chunks for measurement rows', () => {
+    const row: MeasurementStagingRow = {
+      CoreMeasurementID: 1,
+      SourceRowIndex: 1,
+      Tag: 'T1',
+      StemTag: 'S1',
+      Mnemonic: 'FOO',
+      QuadratName: 'A1',
+      PlotCensusNumber: '1',
+      Family: 'Fooaceae',
+      Genus: 'Foo',
+      SpeciesName: 'foo',
+      SpeciesAuthority: 'L.',
+      SubspeciesName: null,
+      SubspeciesAuthority: null,
+      IDLevel: 'species',
+      DBH: 12.3,
+      HOM: '1.3',
+      ExactDate: '2024-06-01',
+      Comments: null,
+      LX: 1.0,
+      LY: 1.0,
+      PrimaryStem: null
+    };
+    const sql = renderStage1(opts({ measurementRows: [row] }));
+    expect(sql).toMatch(/INSERT INTO `staging_measurements` \(/);
+    expect(sql).toMatch(/'T1','S1','FOO'/);
+    expect(sql).toMatch(/'Fooaceae','Foo','foo','L\.'/);
+  });
+
+  it('emits INSERT chunks for attribute rows', () => {
+    const attr: AttributeStagingRow = { CoreMeasurementID: 1, TempMeasurementID: 1, TSMCode: 'LI' };
+    const sql = renderStage1(opts({ attributeRows: [attr] }));
+    expect(sql).toMatch(/INSERT INTO `staging_attributes` \(/);
+    expect(sql).toMatch(/\(1,1,'LI'\)/);
+  });
+
+  it('chunks at 1000 rows per multi-row VALUES', () => {
+    const row: MeasurementStagingRow = {
+      CoreMeasurementID: 1,
+      SourceRowIndex: 1,
+      Tag: 'T1',
+      StemTag: 'S1',
+      Mnemonic: 'FOO',
+      QuadratName: 'A1',
+      PlotCensusNumber: '1',
+      Family: 'F',
+      Genus: 'G',
+      SpeciesName: 'foo',
+      SpeciesAuthority: null,
+      SubspeciesName: null,
+      SubspeciesAuthority: null,
+      IDLevel: null,
+      DBH: null,
+      HOM: null,
+      ExactDate: '2024-06-01',
+      Comments: null,
+      LX: null,
+      LY: null,
+      PrimaryStem: null
+    };
+    const rows = Array.from({ length: 1500 }, (_, i) => ({ ...row, CoreMeasurementID: i + 1 }));
+    const sql = renderStage1(opts({ measurementRows: rows }));
+    const inserts = sql.match(/INSERT INTO `staging_measurements`/g) || [];
+    expect(inserts.length).toBe(2); // 1000 + 500
   });
 });
 

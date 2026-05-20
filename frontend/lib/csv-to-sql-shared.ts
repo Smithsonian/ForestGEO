@@ -44,6 +44,55 @@ export interface StagingRow {
   PlotCensusNumber: string;
 }
 
+/**
+ * App-side rows the export endpoint emits as INSERT VALUES for `staging_measurements`.
+ *
+ * `TreeID`, `StemID`, `SpeciesID`, `SubSpeciesID`, `QuadratID`, `CensusID`, and `DBHID`
+ * are server-populated during join stages and do not appear in this type.
+ * `Errors` is populated by Stage 5 contract checks and also does not appear here.
+ * These columns appear in the staging-table DDL but must not be supplied via INSERT VALUES.
+ */
+export interface MeasurementStagingRow {
+  CoreMeasurementID: number;
+  SourceRowIndex: number | null;
+  Tag: string;
+  StemTag: string;
+  Mnemonic: string;
+  QuadratName: string;
+  PlotCensusNumber: string;
+  Family: string;
+  Genus: string;
+  SpeciesName: string;
+  SpeciesAuthority: string | null;
+  SubspeciesName: string | null;
+  SubspeciesAuthority: string | null;
+  IDLevel: string | null;
+  DBH: number | null;
+  HOM: string | null;
+  ExactDate: string;
+  Comments: string | null;
+  LX: number | null;
+  LY: number | null;
+  PrimaryStem: 'main' | 'secondary' | null;
+}
+
+/**
+ * App-side rows the export endpoint emits as INSERT VALUES for `staging_attributes`.
+ *
+ * `TempAttrID` is server-assigned by AUTO_INCREMENT.
+ * `TSMID` is populated by Stage 2 (lookup against `TSMAttributes.TSMCode`).
+ * `DBHID` is populated by Stage 9 (join-back to `staging_measurements.DBHID`).
+ * `Errors` is populated by Stage 5 contract checks.
+ *
+ * These four columns appear in the staging-table DDL but not in this type,
+ * because the app must not supply them via INSERT VALUES.
+ */
+export interface AttributeStagingRow {
+  CoreMeasurementID: number;
+  TempMeasurementID: number;
+  TSMCode: string;
+}
+
 export interface SharedCliArgs {
   input: string;
   site: string;
@@ -256,6 +305,142 @@ export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkS
     const slice = rows.slice(i, i + chunkSize);
     const tuples = slice.map(row => '(' + INSERT_COLUMNS.map(col => escapeSqlValue(row[col])).join(',') + ')');
     chunks.push(`${insertHead}\n  ${tuples.join(',\n  ')};`);
+  }
+  return chunks;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 1 v2: two-table staging (measurements + attributes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render `DROP TEMPORARY TABLE IF EXISTS` + `CREATE TEMPORARY TABLE` DDL
+ * for the staging_measurements table.
+ */
+export function renderCreateStagingMeasurements(tableName: string): string {
+  const t = escapeSqlIdentifier(tableName);
+  return [
+    `DROP TEMPORARY TABLE IF EXISTS ${t};`,
+    `CREATE TEMPORARY TABLE ${t} (`,
+    `  TempID              INT UNSIGNED AUTO_INCREMENT,`,
+    `  CoreMeasurementID   INT UNSIGNED NOT NULL,`,
+    `  SourceRowIndex      INT UNSIGNED,`,
+    `  Tag                 VARCHAR(10),`,
+    `  StemTag             VARCHAR(32),`,
+    `  Mnemonic            VARCHAR(10),`,
+    `  QuadratName         VARCHAR(12),`,
+    `  PlotCensusNumber    VARCHAR(16),`,
+    `  Family              VARCHAR(64),`,
+    `  Genus               VARCHAR(64),`,
+    `  SpeciesName         VARCHAR(64),`,
+    `  SpeciesAuthority    VARCHAR(128),`,
+    `  SubspeciesName      VARCHAR(64),`,
+    `  SubspeciesAuthority VARCHAR(128),`,
+    `  IDLevel             VARCHAR(32),`,
+    `  DBH                 FLOAT(8),`,
+    `  HOM                 VARCHAR(16),`,
+    `  ExactDate           DATE,`,
+    `  Comments            VARCHAR(256),`,
+    `  LX                  FLOAT(8),`,
+    `  LY                  FLOAT(8),`,
+    `  PrimaryStem         VARCHAR(20),`,
+    `  TreeID              INT UNSIGNED,`,
+    `  StemID              INT UNSIGNED,`,
+    `  SpeciesID           INT UNSIGNED,`,
+    `  SubSpeciesID        INT UNSIGNED,`,
+    `  QuadratID           INT UNSIGNED,`,
+    `  CensusID            INT UNSIGNED,`,
+    `  DBHID               INT UNSIGNED,`,
+    `  Errors              VARCHAR(256),`,
+    `  PRIMARY KEY (TempID),`,
+    `  KEY idxTagStemTag (Tag, StemTag),`,
+    `  KEY idxQuadratName (QuadratName)`,
+    `) ENGINE=InnoDB;`
+  ].join('\n');
+}
+
+/**
+ * Render `DROP TEMPORARY TABLE IF EXISTS` + `CREATE TEMPORARY TABLE` DDL
+ * for the staging_attributes table.
+ */
+export function renderCreateStagingAttributes(tableName: string): string {
+  const t = escapeSqlIdentifier(tableName);
+  return [
+    `DROP TEMPORARY TABLE IF EXISTS ${t};`,
+    `CREATE TEMPORARY TABLE ${t} (`,
+    `  TempAttrID        INT UNSIGNED AUTO_INCREMENT,`,
+    `  CoreMeasurementID INT UNSIGNED NOT NULL,`,
+    `  TempMeasurementID INT UNSIGNED NOT NULL,`,
+    `  TSMCode           VARCHAR(10) NOT NULL,`,
+    `  TSMID             INT UNSIGNED,`,
+    `  DBHID             INT UNSIGNED,`,
+    `  Errors            VARCHAR(256),`,
+    `  PRIMARY KEY (TempAttrID),`,
+    `  KEY idxTempMeasurement (TempMeasurementID),`,
+    `  KEY idxTSMCode (TSMCode)`,
+    `) ENGINE=InnoDB;`
+  ].join('\n');
+}
+
+const MEASUREMENT_INSERT_COLUMNS = [
+  'CoreMeasurementID',
+  'SourceRowIndex',
+  'Tag',
+  'StemTag',
+  'Mnemonic',
+  'QuadratName',
+  'PlotCensusNumber',
+  'Family',
+  'Genus',
+  'SpeciesName',
+  'SpeciesAuthority',
+  'SubspeciesName',
+  'SubspeciesAuthority',
+  'IDLevel',
+  'DBH',
+  'HOM',
+  'ExactDate',
+  'Comments',
+  'LX',
+  'LY',
+  'PrimaryStem'
+] as const satisfies ReadonlyArray<keyof MeasurementStagingRow>;
+
+const ATTRIBUTE_INSERT_COLUMNS = ['CoreMeasurementID', 'TempMeasurementID', 'TSMCode'] as const satisfies ReadonlyArray<keyof AttributeStagingRow>;
+
+/**
+ * Render INSERT INTO ... VALUES chunks for measurement rows.
+ * Default chunk size is 1000 rows per VALUES clause.
+ */
+export function renderInsertChunksMeasurements(tableName: string, rows: MeasurementStagingRow[], chunkSize: number = DEFAULT_CHUNK_SIZE): string[] {
+  return renderInsertChunksGeneric(tableName, rows, MEASUREMENT_INSERT_COLUMNS, chunkSize);
+}
+
+/**
+ * Render INSERT INTO ... VALUES chunks for attribute rows.
+ * Default chunk size is 1000 rows per VALUES clause.
+ */
+export function renderInsertChunksAttributes(tableName: string, rows: AttributeStagingRow[], chunkSize: number = DEFAULT_CHUNK_SIZE): string[] {
+  return renderInsertChunksGeneric(tableName, rows, ATTRIBUTE_INSERT_COLUMNS, chunkSize);
+}
+
+/**
+ * Generic helper for rendering INSERT chunks from a set of rows and column list.
+ */
+function renderInsertChunksGeneric<R extends Record<string, unknown>>(
+  tableName: string,
+  rows: R[],
+  columns: ReadonlyArray<keyof R & string>,
+  chunkSize: number
+): string[] {
+  if (rows.length === 0) return [];
+  const t = escapeSqlIdentifier(tableName);
+  const head = `INSERT INTO ${t} (${columns.join(', ')}) VALUES`;
+  const chunks: string[] = [];
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const slice = rows.slice(i, i + chunkSize);
+    const tuples = slice.map(r => '(' + columns.map(c => escapeSqlValue(r[c] as SqlValue)).join(',') + ')');
+    chunks.push(`${head}\n  ${tuples.join(',\n  ')};`);
   }
   return chunks;
 }

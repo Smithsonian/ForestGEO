@@ -1,5 +1,16 @@
 import SqlString from 'sqlstring';
-import { escapeSqlIdentifier, renderCreateStagingTable, renderInsertChunks, type StagingRow } from './csv-to-sql-shared';
+import {
+  escapeSqlIdentifier,
+  renderCreateStagingTable,
+  renderInsertChunks,
+  renderCreateStagingMeasurements,
+  renderCreateStagingAttributes,
+  renderInsertChunksMeasurements,
+  renderInsertChunksAttributes,
+  type StagingRow,
+  type MeasurementStagingRow,
+  type AttributeStagingRow
+} from './csv-to-sql-shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -259,35 +270,40 @@ ${body}
 }
 
 // ---------------------------------------------------------------------------
-// Stage 1: Temporary InnoDB staging table
+// Stage 1: Temporary InnoDB staging tables (measurements + attributes)
 // ---------------------------------------------------------------------------
 
 export interface Stage1Options {
-  tempTable: string;
-  stagingRows: StagingRow[];
+  measurementsTable: string;
+  attributesTable: string;
+  measurementRows: MeasurementStagingRow[];
+  attributeRows: AttributeStagingRow[];
 }
 
 /**
  * Renders the Stage 1 procedure-body fragment.
  *
  * Emits:
- *   - DROP TEMPORARY TABLE IF EXISTS + CREATE TEMPORARY TABLE ... ENGINE=InnoDB
- *   - INSERT INTO ... VALUES chunks for all staging rows
+ *   - DROP TEMPORARY TABLE IF EXISTS + CREATE TEMPORARY TABLE for staging_measurements
+ *   - DROP TEMPORARY TABLE IF EXISTS + CREATE TEMPORARY TABLE for staging_attributes
+ *   - INSERT INTO ... VALUES chunks for all measurement rows
+ *   - INSERT INTO ... VALUES chunks for all attribute rows
+ *
+ * If both row arrays are empty, only the DDL is emitted (no INSERT statements).
  *
  * Output is indented two spaces at the section boundary — it is a
  * procedure-body fragment, not a full procedure.
  */
 export function renderStage1(opts: Stage1Options): string {
-  const ddl = renderCreateStagingTable({
-    tableName: opts.tempTable,
-    engine: 'InnoDB',
-    temporary: true
-  });
-  const inserts = renderInsertChunks(opts.tempTable, opts.stagingRows).join('\n');
-  return `  -- Stage 1: temporary staging
-${ddl}
+  const mDdl = renderCreateStagingMeasurements(opts.measurementsTable);
+  const aDdl = renderCreateStagingAttributes(opts.attributesTable);
+  const mInserts = renderInsertChunksMeasurements(opts.measurementsTable, opts.measurementRows).join('\n');
+  const aInserts = renderInsertChunksAttributes(opts.attributesTable, opts.attributeRows).join('\n');
 
-${inserts}`;
+  const parts = ['  -- Stage 1: temporary staging (measurements + attributes)', mDdl, aDdl];
+  if (mInserts) parts.push(mInserts);
+  if (aInserts) parts.push(aInserts);
+  return parts.join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -684,9 +700,13 @@ export interface RenderFullPipelineOptions {
  *
  * NOTE: This is a transitional stub. In a later task, the app endpoint will
  * call the individual renderers directly instead of using this composer.
+ *
+ * Stage 1 now uses the new two-table signature; this composer calls it with
+ * empty measurement/attribute arrays as a placeholder. The legacy RenderFullPipelineOptions
+ * stagingRows field is now dead-weight; the new pipeline will replace it entirely.
  */
 export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
-  const { plotId, censusNumber, allowReload, tempTable, stagingRows } = opts;
+  const { plotId, censusNumber, allowReload, tempTable } = opts;
 
   const stage6 = renderStage6NewTrees({ tempTable });
   const stage7 = renderStage7NewStems({ tempTable });
@@ -695,7 +715,12 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
   const body = [
     renderStage0({ destinationPlotId: plotId, censusNumber, allowReload }),
     allowReload ? renderStage0bReload({ mode: 'real' }) : '',
-    renderStage1({ tempTable, stagingRows }),
+    renderStage1({
+      measurementsTable: 'staging_measurements',
+      attributesTable: 'staging_attributes',
+      measurementRows: [],
+      attributeRows: []
+    }),
     renderStage2({ tempTable }),
     renderStage5({ tempTable }),
     stage6.body,
