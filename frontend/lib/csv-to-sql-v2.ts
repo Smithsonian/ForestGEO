@@ -120,7 +120,7 @@ DROP PROCEDURE ${procName};
 }
 
 // ---------------------------------------------------------------------------
-// Stage 0: Census guard and reload cleanup
+// Stage 0: Census guard
 // ---------------------------------------------------------------------------
 
 export interface Stage0Options {
@@ -138,8 +138,7 @@ export interface Stage0Options {
  *   - SET @target_census_id and @target_plot_id session variables
  *
  * Without --allow-reload: counts DBH rows for the census and SIGNALs if any exist.
- * With --allow-reload: creates scoped temp tables for affected stems/trees, then
- *   DELETEs in FK order (DBHAttributes → DBH → orphaned Stems → orphaned Trees).
+ * With --allow-reload: returns only the census guard (reload cleanup is produced by renderStage0bReload).
  *
  * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
@@ -166,10 +165,14 @@ export function renderStage0(opts: Stage0Options): string {
   SET @target_plot_id := ${opts.destinationPlotId};
 `;
 
-  if (!opts.allowReload) {
-    return (
-      guard +
-      `
+  if (opts.allowReload) {
+    // Reload cleanup is now produced by renderStage0bReload; composer is responsible for including it.
+    return guard;
+  }
+
+  return (
+    guard +
+    `
   -- Stage 0b: refuse populated census (no --allow-reload)
   SELECT COUNT(*) INTO _existing_dbh_count
     FROM DBH
@@ -180,46 +183,79 @@ export function renderStage0(opts: Stage0Options): string {
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
   END IF;
 `
-    );
-  }
+  );
+}
 
-  return (
-    guard +
-    `
-  -- Stage 0b: --allow-reload scoped cleanup
-  DROP TEMPORARY TABLE IF EXISTS reload_stems_to_check;
-  DROP TEMPORARY TABLE IF EXISTS reload_trees_to_check;
+// ---------------------------------------------------------------------------
+// Stage 0b: Reload cleanup with orphan reporting
+// ---------------------------------------------------------------------------
 
-  CREATE TEMPORARY TABLE reload_stems_to_check AS
-    SELECT DISTINCT d.StemID
-      FROM DBH d
-      WHERE d.CensusID = @target_census_id;
+export interface Stage0bOptions {
+  mode: 'real' | 'dry-run';
+}
 
-  CREATE TEMPORARY TABLE reload_trees_to_check AS
-    SELECT DISTINCT s.TreeID
+/**
+ * Renders the Stage 0b reload procedure-body fragment.
+ *
+ * Real mode:
+ *   - Populates reload_orphan_candidates TEMPORARY TABLE BEFORE any DELETE
+ *   - Emits SELECT COUNT for DBHAttributes and DBH scope BEFORE the DELETEs
+ *   - Deletes DBHAttributes and DBH for the target census (schema-agnostic JOIN DELETE for attrs)
+ *   - NEVER deletes Stem or Tree rows
+ *   - Emits orphan-count SELECTs AFTER the DELETEs to report orphan stems/trees
+ *
+ * Dry-run mode:
+ *   - Wraps the real-mode body in SAVEPOINT reload_dry ... ROLLBACK TO SAVEPOINT reload_dry
+ *   - Does NOT emit LEAVE main — the composer decides whether to skip subsequent stages
+ *
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
+ */
+export function renderStage0bReload(opts: Stage0bOptions): string {
+  const body = `  -- Stage 0b: reload — capture orphan candidates BEFORE any DELETE
+  DROP TEMPORARY TABLE IF EXISTS reload_orphan_candidates;
+  CREATE TEMPORARY TABLE reload_orphan_candidates AS
+    SELECT DISTINCT s.StemID, s.TreeID
       FROM Stem s
-      JOIN reload_stems_to_check rs ON rs.StemID = s.StemID;
+      JOIN DBH d_target ON d_target.StemID = s.StemID AND d_target.CensusID = @target_census_id
+      LEFT JOIN DBH d_other ON d_other.StemID = s.StemID AND d_other.CensusID <> @target_census_id
+     WHERE d_other.DBHID IS NULL;
+
+  SELECT 'DBHAttributes to delete' AS scope,
+         COUNT(*) AS n
+    FROM DBHAttributes da
+    JOIN DBH d ON d.DBHID = da.DBHID
+   WHERE d.CensusID = @target_census_id;
+
+  SELECT 'DBH to delete' AS scope,
+         COUNT(*) AS n
+    FROM DBH
+   WHERE CensusID = @target_census_id;
 
   DELETE da
     FROM DBHAttributes da
     JOIN DBH d ON d.DBHID = da.DBHID
-    WHERE d.CensusID = @target_census_id;
+   WHERE d.CensusID = @target_census_id;
 
   DELETE FROM DBH WHERE CensusID = @target_census_id;
 
-  DELETE s
-    FROM Stem s
-    JOIN reload_stems_to_check rs ON rs.StemID = s.StemID
-    LEFT JOIN DBH remaining ON remaining.StemID = s.StemID
-    WHERE remaining.DBHID IS NULL;
+  SELECT 'Orphan stems after reload' AS scope,
+         COUNT(*) AS n
+    FROM reload_orphan_candidates roc
+    LEFT JOIN DBH d ON d.StemID = roc.StemID
+   WHERE d.DBHID IS NULL;
 
-  DELETE tr
-    FROM Tree tr
-    JOIN reload_trees_to_check rt ON rt.TreeID = tr.TreeID
-    LEFT JOIN Stem remaining ON remaining.TreeID = tr.TreeID
-    WHERE remaining.StemID IS NULL;
-`
-  );
+  SELECT 'Orphan trees after reload' AS scope,
+         COUNT(*) AS n
+    FROM (SELECT DISTINCT TreeID FROM reload_orphan_candidates) roc_t
+    LEFT JOIN Stem s ON s.TreeID = roc_t.TreeID
+   WHERE s.StemID IS NULL;
+`;
+
+  if (opts.mode === 'real') return body;
+  return `  SAVEPOINT reload_dry;
+${body}
+  ROLLBACK TO SAVEPOINT reload_dry;
+`;
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +674,9 @@ export interface RenderFullPipelineOptions {
  *
  * Stage ordering (after pivot, deleted stages 2b/3/4/9):
  *
- *   Stage 0 -> 1 -> 2 -> 5 -> 6 -> 7 -> 8 -> 10
+ *   Stage 0 -> [0b] -> 1 -> 2 -> 5 -> 6 -> 7 -> 8 -> 10
+ *
+ * Stage 0b (reload cleanup) is included only when allowReload is true.
  *
  * Cursor declarations from Stages 6/7/8 are collected and emitted by the
  * procedure envelope between the scalar DECLAREs and the NOT FOUND handler,
@@ -656,6 +694,7 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
 
   const body = [
     renderStage0({ destinationPlotId: plotId, censusNumber, allowReload }),
+    allowReload ? renderStage0bReload({ mode: 'real' }) : '',
     renderStage1({ tempTable, stagingRows }),
     renderStage2({ tempTable }),
     renderStage5({ tempTable }),
@@ -663,7 +702,9 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
     stage7.body,
     stage8.body,
     renderStage10({ tempTable })
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   return renderProcedureEnvelope({
     procedureName: 'csv_to_sql_v2_load', // placeholder; orchestrator (later task) supplies a unique per-artifact name

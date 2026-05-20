@@ -3,6 +3,7 @@ import {
   renderFullPipeline,
   renderProcedureEnvelope,
   renderStage0,
+  renderStage0bReload,
   renderStage1,
   renderStage2,
   renderStage5,
@@ -187,27 +188,10 @@ describe('renderStage0', () => {
     expect(sql).not.toMatch(/reload_trees_to_check/);
   });
 
-  it('with --allow-reload, emits scoped cleanup', () => {
+  it('with allowReload=true returns only the census guard (Stage 0b is now a separate renderer)', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_stems_to_check/);
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_trees_to_check/);
-    expect(sql).toMatch(/DELETE da\s+FROM DBHAttributes da/);
-    expect(sql).toMatch(/DELETE FROM DBH WHERE CensusID = @target_census_id;/);
-    expect(sql).toMatch(/DELETE s\s+FROM Stem s\s+JOIN reload_stems_to_check/);
-    expect(sql).toMatch(/DELETE tr\s+FROM Tree tr\s+JOIN reload_trees_to_check/);
-    expect(sql).not.toMatch(/Pass --allow-reload to overwrite/);
-  });
-
-  it('with --allow-reload, DELETEs in FK order (DBHAttributes before DBH, Stem before Tree)', () => {
-    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
-    const dbhAttrIdx = sql.indexOf('DELETE da');
-    const dbhIdx = sql.indexOf('DELETE FROM DBH');
-    const stemIdx = sql.indexOf('DELETE s\n');
-    const treeIdx = sql.indexOf('DELETE tr\n');
-    expect(dbhAttrIdx).toBeGreaterThan(0);
-    expect(dbhIdx).toBeGreaterThan(dbhAttrIdx);
-    expect(stemIdx).toBeGreaterThan(dbhIdx);
-    expect(treeIdx).toBeGreaterThan(stemIdx);
+    expect(sql).toMatch(/Stage 0: target census guard/);
+    expect(sql).not.toMatch(/reload_orphan_candidates|reload_stems_to_check|DBHAttributes to delete/);
   });
 
   it('output is a procedure-body fragment indented two spaces (no procedure envelope)', () => {
@@ -219,6 +203,64 @@ describe('renderStage0', () => {
     expect(sql).not.toMatch(/COMMIT/);
     // Body fragments are indented two spaces
     expect(sql).toMatch(/^  -- Stage 0:/m);
+  });
+});
+
+describe('renderStage0bReload', () => {
+  it('real mode populates reload_orphan_candidates before any DELETE', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    const candIdx = sql.indexOf('CREATE TEMPORARY TABLE reload_orphan_candidates');
+    const firstDeleteIdx = sql.indexOf('  DELETE da');
+    expect(candIdx).toBeGreaterThan(-1);
+    expect(firstDeleteIdx).toBeGreaterThan(-1);
+    expect(candIdx).toBeLessThan(firstDeleteIdx);
+  });
+
+  it('real mode emits count SELECTs before each DELETE', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    expect(sql).toMatch(
+      /SELECT 'DBHAttributes to delete' AS scope,\s*COUNT\(\*\) AS n[\s\S]+FROM DBHAttributes da[\s\S]+JOIN DBH d ON d\.DBHID = da\.DBHID[\s\S]+WHERE d\.CensusID = @target_census_id/
+    );
+    expect(sql).toMatch(/SELECT 'DBH to delete' AS scope,\s*COUNT\(\*\) AS n[\s\S]+FROM DBH[\s\S]+WHERE CensusID = @target_census_id/);
+    expect(sql.indexOf("'DBHAttributes to delete'")).toBeLessThan(sql.indexOf('DELETE da'));
+    expect(sql.indexOf("'DBH to delete'")).toBeLessThan(sql.indexOf('DELETE FROM DBH'));
+  });
+
+  it('real mode deletes DBHAttributes via JOIN through DBH (schema-agnostic)', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    expect(sql).toMatch(/DELETE da[\s\S]+FROM DBHAttributes da[\s\S]+JOIN DBH d ON d\.DBHID = da\.DBHID[\s\S]+WHERE d\.CensusID = @target_census_id/);
+  });
+
+  it('real mode deletes DBH for target census', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    expect(sql).toMatch(/DELETE FROM DBH WHERE CensusID = @target_census_id/);
+  });
+
+  it('real mode NEVER deletes Stem or Tree rows', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    expect(sql).not.toMatch(/DELETE\s+(\w+\s+)?FROM Stem/i);
+    expect(sql).not.toMatch(/DELETE\s+(\w+\s+)?FROM Tree/i);
+  });
+
+  it('real mode emits orphan-count SELECTs AFTER the DELETEs', () => {
+    const sql = renderStage0bReload({ mode: 'real' });
+    const lastDeleteIdx = sql.lastIndexOf('DELETE FROM DBH');
+    expect(sql).toMatch(/'Orphan stems after reload'/);
+    expect(sql).toMatch(/'Orphan trees after reload'/);
+    expect(sql.indexOf("'Orphan stems after reload'")).toBeGreaterThan(lastDeleteIdx);
+    expect(sql.indexOf("'Orphan trees after reload'")).toBeGreaterThan(lastDeleteIdx);
+  });
+
+  it('dry-run mode wraps body in SAVEPOINT + ROLLBACK TO SAVEPOINT', () => {
+    const sql = renderStage0bReload({ mode: 'dry-run' });
+    expect(sql).toMatch(/SAVEPOINT reload_dry/);
+    expect(sql).toMatch(/ROLLBACK TO SAVEPOINT reload_dry/);
+    expect(sql.indexOf('SAVEPOINT reload_dry')).toBeLessThan(sql.indexOf('ROLLBACK TO SAVEPOINT reload_dry'));
+  });
+
+  it('dry-run mode does NOT emit LEAVE main', () => {
+    const sql = renderStage0bReload({ mode: 'dry-run' });
+    expect(sql).not.toMatch(/LEAVE\s+main/);
   });
 });
 
