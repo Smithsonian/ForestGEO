@@ -124,7 +124,7 @@ DROP PROCEDURE ${procName};
 // ---------------------------------------------------------------------------
 
 export interface Stage0Options {
-  plotId: number;
+  destinationPlotId: number;
   censusNumber: string;
   allowReload: boolean;
 }
@@ -144,13 +144,17 @@ export interface Stage0Options {
  * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
 export function renderStage0(opts: Stage0Options): string {
+  if (!Number.isInteger(opts.destinationPlotId) || opts.destinationPlotId < 0) {
+    throw new Error(`destinationPlotId must be a non-negative integer; got: ${opts.destinationPlotId}`);
+  }
+
   const censusLit = SqlString.escape(opts.censusNumber);
 
   const guard = `  -- Stage 0: target census guard
   SELECT COUNT(*), MIN(CensusID), MIN(StartDate)
     INTO _census_count, _target_census_id, _target_start_date
     FROM Census
-    WHERE PlotID = ${opts.plotId}
+    WHERE PlotID = ${opts.destinationPlotId}
       AND PlotCensusNumber = ${censusLit};
 
   IF _census_count <> 1 THEN
@@ -159,7 +163,7 @@ export function renderStage0(opts: Stage0Options): string {
   END IF;
 
   SET @target_census_id := _target_census_id;
-  SET @target_plot_id := ${opts.plotId};
+  SET @target_plot_id := ${opts.destinationPlotId};
 `;
 
   if (!opts.allowReload) {
@@ -651,7 +655,7 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
   const stage8 = renderStage8DBH({ tempTable });
 
   const body = [
-    renderStage0({ plotId, censusNumber, allowReload }),
+    renderStage0({ destinationPlotId: plotId, censusNumber, allowReload }),
     renderStage1({ tempTable, stagingRows }),
     renderStage2({ tempTable }),
     renderStage5({ tempTable }),

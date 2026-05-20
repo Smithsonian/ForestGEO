@@ -132,7 +132,7 @@ describe('renderProcedureEnvelope', () => {
 
 describe('renderStage0', () => {
   it('census guard counts rows for (plot, census) pair', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/SELECT COUNT\(\*\), MIN\(CensusID\), MIN\(StartDate\)\s+INTO _census_count, _target_census_id, _target_start_date/);
     expect(sql).toMatch(/PlotID = 1\s+AND PlotCensusNumber = '2'/);
     expect(sql).toMatch(/IF _census_count <> 1 THEN/);
@@ -140,32 +140,55 @@ describe('renderStage0', () => {
   });
 
   it('sets @target_census_id and @target_plot_id session variables', () => {
-    const sql = renderStage0({ plotId: 42, censusNumber: '3', allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 42, censusNumber: '3', allowReload: false });
     expect(sql).toMatch(/SET @target_census_id := _target_census_id;/);
     expect(sql).toMatch(/SET @target_plot_id := 42;/);
   });
 
+  it('uses destinationPlotId in the census guard WHERE clause', () => {
+    const sql = renderStage0({ destinationPlotId: 42, censusNumber: '7', allowReload: false });
+    expect(sql).toMatch(/WHERE PlotID = 42/);
+    expect(sql).toMatch(/AND PlotCensusNumber = '7'/);
+    expect(sql).toMatch(/SET @target_plot_id := 42/);
+  });
+
+  it('rejects non-integer destinationPlotId', () => {
+    expect(() => renderStage0({ destinationPlotId: 1.5 as any, censusNumber: '1', allowReload: false })).toThrow(
+      /destinationPlotId must be a non-negative integer/
+    );
+    expect(() => renderStage0({ destinationPlotId: '1' as any, censusNumber: '1', allowReload: false })).toThrow(
+      /destinationPlotId must be a non-negative integer/
+    );
+    expect(() => renderStage0({ destinationPlotId: -1, censusNumber: '1', allowReload: false })).toThrow(/destinationPlotId must be a non-negative integer/);
+  });
+
+  it('does not emit a DBHAttributes capability probe (spec dropped this)', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '1', allowReload: false });
+    expect(sql).not.toMatch(/@dbhattrs_has_census_id/);
+    expect(sql).not.toMatch(/information_schema/i);
+  });
+
   it('escapes census number to prevent injection', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: "2'; DROP TABLE Tree; --", allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: "2'; DROP TABLE Tree; --", allowReload: false });
     expect(sql).toContain("PlotCensusNumber = '2\\'; DROP TABLE Tree; --'");
     expect(sql).not.toContain("PlotCensusNumber = '2'; DROP TABLE Tree; --'");
   });
 
   it('without --allow-reload, refuses populated census', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).toMatch(/SELECT COUNT\(\*\) INTO _existing_dbh_count\s+FROM DBH\s+WHERE CensusID = @target_census_id/);
     expect(sql).toMatch(/IF _existing_dbh_count > 0 THEN/);
     expect(sql).toMatch(/Pass --allow-reload to overwrite/);
   });
 
   it('without --allow-reload, does not emit reload temp tables', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).not.toMatch(/reload_stems_to_check/);
     expect(sql).not.toMatch(/reload_trees_to_check/);
   });
 
   it('with --allow-reload, emits scoped cleanup', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: true });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
     expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_stems_to_check/);
     expect(sql).toMatch(/CREATE TEMPORARY TABLE reload_trees_to_check/);
     expect(sql).toMatch(/DELETE da\s+FROM DBHAttributes da/);
@@ -176,7 +199,7 @@ describe('renderStage0', () => {
   });
 
   it('with --allow-reload, DELETEs in FK order (DBHAttributes before DBH, Stem before Tree)', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: true });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: true });
     const dbhAttrIdx = sql.indexOf('DELETE da');
     const dbhIdx = sql.indexOf('DELETE FROM DBH');
     const stemIdx = sql.indexOf('DELETE s\n');
@@ -188,7 +211,7 @@ describe('renderStage0', () => {
   });
 
   it('output is a procedure-body fragment indented two spaces (no procedure envelope)', () => {
-    const sql = renderStage0({ plotId: 1, censusNumber: '2', allowReload: false });
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
     expect(sql).not.toMatch(/DROP PROCEDURE/);
     expect(sql).not.toMatch(/DELIMITER/);
     expect(sql).not.toMatch(/CREATE PROCEDURE/);
