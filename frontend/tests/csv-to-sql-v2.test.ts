@@ -487,119 +487,106 @@ describe('renderStage2', () => {
 });
 
 describe('renderStage5', () => {
-  const defaultSql = () => renderStage5({ tempTable: 'TempAllTrees' });
+  const opts = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+  const sql = () => renderStage5(opts);
 
-  it('check 1: missing required staged values flags TempIDs where any required column IS NULL', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/SELECT GROUP_CONCAT\(DISTINCT TempID\) INTO _bad/);
-    expect(sql).toMatch(/WHERE Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL/);
-    expect(sql).toMatch(/Missing required values in TempIDs: /);
+  it('check 1: required-field NOT NULL', () => {
+    expect(sql()).toMatch(/'Missing required field'/);
+    expect(sql()).toMatch(/Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL/);
   });
 
-  it('check 2: NULL QuadratID reports DISTINCT QuadratName', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/SELECT GROUP_CONCAT\(DISTINCT QuadratName\) INTO _bad\s+FROM `TempAllTrees`\s+WHERE QuadratID IS NULL/);
-    expect(sql).toMatch(/Unknown quadrats: /);
+  it('check 2: taxonomy not uniquely resolved', () => {
+    expect(sql()).toMatch(/'Taxonomy not uniquely resolved'/);
+    expect(sql()).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM taxonomy_lookup tx[\s\S]+tx\.TaxonCount = 1/);
   });
 
-  it('check 3: NULL SpeciesID reports DISTINCT Mnemonic', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/SELECT GROUP_CONCAT\(DISTINCT Mnemonic\) INTO _bad\s+FROM `TempAllTrees`\s+WHERE SpeciesID IS NULL/);
-    expect(sql).toMatch(/Unknown species mnemonics: /);
+  it('check 3: ambiguous tree key (TreeCount > 1)', () => {
+    expect(sql()).toMatch(/'Ambiguous tree key'/);
+    expect(sql()).toMatch(/tl\.TreeCount > 1/);
   });
 
-  it('check 4: ambiguous tree lookup joins tree_lookup TreeCount > 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN tree_lookup tl ON tl\.Tag = t\.Tag\s+WHERE tl\.TreeCount > 1/);
-    expect(sql).toMatch(/SELECT GROUP_CONCAT\(DISTINCT t\.Tag\) INTO _bad/);
-    expect(sql).toMatch(/Ambiguous tree tags: /);
+  it('check 4: ambiguous stem key (StemCount > 1)', () => {
+    expect(sql()).toMatch(/'Ambiguous stem key'/);
+    expect(sql()).toMatch(/sl\.StemCount > 1/);
   });
 
-  it('check 5: ambiguous stem lookup joins stem_lookup StemCount > 1 with NULL-safe StemTag', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN stem_lookup sl ON sl\.TreeID = t\.TreeID AND sl\.StemTag <=> t\.StemTag\s+WHERE sl\.StemCount > 1/);
-    expect(sql).toMatch(/GROUP_CONCAT\(DISTINCT CONCAT\(t\.Tag, '\/', COALESCE\(t\.StemTag, 'NULL'\)\)\)/);
-    expect(sql).toMatch(/Ambiguous stem lookup: /);
+  it('check 5: unknown quadrat', () => {
+    expect(sql()).toMatch(/'Unknown quadrat'/);
+    expect(sql()).toMatch(/QuadratID IS NULL AND QuadratName IS NOT NULL/);
   });
 
-  it('check 6: HOM inheritance check fires when O rows exist but prior_census_order is empty', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/EXISTS \(SELECT 1 FROM `TempAllTrees` WHERE Tagged = 'O'\)/);
-    expect(sql).toMatch(/\(SELECT COUNT\(\*\) FROM prior_census_order\) = 0/);
-    expect(sql).toMatch(/HOM inheritance requires prior census ordering but no orderable prior census exists for plot/);
+  it('check 6: unknown TSMCode on staging_attributes', () => {
+    expect(sql()).toMatch(/'Unknown TSMCode'/);
+    expect(sql()).toMatch(/UPDATE `staging_attributes`[\s\S]+TSMID IS NULL AND TSMCode IS NOT NULL/);
   });
 
-  it('check 7: unknown TSMCode tokens uses a recursive CTE that splits Codes on ";"', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/WITH RECURSIVE numbers AS/);
-    expect(sql).toMatch(/SUBSTRING_INDEX\(SUBSTRING_INDEX\(t\.Codes, ';', n\.n\), ';', -1\)/);
-    expect(sql).toMatch(/LEFT JOIN TSMAttributes tsm ON tsm\.TSMCode = e\.token/);
-    expect(sql).toMatch(/WHERE tsm\.TSMID IS NULL AND e\.token NOT IN \('', '\*'\)/);
-    expect(sql).toMatch(/Unknown TSMCodes: /);
+  it('check 7: duplicate (StemID, CensusID)', () => {
+    expect(sql()).toMatch(/'Duplicate \(StemID, CensusID\) destination'/);
+    expect(sql()).toMatch(/GROUP BY StemID, CensusID\s+HAVING COUNT\(\*\) > 1/);
   });
 
-  it('check 7: code-splitting CTE excludes empty and "*" tokens', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/e\.token NOT IN \('', '\*'\)/);
+  it('check 8: duplicate new-stem natural key', () => {
+    expect(sql()).toMatch(/'Duplicate new-stem natural key'/);
+    expect(sql()).toMatch(/GROUP BY TreeID, StemTag, QuadratID\s+HAVING COUNT\(\*\) > 1/);
   });
 
-  it('check 8: duplicate (StemID, CensusID) destinations groups and HAVING COUNT(*) > 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/GROUP BY StemID, CensusID/);
-    expect(sql).toMatch(/HAVING COUNT\(\*\) > 1/);
-    expect(sql).toMatch(/Duplicate \(StemID, CensusID\) DBH destinations: /);
+  it('check 9: ambiguous pre-existing Tree (orphan)', () => {
+    expect(sql()).toMatch(/'Ambiguous pre-existing Tree \(orphan\)'/);
+    expect(sql()).toMatch(/FROM Tree tr\s+LEFT JOIN Stem s ON s\.TreeID = tr\.TreeID[\s\S]+s\.StemID IS NULL/);
   });
 
-  it('all 8 SIGNALs use SQLSTATE 45000', () => {
-    const sql = defaultSql();
-    const matches = sql.match(/SIGNAL SQLSTATE '45000'/g) ?? [];
-    expect(matches.length).toBe(8);
+  it('check 10: string lengths for measurements + TSMCode width for attributes', () => {
+    expect(sql()).toMatch(/CHAR_LENGTH\(Tag\) > 10 OR CHAR_LENGTH\(StemTag\) > 32 OR CHAR_LENGTH\(QuadratName\) > 8 OR CHAR_LENGTH\(Comments\) > 128/);
+    expect(sql()).toMatch(/'TSMCode too long for CTFS'/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(TSMCode\) > 10/);
   });
 
-  it('all 8 checks render in documented order', () => {
-    const sql = defaultSql();
-    const idx1 = sql.indexOf('Missing required values in TempIDs');
-    const idx2 = sql.indexOf('Unknown quadrats');
-    const idx3 = sql.indexOf('Unknown species mnemonics');
-    const idx4 = sql.indexOf('Ambiguous tree tags');
-    const idx5 = sql.indexOf('Ambiguous stem lookup');
-    const idx6 = sql.indexOf('HOM inheritance requires prior census ordering');
-    const idx7 = sql.indexOf('Unknown TSMCodes');
-    const idx8 = sql.indexOf('Duplicate (StemID, CensusID) DBH destinations');
-    expect(idx1).toBeGreaterThan(0);
-    expect(idx2).toBeGreaterThan(idx1);
-    expect(idx3).toBeGreaterThan(idx2);
-    expect(idx4).toBeGreaterThan(idx3);
-    expect(idx5).toBeGreaterThan(idx4);
-    expect(idx6).toBeGreaterThan(idx5);
-    expect(idx7).toBeGreaterThan(idx6);
-    expect(idx8).toBeGreaterThan(idx7);
+  it('errors are accumulated via CONCAT, not overwritten', () => {
+    expect(sql()).toMatch(/SET Errors = CONCAT\(COALESCE\(Errors, ''\), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END,/);
   });
 
-  it('resets _bad to NULL before each check', () => {
-    const sql = defaultSql();
-    const resets = sql.match(/SET _bad = NULL;/g) ?? [];
-    expect(resets.length).toBe(8);
+  it('final SIGNAL is gated on EXISTS in either staging table', () => {
+    expect(sql()).toMatch(
+      /IF EXISTS \(SELECT 1 FROM `staging_measurements` WHERE Errors IS NOT NULL\)\s+OR EXISTS \(SELECT 1 FROM `staging_attributes` WHERE Errors IS NOT NULL\) THEN/
+    );
+  });
+
+  it('final SELECT for measurements carries CoreMeasurementID + SourceRowIndex for tracing', () => {
+    expect(sql()).toMatch(
+      /SELECT TempID, CoreMeasurementID, SourceRowIndex, Tag, StemTag, Mnemonic, QuadratName, Errors\s+FROM `staging_measurements` WHERE Errors IS NOT NULL ORDER BY TempID/
+    );
+  });
+
+  it('final SELECT for attributes carries trace columns', () => {
+    expect(sql()).toMatch(
+      /SELECT TempAttrID, CoreMeasurementID, TempMeasurementID, TSMCode, Errors\s+FROM `staging_attributes` WHERE Errors IS NOT NULL ORDER BY TempAttrID/
+    );
+  });
+
+  it('uses one stable short SIGNAL message; no LEFT(_,128) truncation', () => {
+    expect(sql()).toMatch(/SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Validation failed; see prior SELECT for per-row details'/);
+    expect(sql()).not.toMatch(/LEFT\([^,]+, 128\)/);
+  });
+
+  it('no SET _bad = NULL pattern remains', () => {
+    expect(sql()).not.toMatch(/SET _bad = NULL/);
+  });
+
+  it('rejects invalid measurementsTable identifier', () => {
+    expect(() => renderStage5({ measurementsTable: 'a; DROP TABLE x', attributesTable: 'staging_attributes' })).toThrow(/Invalid SQL identifier/);
+  });
+
+  it('rejects invalid attributesTable identifier', () => {
+    expect(() => renderStage5({ measurementsTable: 'staging_measurements', attributesTable: 'a; DROP TABLE x' })).toThrow(/Invalid SQL identifier/);
   });
 
   it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/DROP PROCEDURE/);
-    expect(sql).not.toMatch(/DELIMITER/);
-    expect(sql).not.toMatch(/CREATE PROCEDURE/);
-    expect(sql).not.toMatch(/START TRANSACTION/);
-    expect(sql).not.toMatch(/COMMIT/);
-    expect(sql).toMatch(/^  -- Stage 5:/m);
-  });
-
-  it('uses backtick-quoted identifier for custom tempTable name', () => {
-    const sql = renderStage5({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/`MyCustomStaging`/);
-    expect(sql).not.toMatch(/TempAllTrees/);
-  });
-
-  it('rejects an invalid tempTable identifier (injection guard)', () => {
-    expect(() => renderStage5({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+    expect(sql()).not.toMatch(/DROP PROCEDURE/);
+    expect(sql()).not.toMatch(/DELIMITER/);
+    expect(sql()).not.toMatch(/CREATE PROCEDURE/);
+    expect(sql()).not.toMatch(/START TRANSACTION/);
+    expect(sql()).not.toMatch(/COMMIT/);
+    expect(sql()).toMatch(/^  -- Stage 5:/m);
   });
 });
 

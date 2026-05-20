@@ -422,140 +422,136 @@ export function renderStage2(opts: Stage2Options): string {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 5: Eight fail-loud sanity checks
+// Stage 5: Destination contract checks
 // ---------------------------------------------------------------------------
 
 export interface Stage5Options {
-  tempTable: string;
+  measurementsTable: string;
+  attributesTable: string;
 }
 
 /**
  * Renders the Stage 5 procedure-body fragment.
  *
- * Eight sanity checks run in sequence. Each follows the same template:
- *   - SELECT GROUP_CONCAT(DISTINCT <value>) INTO _bad FROM ... WHERE <predicate>;
- *   - IF _bad IS NOT NULL THEN SIGNAL SQLSTATE '45000' with a descriptive message.
+ * Ten destination-contract checks run in sequence. Each writes per-row reason
+ * into the `Errors` column on the affected staging rows via CONCAT, then a
+ * single gated SIGNAL at the end emits the full failure set.
  *
- * The shared `_bad TEXT` variable declared in the procedure envelope is reset to
- * NULL before each check so a prior NULL aggregate result does not bleed into
- * the next predicate.
+ * Checks (in order, per spec lines 219-228):
+ *   1. Required-field NOT NULL on staging_measurements: Tag, StemTag, Mnemonic, QuadratName, ExactDate
+ *   2. Taxonomy lookup resolved exactly once (TempID in taxonomy_lookup with TaxonCount = 1)
+ *   3. Tree-key uniqueness on destination plot (tree_lookup.TreeCount > 1 means failure)
+ *   4. Stem uniqueness on destination tree (stem_lookup.StemCount > 1 means failure)
+ *   5. Unknown quadrat (QuadratID IS NULL after Stage 2)
+ *   6. Unknown TSMCode on staging_attributes (TSMID IS NULL after Stage 2)
+ *   7. No duplicate (StemID, CensusID) destinations within the batch
+ *   8. (TreeID, StemTag, QuadratID) uniqueness among new-stem rows (StemID IS NULL)
+ *   9. No pre-existing orphan Tree for new tree keys (fail if matching Tree exists with no Stem)
+ *   10. Destination string lengths: Tag>10, StemTag>32, QuadratName>8, Comments>128 for measurements; TSMCode>10 for attributes
  *
- * Checks (in order):
- *   1. Missing required staged values (Tag/StemTag/Mnemonic/QuadratName/ExactDate)
- *   2. Unresolved QuadratID after Stage 2
- *   3. Unresolved SpeciesID after Stage 2
- *   4. Ambiguous tree lookup (tree_lookup.TreeCount > 1)
- *   5. Ambiguous stem lookup (stem_lookup.StemCount > 1)
- *   6. HOM inheritance required but no orderable prior census exists
- *   7. Unknown TSMCode tokens in staging Codes (recursive CTE split on ';';
- *      empty tokens and '*' are excluded)
- *   8. Duplicate (StemID, CensusID) DBH destinations
+ * After all checks, a single IF EXISTS block emits SELECTs of failed rows from
+ * both tables and a SIGNAL with a stable short message.
  *
  * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
 export function renderStage5(opts: Stage5Options): string {
-  const t = escapeSqlIdentifier(opts.tempTable);
-  return `  -- Stage 5: eight fail-loud sanity checks
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  const a = escapeSqlIdentifier(opts.attributesTable);
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT TempID) INTO _bad
-    FROM ${t}
-    WHERE Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Missing required values in TempIDs: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+  const appendErr = (table: string, reason: string, predicate: string) =>
+    `  UPDATE ${table}
+    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, '${reason}')
+    WHERE ${predicate};
+`;
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT QuadratName) INTO _bad
-    FROM ${t}
-    WHERE QuadratID IS NULL;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Unknown quadrats: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+  return `  -- Stage 5: destination contract checks
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT Mnemonic) INTO _bad
-    FROM ${t}
-    WHERE SpeciesID IS NULL;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Unknown species mnemonics: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+${appendErr(m, 'Missing required field', `Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL`)}
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT t.Tag) INTO _bad
-    FROM ${t} t
-    JOIN tree_lookup tl ON tl.Tag = t.Tag
-    WHERE tl.TreeCount > 1;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Ambiguous tree tags: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+${appendErr(
+  m,
+  'Taxonomy not uniquely resolved',
+  `NOT EXISTS (
+       SELECT 1 FROM taxonomy_lookup tx
+       WHERE tx.TempID = ${m}.TempID AND tx.TaxonCount = 1
+     )`
+)}
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT CONCAT(t.Tag, '/', COALESCE(t.StemTag, 'NULL'))) INTO _bad
-    FROM ${t} t
-    JOIN stem_lookup sl ON sl.TreeID = t.TreeID AND sl.StemTag <=> t.StemTag
-    WHERE sl.StemCount > 1;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Ambiguous stem lookup: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+${appendErr(
+  m,
+  'Ambiguous tree key',
+  `SpeciesID IS NOT NULL AND EXISTS (
+       SELECT 1 FROM tree_lookup tl
+       WHERE tl.Tag = ${m}.Tag AND tl.SpeciesID = ${m}.SpeciesID
+         AND tl.SubSpeciesID <=> ${m}.SubSpeciesID AND tl.TreeCount > 1
+     )`
+)}
 
-  SET _bad = NULL;
-  SELECT CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE Tagged = 'O')
-              AND (SELECT COUNT(*) FROM prior_census_order) = 0
-              THEN 'no orderable prior census' END INTO _bad;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('HOM inheritance requires prior census ordering but no orderable prior census exists for plot: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+${appendErr(
+  m,
+  'Ambiguous stem key',
+  `TreeID IS NOT NULL AND EXISTS (
+       SELECT 1 FROM stem_lookup sl
+       WHERE sl.TreeID = ${m}.TreeID AND sl.StemTag <=> ${m}.StemTag AND sl.StemCount > 1
+     )`
+)}
 
-  -- Precompute max token count in a session variable so the recursive CTE
-  -- only references the TEMPORARY staging table ONCE — MySQL forbids reopening
-  -- a TEMPORARY table within a single statement (ER_CANT_REOPEN_TABLE).
-  SELECT COALESCE(MAX(LENGTH(Codes) - LENGTH(REPLACE(Codes, ';', '')) + 1), 1)
-    INTO @max_code_tokens
-    FROM ${t}
-    WHERE Codes IS NOT NULL;
+${appendErr(m, 'Unknown quadrat', `QuadratID IS NULL AND QuadratName IS NOT NULL`)}
 
-  SET _bad = NULL;
-  WITH RECURSIVE numbers AS (
-    SELECT 1 AS n
-    UNION ALL
-    SELECT n + 1 FROM numbers WHERE n < @max_code_tokens
-  ),
-  exploded AS (
-    SELECT t.TempID,
-           TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(t.Codes, ';', n.n), ';', -1)) AS token
-      FROM ${t} t
-      JOIN numbers n
-        ON n.n <= LENGTH(t.Codes) - LENGTH(REPLACE(t.Codes, ';', '')) + 1
-      WHERE t.Codes IS NOT NULL AND t.Codes <> ''
-  )
-  SELECT GROUP_CONCAT(DISTINCT e.token) INTO _bad
-    FROM exploded e
-    LEFT JOIN TSMAttributes tsm ON tsm.TSMCode = e.token
-    WHERE tsm.TSMID IS NULL AND e.token NOT IN ('', '*');
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Unknown TSMCodes: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
-  END IF;
+${appendErr(a, 'Unknown TSMCode', `TSMID IS NULL AND TSMCode IS NOT NULL`)}
 
-  SET _bad = NULL;
-  SELECT GROUP_CONCAT(DISTINCT pair) INTO _bad
-    FROM (
-      SELECT CONCAT(StemID, '/', CensusID) AS pair
-        FROM ${t}
+${appendErr(
+  m,
+  'Duplicate (StemID, CensusID) destination',
+  `StemID IS NOT NULL AND CensusID IS NOT NULL AND TempID IN (
+     SELECT TempID FROM (
+       SELECT TempID
+         FROM ${m}
         WHERE StemID IS NOT NULL AND CensusID IS NOT NULL
         GROUP BY StemID, CensusID
-        HAVING COUNT(*) > 1
-    ) dup;
-  IF _bad IS NOT NULL THEN
-    SET _message = CONCAT('Duplicate (StemID, CensusID) DBH destinations: ', _bad);
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
+       HAVING COUNT(*) > 1
+     ) dup_outer
+   )`
+)}
+
+${appendErr(
+  m,
+  'Duplicate new-stem natural key',
+  `StemID IS NULL AND TempID IN (
+     SELECT TempID FROM (
+       SELECT TempID
+         FROM ${m}
+        WHERE StemID IS NULL
+        GROUP BY TreeID, StemTag, QuadratID
+       HAVING COUNT(*) > 1
+     ) dup_outer
+   )`
+)}
+
+${appendErr(
+  m,
+  'Ambiguous pre-existing Tree (orphan)',
+  `TreeID IS NULL AND SpeciesID IS NOT NULL AND EXISTS (
+     SELECT 1 FROM Tree tr
+      LEFT JOIN Stem s ON s.TreeID = tr.TreeID
+      WHERE tr.Tag = ${m}.Tag
+        AND tr.SpeciesID = ${m}.SpeciesID
+        AND tr.SubSpeciesID <=> ${m}.SubSpeciesID
+        AND s.StemID IS NULL
+   )`
+)}
+
+${appendErr(m, 'String too long for CTFS', `CHAR_LENGTH(Tag) > 10 OR CHAR_LENGTH(StemTag) > 32 OR CHAR_LENGTH(QuadratName) > 8 OR CHAR_LENGTH(Comments) > 128`)}
+
+${appendErr(a, 'TSMCode too long for CTFS', `CHAR_LENGTH(TSMCode) > 10`)}
+
+  IF EXISTS (SELECT 1 FROM ${m} WHERE Errors IS NOT NULL)
+     OR EXISTS (SELECT 1 FROM ${a} WHERE Errors IS NOT NULL) THEN
+    SELECT TempID, CoreMeasurementID, SourceRowIndex, Tag, StemTag, Mnemonic, QuadratName, Errors
+      FROM ${m} WHERE Errors IS NOT NULL ORDER BY TempID;
+    SELECT TempAttrID, CoreMeasurementID, TempMeasurementID, TSMCode, Errors
+      FROM ${a} WHERE Errors IS NOT NULL ORDER BY TempAttrID;
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Validation failed; see prior SELECT for per-row details';
   END IF;
 `;
 }
@@ -763,7 +759,7 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
       attributeRows: []
     }),
     renderStage2({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
-    renderStage5({ tempTable }),
+    renderStage5({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
     stage6.body,
     stage7.body,
     stage8.body,
