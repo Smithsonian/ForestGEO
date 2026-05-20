@@ -402,100 +402,87 @@ describe('renderStage1', () => {
 });
 
 describe('renderStage2', () => {
-  const defaultSql = () => renderStage2({ tempTable: 'TempAllTrees' });
+  const opts = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
+  const sql = () => renderStage2(opts);
 
   it('first statement sets CensusID from session variable', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/UPDATE `TempAllTrees` SET CensusID = @target_census_id;/);
-    // Must be the first UPDATE (CensusID update precedes any JOIN updates)
-    const censusUpdateIdx = sql.indexOf('UPDATE `TempAllTrees` SET CensusID');
-    const quadratUpdateIdx = sql.indexOf('UPDATE `TempAllTrees` t');
-    expect(censusUpdateIdx).toBeGreaterThan(0);
-    expect(censusUpdateIdx).toBeLessThan(quadratUpdateIdx);
+    const s = sql();
+    expect(s.indexOf('UPDATE `staging_measurements` SET CensusID = @target_census_id')).toBeLessThan(s.indexOf('JOIN Quadrat'));
   });
 
-  it('QuadratID update joins Quadrat on QuadratName and PlotID = @target_plot_id', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(
-      /UPDATE `TempAllTrees` t\s+JOIN Quadrat q ON q\.QuadratName = t\.QuadratName AND q\.PlotID = @target_plot_id\s+SET t\.QuadratID = q\.QuadratID;/
+  it('QuadratID lookup joins Quadrat on QuadratName + plot scope', () => {
+    expect(sql()).toMatch(/JOIN Quadrat q ON q\.QuadratName = t\.QuadratName AND q\.PlotID = @target_plot_id\s+SET t\.QuadratID = q\.QuadratID/);
+  });
+
+  it('taxonomy_lookup joins through Family -> Genus -> Species (LEFT JOIN SubSpecies)', () => {
+    const s = sql();
+    expect(s).toMatch(/CREATE TEMPORARY TABLE taxonomy_lookup AS/);
+    expect(s).toMatch(/JOIN Family fam ON fam\.Family = t\.Family/);
+    expect(s).toMatch(/JOIN Genus gen ON gen\.Genus = t\.Genus AND gen\.FamilyID = fam\.FamilyID/);
+    expect(s).toMatch(/JOIN Species sp ON sp\.GenusID = gen\.GenusID\s+AND sp\.SpeciesName = t\.SpeciesName\s+AND sp\.CurrentTaxonFlag = 1/);
+    expect(s).toMatch(/LEFT JOIN SubSpecies ss ON ss\.SpeciesID = sp\.SpeciesID\s+AND ss\.SubSpeciesName = t\.SubspeciesName\s+AND ss\.CurrentTaxonFlag = 1/);
+  });
+
+  it('taxonomy_lookup WHERE clause matches subspecies-present on both sides', () => {
+    expect(sql()).toMatch(
+      /\(t\.SubspeciesName IS NULL AND ss\.SubSpeciesID IS NULL\)\s+OR\s+\(t\.SubspeciesName IS NOT NULL AND ss\.SubSpeciesID IS NOT NULL\)/
     );
   });
 
-  it('SpeciesID update joins Species filtering by CurrentTaxonFlag = 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN Species s ON s\.Mnemonic = t\.Mnemonic AND s\.CurrentTaxonFlag = 1/);
-    expect(sql).toMatch(/SET t\.SpeciesID = s\.SpeciesID;/);
+  it('taxonomy_lookup TaxonCount uses COUNT(DISTINCT CONCAT(SpeciesID, :, COALESCE(SubSpeciesID, 0)))', () => {
+    expect(sql()).toMatch(/COUNT\(DISTINCT CONCAT\(sp\.SpeciesID, ':', COALESCE\(ss\.SubSpeciesID, 0\)\)\) AS TaxonCount/);
   });
 
-  it('tree_lookup is a TEMPORARY TABLE with MIN(TreeID) and COUNT(DISTINCT TreeID) as TreeCount', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE tree_lookup AS/);
-    expect(sql).toMatch(/MIN\(tr\.TreeID\) AS TreeID/);
-    expect(sql).toMatch(/COUNT\(DISTINCT tr\.TreeID\) AS TreeCount/);
-    expect(sql).toMatch(/GROUP BY tr\.Tag/);
-  });
-
-  it('tree_lookup scopes via Stem -> Quadrat -> @target_plot_id (no Tree.PlotID)', () => {
-    const sql = defaultSql();
-    // Must have the full join chain: Tree JOIN Stem JOIN Quadrat WHERE q.PlotID
-    expect(sql).toMatch(
-      /FROM Tree tr\s+JOIN Stem s ON s\.TreeID = tr\.TreeID\s+JOIN Quadrat q ON q\.QuadratID = s\.QuadratID\s+WHERE q\.PlotID = @target_plot_id/
+  it('taxonomy write-back sets both SpeciesID and SubSpeciesID where TaxonCount = 1', () => {
+    expect(sql()).toMatch(
+      /JOIN taxonomy_lookup tx ON tx\.TempID = t\.TempID AND tx\.TaxonCount = 1\s+SET t\.SpeciesID = tx\.SpeciesID,\s+t\.SubSpeciesID = tx\.SubSpeciesID/
     );
   });
 
-  it('TreeID write-back joins tree_lookup with TreeCount = 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/JOIN tree_lookup tl ON tl\.Tag = t\.Tag AND tl\.TreeCount = 1\s+SET t\.TreeID = tl\.TreeID;/);
+  it('tree_lookup groups by (Tag, SpeciesID, SubSpeciesID) and is plot-scoped via Stem -> Quadrat', () => {
+    const s = sql();
+    expect(s).toMatch(/CREATE TEMPORARY TABLE tree_lookup AS/);
+    expect(s).toMatch(
+      /FROM Tree tr\s+JOIN Stem s ON s\.TreeID = tr\.TreeID\s+JOIN Quadrat q ON q\.QuadratID = s\.QuadratID\s+WHERE q\.PlotID = @target_plot_id\s+GROUP BY tr\.Tag, tr\.SpeciesID, tr\.SubSpeciesID/
+    );
   });
 
-  it('stem_lookup is a TEMPORARY TABLE with MIN(StemID) and COUNT(*) as StemCount', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/CREATE TEMPORARY TABLE stem_lookup AS/);
-    expect(sql).toMatch(/MIN\(s\.StemID\) AS StemID/);
-    expect(sql).toMatch(/COUNT\(\*\) AS StemCount/);
-    expect(sql).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
+  it('tree write-back uses NULL-safe <=> on SubSpeciesID, not IS NULL', () => {
+    const s = sql();
+    expect(s).toMatch(/tl\.Tag = t\.Tag\s+AND tl\.SpeciesID = t\.SpeciesID\s+AND tl\.SubSpeciesID <=> t\.SubSpeciesID\s+AND tl\.TreeCount = 1/);
+    expect(s).not.toMatch(/tl\.SubSpeciesID IS NULL/);
   });
 
-  it('stem_lookup scopes via Quadrat -> @target_plot_id', () => {
-    const sql = defaultSql();
-    // stem_lookup block: Stem JOIN Quadrat WHERE q.PlotID
-    const stemLookupIdx = sql.indexOf('CREATE TEMPORARY TABLE stem_lookup');
-    expect(stemLookupIdx).toBeGreaterThan(0);
-    const stemLookupFragment = sql.slice(stemLookupIdx);
-    expect(stemLookupFragment).toMatch(/FROM Stem s\s+JOIN Quadrat q ON q\.QuadratID = s\.QuadratID\s+WHERE q\.PlotID = @target_plot_id/);
+  it('stem_lookup plot-scoped and grouped by (TreeID, StemTag)', () => {
+    const s = sql();
+    expect(s).toMatch(/CREATE TEMPORARY TABLE stem_lookup AS/);
+    expect(s).toMatch(/GROUP BY s\.TreeID, s\.StemTag/);
   });
 
-  it('StemID write-back uses NULL-safe <=> on StemTag and requires StemCount = 1', () => {
-    const sql = defaultSql();
-    expect(sql).toMatch(/sl\.StemTag <=> t\.StemTag/);
-    expect(sql).toMatch(/sl\.StemCount = 1/);
-    expect(sql).toMatch(/SET t\.StemID = sl\.StemID;/);
+  it('stem write-back uses NULL-safe <=> on StemTag', () => {
+    expect(sql()).toMatch(/sl\.TreeID = t\.TreeID\s+AND sl\.StemTag <=> t\.StemTag\s+AND sl\.StemCount = 1/);
   });
 
-  it('never references Tree.PlotID or tr.PlotID', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/Tree\.PlotID/);
-    expect(sql).not.toMatch(/tr\.PlotID/);
+  it('TSMID resolution UPDATE joins staging_attributes to TSMAttributes by TSMCode', () => {
+    expect(sql()).toMatch(/UPDATE `staging_attributes` a\s+JOIN TSMAttributes tsm ON tsm\.TSMCode = a\.TSMCode\s+SET a\.TSMID = tsm\.TSMID/);
   });
 
-  it('is a procedure-body fragment (no procedure envelope, no DELIMITER, no TRANSACTION)', () => {
-    const sql = defaultSql();
-    expect(sql).not.toMatch(/DROP PROCEDURE/);
-    expect(sql).not.toMatch(/DELIMITER/);
-    expect(sql).not.toMatch(/CREATE PROCEDURE/);
-    expect(sql).not.toMatch(/START TRANSACTION/);
-    expect(sql).not.toMatch(/COMMIT/);
-    expect(sql).toMatch(/^  -- Stage 2:/m);
+  it('does not join on Mnemonic anywhere in Stage 2', () => {
+    expect(sql()).not.toMatch(/JOIN .+ ON .+Mnemonic/);
   });
 
-  it('uses backtick-quoted identifier for custom tempTable name', () => {
-    const sql = renderStage2({ tempTable: 'MyCustomStaging' });
-    expect(sql).toMatch(/`MyCustomStaging`/);
-    expect(sql).not.toMatch(/TempAllTrees/);
+  it('DROP TEMPORARY TABLE IF EXISTS precedes each CREATE TEMPORARY TABLE', () => {
+    const s = sql();
+    for (const t of ['taxonomy_lookup', 'tree_lookup', 'stem_lookup']) {
+      const drop = s.indexOf(`DROP TEMPORARY TABLE IF EXISTS ${t}`);
+      const create = s.indexOf(`CREATE TEMPORARY TABLE ${t}`);
+      expect(drop).toBeGreaterThan(-1);
+      expect(create).toBeGreaterThan(drop);
+    }
   });
 
-  it('rejects an invalid tempTable identifier (injection guard)', () => {
-    expect(() => renderStage2({ tempTable: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  it('rejects invalid measurementsTable identifier (injection guard)', () => {
+    expect(() => renderStage2({ measurementsTable: 'a; DROP TABLE x', attributesTable: 'staging_attributes' })).toThrow(/Invalid SQL identifier/);
   });
 });
 

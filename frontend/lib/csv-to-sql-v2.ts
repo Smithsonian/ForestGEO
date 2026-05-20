@@ -311,22 +311,28 @@ export function renderStage1(opts: Stage1Options): string {
 // ---------------------------------------------------------------------------
 
 export interface Stage2Options {
-  tempTable: string;
+  measurementsTable: string;
+  attributesTable: string;
 }
 
 /**
  * Renders the Stage 2 procedure-body fragment.
  *
  * Emits, in order:
- *   1. UPDATE tempTable SET CensusID = @target_census_id
- *   2. UPDATE tempTable JOIN Quadrat to resolve QuadratID
- *   3. UPDATE tempTable JOIN Species (CurrentTaxonFlag = 1) to resolve SpeciesID
- *   4. CREATE TEMPORARY TABLE tree_lookup — scoped via Tree → Stem → Quadrat → @target_plot_id
+ *   1. UPDATE measurementsTable SET CensusID = @target_census_id
+ *   2. UPDATE measurementsTable JOIN Quadrat to resolve QuadratID
+ *   3. CREATE TEMPORARY TABLE taxonomy_lookup — joins through Family → Genus → Species → SubSpecies
+ *      with a 2-arm WHERE clause ensuring subspecies presence matches on both sides
+ *   4. UPDATE measurementsTable JOIN taxonomy_lookup (TaxonCount = 1) to write back SpeciesID + SubSpeciesID
+ *   5. CREATE TEMPORARY TABLE tree_lookup — scoped via Tree → Stem → Quadrat → @target_plot_id
  *      (Tree has no PlotID column; scope must come from the Stem/Quadrat join chain)
- *   5. UPDATE tempTable JOIN tree_lookup (TreeCount = 1) to write back TreeID
- *   6. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
- *   7. UPDATE tempTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
+ *      Groups by (Tag, SpeciesID, SubSpeciesID)
+ *   6. UPDATE measurementsTable JOIN tree_lookup (TreeCount = 1) with NULL-safe <=> on SubSpeciesID
+ *      to write back TreeID
+ *   7. CREATE TEMPORARY TABLE stem_lookup — scoped via Stem → Quadrat → @target_plot_id
+ *   8. UPDATE measurementsTable JOIN stem_lookup with NULL-safe StemTag (<=>) and StemCount = 1
  *      to write back StemID
+ *   9. UPDATE attributesTable JOIN TSMAttributes to resolve TSMID
  *
  * Ambiguous matches (TreeCount > 1 or StemCount > 1) are intentionally left
  * unresolved in staging so Stage 5 can SIGNAL them.
@@ -334,49 +340,84 @@ export interface Stage2Options {
  * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
 export function renderStage2(opts: Stage2Options): string {
-  const t = escapeSqlIdentifier(opts.tempTable);
-  return `  -- Stage 2: lookup resolution
-  UPDATE ${t} SET CensusID = @target_census_id;
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  const a = escapeSqlIdentifier(opts.attributesTable);
+  return `  -- Stage 2: destination identity lookup
+  UPDATE ${m} SET CensusID = @target_census_id;
 
-  UPDATE ${t} t
+  UPDATE ${m} t
     JOIN Quadrat q ON q.QuadratName = t.QuadratName AND q.PlotID = @target_plot_id
     SET t.QuadratID = q.QuadratID;
 
-  UPDATE ${t} t
-    JOIN Species s ON s.Mnemonic = t.Mnemonic AND s.CurrentTaxonFlag = 1
-    SET t.SpeciesID = s.SpeciesID;
+  -- Taxonomy lookup through Family -> Genus -> Species -> SubSpecies.
+  -- Subspecies rows must produce a non-NULL SubSpeciesID; non-subspecies rows must produce NULL.
+  DROP TEMPORARY TABLE IF EXISTS taxonomy_lookup;
+  CREATE TEMPORARY TABLE taxonomy_lookup AS
+    SELECT t.TempID,
+           MIN(sp.SpeciesID)    AS SpeciesID,
+           MIN(ss.SubSpeciesID) AS SubSpeciesID,
+           COUNT(DISTINCT CONCAT(sp.SpeciesID, ':', COALESCE(ss.SubSpeciesID, 0))) AS TaxonCount
+      FROM ${m} t
+      JOIN Family fam ON fam.Family = t.Family
+      JOIN Genus gen ON gen.Genus = t.Genus AND gen.FamilyID = fam.FamilyID
+      JOIN Species sp ON sp.GenusID = gen.GenusID
+                     AND sp.SpeciesName = t.SpeciesName
+                     AND sp.CurrentTaxonFlag = 1
+      LEFT JOIN SubSpecies ss ON ss.SpeciesID = sp.SpeciesID
+                             AND ss.SubSpeciesName = t.SubspeciesName
+                             AND ss.CurrentTaxonFlag = 1
+     WHERE (t.SubspeciesName IS NULL AND ss.SubSpeciesID IS NULL)
+        OR (t.SubspeciesName IS NOT NULL AND ss.SubSpeciesID IS NOT NULL)
+     GROUP BY t.TempID;
 
+  UPDATE ${m} t
+    JOIN taxonomy_lookup tx ON tx.TempID = t.TempID AND tx.TaxonCount = 1
+    SET t.SpeciesID = tx.SpeciesID,
+        t.SubSpeciesID = tx.SubSpeciesID;
+
+  -- Tree lookup (CTFS Tree has no PlotID; scope via Stem -> Quadrat -> Plot)
   DROP TEMPORARY TABLE IF EXISTS tree_lookup;
   CREATE TEMPORARY TABLE tree_lookup AS
     SELECT tr.Tag,
-           MIN(tr.TreeID) AS TreeID,
+           tr.SpeciesID,
+           tr.SubSpeciesID,
+           MIN(tr.TreeID)            AS TreeID,
            COUNT(DISTINCT tr.TreeID) AS TreeCount
       FROM Tree tr
       JOIN Stem s ON s.TreeID = tr.TreeID
       JOIN Quadrat q ON q.QuadratID = s.QuadratID
      WHERE q.PlotID = @target_plot_id
-     GROUP BY tr.Tag;
+     GROUP BY tr.Tag, tr.SpeciesID, tr.SubSpeciesID;
 
-  UPDATE ${t} t
-    JOIN tree_lookup tl ON tl.Tag = t.Tag AND tl.TreeCount = 1
+  UPDATE ${m} t
+    JOIN tree_lookup tl ON tl.Tag = t.Tag
+                       AND tl.SpeciesID = t.SpeciesID
+                       AND tl.SubSpeciesID <=> t.SubSpeciesID
+                       AND tl.TreeCount = 1
     SET t.TreeID = tl.TreeID;
 
+  -- Stem lookup (also plot-scoped)
   DROP TEMPORARY TABLE IF EXISTS stem_lookup;
   CREATE TEMPORARY TABLE stem_lookup AS
     SELECT s.TreeID,
            s.StemTag,
            MIN(s.StemID) AS StemID,
-           COUNT(*) AS StemCount
+           COUNT(*)      AS StemCount
       FROM Stem s
       JOIN Quadrat q ON q.QuadratID = s.QuadratID
      WHERE q.PlotID = @target_plot_id
      GROUP BY s.TreeID, s.StemTag;
 
-  UPDATE ${t} t
+  UPDATE ${m} t
     JOIN stem_lookup sl ON sl.TreeID = t.TreeID
                        AND sl.StemTag <=> t.StemTag
                        AND sl.StemCount = 1
     SET t.StemID = sl.StemID;
+
+  -- TSMID resolution for attributes
+  UPDATE ${a} a
+    JOIN TSMAttributes tsm ON tsm.TSMCode = a.TSMCode
+    SET a.TSMID = tsm.TSMID;
 `;
 }
 
@@ -721,7 +762,7 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
       measurementRows: [],
       attributeRows: []
     }),
-    renderStage2({ tempTable }),
+    renderStage2({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
     renderStage5({ tempTable }),
     stage6.body,
     stage7.body,
