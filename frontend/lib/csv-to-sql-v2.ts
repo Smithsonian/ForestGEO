@@ -94,7 +94,7 @@ ${scalars}${cursors}
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
   BEGIN
     ROLLBACK;
-    RELEASE_LOCK(${lockLit});
+    DO RELEASE_LOCK(${lockLit});
     RESIGNAL;
   END;
 
@@ -108,7 +108,7 @@ ${scalars}${cursors}
 ${opts.body}
 
   COMMIT;
-  RELEASE_LOCK(${lockLit});
+  DO RELEASE_LOCK(${lockLit});
 END //
 DELIMITER ;
 
@@ -487,33 +487,41 @@ ${appendErr(m, 'Unknown quadrat', `QuadratID IS NULL AND QuadratName IS NOT NULL
 
 ${appendErr(a, 'Unknown TSMCode', `TSMID IS NULL AND TSMCode IS NOT NULL`)}
 
-${appendErr(
-  m,
-  'Duplicate (StemID, CensusID) destination',
-  `StemID IS NOT NULL AND CensusID IS NOT NULL AND TempID IN (
-     SELECT TempID FROM (
-       SELECT TempID
-         FROM ${m}
-        WHERE StemID IS NOT NULL AND CensusID IS NOT NULL
-        GROUP BY StemID, CensusID
-       HAVING COUNT(*) > 1
-     ) dup_outer
-   )`
-)}
+  -- Stage 5 check 7: duplicate (StemID, CensusID) destinations.
+  -- Materialise the duplicate (StemID, CensusID) pairs into a separate
+  -- temporary table first; MySQL cannot reference the same TEMPORARY table
+  -- twice in a single UPDATE (ER_CANT_REOPEN_TABLE).
+  DROP TEMPORARY TABLE IF EXISTS _stage5_dup7;
+  CREATE TEMPORARY TABLE _stage5_dup7 AS
+    SELECT StemID, CensusID
+      FROM ${m}
+     WHERE StemID IS NOT NULL AND CensusID IS NOT NULL
+     GROUP BY StemID, CensusID
+    HAVING COUNT(*) > 1;
 
-${appendErr(
-  m,
-  'Duplicate new-stem natural key',
-  `StemID IS NULL AND TempID IN (
-     SELECT TempID FROM (
-       SELECT TempID
-         FROM ${m}
-        WHERE StemID IS NULL
-        GROUP BY TreeID, StemTag, QuadratID
-       HAVING COUNT(*) > 1
-     ) dup_outer
-   )`
-)}
+  UPDATE ${m}
+    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Duplicate (StemID, CensusID) destination')
+    WHERE StemID IS NOT NULL AND CensusID IS NOT NULL
+      AND EXISTS (SELECT 1 FROM _stage5_dup7 d WHERE d.StemID = ${m}.StemID AND d.CensusID = ${m}.CensusID);
+
+  DROP TEMPORARY TABLE IF EXISTS _stage5_dup7;
+
+  -- Stage 5 check 8: duplicate new-stem natural key.
+  -- Same materialisation pattern to avoid ER_CANT_REOPEN_TABLE.
+  DROP TEMPORARY TABLE IF EXISTS _stage5_dup8;
+  CREATE TEMPORARY TABLE _stage5_dup8 AS
+    SELECT TreeID, StemTag, QuadratID
+      FROM ${m}
+     WHERE StemID IS NULL
+     GROUP BY TreeID, StemTag, QuadratID
+    HAVING COUNT(*) > 1;
+
+  UPDATE ${m}
+    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Duplicate new-stem natural key')
+    WHERE StemID IS NULL
+      AND EXISTS (SELECT 1 FROM _stage5_dup8 d WHERE d.TreeID <=> ${m}.TreeID AND d.StemTag <=> ${m}.StemTag AND d.QuadratID <=> ${m}.QuadratID);
+
+  DROP TEMPORARY TABLE IF EXISTS _stage5_dup8;
 
 ${appendErr(
   m,
@@ -676,12 +684,14 @@ export function renderStage9DBHAttributes(opts: { measurementsTable: string; att
 export function renderStage10(opts: { measurementsTable: string; attributesTable: string }): string {
   const m = escapeSqlIdentifier(opts.measurementsTable);
   const a = escapeSqlIdentifier(opts.attributesTable);
-  return `  -- Stage 10: final tally
-  SELECT
-    (SELECT COUNT(*) FROM ${m}) AS measurement_rows,
-    (SELECT COUNT(*) FROM ${a}) AS attribute_rows,
-    (SELECT COUNT(DISTINCT TreeID) FROM ${m}) AS tree_count,
-    (SELECT COUNT(DISTINCT StemID) FROM ${m}) AS stem_count;
+  // MySQL cannot open the same TEMPORARY table more than once in a single SQL
+  // statement (ER_CANT_REOPEN_TABLE). The original scalar-subquery pattern
+  //   SELECT (SELECT COUNT(*) FROM m), (SELECT COUNT(*) FROM m)
+  // causes this error. Use a single GROUP BY scan instead.
+  return `  -- Stage 10: final tally (single-scan to avoid ER_CANT_REOPEN_TABLE with TEMPORARY tables)
+  SELECT COUNT(*) AS measurement_rows, COUNT(DISTINCT TreeID) AS tree_count, COUNT(DISTINCT StemID) AS stem_count
+    FROM ${m};
+  SELECT COUNT(*) AS attribute_rows FROM ${a};
 `;
 }
 

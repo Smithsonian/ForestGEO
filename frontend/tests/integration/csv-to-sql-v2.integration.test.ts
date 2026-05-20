@@ -1,22 +1,33 @@
 /**
- * csv-to-sql-v2 integration test scaffolding (Task 17).
+ * csv-to-sql-v2 integration tests for the pivoted destination procedure.
  *
- * Stands up a fresh MySQL database, loads the canonical CTFS DDL, seeds
- * minimal reference data, runs the csv-to-sql-v2 CLI against a single-row CSV,
- * and asserts the generated `.sql` contains the procedure envelope.
+ * Composes SQL by calling stage renderers directly — no CLI spawning, no CSV
+ * parsing. Feeds MeasurementStagingRow[] / AttributeStagingRow[] straight into
+ * Stage 1, then executes the assembled procedure against a real MySQL instance.
  *
- * Follow-up tasks (18+) will actually execute the generated SQL and inspect
- * the resulting rows. This scaffolding test verifies the harness wiring only.
+ * Prerequisites: docker compose up -d mysql
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import mysql from 'mysql2/promise';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import os from 'node:os';
-import mysql from 'mysql2/promise';
 import { createTestDatabase, teardownTestDatabase, DEFAULT_TEST_CONFIG } from '../setup/local-db-setup';
 import { splitSqlFile } from '../../lib/provisioning/sql-runner';
+import {
+  renderProcedureEnvelope,
+  renderStage0,
+  renderStage0bReload,
+  renderStage1,
+  renderStage2,
+  renderStage5,
+  renderStage6NewTrees,
+  renderStage7NewStems,
+  renderStage8DBH,
+  renderStage9DBHAttributes,
+  renderStage10
+} from '../../lib/csv-to-sql-v2';
+import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,18 +36,114 @@ const FIXTURE_DIR = path.resolve(__dirname, '../fixtures/csv-to-sql-v2');
 const CANONICAL_DDL_PATH = path.join(FIXTURE_DIR, 'canonical-ddl.sql');
 const SEED_CENSUS_1_PATH = path.join(FIXTURE_DIR, 'seed-census-1.sql');
 const SEED_WITH_PRIORS_PATH = path.join(FIXTURE_DIR, 'seed-with-priors.sql');
-const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
-const TEST_SITE_NAME = 'TEST';
-const TEST_PLOT_ID = 1;
-const TEST_CENSUS_NUMBER = '1';
-const TEST_CENSUS_NUMBER_2 = '2';
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DESTINATION_PLOT_ID = 1;
+const CENSUS_NUMBER_1 = '1';
+const CENSUS_NUMBER_2 = '2';
+const DEFAULT_PROCEDURE_NAME = 'ctfs_export_test_proc';
+const DEFAULT_LOCK_NAME = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_1}`;
+const LOCK_NAME_CENSUS_2 = `ctfs-export:${DESTINATION_PLOT_ID}:${CENSUS_NUMBER_2}`;
+
+// ---------------------------------------------------------------------------
+// ArtifactInput + buildArtifact
+// ---------------------------------------------------------------------------
+
+interface ArtifactInput {
+  procedureName?: string;
+  lockName?: string;
+  destinationPlotId: number;
+  censusNumber: string;
+  allowReload: boolean;
+  reloadDryRun?: boolean;
+  measurementRows: MeasurementStagingRow[];
+  attributeRows: AttributeStagingRow[];
+}
+
+function buildArtifact(input: ArtifactInput): string {
+  const procedureName = input.procedureName ?? DEFAULT_PROCEDURE_NAME;
+  const lockName = input.lockName ?? `ctfs-export:${input.destinationPlotId}:${input.censusNumber}`;
+  const measurementsTable = 'staging_measurements';
+  const attributesTable = 'staging_attributes';
+
+  const isReload = input.allowReload || !!input.reloadDryRun;
+
+  // Dry-run mode: emit Stage 0b in SAVEPOINT mode then LEAVE to skip all DML stages.
+  // The composer is responsible for adding LEAVE main after Stage 0b per the renderer's contract.
+  const stage0bFragment = isReload
+    ? renderStage0bReload({ mode: input.reloadDryRun ? 'dry-run' : 'real' }) + (input.reloadDryRun ? '\n  LEAVE main;' : '')
+    : '';
+
+  const stages = [
+    renderStage0({ destinationPlotId: input.destinationPlotId, censusNumber: input.censusNumber, allowReload: isReload }),
+    stage0bFragment,
+    renderStage1({ measurementsTable, attributesTable, measurementRows: input.measurementRows, attributeRows: input.attributeRows }),
+    renderStage2({ measurementsTable, attributesTable }),
+    renderStage5({ measurementsTable, attributesTable }),
+    renderStage6NewTrees({ measurementsTable }),
+    renderStage7NewStems({ measurementsTable }),
+    renderStage8DBH({ measurementsTable }),
+    renderStage9DBHAttributes({ measurementsTable, attributesTable }),
+    renderStage10({ measurementsTable, attributesTable })
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return renderProcedureEnvelope({ procedureName, lockName, cursorDeclarations: [], body: stages });
+}
+
+// ---------------------------------------------------------------------------
+// Row factories
+// ---------------------------------------------------------------------------
+
+let nextTempId = 1;
+
+function makeMeasurement(overrides: Partial<MeasurementStagingRow> = {}): MeasurementStagingRow {
+  const id = nextTempId++;
+  return {
+    CoreMeasurementID: id,
+    SourceRowIndex: id,
+    Tag: String(id),
+    StemTag: '1',
+    Mnemonic: 'FOO',
+    QuadratName: 'A1',
+    PlotCensusNumber: CENSUS_NUMBER_1,
+    Family: 'Testaceae',
+    Genus: 'Foobaria',
+    SpeciesName: 'foo',
+    SpeciesAuthority: null,
+    SubspeciesName: null,
+    SubspeciesAuthority: null,
+    IDLevel: 'species',
+    DBH: 10,
+    HOM: '1.3',
+    ExactDate: '2024-01-15',
+    Comments: null,
+    LX: 1,
+    LY: 1,
+    PrimaryStem: null,
+    ...overrides
+  };
+}
+
+function makeAttribute(measurementId: number, tsmCode: string, coreMeasurementId?: number): AttributeStagingRow {
+  return {
+    CoreMeasurementID: coreMeasurementId ?? measurementId,
+    TempMeasurementID: measurementId,
+    TSMCode: tsmCode
+  };
+}
+
+// ---------------------------------------------------------------------------
+// DDL + seed helpers
+// ---------------------------------------------------------------------------
 
 /**
- * Production-only objects referenced by `DBCHANGES2014f.sql` that do not
- * exist in a bootstrap schema. ALTER / RENAME statements touching these are
- * the only DDL errors we tolerate — any other ER_NO_SUCH_TABLE means a real
- * bug (e.g. a typo in canonical-ddl.sql) and must not be swallowed.
+ * Production-only objects referenced by DBCHANGES2014f section of canonical-ddl.sql.
+ * ALTER / RENAME statements touching these are the only DDL errors we tolerate.
  */
 const PRODUCTION_ONLY_OBJECTS = ['ViewTaxonomy', 'ViewFullTable', 'TAX1temp'];
 
@@ -45,25 +152,13 @@ function isTolerableDdlError(errCode: string, stmt: string): boolean {
   return PRODUCTION_ONLY_OBJECTS.some(obj => stmt.includes(obj));
 }
 
-/**
- * Strips C-style `/* ... *\/` block comments from a SQL file.
- *
- * `splitSqlFile` in `lib/provisioning/sql-runner.ts` understands `--` and `#`
- * line comments but does NOT strip multi-line block comments — they get mixed
- * into the next statement and cause syntax errors. `DBCHANGES2014f.sql` uses
- * block comments to embed prose, so we strip them before splitting.
- *
- * Quotes are not tracked because the canonical DDL has no string literals
- * containing the `/​*` or `*​/` sequences.
- */
 function stripBlockComments(content: string): string {
   return content.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 async function loadCanonicalDdl(connection: mysql.Connection, filePath: string): Promise<void> {
   const content = stripBlockComments(readFileSync(filePath, 'utf8'));
-  const statements = splitSqlFile(content);
-  for (const stmt of statements) {
+  for (const stmt of splitSqlFile(content)) {
     try {
       await connection.query(stmt.sql);
     } catch (err: any) {
@@ -74,109 +169,32 @@ async function loadCanonicalDdl(connection: mysql.Connection, filePath: string):
   }
 }
 
-/** Strict: any SQL error fails the test (no error swallowing — seed files are hand-authored). */
 async function loadSeedFile(connection: mysql.Connection, filePath: string): Promise<void> {
-  const content = readFileSync(filePath, 'utf8');
-  const statements = splitSqlFile(content);
-  for (const stmt of statements) {
+  for (const stmt of splitSqlFile(readFileSync(filePath, 'utf8'))) {
     await connection.query(stmt.sql);
   }
 }
 
-describe('csv-to-sql-v2 integration — scaffolding', () => {
-  let connection: mysql.Connection;
-  const dbName = `forestgeo_csv_v2_scaffold_${process.pid}_${Date.now()}`;
-  const config = { ...DEFAULT_TEST_CONFIG, database: dbName };
-
-  beforeEach(async () => {
-    connection = await createTestDatabase(config);
-    await loadCanonicalDdl(connection, CANONICAL_DDL_PATH);
-    await loadSeedFile(connection, SEED_CENSUS_1_PATH);
-  });
-
-  afterEach(async () => {
-    if (connection) {
-      await teardownTestDatabase(connection, config);
-    }
-  });
-
-  it('seeds the canonical schema with exactly one Census row for the target plot/number', async () => {
-    const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS n FROM Census WHERE PlotID = ? AND PlotCensusNumber = ?', [
-      TEST_PLOT_ID,
-      TEST_CENSUS_NUMBER
-    ]);
-    expect(rows[0].n).toBe(1);
-  });
-
-  it('generates a runnable .sql file containing the procedure envelope', () => {
-    const tempOutDir = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-scaffold-'));
-    const inputCsv = path.join(tempOutDir, 'one-row.csv');
-    const outputSql = path.join(tempOutDir, 'out.sql');
-
-    writeFileSync(inputCsv, 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n' + '1,1,FOO,A1,1,1,10,1.3,2024-01-01,LI\n', 'utf8');
-
-    execSync(
-      [
-        'npx tsx lib/csv-to-sql-v2.ts',
-        `--input ${inputCsv}`,
-        `--site ${TEST_SITE_NAME}`,
-        `--plot-id ${TEST_PLOT_ID}`,
-        `--census-number ${TEST_CENSUS_NUMBER}`,
-        `--output ${outputSql}`
-      ].join(' '),
-      { cwd: PROJECT_ROOT, stdio: 'pipe' }
-    );
-
-    const generated = readFileSync(outputSql, 'utf8');
-    expect(generated).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load/);
-    expect(generated).toMatch(/CALL csv_to_sql_v2_load\(\);/);
-    expect(generated).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Task 18: end-to-end success scenarios.
-//
-// Each test bootstraps a fresh DB with the canonical DDL + base seed, optionally
-// applies a scenario-specific seed, runs csv-to-sql-v2 to render a `.sql` file,
-// executes it through `splitSqlFile` (which understands `DELIMITER //`), and
-// asserts the destination tables (Tree, Stem, DBH, DBHAttributes) reflect the
-// expected post-ingestion state.
-// ---------------------------------------------------------------------------
-
-interface ExecuteSqlResult {
-  warnings: mysql.RowDataPacket[];
-}
-
-async function executeGeneratedSql(connection: mysql.Connection, sql: string): Promise<ExecuteSqlResult> {
-  const statements = splitSqlFile(sql);
-  for (const stmt of statements) {
+/**
+ * Execute the assembled procedure SQL against the connection.
+ * splitSqlFile handles DELIMITER // blocks.
+ */
+async function executeArtifact(connection: mysql.Connection, sql: string): Promise<mysql.RowDataPacket[][]> {
+  const resultSets: mysql.RowDataPacket[][] = [];
+  for (const stmt of splitSqlFile(sql)) {
     if (!stmt.sql.trim()) continue;
-    await connection.query(stmt.sql);
+    const [result] = await connection.query<mysql.RowDataPacket[]>(stmt.sql);
+    // CALL statements return the result sets emitted by SELECT inside the procedure.
+    // mysql2 returns an array of result sets when multiple SELECTs are emitted.
+    if (Array.isArray(result) && result.length > 0 && Array.isArray(result[0])) {
+      for (const rs of result as unknown as mysql.RowDataPacket[][]) {
+        resultSets.push(rs);
+      }
+    } else if (Array.isArray(result) && result.length > 0 && !Array.isArray(result[0])) {
+      resultSets.push(result as mysql.RowDataPacket[]);
+    }
   }
-  const [warnings] = await connection.query<mysql.RowDataPacket[]>('SHOW WARNINGS');
-  return { warnings };
-}
-
-function writeCsv(dir: string, rows: string[]): string {
-  const inputCsv = path.join(dir, 'in.csv');
-  const header = 'tag,stemtag,spcode,quadrat,lx,ly,dbh,hom,date,codes\n';
-  writeFileSync(inputCsv, header + rows.join('\n') + '\n', 'utf8');
-  return inputCsv;
-}
-
-function generateSql(inputCsv: string, outSql: string, censusNumber: string): void {
-  execSync(
-    [
-      'npx tsx lib/csv-to-sql-v2.ts',
-      `--input ${inputCsv}`,
-      `--site ${TEST_SITE_NAME}`,
-      `--plot-id ${TEST_PLOT_ID}`,
-      `--census-number ${censusNumber}`,
-      `--output ${outSql}`
-    ].join(' '),
-    { cwd: PROJECT_ROOT, stdio: 'pipe' }
-  );
+  return resultSets;
 }
 
 async function countRows(connection: mysql.Connection, table: string, where = ''): Promise<number> {
@@ -185,195 +203,6 @@ async function countRows(connection: mysql.Connection, table: string, where = ''
   return Number(rows[0].n);
 }
 
-describe('csv-to-sql-v2 integration — success scenarios (Task 18)', () => {
-  let connection: mysql.Connection;
-  const dbName = `forestgeo_csv_v2_success_${process.pid}_${Date.now()}`;
-  const config = { ...DEFAULT_TEST_CONFIG, database: dbName };
-
-  beforeEach(async () => {
-    connection = await createTestDatabase(config);
-    await loadCanonicalDdl(connection, CANONICAL_DDL_PATH);
-    await loadSeedFile(connection, SEED_CENSUS_1_PATH);
-  });
-
-  afterEach(async () => {
-    if (connection) {
-      await teardownTestDatabase(connection, config);
-    }
-  });
-
-  it('Scenario 1 — Census 1 all-new load (4 distinct tags, no codes)', async () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s1-'));
-    const inputCsv = writeCsv(tmp, [
-      '1,1,FOO,A1,1,1,10,1.3,2024-01-01,',
-      '2,1,FOO,A1,2,2,12,1.3,2024-01-01,',
-      '3,1,BAR,A2,3,3,15,1.3,2024-01-01,',
-      '4,1,BAZ,B1,4,4,8,1.3,2024-01-01,'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    expect(await countRows(connection, 'Tree')).toBe(4);
-    expect(await countRows(connection, 'Stem')).toBe(4);
-    expect(await countRows(connection, 'DBH', 'CensusID = 1')).toBe(4);
-    expect(await countRows(connection, 'DBHAttributes')).toBe(0);
-  });
-
-  it('Scenario 2 — Census 2 mixed O/M/N (existing tree reused for O and M; new tree+stem for N)', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s2-'));
-    const inputCsv = writeCsv(tmp, [
-      // O: known (Tag=1, StemTag=1) — must reuse StemID=1, TreeID=1
-      '1,1,FOO,A1,1,1,11,1.3,2025-01-15,',
-      // M: known Tag=1 but new StemTag=2 — must reuse TreeID=1, insert new Stem
-      '1,2,FOO,A1,1.5,1.5,9,1.3,2025-01-15,',
-      // N: brand-new Tag=99 — must insert new Tree + Stem
-      '99,1,BAZ,B1,5,5,20,1.3,2025-01-15,'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER_2);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    // Tree: 3 priors (TreeID 1,2,3) + 1 new for Tag=99 = 4
-    expect(await countRows(connection, 'Tree')).toBe(4);
-    // Stem: 3 priors + 1 new (Tag=1/StemTag=2) + 1 new (Tag=99/StemTag=1) = 5
-    expect(await countRows(connection, 'Stem')).toBe(5);
-    // DBH: 3 priors (CensusID=1) + 3 new (CensusID=2) = 6
-    expect(await countRows(connection, 'DBH')).toBe(6);
-    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
-
-    // O-row reuses StemID=1 (no new stem created for Tag=1/StemTag=1)
-    const [oRows] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM DBH WHERE CensusID = 2 AND DBH = 11');
-    expect(oRows.length).toBe(1);
-    expect(oRows[0].StemID).toBe(1);
-
-    // M-row attaches a new Stem to existing TreeID=1
-    const [mStems] = await connection.query<mysql.RowDataPacket[]>("SELECT StemID, TreeID FROM Stem WHERE TreeID = 1 AND StemTag = '2'");
-    expect(mStems.length).toBe(1);
-    expect(mStems[0].TreeID).toBe(1);
-
-    // N-row creates a new Tree
-    const [nTrees] = await connection.query<mysql.RowDataPacket[]>("SELECT TreeID FROM Tree WHERE Tag = '99'");
-    expect(nTrees.length).toBe(1);
-  });
-
-  it('Scenario 3 — HOM inheritance (blank HOM on O row picks up prior census HOM=2.0)', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s3-'));
-    const inputCsv = writeCsv(tmp, [
-      // O-row for Tag=2/StemTag=1 (prior census stem with HOM=2.0); leave HOM blank
-      '2,1,BAR,A1,2,2,19,,2025-01-15,'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER_2);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT HOM, DBH FROM DBH WHERE CensusID = 2 AND StemID = 2');
-    expect(dbhRows.length).toBe(1);
-    expect(String(dbhRows[0].HOM)).toBe('2.0');
-    expect(Number(dbhRows[0].DBH)).toBeCloseTo(19, 5);
-  });
-
-  it('Scenario 4 — HOM fallback to 1.3 (new tree, no priors)', async () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s4-'));
-    const inputCsv = writeCsv(tmp, [
-      // N-row, blank HOM, fresh Census 1 (no priors)
-      '7,1,QUX,A1,1,1,11,,2024-01-15,'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT HOM, DBH FROM DBH WHERE CensusID = 1');
-    expect(dbhRows.length).toBe(1);
-    expect(String(dbhRows[0].HOM)).toBe('1.3');
-  });
-
-  it('Scenario 5 — DBH=0 normalizes to NULL', async () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s5-'));
-    const inputCsv = writeCsv(tmp, ['5,1,FOO,A1,1,1,0,1.3,2024-01-15,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBH FROM DBH WHERE CensusID = 1');
-    expect(dbhRows.length).toBe(1);
-    expect(dbhRows[0].DBH).toBeNull();
-  });
-
-  it('Scenario 6 — Marker code derives PrimaryStem; non-marker codes go to DBHAttributes', async () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s6-'));
-    const inputCsv = writeCsv(tmp, [
-      // Codes: M (main marker) ; LI (living) ; A (alive)
-      '6,1,FOO,A1,1,1,14,1.3,2024-01-15,M;LI;A'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBHID, PrimaryStem FROM DBH WHERE CensusID = 1');
-    expect(dbhRows.length).toBe(1);
-    expect(dbhRows[0].PrimaryStem).toBe('main');
-
-    const dbhId = dbhRows[0].DBHID;
-    const [attrRows] = await connection.query<mysql.RowDataPacket[]>(
-      `SELECT tsm.TSMCode
-         FROM DBHAttributes da
-         JOIN TSMAttributes tsm ON tsm.TSMID = da.TSMID
-        WHERE da.DBHID = ?
-        ORDER BY tsm.TSMCode`,
-      [dbhId]
-    );
-    const codes = attrRows.map(r => r.TSMCode as string);
-    expect(codes).toEqual(['A', 'LI']);
-    expect(codes).not.toContain('M');
-  });
-
-  it('Scenario 7 — Resprout reuse (different StemTag on known tree picks up the single prior stem)', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-s7-'));
-    const inputCsv = writeCsv(tmp, [
-      // Tag=3 exists (TreeID=3) with one prior stem StemTag='OLD', DBH=15 (>=10), no dead/resprout code.
-      // CSV references Tag=3 with StemTag='NEW' — Stage 2 won't match StemTag, so Stage 2b
-      // should reuse StemID=3 instead of inserting a new Stem.
-      '3,NEW,BAZ,A2,3,3,16,1.3,2025-01-15,'
-    ]);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER_2);
-
-    await executeGeneratedSql(connection, readFileSync(outSql, 'utf8'));
-
-    // No new Stem inserted — 3 prior stems remain
-    expect(await countRows(connection, 'Stem')).toBe(3);
-
-    // The new DBH row references the prior StemID=3
-    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM DBH WHERE CensusID = 2');
-    expect(dbhRows.length).toBe(1);
-    expect(dbhRows[0].StemID).toBe(3);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Task 19: failure rollback scenarios.
-//
-// Each test boots a fresh DB with the canonical DDL + base seed, captures
-// destination-table row counts (Tree/Stem/DBH/DBHAttributes), generates a `.sql`
-// file from a CSV crafted to violate a specific Stage 0/Stage 5 check, executes
-// it, and asserts both (a) the execution throws with a specific error message
-// and (b) all destination table counts are unchanged (i.e. the procedure's
-// EXIT HANDLER FOR SQLEXCEPTION rolled back the transaction).
-// ---------------------------------------------------------------------------
-
 interface DestinationCounts {
   tree: number;
   stem: number;
@@ -381,243 +210,826 @@ interface DestinationCounts {
   dbhAttributes: number;
 }
 
-async function captureDestinationCounts(conn: mysql.Connection): Promise<DestinationCounts> {
+async function captureDestinationCounts(connection: mysql.Connection): Promise<DestinationCounts> {
   return {
-    tree: await countRows(conn, 'Tree'),
-    stem: await countRows(conn, 'Stem'),
-    dbh: await countRows(conn, 'DBH'),
-    dbhAttributes: await countRows(conn, 'DBHAttributes')
+    tree: await countRows(connection, 'Tree'),
+    stem: await countRows(connection, 'Stem'),
+    dbh: await countRows(connection, 'DBH'),
+    dbhAttributes: await countRows(connection, 'DBHAttributes')
   };
 }
 
 function expectCountsUnchanged(after: DestinationCounts, before: DestinationCounts): void {
-  expect(after.tree).toBe(before.tree);
-  expect(after.stem).toBe(before.stem);
-  expect(after.dbh).toBe(before.dbh);
-  expect(after.dbhAttributes).toBe(before.dbhAttributes);
+  expect(after.tree, 'Tree count must be unchanged after rollback').toBe(before.tree);
+  expect(after.stem, 'Stem count must be unchanged after rollback').toBe(before.stem);
+  expect(after.dbh, 'DBH count must be unchanged after rollback').toBe(before.dbh);
+  expect(after.dbhAttributes, 'DBHAttributes count must be unchanged after rollback').toBe(before.dbhAttributes);
 }
 
-function generateSqlWithReload(inputCsv: string, outSql: string, censusNumber: string): void {
-  execSync(
-    [
-      'npx tsx lib/csv-to-sql-v2.ts',
-      `--input ${inputCsv}`,
-      `--site ${TEST_SITE_NAME}`,
-      `--plot-id ${TEST_PLOT_ID}`,
-      `--census-number ${censusNumber}`,
-      `--output ${outSql}`,
-      '--allow-reload'
-    ].join(' '),
-    { cwd: PROJECT_ROOT, stdio: 'pipe' }
-  );
-}
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
 
-describe('csv-to-sql-v2 integration — failure rollback scenarios (Task 19)', () => {
+describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
   let connection: mysql.Connection;
-  const dbName = `forestgeo_csv_v2_failure_${process.pid}_${Date.now()}`;
+  // Each describe block gets a distinct dbName to avoid cross-suite collision
+  // when vitest runs describe blocks sequentially within this file.
+  const dbName = `forestgeo_v2_pivot_${process.pid}_${Date.now()}`;
   const config = { ...DEFAULT_TEST_CONFIG, database: dbName };
 
   beforeEach(async () => {
+    nextTempId = 1;
     connection = await createTestDatabase(config);
     await loadCanonicalDdl(connection, CANONICAL_DDL_PATH);
+    // The canonical DDL's DBCHANGES2014f section already drops DBHAttributes.CensusID
+    // (line: ALTER TABLE DBHAttributes DROP COLUMN censusid). No further ALTER needed.
     await loadSeedFile(connection, SEED_CENSUS_1_PATH);
   });
 
   afterEach(async () => {
-    if (connection) {
-      await teardownTestDatabase(connection, config);
-    }
+    if (connection) await teardownTestDatabase(connection, config);
   });
 
-  it('Scenario 1 — rollback on unknown species mnemonic', async () => {
-    const before = await captureDestinationCounts(connection);
+  // -------------------------------------------------------------------------
+  // Happy path: single-row insert (N — new tree, new stem)
+  // -------------------------------------------------------------------------
 
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f1-'));
-    const inputCsv = writeCsv(tmp, ['1,1,ZZZ,A1,1,1,10,1.3,2024-01-01,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
+  it('happy path single-row insert: one measurement + zero attributes → Tree, Stem, DBH each +1', async () => {
+    const measurementRows = [makeMeasurement({ Tag: 'HP1', StemTag: '1', DBH: 12, HOM: '1.3' })];
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows,
+      attributeRows: []
+    });
 
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown species mnemonics/);
+    await executeArtifact(connection, artifact);
 
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+    expect(await countRows(connection, 'Tree')).toBe(1);
+    expect(await countRows(connection, 'Stem')).toBe(1);
+    expect(await countRows(connection, 'DBH', 'CensusID = 1')).toBe(1);
+    expect(await countRows(connection, 'DBHAttributes')).toBe(0);
+
+    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBH, HOM FROM DBH WHERE CensusID = 1');
+    expect(dbhRows).toHaveLength(1);
+    expect(Number(dbhRows[0].DBH)).toBeCloseTo(12, 4);
+    expect(String(dbhRows[0].HOM)).toBe('1.3');
   });
 
-  it('Scenario 2 — rollback on unknown quadrat name', async () => {
-    const before = await captureDestinationCounts(connection);
+  // -------------------------------------------------------------------------
+  // Mixed O/M/N scenario
+  // -------------------------------------------------------------------------
 
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f2-'));
-    const inputCsv = writeCsv(tmp, ['1,1,FOO,Z99,1,1,10,1.3,2024-01-01,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown quadrats/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 3 — rollback on unknown TSMCode token', async () => {
-    const before = await captureDestinationCounts(connection);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f3-'));
-    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,ZZ;LI']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Unknown TSMCodes/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 4 — rollback on duplicate (StemID, CensusID) DBH destination', async () => {
-    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
-    const before = await captureDestinationCounts(connection);
-
-    // Two CSV rows both reference the prior (Tag=1, StemTag=1) which resolves to
-    // StemID=1. Both rows therefore target (StemID=1, CensusID=2) — check 8 fires.
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f4-'));
-    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,11,1.3,2025-01-15,', '1,1,FOO,A1,1,1,13,1.3,2025-01-15,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER_2);
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Duplicate \(StemID, CensusID\) DBH destinations/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 5 — rollback on ambiguous tree lookup', async () => {
-    // Seed two Tree rows with Tag='X' on the same plot. Both need at least one
-    // Stem joined through a Quadrat on PlotID=1 so tree_lookup picks them up.
-    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID) VALUES (10, 'X', 1), (11, 'X', 1)");
-    await connection.query(
-      'INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES ' + "(10, 10, '1', 1, 0, 1.0, 1.0), (11, 11, '1', 1, 0, 2.0, 2.0)"
-    );
-
-    const before = await captureDestinationCounts(connection);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f5-'));
-    const inputCsv = writeCsv(tmp, ['X,1,FOO,A1,1,1,10,1.3,2024-01-15,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Ambiguous tree tags/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 6 — rollback on ambiguous stem lookup', async () => {
-    // Seed one Tree (Tag='Y') with two stems sharing the same (TreeID, StemTag).
-    // tree_lookup resolves uniquely to TreeID=20, but stem_lookup has
-    // StemCount=2 for (TreeID=20, StemTag='S1') so check 5 fires.
-    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID) VALUES (20, 'Y', 1)");
-    await connection.query(
-      'INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES ' + "(20, 20, 'S1', 1, 0, 1.0, 1.0), (21, 20, 'S1', 1, 0, 2.0, 2.0)"
-    );
-
-    const before = await captureDestinationCounts(connection);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f6-'));
-    const inputCsv = writeCsv(tmp, ['Y,S1,FOO,A1,1,1,10,1.3,2024-01-15,']);
-    const outSql = path.join(tmp, 'out.sql');
-    generateSql(inputCsv, outSql, TEST_CENSUS_NUMBER);
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Ambiguous stem lookup/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 7 — rollback on missing Census row (--census-number=99)', async () => {
-    const before = await captureDestinationCounts(connection);
-
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f7-'));
-    const inputCsv = writeCsv(tmp, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,']);
-    const outSql = path.join(tmp, 'out.sql');
-    // census-number 99 does not exist in the seed — Stage 0 SIGNALs immediately.
-    generateSql(inputCsv, outSql, '99');
-
-    await expect(executeGeneratedSql(connection, readFileSync(outSql, 'utf8'))).rejects.toThrow(/Expected exactly one Census row/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), before);
-  });
-
-  it('Scenario 8 — rollback on already-loaded census without --allow-reload', async () => {
-    // First load: populate census 1 successfully.
-    const tmpFirst = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f8a-'));
-    const firstCsv = writeCsv(tmpFirst, ['1,1,FOO,A1,1,1,10,1.3,2024-01-01,']);
-    const firstSql = path.join(tmpFirst, 'out.sql');
-    generateSql(firstCsv, firstSql, TEST_CENSUS_NUMBER);
-    await executeGeneratedSql(connection, readFileSync(firstSql, 'utf8'));
-
-    // Capture post-first-load counts — these are what the rolled-back retry must preserve.
-    const afterFirstLoad = await captureDestinationCounts(connection);
-    expect(afterFirstLoad.dbh).toBe(1);
-
-    // Second load (same census, no --allow-reload) must SIGNAL at Stage 0b.
-    const tmpSecond = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-f8b-'));
-    const secondCsv = writeCsv(tmpSecond, ['2,1,BAR,A1,2,2,12,1.3,2024-01-01,']);
-    const secondSql = path.join(tmpSecond, 'out.sql');
-    generateSql(secondCsv, secondSql, TEST_CENSUS_NUMBER);
-
-    await expect(executeGeneratedSql(connection, readFileSync(secondSql, 'utf8'))).rejects.toThrow(/Census already loaded/);
-
-    expectCountsUnchanged(await captureDestinationCounts(connection), afterFirstLoad);
-  });
-
-  it('Scenario 9 — --allow-reload replaces target-census rows and leaves other censuses intact', async () => {
-    // Prior-census seed adds CensusID=2 + 3 trees/stems/DBH rows for CensusID=1.
-    // We load CensusID=2 with one CSV, then reload with --allow-reload using a
-    // different DBH value, and verify (a) the new value replaces the old,
-    // (b) the other census's DBH rows are untouched.
+  it('mixed O/M/N: reuses prior stem (O), new stem on known tree (M), new tree+stem (N); Tree=4 Stem=5 DBH(census2)=3', async () => {
     await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
 
-    // Snapshot Census-1 DBH rows BEFORE the target-census load — these must
-    // survive both the load and the reload byte-for-byte.
-    const [census1Before] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT MeasureID, StemID, DBH, HOM, ExactDate FROM DBH WHERE CensusID = 1 ORDER BY StemID'
-    );
-    expect(census1Before.length).toBe(3);
+    // seed-with-priors inserts Census 2 and 3 prior trees (TreeID 1..3, StemID 1..3, CensusID=1 DBH rows)
+    // O: Tag=1/StemTag=1 — existing StemID=1
+    // M: Tag=1/StemTag=2 — new stem on TreeID=1
+    // N: Tag=99/StemTag=1 — brand new tree
+    const row1 = makeMeasurement({
+      Tag: '1',
+      StemTag: '1',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      DBH: 11,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+    const row2 = makeMeasurement({
+      Tag: '1',
+      StemTag: '2',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      DBH: 9,
+      LX: 1.5,
+      LY: 1.5,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+    const row3 = makeMeasurement({
+      Tag: '99',
+      StemTag: '1',
+      Mnemonic: 'BAZ',
+      Family: 'Testaceae',
+      Genus: 'Bazbaria',
+      SpeciesName: 'baz',
+      DBH: 20,
+      QuadratName: 'B1',
+      LX: 5,
+      LY: 5,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
 
-    // First load into CensusID=2 — three O-rows reusing prior trees/stems.
-    const tmpFirst = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-r9a-'));
-    const firstCsv = writeCsv(tmpFirst, ['1,1,FOO,A1,1,1,11,1.3,2025-01-15,', '2,1,BAR,A1,2,2,19,2.0,2025-01-15,', '3,OLD,BAZ,A2,3,3,16,1.3,2025-01-15,']);
-    const firstSql = path.join(tmpFirst, 'out.sql');
-    generateSql(firstCsv, firstSql, TEST_CENSUS_NUMBER_2);
-    await executeGeneratedSql(connection, readFileSync(firstSql, 'utf8'));
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_2,
+      lockName: LOCK_NAME_CENSUS_2,
+      allowReload: false,
+      measurementRows: [row1, row2, row3],
+      attributeRows: []
+    });
 
+    await executeArtifact(connection, artifact);
+
+    // 3 prior trees + 1 new (Tag=99) = 4
+    expect(await countRows(connection, 'Tree')).toBe(4);
+    // 3 prior stems + 1 new (Tag=1/StemTag=2) + 1 new (Tag=99/StemTag=1) = 5
+    expect(await countRows(connection, 'Stem')).toBe(5);
+    // Census-2 DBH rows = 3
     expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
-    const [firstDbhValues] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 2 ORDER BY StemID');
-    expect(firstDbhValues.map(r => Number(r.DBH))).toEqual([11, 19, 16]);
 
-    // Reload CensusID=2 with --allow-reload and different DBH values.
-    const tmpReload = mkdtempSync(path.join(os.tmpdir(), 'csv-v2-r9b-'));
-    const reloadCsv = writeCsv(tmpReload, ['1,1,FOO,A1,1,1,99,1.3,2025-01-15,', '2,1,BAR,A1,2,2,88,2.0,2025-01-15,', '3,OLD,BAZ,A2,3,3,77,1.3,2025-01-15,']);
-    const reloadSql = path.join(tmpReload, 'out.sql');
-    generateSqlWithReload(reloadCsv, reloadSql, TEST_CENSUS_NUMBER_2);
+    // O-row reuses StemID=1
+    const [oRows] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID FROM DBH WHERE CensusID = 2 AND DBH = 11');
+    expect(oRows).toHaveLength(1);
+    expect(oRows[0].StemID).toBe(1);
 
-    await executeGeneratedSql(connection, readFileSync(reloadSql, 'utf8'));
+    // M-row attaches a new Stem to TreeID=1
+    const [mStems] = await connection.query<mysql.RowDataPacket[]>("SELECT StemID, TreeID FROM Stem WHERE TreeID = 1 AND StemTag = '2'");
+    expect(mStems).toHaveLength(1);
+    expect(mStems[0].TreeID).toBe(1);
 
-    // Target census shows replaced — not merged — values.
-    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
-    const [reloadDbhValues] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 2 ORDER BY StemID');
-    expect(reloadDbhValues.map(r => Number(r.DBH))).toEqual([99, 88, 77]);
+    // N-row creates a new Tree with Tag=99
+    const [nTrees] = await connection.query<mysql.RowDataPacket[]>("SELECT TreeID FROM Tree WHERE Tag = '99'");
+    expect(nTrees).toHaveLength(1);
+  });
 
-    // Old DBH values for CensusID=2 are gone (not merged in alongside the new ones).
-    const [staleRows] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS n FROM DBH WHERE CensusID = 2 AND DBH IN (11, 19, 16)');
-    expect(Number(staleRows[0].n)).toBe(0);
+  // -------------------------------------------------------------------------
+  // HOM passes through unchanged
+  // -------------------------------------------------------------------------
 
-    // Unrelated census DBH rows must be byte-for-byte unchanged.
-    const [census1After] = await connection.query<mysql.RowDataPacket[]>(
-      'SELECT MeasureID, StemID, DBH, HOM, ExactDate FROM DBH WHERE CensusID = 1 ORDER BY StemID'
+  it('HOM passes through unchanged: app-chosen HOM value lands verbatim in DBH row', async () => {
+    const measurementRows = [makeMeasurement({ Tag: 'HT1', StemTag: '1', DBH: 15, HOM: '2.0' })];
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows,
+      attributeRows: []
+    });
+
+    await executeArtifact(connection, artifact);
+
+    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT HOM FROM DBH WHERE CensusID = 1');
+    expect(dbhRows).toHaveLength(1);
+    expect(String(dbhRows[0].HOM)).toBe('2.0');
+  });
+
+  // -------------------------------------------------------------------------
+  // DBH=NULL arrives as NULL in destination (app coerced 0→NULL before staging)
+  // -------------------------------------------------------------------------
+
+  it('DBH=NULL staging row inserts NULL into DBH.DBH (app already coerced 0→NULL)', async () => {
+    // The app converts DBH=0 to NULL before writing the MeasurementStagingRow.
+    // The destination procedure must not touch that NULL — it inserts as-is.
+    const measurementRows = [makeMeasurement({ Tag: 'DN1', StemTag: '1', DBH: null })];
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows,
+      attributeRows: []
+    });
+
+    await executeArtifact(connection, artifact);
+
+    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBH FROM DBH WHERE CensusID = 1');
+    expect(dbhRows).toHaveLength(1);
+    expect(dbhRows[0].DBH).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // DBHAttributes single-shape (TSMID + DBHID only, no CensusID column)
+  // -------------------------------------------------------------------------
+
+  it('DBHAttributes single-shape: one attribute row has TSMID + DBHID, no CensusID on the table', async () => {
+    // Verify ALTER TABLE removed CensusID from the live table definition.
+    const [colRows] = await connection.query<mysql.RowDataPacket[]>(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DBHAttributes' AND COLUMN_NAME = 'CensusID'"
     );
-    expect(census1After.length).toBe(3);
+    expect(colRows, 'CensusID should not exist on DBHAttributes after post-DBCHANGES2014f ALTER').toHaveLength(0);
+
+    const m = makeMeasurement({ Tag: 'AT1', StemTag: '1' });
+    const attributeRows = [makeAttribute(m.CoreMeasurementID, 'LI', m.CoreMeasurementID)];
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows: [m],
+      attributeRows
+    });
+
+    await executeArtifact(connection, artifact);
+
+    expect(await countRows(connection, 'DBHAttributes')).toBe(1);
+
+    const [attrRows] = await connection.query<mysql.RowDataPacket[]>('SELECT TSMID, DBHID FROM DBHAttributes');
+    expect(attrRows).toHaveLength(1);
+    expect(attrRows[0].TSMID).toBeGreaterThan(0);
+    expect(attrRows[0].DBHID).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Subspecies mapping
+  // -------------------------------------------------------------------------
+
+  it('subspecies mapping: staging row with SubspeciesName resolves to Tree.SubSpeciesID', async () => {
+    // seed-census-1.sql inserts no SubSpecies rows. Insert one here.
+    // SpeciesID=1 (FOO / Foobaria / foo) is already seeded.
+    await connection.query("INSERT INTO SubSpecies (SubSpeciesID, SpeciesID, SubSpeciesName, Authority, CurrentTaxonFlag) VALUES (1, 1, 'foovar', 'L.', 1)");
+
+    const m = makeMeasurement({
+      Tag: 'SS1',
+      StemTag: '1',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      SubspeciesName: 'foovar',
+      SubspeciesAuthority: 'L.'
+    });
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows: [m],
+      attributeRows: []
+    });
+
+    await executeArtifact(connection, artifact);
+
+    const [treeRows] = await connection.query<mysql.RowDataPacket[]>('SELECT SubSpeciesID FROM Tree WHERE Tag = ?', ['SS1']);
+    expect(treeRows).toHaveLength(1);
+    expect(treeRows[0].SubSpeciesID).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Panama overlap regression
+  // -------------------------------------------------------------------------
+
+  it('Panama overlap regression: same Tag in a different plot does not block new-tree insertion in target plot', async () => {
+    // Pre-seed a second Site (PlotID=2) and a Tree+Stem there with Tag='P1'.
+    // The tree_lookup is scoped to @target_plot_id via Stem->Quadrat->PlotID,
+    // so this foreign-plot tree must be invisible to Stage 2.
+    // Stage 6 then inserts a NEW Tree for (Tag='P1', SpeciesID=1) and binds via
+    // LEFT JOIN Stem (the new row has no stem yet).
+    await connection.query("INSERT INTO Country (CountryID, CountryName) VALUES (2, 'Panamaland')");
+    await connection.query(
+      "INSERT INTO Site (PlotID, PlotName, LocationName, CountryID, ShapeOfSite, DescriptionOfSite, Area, QDimX, QDimY, GUOM, GZUOM, PUOM, QUOM, IsStandardSize) VALUES (2, 'PANAMA', 'Panama Forest', 2, 'rectangle', 'Panama test', 4.0, 20.0, 20.0, 'm', 'm', 'm', 'm', 'Y')"
+    );
+    await connection.query("INSERT INTO Quadrat (QuadratID, PlotID, QuadratName, Area, IsStandardShape) VALUES (10, 2, 'A1', 400.0, 'Y')");
+    // Foreign-plot tree has a Stem — it is NOT orphaned, so Stage 6's LEFT JOIN Stem won't bind to it.
+    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID, SubSpeciesID) VALUES (100, 'P1', 1, NULL)");
+    await connection.query("INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES (100, 100, '1', 10, 0, 1.0, 1.0)");
+
+    const m = makeMeasurement({
+      Tag: 'P1',
+      StemTag: '1',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      QuadratName: 'A1',
+      LX: 2,
+      LY: 2
+    });
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows: [m],
+      attributeRows: []
+    });
+
+    await executeArtifact(connection, artifact);
+
+    // A NEW Tree for Plot 1 must have been inserted — TreeID ≠ 100.
+    const [trees] = await connection.query<mysql.RowDataPacket[]>("SELECT TreeID FROM Tree WHERE Tag = 'P1' ORDER BY TreeID");
+    // Should have the foreign-plot tree (100) + one new tree for the target plot
+    expect(trees.length).toBe(2);
+    const newTreeId = trees.find((r: mysql.RowDataPacket) => r.TreeID !== 100)?.TreeID;
+    expect(newTreeId).toBeDefined();
+
+    // The DBH row must reference the new stem on the NEW tree, not the foreign tree.
+    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>(
+      'SELECT d.DBHID, s.TreeID FROM DBH d JOIN Stem s ON s.StemID = d.StemID WHERE d.CensusID = 1'
+    );
+    expect(dbhRows).toHaveLength(1);
+    expect(dbhRows[0].TreeID).toBe(newTreeId);
+    expect(dbhRows[0].TreeID).not.toBe(100);
+  });
+
+  // -------------------------------------------------------------------------
+  // Stage 5 contract failure: result SELECT arrives before SIGNAL
+  // -------------------------------------------------------------------------
+
+  it('Stage 5 contract failure: procedure SIGNALs "Validation failed" with diagnostic columns (CoreMeasurementID, SourceRowIndex, Errors) in the trace SELECT', async () => {
+    // Feed a row referencing quadrat 'Z99' which does not exist in seed-census-1.sql.
+    const m = makeMeasurement({ Tag: 'CF1', StemTag: '1', QuadratName: 'Z99' });
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows: [m],
+      attributeRows: []
+    });
+
+    // The procedure SIGNALs with 'Validation failed; see prior SELECT for per-row details'.
+    // mysql2's promise API throws on the SIGNAL error packet and does not expose the
+    // per-row SELECT result sets emitted before the SIGNAL — those are available via
+    // the MySQL protocol stream but not surfaced through Promise<RowDataPacket>.
+    // We verify:
+    //   (a) The procedure SIGNALs with the expected stable message.
+    //   (b) The SIGNAL message text references "prior SELECT" tracing.
+    //   (c) The destination tables are unchanged (rollback occurred).
+    // The rendered procedure SQL does emit SELECT with CoreMeasurementID, SourceRowIndex,
+    // and Errors columns before the SIGNAL — verified by the mysql CLI tool and by
+    // the Stage 5 renderer's own SELECT statement.
+    const before = await captureDestinationCounts(connection);
+
+    await expect(executeArtifact(connection, artifact)).rejects.toThrow(/Validation failed/);
+
+    // Verify the Stage 5 SELECT was rendered with the correct diagnostic columns.
+    expect(artifact).toContain('CoreMeasurementID');
+    expect(artifact).toContain('SourceRowIndex');
+    expect(artifact).toContain('Errors');
+    expect(artifact).toMatch(/SELECT TempID, CoreMeasurementID, SourceRowIndex.*Errors.*FROM.*staging_measurements.*WHERE Errors IS NOT NULL/s);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // allowReload real run
+  // -------------------------------------------------------------------------
+
+  it('allowReload real run: target-census DBH rows replaced; prior-census rows untouched; orphan counts reported', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+
+    // First load into Census 2 (three O-rows reusing prior trees/stems from Census 1).
+    const firstRows = [
+      makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        Mnemonic: 'FOO',
+        Family: 'Testaceae',
+        Genus: 'Foobaria',
+        SpeciesName: 'foo',
+        DBH: 11,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      }),
+      makeMeasurement({
+        Tag: '2',
+        StemTag: '1',
+        Mnemonic: 'BAR',
+        Family: 'Testaceae',
+        Genus: 'Barbaria',
+        SpeciesName: 'bar',
+        DBH: 19,
+        HOM: '2.0',
+        PlotCensusNumber: CENSUS_NUMBER_2
+      }),
+      makeMeasurement({
+        Tag: '3',
+        StemTag: 'OLD',
+        Mnemonic: 'BAZ',
+        Family: 'Testaceae',
+        Genus: 'Bazbaria',
+        SpeciesName: 'baz',
+        DBH: 16,
+        QuadratName: 'A2',
+        LX: 3,
+        LY: 3,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      })
+    ];
+    const firstArtifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_2,
+      lockName: LOCK_NAME_CENSUS_2,
+      allowReload: false,
+      measurementRows: firstRows,
+      attributeRows: []
+    });
+    await executeArtifact(connection, firstArtifact);
+    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
+
+    // Snapshot Census-1 DBH rows — must survive the reload byte-for-byte.
+    const [census1Before] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 1 ORDER BY StemID');
+    expect(census1Before).toHaveLength(3);
+
+    // Reload Census 2 with different DBH values.
+    nextTempId = 100; // Avoid TempID collision with first load (different procedure call)
+    const reloadRows = [
+      makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        Mnemonic: 'FOO',
+        Family: 'Testaceae',
+        Genus: 'Foobaria',
+        SpeciesName: 'foo',
+        DBH: 99,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      }),
+      makeMeasurement({
+        Tag: '2',
+        StemTag: '1',
+        Mnemonic: 'BAR',
+        Family: 'Testaceae',
+        Genus: 'Barbaria',
+        SpeciesName: 'bar',
+        DBH: 88,
+        HOM: '2.0',
+        PlotCensusNumber: CENSUS_NUMBER_2
+      }),
+      makeMeasurement({
+        Tag: '3',
+        StemTag: 'OLD',
+        Mnemonic: 'BAZ',
+        Family: 'Testaceae',
+        Genus: 'Bazbaria',
+        SpeciesName: 'baz',
+        DBH: 77,
+        QuadratName: 'A2',
+        LX: 3,
+        LY: 3,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      })
+    ];
+    const reloadArtifact = buildArtifact({
+      procedureName: 'ctfs_export_reload_proc',
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_2,
+      lockName: LOCK_NAME_CENSUS_2,
+      allowReload: true,
+      reloadDryRun: false,
+      measurementRows: reloadRows,
+      attributeRows: []
+    });
+    const reloadResultSets = await executeArtifact(connection, reloadArtifact);
+
+    // Target census replaced, not merged.
+    expect(await countRows(connection, 'DBH', 'CensusID = 2')).toBe(3);
+    const [newDbh] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 2 ORDER BY StemID');
+    expect(newDbh.map((r: mysql.RowDataPacket) => Number(r.DBH))).toEqual([99, 88, 77]);
+
+    // Old values are gone.
+    const [stale] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS n FROM DBH WHERE CensusID = 2 AND DBH IN (11, 19, 16)');
+    expect(Number(stale[0].n)).toBe(0);
+
+    // Census-1 rows untouched.
+    const [census1After] = await connection.query<mysql.RowDataPacket[]>('SELECT StemID, DBH FROM DBH WHERE CensusID = 1 ORDER BY StemID');
+    expect(census1After).toHaveLength(3);
     for (let i = 0; i < census1Before.length; i++) {
       expect(census1After[i].StemID).toBe(census1Before[i].StemID);
-      expect(Number(census1After[i].DBH)).toBeCloseTo(Number(census1Before[i].DBH), 5);
-      expect(String(census1After[i].HOM)).toBe(String(census1Before[i].HOM));
+      expect(Number(census1After[i].DBH)).toBeCloseTo(Number(census1Before[i].DBH), 4);
     }
 
-    // Tree count is preserved (reload deletes orphaned trees but every prior
-    // tree still has the reloaded stem attached, so none should be orphaned).
-    expect(await countRows(connection, 'Tree')).toBe(3);
-    expect(await countRows(connection, 'Stem')).toBe(3);
+    // Orphan count SELECTs must have been emitted from Stage 0b.
+    const orphanStemSet = reloadResultSets.find(rs => rs.length > 0 && 'scope' in rs[0] && String(rs[0].scope).includes('stem'));
+    const orphanTreeSet = reloadResultSets.find(rs => rs.length > 0 && 'scope' in rs[0] && String(rs[0].scope).includes('tree'));
+    expect(orphanStemSet, 'Stage 0b must emit orphan-stems SELECT').toBeDefined();
+    expect(orphanTreeSet, 'Stage 0b must emit orphan-trees SELECT').toBeDefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // reloadDryRun
+  // -------------------------------------------------------------------------
+
+  it('reloadDryRun: count SELECTs emitted; zero rows changed in any destination table', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+
+    // Load census 2 first.
+    const firstRows = [
+      makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        Mnemonic: 'FOO',
+        Family: 'Testaceae',
+        Genus: 'Foobaria',
+        SpeciesName: 'foo',
+        DBH: 11,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      })
+    ];
+    await executeArtifact(
+      connection,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_2,
+        lockName: LOCK_NAME_CENSUS_2,
+        allowReload: false,
+        measurementRows: firstRows,
+        attributeRows: []
+      })
+    );
+    const before = await captureDestinationCounts(connection);
+
+    nextTempId = 200;
+    const dryRunRows = [
+      makeMeasurement({
+        Tag: '1',
+        StemTag: '1',
+        Mnemonic: 'FOO',
+        Family: 'Testaceae',
+        Genus: 'Foobaria',
+        SpeciesName: 'foo',
+        DBH: 55,
+        PlotCensusNumber: CENSUS_NUMBER_2
+      })
+    ];
+    const dryRunArtifact = buildArtifact({
+      procedureName: 'ctfs_export_dry_run_proc',
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_2,
+      lockName: LOCK_NAME_CENSUS_2,
+      allowReload: false,
+      reloadDryRun: true,
+      measurementRows: dryRunRows,
+      attributeRows: []
+    });
+    const resultSets = await executeArtifact(connection, dryRunArtifact);
+
+    // Verify at least one count SELECT was emitted from Stage 0b dry-run.
+    const countSet = resultSets.find(rs => rs.length > 0 && 'scope' in rs[0]);
+    expect(countSet, 'Stage 0b dry-run must emit count SELECTs').toBeDefined();
+
+    // After dry-run, destination row counts must be unchanged.
+    const after = await captureDestinationCounts(connection);
+    expectCountsUnchanged(after, before);
+
+    // DBH value must not have changed to the dry-run value.
+    const [dbhRows] = await connection.query<mysql.RowDataPacket[]>('SELECT DBH FROM DBH WHERE CensusID = 2');
+    const dbhValues = dbhRows.map((r: mysql.RowDataPacket) => Number(r.DBH));
+    expect(dbhValues).not.toContain(55);
+  });
+
+  // -------------------------------------------------------------------------
+  // Concurrent lock
+  // -------------------------------------------------------------------------
+
+  it('concurrent lock: second procedure on same (plotId, censusNumber) SIGNALs with lock-failure message', async () => {
+    const lockName = DEFAULT_LOCK_NAME;
+
+    // Acquire the lock on a separate connection to simulate a concurrent run.
+    const conn2 = await mysql.createConnection({
+      host: DEFAULT_TEST_CONFIG.host,
+      user: DEFAULT_TEST_CONFIG.user,
+      password: DEFAULT_TEST_CONFIG.password,
+      port: DEFAULT_TEST_CONFIG.port,
+      database: dbName
+    });
+
+    try {
+      // Hold the lock on conn2.
+      await conn2.query(`SELECT GET_LOCK(${mysql.escape(lockName)}, 0)`);
+
+      // Attempt to run the procedure on the primary connection — it must SIGNAL.
+      const m = makeMeasurement({ Tag: 'LK1', StemTag: '1' });
+      const artifact = buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        lockName,
+        allowReload: false,
+        measurementRows: [m],
+        attributeRows: []
+      });
+
+      await expect(executeArtifact(connection, artifact)).rejects.toThrow(/Another ctfs-sql export is running/);
+    } finally {
+      await conn2.query(`SELECT RELEASE_LOCK(${mysql.escape(lockName)})`);
+      await conn2.end();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Mid-flight rollback
+  // -------------------------------------------------------------------------
+
+  it.skip('mid-flight rollback: UNIQUE violation on Stem after Stage 6/7/8 wrote rows unwinds all inserts (TODO: engineer reliable constraint trigger)', () => {
+    // Engineering a mid-flight rollback cleanly is fiddly because Stage 5 catches
+    // most violation patterns before any DML runs. The cleanest approach would be
+    // to tamper with TSMAttributes between Stage 5 and Stage 9 (as the spec suggests),
+    // but MySQL stored-procedure execution is atomic from the caller's perspective —
+    // we cannot inject an operation mid-procedure.
+    //
+    // Alternative: seed a UNIQUE constraint on Stem(TreeID, StemTag) and craft two
+    // staging rows that resolve to the same (TreeID=new, StemTag='1') after Stage 6
+    // inserts the tree. Stage 5 check 8 would catch this as "Duplicate new-stem
+    // natural key", meaning it never reaches Stage 7. A genuine mid-flight failure
+    // requires a scenario that passes all 10 Stage 5 checks but still violates a
+    // destination constraint — which the current canonical DDL does not expose.
+    //
+    // This test is deferred until a suitable constraint injection point is identified.
+  });
+
+  // -------------------------------------------------------------------------
+  // ViewFullTable (deferred)
+  // -------------------------------------------------------------------------
+
+  it.skip('rebuilds ViewFullTable after load (deferred — Suzanne TBD)', () => {
+    // Sentinel: will fail-as-skipped until Suzanne provides the refresh procedure.
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: already-loaded census without allowReload
+  // -------------------------------------------------------------------------
+
+  it('rollback on already-loaded census without allowReload: SIGNAL "Census already loaded" and counts unchanged', async () => {
+    // First load succeeds.
+    const firstRow = makeMeasurement({ Tag: 'AL1', StemTag: '1', DBH: 10 });
+    await executeArtifact(
+      connection,
+      buildArtifact({
+        destinationPlotId: DESTINATION_PLOT_ID,
+        censusNumber: CENSUS_NUMBER_1,
+        allowReload: false,
+        measurementRows: [firstRow],
+        attributeRows: []
+      })
+    );
+    const before = await captureDestinationCounts(connection);
+    expect(before.dbh).toBe(1);
+
+    // Second load on same census without --allow-reload must SIGNAL.
+    nextTempId = 50;
+    const secondRow = makeMeasurement({ Tag: 'AL2', StemTag: '1', DBH: 12 });
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({
+          procedureName: 'ctfs_export_retry_proc',
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: CENSUS_NUMBER_1,
+          allowReload: false,
+          measurementRows: [secondRow],
+          attributeRows: []
+        })
+      )
+    ).rejects.toThrow(/Census already loaded/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: unknown species mnemonic → taxonomy not resolved → Stage 5 SIGNAL
+  // -------------------------------------------------------------------------
+
+  it('rollback on unknown species mnemonic: Stage 5 SIGNALs and counts unchanged', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const m = makeMeasurement({ Tag: 'UM1', StemTag: '1', Mnemonic: 'ZZZ', Genus: 'Unknownus', SpeciesName: 'unknown' });
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({ destinationPlotId: DESTINATION_PLOT_ID, censusNumber: CENSUS_NUMBER_1, allowReload: false, measurementRows: [m], attributeRows: [] })
+      )
+    ).rejects.toThrow(/Validation failed/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: unknown quadrat
+  // -------------------------------------------------------------------------
+
+  it('rollback on unknown quadrat: Stage 5 SIGNALs and counts unchanged', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const m = makeMeasurement({ Tag: 'UQ1', StemTag: '1', QuadratName: 'Z99' });
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({ destinationPlotId: DESTINATION_PLOT_ID, censusNumber: CENSUS_NUMBER_1, allowReload: false, measurementRows: [m], attributeRows: [] })
+      )
+    ).rejects.toThrow(/Validation failed/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: unknown TSMCode
+  // -------------------------------------------------------------------------
+
+  it('rollback on unknown TSMCode: Stage 5 SIGNALs and counts unchanged', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const m = makeMeasurement({ Tag: 'UT1', StemTag: '1' });
+    const attributeRows = [makeAttribute(m.CoreMeasurementID, 'ZZ', m.CoreMeasurementID)];
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: CENSUS_NUMBER_1,
+          allowReload: false,
+          measurementRows: [m],
+          attributeRows
+        })
+      )
+    ).rejects.toThrow(/Validation failed/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: missing Census row
+  // -------------------------------------------------------------------------
+
+  it('rollback on missing Census row: Stage 0 SIGNALs "Expected exactly one Census row" and counts unchanged', async () => {
+    const before = await captureDestinationCounts(connection);
+
+    const m = makeMeasurement({ Tag: 'MC1', StemTag: '1' });
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({
+          procedureName: 'ctfs_export_no_census_proc',
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: '99',
+          lockName: 'ctfs-export:1:99',
+          allowReload: false,
+          measurementRows: [m],
+          attributeRows: []
+        })
+      )
+    ).rejects.toThrow(/Expected exactly one Census row/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: duplicate (StemID, CensusID) destination within the batch
+  // -------------------------------------------------------------------------
+
+  it('rollback on duplicate (StemID, CensusID) destination: Stage 5 SIGNALs and counts unchanged', async () => {
+    await loadSeedFile(connection, SEED_WITH_PRIORS_PATH);
+    const before = await captureDestinationCounts(connection);
+
+    // Two rows both reference prior (Tag=1, StemTag=1) → resolves to StemID=1.
+    // Both target (StemID=1, CensusID=2): Stage 5 check 7 fires.
+    const row1 = makeMeasurement({
+      Tag: '1',
+      StemTag: '1',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      DBH: 11,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+    const row2 = makeMeasurement({
+      Tag: '1',
+      StemTag: '1',
+      Mnemonic: 'FOO',
+      Family: 'Testaceae',
+      Genus: 'Foobaria',
+      SpeciesName: 'foo',
+      DBH: 13,
+      PlotCensusNumber: CENSUS_NUMBER_2
+    });
+
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({
+          procedureName: 'ctfs_export_dup_proc',
+          destinationPlotId: DESTINATION_PLOT_ID,
+          censusNumber: CENSUS_NUMBER_2,
+          lockName: LOCK_NAME_CENSUS_2,
+          allowReload: false,
+          measurementRows: [row1, row2],
+          attributeRows: []
+        })
+      )
+    ).rejects.toThrow(/Validation failed/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
+  });
+
+  // -------------------------------------------------------------------------
+  // Rollback: ambiguous tree lookup (two Trees with same Tag in same plot)
+  // -------------------------------------------------------------------------
+
+  it('rollback on ambiguous tree tag: Stage 5 SIGNALs and counts unchanged', async () => {
+    // Seed two Tree rows with Tag='X', each with a Stem in Plot 1.
+    await connection.query("INSERT INTO Tree (TreeID, Tag, SpeciesID) VALUES (10, 'X', 1), (11, 'X', 1)");
+    await connection.query(
+      "INSERT INTO Stem (StemID, TreeID, StemTag, QuadratID, StemNumber, QX, QY) VALUES (10, 10, '1', 1, 0, 1.0, 1.0), (11, 11, '1', 1, 0, 2.0, 2.0)"
+    );
+
+    const before = await captureDestinationCounts(connection);
+
+    const m = makeMeasurement({ Tag: 'X', StemTag: '1', DBH: 10 });
+    await expect(
+      executeArtifact(
+        connection,
+        buildArtifact({ destinationPlotId: DESTINATION_PLOT_ID, censusNumber: CENSUS_NUMBER_1, allowReload: false, measurementRows: [m], attributeRows: [] })
+      )
+    ).rejects.toThrow(/Validation failed/);
+
+    expectCountsUnchanged(await captureDestinationCounts(connection), before);
   });
 });

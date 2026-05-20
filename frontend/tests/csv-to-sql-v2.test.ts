@@ -44,20 +44,20 @@ describe('renderProcedureEnvelope', () => {
     expect(lockIdx).toBeLessThan(txIdx);
   });
 
-  it('emits RELEASE_LOCK after COMMIT in the success path', () => {
+  it('emits DO RELEASE_LOCK after COMMIT in the success path', () => {
     const sql = renderProcedureEnvelope(baseOpts);
     const commitIdx = sql.indexOf('COMMIT;');
-    const releaseIdx = sql.indexOf("RELEASE_LOCK('ctfs-export:1:2')", commitIdx);
+    const releaseIdx = sql.indexOf("DO RELEASE_LOCK('ctfs-export:1:2')", commitIdx);
     expect(commitIdx).toBeGreaterThan(-1);
     expect(releaseIdx).toBeGreaterThan(commitIdx);
   });
 
-  it('EXIT HANDLER block calls ROLLBACK, RELEASE_LOCK, then RESIGNAL', () => {
+  it('EXIT HANDLER block calls ROLLBACK, DO RELEASE_LOCK, then RESIGNAL', () => {
     const sql = renderProcedureEnvelope(baseOpts);
     const handler = sql.match(/EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN[\s\S]+?END;/)?.[0];
     expect(handler).toBeDefined();
     const rb = handler!.indexOf('ROLLBACK;');
-    const rl = handler!.indexOf("RELEASE_LOCK('ctfs-export:1:2')");
+    const rl = handler!.indexOf("DO RELEASE_LOCK('ctfs-export:1:2')");
     const rs = handler!.indexOf('RESIGNAL;');
     expect(rb).toBeGreaterThan(-1);
     expect(rl).toBeGreaterThan(rb);
@@ -90,11 +90,11 @@ describe('renderProcedureEnvelope', () => {
     expect(sql).toMatch(/DECLARE _resprout_candidates INT DEFAULT 0;/);
     expect(sql).toMatch(/DECLARE _bad TEXT;/);
     expect(sql).toMatch(/DECLARE CONTINUE HANDLER FOR NOT FOUND SET _done = TRUE;/);
-    expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+RELEASE_LOCK\('test-lock'\);\s+RESIGNAL;\s+END;/);
+    expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+DO RELEASE_LOCK\('test-lock'\);\s+RESIGNAL;\s+END;/);
     expect(sql).toMatch(/GET_LOCK\('test-lock', 0\)/);
     expect(sql).toMatch(/START TRANSACTION;/);
     expect(sql).toMatch(/-- body/);
-    expect(sql).toMatch(/COMMIT;\s+RELEASE_LOCK\('test-lock'\);/);
+    expect(sql).toMatch(/COMMIT;\s+DO RELEASE_LOCK\('test-lock'\);/);
     expect(sql).toMatch(/END \/\//);
     expect(sql).toMatch(/DELIMITER ;/);
     expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);\s*DROP PROCEDURE csv_to_sql_v2_load;/);
@@ -695,12 +695,14 @@ describe('renderStage9DBHAttributes', () => {
 describe('renderStage10', () => {
   const sql = () => renderStage10({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' });
 
-  it('emits a single SELECT with four named columns', () => {
+  it('emits two SELECT statements: one measurement tally and one attribute count', () => {
     const s = sql();
-    expect(s).toMatch(/\(SELECT COUNT\(\*\) FROM `staging_measurements`\) AS measurement_rows/);
-    expect(s).toMatch(/\(SELECT COUNT\(\*\) FROM `staging_attributes`\)\s+AS attribute_rows/);
-    expect(s).toMatch(/\(SELECT COUNT\(DISTINCT TreeID\) FROM `staging_measurements`\) AS tree_count/);
-    expect(s).toMatch(/\(SELECT COUNT\(DISTINCT StemID\) FROM `staging_measurements`\) AS stem_count/);
+    // Single-scan measurement tally (avoids ER_CANT_REOPEN_TABLE with TEMPORARY tables)
+    expect(s).toMatch(/SELECT COUNT\(\*\) AS measurement_rows.*COUNT\(DISTINCT TreeID\) AS tree_count.*COUNT\(DISTINCT StemID\) AS stem_count/s);
+    // Separate attribute count
+    expect(s).toMatch(/SELECT COUNT\(\*\) AS attribute_rows\s+FROM `staging_attributes`/);
+    // Must not use scalar subqueries that re-open the same temp table
+    expect(s).not.toMatch(/\(SELECT COUNT\([^)]+\) FROM `staging_measurements`\) AS measurement_rows/);
   });
 
   it('does NOT emit any DELETE, INSERT, or UPDATE — read-only tally', () => {
