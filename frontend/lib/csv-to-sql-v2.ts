@@ -28,6 +28,12 @@ export interface ProcedureEnvelopeOptions {
 // ---------------------------------------------------------------------------
 
 /**
+ * Exported legacy constants for bulk insert stages.
+ */
+export const LEGACY_DEFAULT_STEM_NUMBER = 0;
+export const LEGACY_DEFAULT_MEASURE_ID = 0;
+
+/**
  * All scalar and cursor-fetch variable declarations for the procedure.
  * These must appear before any cursor DECLAREs in the MySQL procedure body.
  */
@@ -40,26 +46,7 @@ const SCALAR_DECLARES = [
   'DECLARE _done BOOL DEFAULT FALSE;',
   'DECLARE _existing_dbh_count INT DEFAULT 0;',
   'DECLARE _resprout_candidates INT DEFAULT 0;',
-  'DECLARE _bad TEXT;',
-  'DECLARE _new_tree_id INT UNSIGNED;',
-  'DECLARE _new_stem_id INT UNSIGNED;',
-  'DECLARE _new_dbh_id INT UNSIGNED;',
-  'DECLARE _cur_temp_id INT UNSIGNED;',
-  'DECLARE _cur_tag VARCHAR(10);',
-  'DECLARE _cur_stem_tag VARCHAR(32);',
-  'DECLARE _cur_species_id INT UNSIGNED;',
-  'DECLARE _cur_subspecies_id INT UNSIGNED;',
-  'DECLARE _cur_first_temp_id INT UNSIGNED;',
-  'DECLARE _cur_tree_id INT UNSIGNED;',
-  'DECLARE _cur_quadrat_id INT UNSIGNED;',
-  'DECLARE _cur_x FLOAT;',
-  'DECLARE _cur_y FLOAT;',
-  'DECLARE _cur_dbh FLOAT;',
-  'DECLARE _cur_hom VARCHAR(16);',
-  'DECLARE _cur_primary_stem VARCHAR(20);',
-  'DECLARE _cur_exact_date DATE;',
-  'DECLARE _cur_comments VARCHAR(256);',
-  'DECLARE _cur_stem_id INT UNSIGNED;'
+  'DECLARE _bad TEXT;'
 ];
 
 /**
@@ -557,141 +544,109 @@ ${appendErr(a, 'TSMCode too long for CTFS', `CHAR_LENGTH(TSMCode) > 10`)}
 }
 
 // ---------------------------------------------------------------------------
-// Stage 6: Cursor-driven new Tree inserts
+// Stage 6: Bulk-insert new Tree rows with set-based join-back
 // ---------------------------------------------------------------------------
 
-export interface CursorStageResult {
-  cursorDeclaration: string;
-  body: string;
+export interface StageBulkInsertOptions {
+  measurementsTable: string;
 }
 
 /**
- * Renders the Stage 6 cursor declaration and body fragment.
+ * Renders the Stage 6 procedure-body fragment.
  *
- * The cursor declaration is bare (no handler) — the envelope emits the single
- * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ * Two-statement pattern:
+ *   1. INSERT into Tree by deduplicating (Tag, SpeciesID, SubSpeciesID) from
+ *      staging rows where TreeID IS NULL, ordered by MIN(TempID) for determinism.
+ *   2. UPDATE staging to join back newly inserted Trees using LEFT JOIN Stem
+ *      to bind only to Trees with no existing Stem (supports CTFS databases
+ *      where the same Tag appears in different plots).
  *
- * The body:
- *   - Opens cur_new_trees, iterating over DISTINCT (Tag, SpeciesID, SubSpeciesID)
- *     rows where Tagged = 'N', ordered by first_temp_id for determinism.
- *   - Inserts one Tree row per distinct tag, captures LAST_INSERT_ID(), and
- *     back-fills TreeID into every staging row with that Tag.
- *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
- *
- * Tree has no PlotID column; scoping is via the Quadrat join chain, which is
- * already resolved in Stage 2.
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
-export function renderStage6NewTrees(opts: { tempTable: string }): CursorStageResult {
-  const t = escapeSqlIdentifier(opts.tempTable);
-  return {
-    cursorDeclaration: `DECLARE cur_new_trees CURSOR FOR
-    SELECT DISTINCT Tag, SpeciesID, SubSpeciesID, MIN(TempID) AS first_temp_id
-      FROM ${t}
-      WHERE Tagged = 'N'
-      GROUP BY Tag, SpeciesID, SubSpeciesID
-      ORDER BY first_temp_id;`,
-    body: `  -- Stage 6: insert new Tree rows row-by-row
-  SET _done = FALSE;
-  OPEN cur_new_trees;
-  read_new_trees: LOOP
-    FETCH cur_new_trees INTO _cur_tag, _cur_species_id, _cur_subspecies_id, _cur_first_temp_id;
-    IF _done THEN LEAVE read_new_trees; END IF;
-    INSERT INTO Tree (Tag, SpeciesID, SubSpeciesID) VALUES (_cur_tag, _cur_species_id, _cur_subspecies_id);
-    SET _new_tree_id = LAST_INSERT_ID();
-    UPDATE ${t} SET TreeID = _new_tree_id
-      WHERE Tagged = 'N' AND Tag = _cur_tag;
-  END LOOP;
-  CLOSE cur_new_trees;
-  SET _done = FALSE;
-`
-  };
+export function renderStage6NewTrees(opts: StageBulkInsertOptions): string {
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  return `  -- Stage 6: bulk insert new Trees + plot-aware join-back
+  INSERT INTO Tree (Tag, SpeciesID, SubSpeciesID)
+    SELECT nt.Tag, nt.SpeciesID, nt.SubSpeciesID
+      FROM (
+        SELECT Tag, SpeciesID, SubSpeciesID, MIN(TempID) AS first_temp_id
+          FROM ${m}
+         WHERE TreeID IS NULL
+         GROUP BY Tag, SpeciesID, SubSpeciesID
+      ) nt
+     ORDER BY nt.first_temp_id;
+
+  UPDATE ${m} t
+    JOIN Tree tr ON tr.Tag = t.Tag
+                AND tr.SpeciesID = t.SpeciesID
+                AND tr.SubSpeciesID <=> t.SubSpeciesID
+    LEFT JOIN Stem existing_stem ON existing_stem.TreeID = tr.TreeID
+    SET t.TreeID = tr.TreeID
+    WHERE t.TreeID IS NULL
+      AND existing_stem.StemID IS NULL;
+`;
 }
 
 // ---------------------------------------------------------------------------
-// Stage 7: Cursor-driven new Stem inserts
+// Stage 7: Bulk-insert new Stem rows with set-based join-back
 // ---------------------------------------------------------------------------
 
 /**
- * Renders the Stage 7 cursor declaration and body fragment.
+ * Renders the Stage 7 procedure-body fragment.
  *
- * The cursor declaration is bare (no handler) — the envelope emits the single
- * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ * Two-statement pattern:
+ *   1. INSERT into Stem for rows where StemID IS NULL, using LEGACY_DEFAULT_STEM_NUMBER
+ *      for StemNumber and (LX, LY) mapped to (QX, QY), ordered by TempID.
+ *   2. UPDATE staging to join back newly inserted Stems using (TreeID, StemTag, QuadratID)
+ *      with NULL-safe <=> for StemTag.
  *
- * The body:
- *   - Opens cur_new_stems, iterating over every staging row where StemID IS
- *     NULL (i.e. rows whose stem was not resolved in Stages 2/2b).
- *   - Inserts one Stem row per staging row with explicit StemNumber = 0, then
- *     captures LAST_INSERT_ID() and writes the generated StemID back to that
- *     specific staging row via its TempID primary key.
- *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
-export function renderStage7NewStems(opts: { tempTable: string }): CursorStageResult {
-  const t = escapeSqlIdentifier(opts.tempTable);
-  return {
-    cursorDeclaration: `DECLARE cur_new_stems CURSOR FOR
-    SELECT TempID, TreeID, StemTag, QuadratID, X, Y
-      FROM ${t}
-      WHERE StemID IS NULL
-      ORDER BY TempID;`,
-    body: `  -- Stage 7: insert new Stem rows row-by-row
-  SET _done = FALSE;
-  OPEN cur_new_stems;
-  read_new_stems: LOOP
-    FETCH cur_new_stems INTO _cur_temp_id, _cur_tree_id, _cur_stem_tag, _cur_quadrat_id, _cur_x, _cur_y;
-    IF _done THEN LEAVE read_new_stems; END IF;
-    INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY)
-      VALUES (_cur_tree_id, _cur_stem_tag, _cur_quadrat_id, 0, _cur_x, _cur_y);
-    SET _new_stem_id = LAST_INSERT_ID();
-    UPDATE ${t} SET StemID = _new_stem_id WHERE TempID = _cur_temp_id;
-  END LOOP;
-  CLOSE cur_new_stems;
-  SET _done = FALSE;
-`
-  };
+export function renderStage7NewStems(opts: StageBulkInsertOptions): string {
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  return `  -- Stage 7: bulk insert new Stems, set-based join-back
+  INSERT INTO Stem (TreeID, StemTag, QuadratID, StemNumber, QX, QY)
+    SELECT TreeID, StemTag, QuadratID, ${LEGACY_DEFAULT_STEM_NUMBER}, LX, LY
+      FROM ${m}
+     WHERE StemID IS NULL
+     ORDER BY TempID;
+
+  UPDATE ${m} t
+    JOIN Stem s ON s.TreeID = t.TreeID
+                AND s.StemTag <=> t.StemTag
+                AND s.QuadratID = t.QuadratID
+    SET t.StemID = s.StemID
+    WHERE t.StemID IS NULL;
+`;
 }
 
 // ---------------------------------------------------------------------------
-// Stage 8: Cursor-driven DBH inserts
+// Stage 8: Bulk-insert DBH rows with set-based join-back
 // ---------------------------------------------------------------------------
 
 /**
- * Renders the Stage 8 cursor declaration and body fragment.
+ * Renders the Stage 8 procedure-body fragment.
  *
- * The cursor declaration is bare (no handler) — the envelope emits the single
- * shared CONTINUE HANDLER FOR NOT FOUND after all cursor declarations.
+ * Two-statement pattern:
+ *   1. INSERT into DBH using LEGACY_DEFAULT_MEASURE_ID for MeasureID,
+ *      @target_census_id for CensusID, and other columns from staging,
+ *      ordered by TempID.
+ *   2. UPDATE staging to join back newly inserted DBH rows using (StemID, CensusID).
  *
- * The body:
- *   - Opens cur_dbh, iterating over EVERY staging row ordered by TempID.
- *   - Inserts one DBH row per staging row with explicit MeasureID = 0, then
- *     captures LAST_INSERT_ID() and writes the generated DBHID back to that
- *     specific staging row via its TempID primary key.
- *   - Reads PrimaryStem from staging. The renderer that populates that column
- *     (previously Stage 9a) was removed in this pruning pass; a later task in
- *     the pivot reintroduces a simpler population step before Stage 8 runs.
- *   - Resets _done to FALSE after the loop so later cursors see a clean flag.
+ * Output is indented two spaces — it is a procedure-body fragment, not a full procedure.
  */
-export function renderStage8DBH(opts: { tempTable: string }): CursorStageResult {
-  const t = escapeSqlIdentifier(opts.tempTable);
-  return {
-    cursorDeclaration: `DECLARE cur_dbh CURSOR FOR
-    SELECT TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments
-      FROM ${t}
-      ORDER BY TempID;`,
-    body: `  -- Stage 8: insert DBH rows row-by-row
-  SET _done = FALSE;
-  OPEN cur_dbh;
-  read_dbh: LOOP
-    FETCH cur_dbh INTO _cur_temp_id, _cur_stem_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments;
-    IF _done THEN LEAVE read_dbh; END IF;
-    INSERT INTO DBH (MeasureID, StemID, CensusID, DBH, HOM, PrimaryStem, ExactDate, Comments)
-      VALUES (0, _cur_stem_id, @target_census_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments);
-    SET _new_dbh_id = LAST_INSERT_ID();
-    UPDATE ${t} SET DBHID = _new_dbh_id WHERE TempID = _cur_temp_id;
-  END LOOP;
-  CLOSE cur_dbh;
-  SET _done = FALSE;
-`
-  };
+export function renderStage8DBH(opts: StageBulkInsertOptions): string {
+  const m = escapeSqlIdentifier(opts.measurementsTable);
+  return `  -- Stage 8: bulk insert DBH, set-based join-back
+  INSERT INTO DBH (MeasureID, StemID, CensusID, DBH, HOM, PrimaryStem, ExactDate, Comments)
+    SELECT ${LEGACY_DEFAULT_MEASURE_ID}, StemID, @target_census_id, DBH, HOM, PrimaryStem, ExactDate, Comments
+      FROM ${m}
+     ORDER BY TempID;
+
+  UPDATE ${m} t
+    JOIN DBH d ON d.StemID = t.StemID AND d.CensusID = @target_census_id
+    SET t.DBHID = d.DBHID;
+`;
 }
 
 // ---------------------------------------------------------------------------
@@ -731,9 +686,8 @@ export interface RenderFullPipelineOptions {
  *
  * Stage 0b (reload cleanup) is included only when allowReload is true.
  *
- * Cursor declarations from Stages 6/7/8 are collected and emitted by the
- * procedure envelope between the scalar DECLAREs and the NOT FOUND handler,
- * matching MySQL's required declaration order.
+ * Stages 6/7/8 now emit set-based bulk INSERTs + UPDATE join-backs; no cursor
+ * declarations are required.
  *
  * NOTE: This is a transitional stub. In a later task, the app endpoint will
  * call the individual renderers directly instead of using this composer.
@@ -743,11 +697,11 @@ export interface RenderFullPipelineOptions {
  * stagingRows field is now dead-weight; the new pipeline will replace it entirely.
  */
 export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
-  const { plotId, censusNumber, allowReload, tempTable } = opts;
+  const { plotId, censusNumber, allowReload } = opts;
 
-  const stage6 = renderStage6NewTrees({ tempTable });
-  const stage7 = renderStage7NewStems({ tempTable });
-  const stage8 = renderStage8DBH({ tempTable });
+  const stage6 = renderStage6NewTrees({ measurementsTable: 'staging_measurements' });
+  const stage7 = renderStage7NewStems({ measurementsTable: 'staging_measurements' });
+  const stage8 = renderStage8DBH({ measurementsTable: 'staging_measurements' });
 
   const body = [
     renderStage0({ destinationPlotId: plotId, censusNumber, allowReload }),
@@ -760,10 +714,10 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
     }),
     renderStage2({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
     renderStage5({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
-    stage6.body,
-    stage7.body,
-    stage8.body,
-    renderStage10({ tempTable })
+    stage6,
+    stage7,
+    stage8,
+    renderStage10({ tempTable: opts.tempTable })
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -771,7 +725,7 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
   return renderProcedureEnvelope({
     procedureName: 'csv_to_sql_v2_load', // placeholder; orchestrator (later task) supplies a unique per-artifact name
     lockName: 'ctfs-export:legacy:placeholder', // placeholder; orchestrator supplies real lock name
-    cursorDeclarations: [stage6.cursorDeclaration, stage7.cursorDeclaration, stage8.cursorDeclaration],
+    cursorDeclarations: [],
     body
   });
 }

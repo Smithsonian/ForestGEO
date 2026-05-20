@@ -11,6 +11,8 @@ import {
   renderStage7NewStems,
   renderStage8DBH,
   renderStage10,
+  LEGACY_DEFAULT_STEM_NUMBER,
+  LEGACY_DEFAULT_MEASURE_ID,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
 import { mapCsvRowToStagingRow, type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
@@ -86,12 +88,6 @@ describe('renderProcedureEnvelope', () => {
     expect(sql).toMatch(/DECLARE _existing_dbh_count INT DEFAULT 0;/);
     expect(sql).toMatch(/DECLARE _resprout_candidates INT DEFAULT 0;/);
     expect(sql).toMatch(/DECLARE _bad TEXT;/);
-    expect(sql).toMatch(/DECLARE _new_tree_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _new_stem_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _new_dbh_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _cur_temp_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _cur_tag VARCHAR\(10\);/);
-    expect(sql).toMatch(/DECLARE _cur_stem_tag VARCHAR\(32\);/);
     expect(sql).toMatch(/DECLARE CONTINUE HANDLER FOR NOT FOUND SET _done = TRUE;/);
     expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+RELEASE_LOCK\('test-lock'\);\s+RESIGNAL;\s+END;/);
     expect(sql).toMatch(/GET_LOCK\('test-lock', 0\)/);
@@ -110,7 +106,7 @@ describe('renderProcedureEnvelope', () => {
       body: ''
     });
     const cursorIdx = sql.indexOf('cur_trees CURSOR');
-    const lastScalarIdx = sql.indexOf('_cur_stem_id INT UNSIGNED');
+    const lastScalarIdx = sql.indexOf('DECLARE _bad TEXT;');
     const notFoundIdx = sql.indexOf('CONTINUE HANDLER FOR NOT FOUND');
     const exitHandlerIdx = sql.indexOf('EXIT HANDLER FOR SQLEXCEPTION');
     expect(lastScalarIdx).toBeGreaterThan(0);
@@ -591,78 +587,71 @@ describe('renderStage5', () => {
 });
 
 describe('renderStage6NewTrees', () => {
-  it('returns cursorDeclaration without handler', () => {
-    const { cursorDeclaration } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
-    expect(cursorDeclaration).toMatch(/DECLARE cur_new_trees CURSOR FOR/);
-    expect(cursorDeclaration).not.toMatch(/HANDLER/); // shared handler lives in envelope
+  const sql = () => renderStage6NewTrees({ measurementsTable: 'staging_measurements' });
+
+  it('emits no cursor primitives', () => {
+    for (const kw of ['CURSOR FOR', 'OPEN ', 'FETCH ', 'CLOSE ']) {
+      expect(sql()).not.toContain(kw);
+    }
   });
 
-  it('body opens, fetches, inserts, captures LAST_INSERT_ID, updates staging, closes', () => {
-    const { body } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
-    expect(body).toMatch(/OPEN cur_new_trees;/);
-    expect(body).toMatch(/FETCH cur_new_trees INTO/);
-    expect(body).toMatch(/INSERT INTO Tree \(Tag, SpeciesID, SubSpeciesID\) VALUES/);
-    expect(body).toMatch(/SET _new_tree_id = LAST_INSERT_ID\(\);/);
-    expect(body).toMatch(/UPDATE `TempAllTrees` SET TreeID = _new_tree_id/);
-    expect(body).toMatch(/CLOSE cur_new_trees;/);
+  it('inserts DISTINCT (Tag, SpeciesID, SubSpeciesID) ordered by MIN(TempID)', () => {
+    expect(sql()).toMatch(
+      /INSERT INTO Tree \(Tag, SpeciesID, SubSpeciesID\)\s+SELECT nt\.Tag, nt\.SpeciesID, nt\.SubSpeciesID\s+FROM \(\s*SELECT Tag, SpeciesID, SubSpeciesID, MIN\(TempID\) AS first_temp_id/
+    );
+    expect(sql()).toMatch(/GROUP BY Tag, SpeciesID, SubSpeciesID\s+\) nt\s+ORDER BY nt\.first_temp_id/);
   });
 
-  it('does not reference Tree.PlotID', () => {
-    const { body } = renderStage6NewTrees({ tempTable: 'TempAllTrees' });
-    expect(body).not.toMatch(/Tree.*PlotID|PlotID.*Tree/);
+  it('join-back uses LEFT JOIN Stem to bind to the newly inserted no-stem Tree', () => {
+    expect(sql()).toMatch(/JOIN Tree tr ON tr\.Tag = t\.Tag\s+AND tr\.SpeciesID = t\.SpeciesID\s+AND tr\.SubSpeciesID <=> t\.SubSpeciesID/);
+    expect(sql()).toMatch(/LEFT JOIN Stem existing_stem ON existing_stem\.TreeID = tr\.TreeID/);
+    expect(sql()).toMatch(/SET t\.TreeID = tr\.TreeID\s+WHERE t\.TreeID IS NULL\s+AND existing_stem\.StemID IS NULL/);
   });
 });
 
 describe('renderStage7NewStems', () => {
-  it('cursor declaration has no handler', () => {
-    const { cursorDeclaration } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
-    expect(cursorDeclaration).toMatch(/DECLARE cur_new_stems CURSOR FOR/);
-    expect(cursorDeclaration).not.toMatch(/HANDLER/);
+  const sql = () => renderStage7NewStems({ measurementsTable: 'staging_measurements' });
+
+  it('emits no cursor primitives', () => {
+    for (const kw of ['CURSOR FOR', 'OPEN ', 'FETCH ', 'CLOSE ']) {
+      expect(sql()).not.toContain(kw);
+    }
   });
 
-  it('INSERT shape includes explicit StemNumber=0', () => {
-    const { body } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
-    expect(body).toMatch(
-      /INSERT INTO Stem \(TreeID, StemTag, QuadratID, StemNumber, QX, QY\)\s+VALUES \(_cur_tree_id, _cur_stem_tag, _cur_quadrat_id, 0, _cur_x, _cur_y\);/
-    );
+  it('inserts with LEGACY_DEFAULT_STEM_NUMBER = 0 hardcoded in literal', () => {
+    expect(sql()).toMatch(/SELECT TreeID, StemTag, QuadratID, 0, LX, LY/);
   });
 
-  it('per-TempID write-back', () => {
-    const { body } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
-    expect(body).toMatch(/UPDATE `TempAllTrees` SET StemID = _new_stem_id WHERE TempID = _cur_temp_id;/);
-  });
-
-  it('cursor selects per-row TempID, TreeID, StemTag, QuadratID, X, Y where StemID IS NULL', () => {
-    const { cursorDeclaration } = renderStage7NewStems({ tempTable: 'TempAllTrees' });
-    expect(cursorDeclaration).toMatch(/SELECT TempID, TreeID, StemTag, QuadratID, X, Y/);
-    expect(cursorDeclaration).toMatch(/WHERE StemID IS NULL/);
+  it('join-back uses (TreeID, StemTag, QuadratID) with NULL-safe StemTag', () => {
+    expect(sql()).toMatch(/JOIN Stem s ON s\.TreeID = t\.TreeID\s+AND s\.StemTag <=> t\.StemTag\s+AND s\.QuadratID = t\.QuadratID/);
   });
 });
 
 describe('renderStage8DBH', () => {
-  it('cursor declaration has no handler', () => {
-    const { cursorDeclaration } = renderStage8DBH({ tempTable: 'TempAllTrees' });
-    expect(cursorDeclaration).toMatch(/DECLARE cur_dbh CURSOR FOR/);
-    expect(cursorDeclaration).not.toMatch(/HANDLER/);
+  const sql = () => renderStage8DBH({ measurementsTable: 'staging_measurements' });
+
+  it('emits no cursor primitives', () => {
+    for (const kw of ['CURSOR FOR', 'OPEN ', 'FETCH ', 'CLOSE ']) {
+      expect(sql()).not.toContain(kw);
+    }
   });
 
-  it('INSERT includes explicit MeasureID=0, StemID, CensusID from @target_census_id, and Comments', () => {
-    const { body } = renderStage8DBH({ tempTable: 'TempAllTrees' });
-    expect(body).toMatch(
-      /INSERT INTO DBH \(MeasureID, StemID, CensusID, DBH, HOM, PrimaryStem, ExactDate, Comments\)\s+VALUES \(0, _cur_stem_id, @target_census_id, _cur_dbh, _cur_hom, _cur_primary_stem, _cur_exact_date, _cur_comments\);/
-    );
+  it('inserts with LEGACY_DEFAULT_MEASURE_ID = 0 and @target_census_id', () => {
+    expect(sql()).toMatch(/SELECT 0, StemID, @target_census_id, DBH, HOM, PrimaryStem, ExactDate, Comments/);
   });
 
-  it('per-TempID write-back of DBHID', () => {
-    const { body } = renderStage8DBH({ tempTable: 'TempAllTrees' });
-    expect(body).toMatch(/UPDATE `TempAllTrees` SET DBHID = _new_dbh_id WHERE TempID = _cur_temp_id;/);
+  it('join-back uses (StemID, CensusID = @target_census_id)', () => {
+    expect(sql()).toMatch(/JOIN DBH d ON d\.StemID = t\.StemID AND d\.CensusID = @target_census_id\s+SET t\.DBHID = d\.DBHID/);
+  });
+});
+
+describe('legacy default constants', () => {
+  it('exports LEGACY_DEFAULT_STEM_NUMBER = 0', () => {
+    expect(LEGACY_DEFAULT_STEM_NUMBER).toBe(0);
   });
 
-  it('cursor selects TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments over all rows', () => {
-    const { cursorDeclaration } = renderStage8DBH({ tempTable: 'TempAllTrees' });
-    expect(cursorDeclaration).toMatch(/SELECT TempID, StemID, DBH, HOM, PrimaryStem, ExactDate, Comments/);
-    expect(cursorDeclaration).toMatch(/ORDER BY TempID/);
-    expect(cursorDeclaration).not.toMatch(/WHERE/);
+  it('exports LEGACY_DEFAULT_MEASURE_ID = 0', () => {
+    expect(LEGACY_DEFAULT_MEASURE_ID).toBe(0);
   });
 });
 
@@ -735,30 +724,11 @@ describe('renderFullPipeline', () => {
     expect(sql).not.toMatch(/-- Stage 9b:/);
   });
 
-  it('declares cur_new_trees, cur_new_stems, cur_dbh inside main: BEGIN before the EXIT HANDLER', () => {
+  it('emits no cursor declarations since stages 6/7/8 use set-based bulk inserts', () => {
     const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    const mainBeginIdx = sql.indexOf('main: BEGIN');
-    const curTreesIdx = sql.indexOf('cur_new_trees CURSOR');
-    const curStemsIdx = sql.indexOf('cur_new_stems CURSOR');
-    const curDbhIdx = sql.indexOf('cur_dbh CURSOR');
-    const exitHandlerIdx = sql.indexOf('EXIT HANDLER FOR SQLEXCEPTION');
-    expect(mainBeginIdx).toBeGreaterThan(0);
-    expect(curTreesIdx).toBeGreaterThan(mainBeginIdx);
-    expect(curStemsIdx).toBeGreaterThan(mainBeginIdx);
-    expect(curDbhIdx).toBeGreaterThan(mainBeginIdx);
-    expect(curTreesIdx).toBeLessThan(exitHandlerIdx);
-    expect(curStemsIdx).toBeLessThan(exitHandlerIdx);
-    expect(curDbhIdx).toBeLessThan(exitHandlerIdx);
-  });
-
-  it('emits cursor declarations after scalar declares and before the NOT FOUND handler', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    const lastScalarIdx = sql.indexOf('_cur_stem_id INT UNSIGNED');
-    const firstCursorIdx = sql.indexOf('cur_new_trees CURSOR');
-    const notFoundIdx = sql.indexOf('CONTINUE HANDLER FOR NOT FOUND');
-    expect(lastScalarIdx).toBeGreaterThan(0);
-    expect(firstCursorIdx).toBeGreaterThan(lastScalarIdx);
-    expect(notFoundIdx).toBeGreaterThan(firstCursorIdx);
+    expect(sql).not.toContain('cur_new_trees CURSOR');
+    expect(sql).not.toContain('cur_new_stems CURSOR');
+    expect(sql).not.toContain('cur_dbh CURSOR');
   });
 
   it('honors a custom tempTable name in every stage', () => {
