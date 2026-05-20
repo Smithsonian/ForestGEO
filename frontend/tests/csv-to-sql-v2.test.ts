@@ -14,8 +14,63 @@ import {
 import { mapCsvRowToStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('renderProcedureEnvelope', () => {
-  it('emits drop/delimiter/create/declares/handler/tx/body/commit/end/call/drop', () => {
-    const sql = renderProcedureEnvelope({ cursorDeclarations: [], body: '  -- BODY --' });
+  const baseOpts = {
+    procedureName: 'csv_to_sql_v2_load_1_2_abc12345',
+    lockName: 'ctfs-export:1:2',
+    cursorDeclarations: [] as string[],
+    body: '  -- body'
+  };
+
+  it('uses the supplied procedureName in DROP/CREATE/CALL/DROP', () => {
+    const sql = renderProcedureEnvelope(baseOpts);
+    expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load_1_2_abc12345;/);
+    expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load_1_2_abc12345\(\)/);
+    expect(sql).toMatch(/CALL csv_to_sql_v2_load_1_2_abc12345\(\);/);
+    expect(sql.match(/DROP PROCEDURE csv_to_sql_v2_load_1_2_abc12345;/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(sql).not.toMatch(/csv_to_sql_v2_load(?!_)/); // no bare legacy name
+  });
+
+  it('emits GET_LOCK before START TRANSACTION', () => {
+    const sql = renderProcedureEnvelope(baseOpts);
+    const lockIdx = sql.indexOf("GET_LOCK('ctfs-export:1:2', 0)");
+    const txIdx = sql.indexOf('START TRANSACTION');
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(txIdx).toBeGreaterThan(-1);
+    expect(lockIdx).toBeLessThan(txIdx);
+  });
+
+  it('emits RELEASE_LOCK after COMMIT in the success path', () => {
+    const sql = renderProcedureEnvelope(baseOpts);
+    const commitIdx = sql.indexOf('COMMIT;');
+    const releaseIdx = sql.indexOf("RELEASE_LOCK('ctfs-export:1:2')", commitIdx);
+    expect(commitIdx).toBeGreaterThan(-1);
+    expect(releaseIdx).toBeGreaterThan(commitIdx);
+  });
+
+  it('EXIT HANDLER block calls ROLLBACK, RELEASE_LOCK, then RESIGNAL', () => {
+    const sql = renderProcedureEnvelope(baseOpts);
+    const handler = sql.match(/EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN[\s\S]+?END;/)?.[0];
+    expect(handler).toBeDefined();
+    const rb = handler!.indexOf('ROLLBACK;');
+    const rl = handler!.indexOf("RELEASE_LOCK('ctfs-export:1:2')");
+    const rs = handler!.indexOf('RESIGNAL;');
+    expect(rb).toBeGreaterThan(-1);
+    expect(rl).toBeGreaterThan(rb);
+    expect(rs).toBeGreaterThan(rl);
+  });
+
+  it('rejects invalid procedureName via escapeSqlIdentifier', () => {
+    expect(() => renderProcedureEnvelope({ ...baseOpts, procedureName: 'bad name; DROP TABLE' })).toThrow(/Invalid SQL identifier/);
+  });
+
+  it('escapes lockName through SqlString.escape (single quotes doubled, etc.)', () => {
+    const sql = renderProcedureEnvelope({ ...baseOpts, lockName: "x'y" });
+    // mysql2's escape uses backslash escaping: 'x\'y'
+    expect(sql).toMatch(/GET_LOCK\('x\\'y', 0\)/);
+  });
+
+  it('emits drop/delimiter/create/declares/handler/lock/tx/body/commit/release/end/call/drop', () => {
+    const sql = renderProcedureEnvelope({ ...baseOpts, procedureName: 'csv_to_sql_v2_load', lockName: 'test-lock' });
     expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
     expect(sql).toMatch(/DELIMITER \/\//);
     expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
@@ -36,16 +91,19 @@ describe('renderProcedureEnvelope', () => {
     expect(sql).toMatch(/DECLARE _cur_tag VARCHAR\(10\);/);
     expect(sql).toMatch(/DECLARE _cur_stem_tag VARCHAR\(32\);/);
     expect(sql).toMatch(/DECLARE CONTINUE HANDLER FOR NOT FOUND SET _done = TRUE;/);
-    expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+RESIGNAL;\s+END;/);
+    expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+RELEASE_LOCK\('test-lock'\);\s+RESIGNAL;\s+END;/);
+    expect(sql).toMatch(/GET_LOCK\('test-lock', 0\)/);
     expect(sql).toMatch(/START TRANSACTION;/);
-    expect(sql).toMatch(/-- BODY --/);
-    expect(sql).toMatch(/COMMIT;\s+END \/\//);
+    expect(sql).toMatch(/-- body/);
+    expect(sql).toMatch(/COMMIT;\s+RELEASE_LOCK\('test-lock'\);/);
+    expect(sql).toMatch(/END \/\//);
     expect(sql).toMatch(/DELIMITER ;/);
     expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);\s*DROP PROCEDURE csv_to_sql_v2_load;/);
   });
 
   it('declaration order is variables -> cursors -> handlers', () => {
     const sql = renderProcedureEnvelope({
+      ...baseOpts,
       cursorDeclarations: ['DECLARE cur_trees CURSOR FOR SELECT 1;'],
       body: ''
     });
@@ -62,6 +120,7 @@ describe('renderProcedureEnvelope', () => {
   it('cursor declarations must contain no handler (caller responsibility)', () => {
     // This is documented in the test as a reminder; renderer doesn't validate inputs.
     const sql = renderProcedureEnvelope({
+      ...baseOpts,
       cursorDeclarations: ['DECLARE cur_x CURSOR FOR SELECT 1;'],
       body: ''
     });
@@ -519,8 +578,9 @@ describe('renderFullPipeline', () => {
     expect(sql.length).toBeGreaterThan(0);
   });
 
-  it('contains the procedure envelope (DROP/CREATE/END/CALL/DROP)', () => {
+  it('contains the procedure envelope (DROP/CREATE/END/CALL/DROP) with placeholder procedure name', () => {
     const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
+    // renderFullPipeline uses a placeholder name; tests verify the structure exists
     expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
     expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
     expect(sql).toMatch(/END \/\//);

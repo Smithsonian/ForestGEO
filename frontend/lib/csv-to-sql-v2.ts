@@ -6,6 +6,8 @@ import { escapeSqlIdentifier, renderCreateStagingTable, renderInsertChunks, type
 // ---------------------------------------------------------------------------
 
 export interface ProcedureEnvelopeOptions {
+  procedureName: string;
+  lockName: string;
   cursorDeclarations: string[];
   body: string;
 }
@@ -13,8 +15,6 @@ export interface ProcedureEnvelopeOptions {
 // ---------------------------------------------------------------------------
 // Procedure envelope renderer
 // ---------------------------------------------------------------------------
-
-const PROCEDURE_NAME = 'csv_to_sql_v2_load';
 
 /**
  * All scalar and cursor-fetch variable declarations for the procedure.
@@ -62,17 +62,33 @@ const SCALAR_DECLARES = [
  * Caller-supplied `cursorDeclarations` must be plain DECLARE...CURSOR FOR...
  * statements — no handlers. The shared CONTINUE HANDLER FOR NOT FOUND is
  * emitted here and covers all cursors declared above it.
+ *
+ * GET_LOCK is acquired before START TRANSACTION — MySQL's GET_LOCK is
+ * non-transactional and survives ROLLBACK, so acquiring it before the
+ * transaction means we don't open a transaction we won't use if the lock
+ * is held.
+ *
+ * `procedureName` is validated via escapeSqlIdentifier and stripped of
+ * backticks for bare interpolation. `lockName` is SQL-escaped via
+ * mysql2's string-literal escaping.
  */
 export function renderProcedureEnvelope(opts: ProcedureEnvelopeOptions): string {
+  // Validate procedure name and strip backticks for bare interpolation
+  const quoted = escapeSqlIdentifier(opts.procedureName);
+  const procName = quoted.replace(/`/g, '');
+
+  // SQL-escape the lock name for string literal
+  const lockLit = SqlString.escape(opts.lockName);
+
   const indent = (line: string) => `  ${line}`;
 
   const scalars = SCALAR_DECLARES.map(indent).join('\n');
   const cursors = opts.cursorDeclarations.length > 0 ? '\n\n' + opts.cursorDeclarations.map(indent).join('\n') : '';
 
-  return `DROP PROCEDURE IF EXISTS ${PROCEDURE_NAME};
+  return `DROP PROCEDURE IF EXISTS ${procName};
 
 DELIMITER //
-CREATE PROCEDURE ${PROCEDURE_NAME}()
+CREATE PROCEDURE ${procName}()
 main: BEGIN
 ${scalars}${cursors}
 
@@ -80,19 +96,26 @@ ${scalars}${cursors}
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
   BEGIN
     ROLLBACK;
+    RELEASE_LOCK(${lockLit});
     RESIGNAL;
   END;
+
+  IF GET_LOCK(${lockLit}, 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Another ctfs-sql export is running for this destination (plot, census)';
+  END IF;
 
   START TRANSACTION;
 
 ${opts.body}
 
   COMMIT;
+  RELEASE_LOCK(${lockLit});
 END //
 DELIMITER ;
 
-CALL ${PROCEDURE_NAME}();
-DROP PROCEDURE ${PROCEDURE_NAME};
+CALL ${procName}();
+DROP PROCEDURE ${procName};
 `;
 }
 
@@ -639,6 +662,8 @@ export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
   ].join('\n\n');
 
   return renderProcedureEnvelope({
+    procedureName: 'csv_to_sql_v2_load', // placeholder; orchestrator (later task) supplies a unique per-artifact name
+    lockName: 'ctfs-export:legacy:placeholder', // placeholder; orchestrator supplies real lock name
     cursorDeclarations: [stage6.cursorDeclaration, stage7.cursorDeclaration, stage8.cursorDeclaration],
     body
   });
