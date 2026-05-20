@@ -19,6 +19,7 @@ interface SelectFormTypeProps {
 const SelectFormType: React.FC<SelectFormTypeProps> = ({ externalState, updateExternalState, updateExternalHeaders }) => {
   const colors: Record<string, 'neutral' | 'primary'> = {
     DatabaseForms: 'neutral',
+    /** @deprecated Use /api/export/ctfs-sql instead. The legacy CSV form-type emits the historical ctfsweb measurement export that the destination procedure can no longer consume after the pivot. */
     CTFSWebForms: 'primary'
   };
   const handleChange = (event: React.SyntheticEvent | null, newValue: string | null) => {
