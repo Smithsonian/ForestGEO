@@ -21,7 +21,7 @@ export default defineConfig({
     // Integration tests: top-level folder, colocated lib/provisioning tests,
     // and admin provisioning endpoint unit tests (no live DB needed, but they
     // must run in Node — not jsdom — because the route uses Node-only modules)
-    include: ['tests/integration/**/*.test.ts', 'lib/provisioning/**/*.test.ts', 'app/api/admin/provision/**/*.test.ts'],
+    include: ['tests/integration/**/*.test.ts', 'lib/provisioning/**/*.test.ts', 'lib/ctfs-export/**/*.test.ts', 'app/api/admin/provision/**/*.test.ts'],
 
     // Extended timeouts for database operations
     testTimeout: 60000, // 60 seconds per test
