@@ -614,4 +614,29 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
 
     expect(mockBeginEdit).not.toHaveBeenCalled();
   });
+
+  it('toggling Infinite scroll issues a query with pageSize 100', async () => {
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    const toggles = screen.getAllByLabelText('Infinite scroll');
+    expect(toggles.length).toBeGreaterThan(0);
+    const labelEl = toggles[0];
+    const checkbox =
+      (labelEl as HTMLElement).querySelector('input[type="checkbox"]') ??
+      (labelEl as HTMLElement).closest('label')?.querySelector('input[type="checkbox"]') ??
+      null;
+    expect(checkbox).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(checkbox as HTMLInputElement);
+    });
+
+    await waitFor(() => {
+      const explorerCalls = mockFetch.mock.calls.filter(([input, init]) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
+      });
+      expect(explorerCalls.length).toBeGreaterThan(0);
+    });
+  });
 });
