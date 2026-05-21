@@ -281,6 +281,8 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: DynamicButton[];
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
+  enablePageJump?: boolean;
+  enableInfiniteScroll?: boolean;
 }
 
 export const failureErrorMapping: Record<string, string[]> = {

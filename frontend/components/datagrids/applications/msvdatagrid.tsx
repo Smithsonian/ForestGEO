@@ -251,6 +251,8 @@ export default function MeasurementsSummaryViewDataGrid({
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
           { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
         ]}
+        enablePageJump
+        enableInfiniteScroll
       />
       <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
         <Snackbar

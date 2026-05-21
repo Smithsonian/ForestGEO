@@ -86,6 +86,10 @@ import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
+import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
@@ -172,7 +176,9 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
     locked = false,
-    dynamicButtons
+    dynamicButtons,
+    enablePageJump = false,
+    enableInfiniteScroll = false
   } = props;
 
   const initialErrorRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('errors') : true;
@@ -467,6 +473,49 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setHasLoadedGrid(true);
     }
   }, [gridData, setRows, setRowCount]);
+
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      if (!currentSite?.schemaName) return { rows: [], totalRows: 0 };
+      const url = createQFFetchQuery(currentSite.schemaName, gridType, p, ps, currentPlot?.plotID, currentCensus?.plotCensusNumber, undefined);
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel, sortModel }),
+        signal
+      });
+      if (!res.ok) throw new QueryError(res.status, undefined, `POST ${url} ${res.status}`);
+      const json = (await res.json()) as { output?: any[]; totalCount?: number };
+      return { rows: json.output ?? [], totalRows: json.totalCount ?? 0 };
+    },
+    [currentSite?.schemaName, gridType, currentPlot?.plotID, currentCensus?.plotCensusNumber, filterModel, sortModel]
+  );
+
+  const infiniteResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        filter: filterModel,
+        sort: sortModel,
+        site: currentSite?.schemaName,
+        plot: currentPlot?.plotID,
+        census: currentCensus?.plotCensusNumber,
+        gridType
+      }),
+    [filterModel, sortModel, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, gridType]
+  );
+
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'id',
+    paginated: { rows: rows as GridRowModel[], totalRows: rowCount, isLoading: isValidating }
+  });
+
+  const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  const gridRows = isInfiniteOn ? infinite.rows : rows;
+  const gridRowCount = isInfiniteOn ? infinite.totalRows : rowCount;
 
   useEffect(() => {
     if (gridError) {
@@ -1506,111 +1555,143 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           {showInitialGridSkeleton ? (
             <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
           ) : (
-            <StyledDataGrid
-              apiRef={apiRef}
-              sx={{ width: '100%' }}
-              rows={rows}
-              columns={filteredColumns}
-              editMode="row"
-              rowModesModel={rowModesModel}
-              disableColumnSelector
-              onRowModesModelChange={handleRowModesModelChange}
-              onRowEditStop={handleRowEditStop}
-              processRowUpdate={processRowUpdate}
-              loading={showGridLoading}
-              paginationMode="server"
-              filterMode="server"
-              onPaginationModelChange={newPaginationModel => {
-                if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
-                  return;
-                }
-                setPaginationModel(newPaginationModel);
-              }}
-              onProcessRowUpdateError={(error: Error) => {
-                if (isMuiRowEditCancelled(error)) return;
-                ailogger.error('Row update error:', error);
-                setSnackbar({
-                  children: 'Error updating row',
-                  severity: 'error'
-                });
-              }}
-              onCellKeyDown={(params, event) => {
-                if (event.key === 'Enter') {
-                  handleEnterKeyNavigation(params, event).then(() => {});
-                }
-              }}
-              paginationModel={paginationModel}
-              rowCount={rowCount}
-              onRowCountChange={handleRowCountChange}
-              pageSizeOptions={[10, 25, 50, 100]}
-              sortModel={sortModel}
-              onSortModelChange={handleSortModelChange}
-              filterModel={gridFilterModel}
-              onFilterModelChange={handleFilterModelChange}
-              ignoreDiacritics
-              initialState={{
-                columns: {
-                  columnVisibilityModel: getColumnVisibilityModel(gridType)
-                }
-              }}
-              slots={{
-                toolbar: EditToolbar
-              }}
-              slotProps={{
-                toolbar: {
-                  locked: locked,
-                  handleAddNewRow: handleAddNewRow,
-                  handleRefresh: async () => setRefresh(true),
-                  handleExport: fetchRowsForExport,
-                  showToolbarActions: showToolbarActions,
-                  handleQuickFilterChange: onQuickFilterChange,
-                  filterModel: gridFilterModel,
-                  gridColumns: gridColumns,
-                  gridType: FormType.measurements,
-                  dynamicButtons: dynamicButtons,
-                  validationMenu: (
-                    <ValidationActionsMenu
-                      onRunValidations={() => setIsValidationModalOpen(true)}
-                      onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
-                      onResetValidations={() => setIsResetValidationModalOpen(true)}
-                      onRefreshView={async () => {
-                        if (!currentSite?.schemaName) return;
-                        // destructive mutation — global overlay blocks UI for the duration of the API call
-                        setLoading(true, 'Refreshing Measurements Summary View...');
-                        try {
-                          await refreshMeasurementsSummaryView();
-                        } finally {
-                          setLoading(false);
-                          setRefresh(true);
-                        }
-                      }}
-                      pendingCount={pendingCount}
-                      errorCount={validationErrorCount}
-                    />
-                  ),
-                  errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
-                  validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
-                  pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
-                  otControls: { show: showOT, toggle: setShowOT, count: otCount },
-                  msControls: { show: showMS, toggle: setShowMS, count: msCount },
-                  nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
-                  hidingEmpty: hidingEmpty,
-                  setHidingEmpty: setHidingEmpty
-                } as GridToolbarProps & Partial<EditToolbarCustomProps>
-              }}
-              showToolbar
-              getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
-              getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
-              rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
-              isCellEditable={params => {
-                if (locked) return false;
-                // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
-                // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
-                // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
-                // lockstep with the server's rejectDisallowedFields check.
-                return isFieldEditableOnSurface('measurementssummary', params.field);
-              }}
-            />
+            <>
+              <StyledDataGrid
+                apiRef={apiRef}
+                sx={{ width: '100%' }}
+                rows={gridRows}
+                columns={filteredColumns}
+                editMode="row"
+                rowModesModel={rowModesModel}
+                disableColumnSelector
+                onRowModesModelChange={handleRowModesModelChange}
+                onRowEditStop={handleRowEditStop}
+                processRowUpdate={async (newRow, oldRow) => {
+                  const result = await processRowUpdate(newRow, oldRow);
+                  if (isInfiniteOn) infinite.upsertRow(result);
+                  return result;
+                }}
+                loading={showGridLoading}
+                paginationMode="server"
+                filterMode="server"
+                onPaginationModelChange={newPaginationModel => {
+                  if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
+                    return;
+                  }
+                  setPaginationModel(newPaginationModel);
+                }}
+                onProcessRowUpdateError={(error: Error) => {
+                  if (isMuiRowEditCancelled(error)) return;
+                  ailogger.error('Row update error:', error);
+                  setSnackbar({
+                    children: 'Error updating row',
+                    severity: 'error'
+                  });
+                }}
+                onCellKeyDown={(params, event) => {
+                  if (event.key === 'Enter') {
+                    handleEnterKeyNavigation(params, event).then(() => {});
+                  }
+                }}
+                paginationModel={paginationModel}
+                rowCount={gridRowCount}
+                onRowCountChange={handleRowCountChange}
+                pageSizeOptions={[10, 25, 50, 100]}
+                hideFooterPagination={isInfiniteOn}
+                sortModel={sortModel}
+                onSortModelChange={handleSortModelChange}
+                filterModel={gridFilterModel}
+                onFilterModelChange={handleFilterModelChange}
+                ignoreDiacritics
+                initialState={{
+                  columns: {
+                    columnVisibilityModel: getColumnVisibilityModel(gridType)
+                  }
+                }}
+                slots={{
+                  toolbar: EditToolbar,
+                  ...(enablePageJump ? { pagination: CustomGridPagination } : {}),
+                  ...(isInfiniteOn
+                    ? {
+                        footer: () => (
+                          <InfiniteGridFooter
+                            loadedCount={infinite.rows.length}
+                            totalRows={infinite.totalRows}
+                            isLoadingMore={infinite.isLoadingMore}
+                            hasMore={infinite.hasMore}
+                            error={infinite.error}
+                            softCapExceeded={infinite.softCapExceeded}
+                            onRetry={infinite.retry}
+                          />
+                        )
+                      }
+                    : {})
+                }}
+                slotProps={{
+                  toolbar: {
+                    locked: locked,
+                    handleAddNewRow: handleAddNewRow,
+                    handleRefresh: async () => setRefresh(true),
+                    handleExport: fetchRowsForExport,
+                    showToolbarActions: showToolbarActions,
+                    handleQuickFilterChange: onQuickFilterChange,
+                    filterModel: gridFilterModel,
+                    gridColumns: gridColumns,
+                    gridType: FormType.measurements,
+                    dynamicButtons: dynamicButtons,
+                    validationMenu: (
+                      <ValidationActionsMenu
+                        onRunValidations={() => setIsValidationModalOpen(true)}
+                        onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
+                        onResetValidations={() => setIsResetValidationModalOpen(true)}
+                        onRefreshView={async () => {
+                          if (!currentSite?.schemaName) return;
+                          // destructive mutation — global overlay blocks UI for the duration of the API call
+                          setLoading(true, 'Refreshing Measurements Summary View...');
+                          try {
+                            await refreshMeasurementsSummaryView();
+                          } finally {
+                            setLoading(false);
+                            setRefresh(true);
+                          }
+                        }}
+                        pendingCount={pendingCount}
+                        errorCount={validationErrorCount}
+                      />
+                    ),
+                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
+                    validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
+                    pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
+                    otControls: { show: showOT, toggle: setShowOT, count: otCount },
+                    msControls: { show: showMS, toggle: setShowMS, count: msCount },
+                    nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
+                    hidingEmpty: hidingEmpty,
+                    setHidingEmpty: setHidingEmpty,
+                    infiniteScroll: enableInfiniteScroll
+                      ? { enabled: isInfiniteOn, onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated') }
+                      : undefined
+                  } as GridToolbarProps & Partial<EditToolbarCustomProps>
+                }}
+                showToolbar
+                getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
+                getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
+                rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
+                isCellEditable={params => {
+                  if (locked) return false;
+                  // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
+                  // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
+                  // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
+                  // lockstep with the server's rejectDisallowedFields check.
+                  return isFieldEditableOnSurface('measurementssummary', params.field);
+                }}
+              />
+              <InfiniteGridScrollBridge
+                apiRef={apiRef}
+                enabled={isInfiniteOn}
+                onLoadMore={infinite.loadMore}
+                observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+              />
+            </>
           )}
         </Box>
         {!!snackbar && (
