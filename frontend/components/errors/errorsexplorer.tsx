@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Card,
   Chip,
@@ -28,7 +29,8 @@ import {
   GridRowEditStopReasons,
   GridRowModes,
   GridRowModesModel,
-  GridRowModel
+  GridRowModel,
+  useGridApiRef
 } from '@mui/x-data-grid';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
@@ -48,6 +50,10 @@ import {
 } from '@/config/errorsexplorer';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { StyledDataGrid } from '@/config/styleddatagrid';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
+import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
@@ -593,6 +599,81 @@ export default function ErrorsExplorer() {
     setErrorMessage(error.message);
   }, []);
 
+  const explorerApiRef = useGridApiRef();
+
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      const scope = resolveExplorerScope();
+      if (!scope) return { rows: [], totalRows: 0 };
+      const response = await fetch('/api/errors/explorer/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
+          page: p,
+          pageSize: ps,
+          filters
+        })
+      });
+      const data = (await response.json()) as ErrorExplorerQueryResponse | { error: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data ? data.error : 'Failed to load errors');
+      }
+      return { rows: data.rows as GridRowModel[], totalRows: data.totalRows };
+    },
+    [filters, resolveExplorerScope]
+  );
+
+  const infiniteResetKey = useMemo(() => {
+    const scope = resolveExplorerScope();
+    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusID: scope?.censusID });
+  }, [filters, resolveExplorerScope]);
+
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'coreMeasurementID',
+    paginated: { rows: results.rows as GridRowModel[], totalRows: results.totalRows, isLoading: loadingRows }
+  });
+
+  const isInfiniteOn = infinite.mode === 'infinite';
+
+  const wrappedProcessRowUpdate = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      const updated = await processRowUpdate(newRow, oldRow);
+      infinite.upsertRow(updated);
+      return updated;
+    },
+    [processRowUpdate, infinite]
+  );
+
+  const renderInfiniteFooter = useCallback(
+    () => (
+      <InfiniteGridFooter
+        loadedCount={infinite.rows.length}
+        totalRows={infinite.totalRows}
+        isLoadingMore={infinite.isLoadingMore}
+        hasMore={infinite.hasMore}
+        error={infinite.error}
+        softCapExceeded={infinite.softCapExceeded}
+        onRetry={infinite.refresh}
+      />
+    ),
+    [infinite]
+  );
+
+  const explorerGridSlots = useMemo(
+    () => ({
+      pagination: CustomGridPagination,
+      ...(isInfiniteOn ? { footer: renderInfiniteFooter } : {})
+    }),
+    [isInfiniteOn, renderInfiniteFooter]
+  );
+
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
       event.defaultMuiPrevented = true;
@@ -1068,23 +1149,35 @@ export default function ErrorsExplorer() {
         }}
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, px: 1, pb: 0.5 }}>
+            <Typography level="body-sm">Infinite scroll</Typography>
+            <Switch
+              size="sm"
+              aria-label="Infinite scroll"
+              checked={isInfiniteOn}
+              onChange={e => infinite.setMode(e.target.checked ? 'infinite' : 'paginated')}
+            />
+          </Box>
           <StyledDataGrid
+            apiRef={explorerApiRef}
             autoHeight={false}
-            rows={results.rows as any[]}
+            rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
             columns={columns}
-            loading={loadingRows}
-            rowCount={results.totalRows}
+            loading={isInfiniteOn ? infinite.isLoading : loadingRows}
+            rowCount={isInfiniteOn ? infinite.totalRows : results.totalRows}
             paginationMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
             pageSizeOptions={[25, 50, 100]}
+            hideFooterPagination={isInfiniteOn}
             editMode="row"
             rowModesModel={rowModesModel}
             onRowModesModelChange={setRowModesModel}
-            processRowUpdate={processRowUpdate}
+            processRowUpdate={wrappedProcessRowUpdate}
             onProcessRowUpdateError={handleProcessRowUpdateError}
             onRowEditStop={handleRowEditStop}
             onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
+            slots={explorerGridSlots}
             rowHeight={68}
             sx={{
               minHeight: 640,
@@ -1104,6 +1197,7 @@ export default function ErrorsExplorer() {
               }
             }}
           />
+          <InfiniteGridScrollBridge apiRef={explorerApiRef} enabled={isInfiniteOn} onLoadMore={infinite.loadMore} />
         </Sheet>
 
         <Sheet

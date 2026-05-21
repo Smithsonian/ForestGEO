@@ -185,7 +185,20 @@ vi.mock('@mui/x-data-grid', () => ({
     </button>
   ),
   GridRowEditStopReasons: { rowFocusOut: 'rowFocusOut' },
-  GridRowModes: { Edit: 'edit', View: 'view' }
+  GridRowModes: { Edit: 'edit', View: 'view' },
+  useGridApiRef: () => ({ current: { subscribeEvent: () => () => undefined } })
+}));
+
+vi.mock('@/components/datagrids/customgridpagination', () => ({
+  default: () => null
+}));
+
+vi.mock('@/components/datagrids/infinitegridfooter', () => ({
+  default: () => null
+}));
+
+vi.mock('@/components/datagrids/infinitegridscrollbridge', () => ({
+  default: () => null
 }));
 
 vi.mock('@/components/editplan/previewdialog', () => ({
