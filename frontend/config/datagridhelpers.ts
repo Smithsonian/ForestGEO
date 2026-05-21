@@ -174,6 +174,7 @@ export interface EditToolbarCustomProps {
   pendingControls?: RowControl;
   hidingEmpty?: boolean;
   setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
+  infiniteScroll?: { enabled: boolean; onToggle: (next: boolean) => void };
 }
 
 export interface IsolatedDataGridCommonProps {
@@ -194,6 +195,8 @@ export interface IsolatedDataGridCommonProps {
   apiRef?: RefObject<GridApiCommunity>;
   adminEmail?: string;
   editFlowOverride?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
+  enablePageJump?: boolean;
+  enableInfiniteScroll?: boolean;
 }
 
 export interface DataGridCommonProps {

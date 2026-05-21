@@ -56,6 +56,10 @@ import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, Q
 import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
+import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -96,7 +100,6 @@ const AUTO_ROW_HEIGHT = () => 'auto' as const;
 // dimensions ResizeObserver loop (sub-pixel measurement feedback) on flex parents.
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const GRID_ROOT_SX = { width: '100%' } as const;
-const GRID_SLOTS = { toolbar: EditToolbar } as const;
 
 function arePaginationModelsEqual(left: GridPaginationModel, right: GridPaginationModel): boolean {
   return left.page === right.page && left.pageSize === right.pageSize;
@@ -127,7 +130,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     adminEmail = undefined,
     onDataUpdate,
     onDataLoaded,
-    editFlowOverride
+    editFlowOverride,
+    enablePageJump = false,
+    enableInfiniteScroll = false
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -292,9 +297,67 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     }
   }, [gridData, onDataLoaded]);
 
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      if (!currentSite?.schemaName) return { rows: [], totalRows: 0 };
+      const useFilter = hasFilter;
+      const url = adminEmail
+        ? `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`
+        : (useFilter ? createQFFetchQuery : createFetchQuery)(
+            currentSite.schemaName,
+            gridType,
+            p,
+            ps,
+            currentPlot?.plotID,
+            currentCensus?.plotCensusNumber,
+            currentQuadrat?.quadratID
+          );
+      const res = useFilter
+        ? await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filterModel }),
+            signal
+          })
+        : await fetch(url, { credentials: 'include', signal });
+      if (!res.ok) throw new QueryError(res.status, undefined, `${useFilter ? 'POST' : 'GET'} ${url} ${res.status}`);
+      const json = (await res.json()) as { output?: any[]; totalCount?: number };
+      return { rows: json.output ?? [], totalRows: json.totalCount ?? 0 };
+    },
+    [adminEmail, currentSite?.schemaName, gridType, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentQuadrat?.quadratID, hasFilter, filterModel]
+  );
+
+  const infiniteResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        filter: filterModel,
+        site: currentSite?.schemaName,
+        plot: currentPlot?.plotID,
+        census: currentCensus?.plotCensusNumber,
+        quadrat: currentQuadrat?.quadratID,
+        gridType,
+        adminEmail
+      }),
+    [filterModel, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentQuadrat?.quadratID, gridType, adminEmail]
+  );
+
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'id',
+    paginated: { rows: rows as GridRowModel[], totalRows: rowCount, isLoading: isValidating }
+  });
+
+  const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  const gridRows = isInfiniteOn ? infinite.rows : rows;
+  const gridRowCount = isInfiniteOn ? infinite.totalRows : rowCount;
+
   const handleRefresh = useCallback(async () => {
+    if (isInfiniteOn) infinite.refresh();
     await refetch();
-  }, [refetch]);
+  }, [refetch, isInfiniteOn, infinite]);
 
   // Handle refresh signal from parent - use ref to track previous state
   const previousRefresh = useRef(refresh);
@@ -732,6 +795,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           }
         } else {
           setRows(prevRows => prevRows.filter(row => row.id !== id));
+          infinite.removeRow(id);
           setSnackbar({
             children: 'Row successfully deleted',
             severity: 'success'
@@ -753,7 +817,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         });
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope]
+    [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope, infinite]
   );
 
   const handleConfirmAction = useCallback(
@@ -941,6 +1005,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               refetch,
               paginationModel
             );
+        infinite.upsertRow(updatedRow);
         return updatedRow;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -958,7 +1023,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       paginationModel,
       openConfirmationDialog,
       updateRow,
-      editFlowOverride
+      editFlowOverride,
+      infinite
     ]
   );
 
@@ -1209,10 +1275,51 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         gridColumns,
         gridType,
         hidingEmpty,
-        setHidingEmpty
+        setHidingEmpty,
+        infiniteScroll: enableInfiniteScroll
+          ? { enabled: isInfiniteOn, onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated') }
+          : undefined
       } as GridToolbarProps & Partial<EditToolbarCustomProps>
     }),
-    [handleAddNewRow, handleRefresh, fetchFullData, exportAllCSV, onQuickFilterChange, gridFilterModel, dynamicButtons, gridColumns, gridType, hidingEmpty]
+    [
+      handleAddNewRow,
+      handleRefresh,
+      fetchFullData,
+      exportAllCSV,
+      onQuickFilterChange,
+      gridFilterModel,
+      dynamicButtons,
+      gridColumns,
+      gridType,
+      hidingEmpty,
+      enableInfiniteScroll,
+      isInfiniteOn,
+      infinite
+    ]
+  );
+
+  const renderInfiniteFooter = useCallback(
+    () => (
+      <InfiniteGridFooter
+        loadedCount={infinite.rows.length}
+        totalRows={infinite.totalRows}
+        isLoadingMore={infinite.isLoadingMore}
+        hasMore={infinite.hasMore}
+        error={infinite.error}
+        softCapExceeded={infinite.softCapExceeded}
+        onRetry={infinite.refresh}
+      />
+    ),
+    [infinite]
+  );
+
+  const gridSlots = useMemo(
+    () => ({
+      toolbar: EditToolbar,
+      ...(enablePageJump ? { pagination: CustomGridPagination } : {}),
+      ...(isInfiniteOn ? { footer: renderInfiniteFooter } : {})
+    }),
+    [enablePageJump, isInfiniteOn, renderInfiniteFooter]
   );
 
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
@@ -1237,35 +1344,39 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           {showInitialGridSkeleton ? (
             <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
           ) : (
-            <StyledDataGrid
-              apiRef={localApiRef}
-              sx={GRID_ROOT_SX}
-              rows={rows}
-              columns={filteredColumns}
-              editMode="row"
-              rowModesModel={rowModesModel}
-              disableColumnSelector
-              onRowModesModelChange={handleRowModesModelChange}
-              onRowEditStop={handleRowEditStop}
-              onCellDoubleClick={handleCellDoubleClick}
-              onCellKeyDown={handleCellKeyDown}
-              processRowUpdate={handleProcessRowUpdate}
-              onProcessRowUpdateError={handleProcessRowUpdateError}
-              loading={showGridLoading}
-              paginationMode="server"
-              filterMode="server"
-              onPaginationModelChange={handlePaginationModelChange}
-              paginationModel={paginationModel}
-              rowCount={rowCount}
-              pageSizeOptions={pageSizeOptions}
-              filterModel={gridFilterModel}
-              onFilterModelChange={handleFilterModelChange}
-              ignoreDiacritics
-              initialState={gridInitialState}
-              slots={GRID_SLOTS}
-              slotProps={slotProps}
-              showToolbar
-            />
+            <>
+              <StyledDataGrid
+                apiRef={localApiRef}
+                sx={GRID_ROOT_SX}
+                rows={gridRows}
+                columns={filteredColumns}
+                editMode="row"
+                rowModesModel={rowModesModel}
+                disableColumnSelector
+                onRowModesModelChange={handleRowModesModelChange}
+                onRowEditStop={handleRowEditStop}
+                onCellDoubleClick={handleCellDoubleClick}
+                onCellKeyDown={handleCellKeyDown}
+                processRowUpdate={handleProcessRowUpdate}
+                onProcessRowUpdateError={handleProcessRowUpdateError}
+                loading={showGridLoading}
+                paginationMode="server"
+                filterMode="server"
+                onPaginationModelChange={handlePaginationModelChange}
+                paginationModel={paginationModel}
+                rowCount={gridRowCount}
+                pageSizeOptions={pageSizeOptions}
+                hideFooterPagination={isInfiniteOn}
+                filterModel={gridFilterModel}
+                onFilterModelChange={handleFilterModelChange}
+                ignoreDiacritics
+                initialState={gridInitialState}
+                slots={gridSlots}
+                slotProps={slotProps}
+                showToolbar
+              />
+              <InfiniteGridScrollBridge apiRef={localApiRef} enabled={isInfiniteOn} onLoadMore={infinite.loadMore} />
+            </>
           )}
         </Box>
         {!!snackbar && (

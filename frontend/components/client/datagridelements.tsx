@@ -93,6 +93,7 @@ declare module '@mui/x-data-grid' {
     nrControls?: RowControl;
     hidingEmpty?: boolean;
     setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
+    infiniteScroll?: { enabled: boolean; onToggle: (next: boolean) => void };
   }
 }
 
@@ -126,7 +127,8 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
     msControls = defaultControl,
     nrControls = defaultControl,
     hidingEmpty,
-    setHidingEmpty
+    setHidingEmpty,
+    infiniteScroll
   } = props;
 
   // Hooks must be called before any early returns
@@ -462,6 +464,21 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     >
                       <CloudDownloadIcon />
                     </IconButton>
+                  </Tooltip>
+                )}
+                {/* Infinite scroll toggle */}
+                {infiniteScroll && (
+                  <Tooltip title="Toggle infinite scroll" placement="top" arrow>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mr: 0.5 }}>
+                      <Typography level="body-sm">Infinite</Typography>
+                      <Switch
+                        size="sm"
+                        aria-label="Infinite scroll"
+                        checked={infiniteScroll.enabled}
+                        onChange={e => infiniteScroll.onToggle(e.target.checked)}
+                        slotProps={{ input: { 'aria-label': 'Infinite scroll' } }}
+                      />
+                    </Box>
                   </Tooltip>
                 )}
                 {/* Show/Hide empty columns button */}
