@@ -403,7 +403,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
     });
 
-    expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     const [targetID, diff] = mockBeginEdit.mock.calls[0];
     expect(targetID).toBe(TEST_CORE_MEASUREMENT_ID);
     expect(diff).toEqual({ MeasuredDBH: 12, Attributes: 'L;M' });
@@ -461,7 +461,7 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, editedRow);
     });
 
-    expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockBeginEdit).toHaveBeenCalledTimes(1));
     const [, diff, options] = mockBeginEdit.mock.calls[0];
     expect(diff).toEqual({ SpCode: 'NEWSP', DBH: 14, Codes: 'L;DEAD' });
     expect(options).toEqual({ dataType: 'failedmeasurements' });
