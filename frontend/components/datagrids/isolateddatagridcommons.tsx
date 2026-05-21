@@ -351,7 +351,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
   const gridRows = isInfiniteOn ? infinite.rows : rows;
-  const gridRowCount = isInfiniteOn ? infinite.totalRows : rowCount;
+  const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
 
   const handleRefresh = useCallback(async () => {
     if (isInfiniteOn) {

@@ -1164,7 +1164,7 @@ export default function ErrorsExplorer() {
             rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
             columns={columns}
             loading={isInfiniteOn ? infinite.isLoading : loadingRows}
-            rowCount={isInfiniteOn ? infinite.totalRows : results.totalRows}
+            rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
             paginationMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
