@@ -103,16 +103,13 @@ describe('selectMeasurements', () => {
     expect(row.QuadratName, 'QuadratName maps from quadrats.QuadratName').toBe('A1');
     expect(row.PlotCensusNumber, 'PlotCensusNumber maps from census.PlotCensusNumber').toBe('1');
 
-    // Taxonomy context
+    // Taxonomy context — IDLevel and SubspeciesAuthority were dropped from
+    // staging because no downstream stage reads them after the pivot.
     expect(row.Family, 'Family maps from family.Family').toBe('Testaceae');
     expect(row.Genus, 'Genus maps from genus.Genus').toBe('Foobaria');
     expect(row.SpeciesName, 'SpeciesName maps from species.SpeciesName').toBe('foo');
-    // Seed row has no SpeciesAuthority set — verify null handling.
     expect(row.SpeciesAuthority, 'SpeciesAuthority should be null when not populated in seed').toBeNull();
-    // Seed has SubspeciesName=NULL and IDLevel='species'.
     expect(row.SubspeciesName, 'SubspeciesName should be null for the seed species row').toBeNull();
-    expect(row.SubspeciesAuthority, 'SubspeciesAuthority should be null for non-subspecies row').toBeNull();
-    expect(row.IDLevel, 'IDLevel should be "species" per seed').toBe('species');
 
     // Measurement values
     expect(row.DBH, 'DBH maps from coremeasurements.MeasuredDBH').toBeCloseTo(12.3, 3);
@@ -125,11 +122,21 @@ describe('selectMeasurements', () => {
     // MVP invariant: PrimaryStem is always null
     expect(row.PrimaryStem, 'PrimaryStem is always null in MVP').toBeNull();
 
-    // Attribute
+    // Attribute — linked to parent measurement by CoreMeasurementID only.
     expect(attributeRows).toHaveLength(1);
     expect(attributeRows[0].TSMCode, 'TSMCode from cmattributes.Code').toBe('LI');
     expect(attributeRows[0].CoreMeasurementID, 'attribute references parent measurement').toBe(1);
-    expect(attributeRows[0].TempMeasurementID, 'TempMeasurementID is 1 for the first measurement').toBe(1);
+  });
+
+  it('returns no rows when the requested plotId does not own the census', async () => {
+    const { measurementRows, attributeRows } = await selectMeasurements(conn, {
+      schema: DB_NAME,
+      plotId: 999,
+      censusId: CENSUS_ID
+    });
+
+    expect(measurementRows, 'plot/census mismatch should not export measurements').toHaveLength(0);
+    expect(attributeRows, 'plot/census mismatch should not export attributes').toHaveLength(0);
   });
 
   // -------------------------------------------------------------------------
@@ -150,12 +157,10 @@ describe('selectMeasurements', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Stable TempMeasurementID across multiple measurements
+  // CoreMeasurementID linkage between staging tables
   // -------------------------------------------------------------------------
 
-  it('assigns stable 1-based TempMeasurementID ordered by CoreMeasurementID ASC', async () => {
-    // Add a second measurement sharing the same stem as measurement 1.
-    // A different MeasuredDBH satisfies the unique constraint on the stems table.
+  it('returns measurements ordered by CoreMeasurementID ASC with matching attribute CoreMeasurementID linkage', async () => {
     await conn.query(
       `INSERT INTO coremeasurements
          (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
@@ -169,21 +174,17 @@ describe('selectMeasurements', () => {
       censusId: CENSUS_ID
     });
 
-    // Should return both measurements in CoreMeasurementID order.
     expect(measurementRows).toHaveLength(2);
     expect(measurementRows[0].CoreMeasurementID, 'first row is CoreMeasurementID=1').toBe(1);
     expect(measurementRows[1].CoreMeasurementID, 'second row is CoreMeasurementID=2').toBe(2);
 
-    // TempMeasurementID is 1-based and corresponds to position in measurementRows.
     const attr1 = attributeRows.find(a => a.CoreMeasurementID === 1);
     const attr2 = attributeRows.find(a => a.CoreMeasurementID === 2);
-
-    expect(attr1?.TempMeasurementID, 'attribute for first measurement has TempMeasurementID=1').toBe(1);
-    expect(attr2?.TempMeasurementID, 'attribute for second measurement has TempMeasurementID=2').toBe(2);
+    expect(attr1, 'attribute for measurement 1 must exist').toBeDefined();
+    expect(attr2, 'attribute for measurement 2 must exist').toBeDefined();
   });
 
-  it('TempMeasurementID for attributes matches 1-based position even when CoreMeasurementIDs are non-contiguous', async () => {
-    // Insert a measurement with CoreMeasurementID=100 (gap from 1).
+  it('preserves CoreMeasurementID linkage even when ids are non-contiguous', async () => {
     await conn.query(
       `INSERT INTO coremeasurements
          (CoreMeasurementID, CensusID, StemGUID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, IsActive)
@@ -201,7 +202,7 @@ describe('selectMeasurements', () => {
     expect(measurementRows.map(m => m.CoreMeasurementID)).toEqual([1, 100]);
 
     const attrFor100 = attributeRows.find(a => a.CoreMeasurementID === 100);
-    expect(attrFor100?.TempMeasurementID, 'CoreMeasurementID=100 is the second row so TempMeasurementID=2').toBe(2);
+    expect(attrFor100, 'attribute references CoreMeasurementID=100 directly (no positional mapping)').toBeDefined();
   });
 
   // -------------------------------------------------------------------------
@@ -221,10 +222,10 @@ describe('selectMeasurements', () => {
 
     const codes = attributeRows.map(a => a.TSMCode).sort();
     expect(codes, 'both active attribute codes should appear').toEqual(['D', 'LI']);
-    // Both attributes reference the same measurement, so both get TempMeasurementID=1.
+    // Both attributes reference the same measurement via CoreMeasurementID.
     expect(
-      attributeRows.every(a => a.TempMeasurementID === 1),
-      'all attributes for the only measurement get TempMeasurementID=1'
+      attributeRows.every(a => a.CoreMeasurementID === 1),
+      'all attributes for the only measurement reference CoreMeasurementID=1'
     ).toBe(true);
   });
 
@@ -253,7 +254,7 @@ describe('selectMeasurements', () => {
   // Subspecies taxonomy
   // -------------------------------------------------------------------------
 
-  it('maps SubspeciesName and SubspeciesAuthority when species row has subspecies fields set', async () => {
+  it('maps SubspeciesName when species row has subspecies fields set', async () => {
     await conn.query("UPDATE species SET SubspeciesName = 'fooianus', SubspeciesAuthority = 'Smith 1999' WHERE SpeciesID = 1");
 
     const { measurementRows } = await selectMeasurements(conn, {
@@ -264,8 +265,6 @@ describe('selectMeasurements', () => {
 
     expect(measurementRows).toHaveLength(1);
     expect(measurementRows[0].SubspeciesName, 'SubspeciesName should be populated').toBe('fooianus');
-    expect(measurementRows[0].SubspeciesAuthority, 'SubspeciesAuthority should be populated').toBe('Smith 1999');
-    // TempMeasurementID is still 1-based and correct.
     expect(measurementRows[0].CoreMeasurementID, 'CoreMeasurementID is unchanged').toBe(1);
   });
 
@@ -391,10 +390,10 @@ describe('selectMeasurements', () => {
 
   it('throws on schema names containing SQL injection payloads', async () => {
     await expect(selectMeasurements(conn, { schema: 'bad; DROP TABLE coremeasurements; --', plotId: PLOT_ID, censusId: CENSUS_ID })).rejects.toThrow(
-      'Invalid schema name'
+      /Invalid or unauthorized schema/
     );
 
-    await expect(selectMeasurements(conn, { schema: 'bad`name', plotId: PLOT_ID, censusId: CENSUS_ID })).rejects.toThrow('Invalid schema name');
+    await expect(selectMeasurements(conn, { schema: 'bad`name', plotId: PLOT_ID, censusId: CENSUS_ID })).rejects.toThrow(/Invalid or unauthorized schema/);
   });
 
   // -------------------------------------------------------------------------

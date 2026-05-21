@@ -65,7 +65,8 @@ export default defineConfig({
           items: [
             { label: 'CTFSWeb vs ForestGEO Comparison', slug: 'migration/ctfsweb-forestgeo-comparison' },
             { label: 'Data Model Reference', slug: 'migration/ctfsweb-data-model' },
-            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' }
+            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' },
+            { label: 'Publishing a Census to CTFSWeb', slug: 'migration/publishing-census-to-ctfs' }
           ]
         },
         {

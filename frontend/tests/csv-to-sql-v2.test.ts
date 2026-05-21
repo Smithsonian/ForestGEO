@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  renderFullPipeline,
   renderProcedureEnvelope,
   renderStage0,
   renderStage0bReload,
@@ -12,11 +11,12 @@ import {
   renderStage8DBH,
   renderStage9DBHAttributes,
   renderStage10,
+  renderPostLoadViewFullTableCall,
   LEGACY_DEFAULT_STEM_NUMBER,
   LEGACY_DEFAULT_MEASURE_ID,
   type Stage1Options
 } from '../lib/csv-to-sql-v2';
-import { mapCsvRowToStagingRow, type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
+import { type MeasurementStagingRow, type AttributeStagingRow } from '../lib/csv-to-sql-shared';
 
 describe('renderProcedureEnvelope', () => {
   const baseOpts = {
@@ -52,6 +52,15 @@ describe('renderProcedureEnvelope', () => {
     expect(releaseIdx).toBeGreaterThan(commitIdx);
   });
 
+  it('can emit post-commit body before releasing the lock', () => {
+    const sql = renderProcedureEnvelope({ ...baseOpts, postCommitBody: "  SELECT 'post-commit' AS scope;" });
+    const commitIdx = sql.indexOf('COMMIT;');
+    const postIdx = sql.indexOf("SELECT 'post-commit' AS scope;");
+    const releaseIdx = sql.indexOf("DO RELEASE_LOCK('ctfs-export:1:2')", postIdx);
+    expect(commitIdx).toBeLessThan(postIdx);
+    expect(postIdx).toBeLessThan(releaseIdx);
+  });
+
   it('EXIT HANDLER block calls ROLLBACK, DO RELEASE_LOCK, then RESIGNAL', () => {
     const sql = renderProcedureEnvelope(baseOpts);
     const handler = sql.match(/EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN[\s\S]+?END;/)?.[0];
@@ -80,18 +89,27 @@ describe('renderProcedureEnvelope', () => {
     expect(sql).toMatch(/DELIMITER \/\//);
     expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
     expect(sql).toMatch(/main: BEGIN/);
+    // Live SCALAR_DECLARES only — resprout/cursor scratch removed with the pivot.
     expect(sql).toMatch(/DECLARE _message TEXT;/);
     expect(sql).toMatch(/DECLARE _census_count INT DEFAULT 0;/);
     expect(sql).toMatch(/DECLARE _target_census_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _target_plot_id INT UNSIGNED;/);
-    expect(sql).toMatch(/DECLARE _target_start_date DATE;/);
-    expect(sql).toMatch(/DECLARE _done BOOL DEFAULT FALSE;/);
     expect(sql).toMatch(/DECLARE _existing_dbh_count INT DEFAULT 0;/);
-    expect(sql).toMatch(/DECLARE _resprout_candidates INT DEFAULT 0;/);
-    expect(sql).toMatch(/DECLARE _bad TEXT;/);
-    expect(sql).toMatch(/DECLARE CONTINUE HANDLER FOR NOT FOUND SET _done = TRUE;/);
+    expect(sql).toMatch(/DECLARE _viewfulltable_installed INT DEFAULT 0;/);
+    expect(sql).toMatch(/DECLARE _lock_result INT DEFAULT 0;/);
+    // Dead scalars were dropped with the pivot — assert their absence.
+    expect(sql).not.toMatch(/DECLARE _target_plot_id /);
+    expect(sql).not.toMatch(/DECLARE _target_start_date /);
+    expect(sql).not.toMatch(/DECLARE _done /);
+    expect(sql).not.toMatch(/DECLARE _resprout_candidates /);
+    expect(sql).not.toMatch(/DECLARE _bad /);
+    expect(sql).not.toMatch(/CONTINUE HANDLER FOR NOT FOUND/);
     expect(sql).toMatch(/DECLARE EXIT HANDLER FOR SQLEXCEPTION\s+BEGIN\s+ROLLBACK;\s+DO RELEASE_LOCK\('test-lock'\);\s+RESIGNAL;\s+END;/);
-    expect(sql).toMatch(/GET_LOCK\('test-lock', 0\)/);
+    // GET_LOCK now distinguishes NULL (subsystem error) from 0 (lock held).
+    expect(sql).toMatch(/SET _lock_result = GET_LOCK\('test-lock', 0\);/);
+    expect(sql).toMatch(/IF _lock_result IS NULL THEN/);
+    expect(sql).toMatch(/lock subsystem returned NULL/);
+    expect(sql).toMatch(/IF _lock_result = 0 THEN/);
+    expect(sql).toMatch(/Another ctfs-sql export is running/);
     expect(sql).toMatch(/START TRANSACTION;/);
     expect(sql).toMatch(/-- body/);
     expect(sql).toMatch(/COMMIT;\s+DO RELEASE_LOCK\('test-lock'\);/);
@@ -100,42 +118,39 @@ describe('renderProcedureEnvelope', () => {
     expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);\s*DROP PROCEDURE csv_to_sql_v2_load;/);
   });
 
-  it('declaration order is variables -> cursors -> handlers', () => {
-    const sql = renderProcedureEnvelope({
-      ...baseOpts,
-      cursorDeclarations: ['DECLARE cur_trees CURSOR FOR SELECT 1;'],
-      body: ''
-    });
-    const cursorIdx = sql.indexOf('cur_trees CURSOR');
-    const lastScalarIdx = sql.indexOf('DECLARE _bad TEXT;');
-    const notFoundIdx = sql.indexOf('CONTINUE HANDLER FOR NOT FOUND');
-    const exitHandlerIdx = sql.indexOf('EXIT HANDLER FOR SQLEXCEPTION');
-    expect(lastScalarIdx).toBeGreaterThan(0);
-    expect(cursorIdx).toBeGreaterThan(lastScalarIdx);
-    expect(notFoundIdx).toBeGreaterThan(cursorIdx);
-    expect(exitHandlerIdx).toBeGreaterThan(notFoundIdx);
-  });
-
-  it('cursor declarations must contain no handler (caller responsibility)', () => {
-    // This is documented in the test as a reminder; renderer doesn't validate inputs.
-    const sql = renderProcedureEnvelope({
-      ...baseOpts,
-      cursorDeclarations: ['DECLARE cur_x CURSOR FOR SELECT 1;'],
-      body: ''
-    });
-    // Sanity: the shared NOT FOUND handler appears exactly once.
-    const handlerMatches = sql.match(/CONTINUE HANDLER FOR NOT FOUND/g) ?? [];
-    expect(handlerMatches.length).toBe(1);
+  it('rejects non-empty cursorDeclarations (no cursors after pivot)', () => {
+    expect(() =>
+      renderProcedureEnvelope({
+        ...baseOpts,
+        cursorDeclarations: ['DECLARE cur_trees CURSOR FOR SELECT 1;'],
+        body: ''
+      })
+    ).toThrow(/cursorDeclarations is unsupported/);
   });
 });
 
 describe('renderStage0', () => {
   it('census guard counts rows for (plot, census) pair', () => {
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
-    expect(sql).toMatch(/SELECT COUNT\(\*\), MIN\(CensusID\), MIN\(StartDate\)\s+INTO _census_count, _target_census_id, _target_start_date/);
+    expect(sql).toMatch(/SELECT COUNT\(\*\), MIN\(CensusID\)\s+INTO _census_count, _target_census_id/);
     expect(sql).toMatch(/PlotID = 1\s+AND PlotCensusNumber = '2'/);
     expect(sql).toMatch(/IF _census_count <> 1 THEN/);
     expect(sql).toMatch(/SIGNAL SQLSTATE '45000'/);
+    // Search keys are surfaced in the failure message so operators don't have
+    // to look up which (plot, census) pair they asked for.
+    expect(sql).toMatch(/Expected exactly one Census row for PlotID=1, PlotCensusNumber=/);
+  });
+
+  it('probes for ctfsweb_webuser.CreateFullView before the data load', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(/ctfsweb_webuser.+CreateFullView/);
+    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
+  });
+
+  it('probes that DBHAttributes does not have a CensusID column (post-2014f)', () => {
+    const sql = renderStage0({ destinationPlotId: 1, censusNumber: '2', allowReload: false });
+    expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
+    expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
   });
 
   it('sets @target_census_id and @target_plot_id session variables', () => {
@@ -161,10 +176,13 @@ describe('renderStage0', () => {
     expect(() => renderStage0({ destinationPlotId: -1, censusNumber: '1', allowReload: false })).toThrow(/destinationPlotId must be a non-negative integer/);
   });
 
-  it('does not emit a DBHAttributes capability probe (spec dropped this)', () => {
+  it('does not emit the legacy DBHAttributes capability probe (CASE branches by CensusID-vs-no-CensusID)', () => {
+    // The pivot replaced the dual-schema capability probe with a hard SIGNAL
+    // for pre-2014f destinations. information_schema IS now referenced (for
+    // the new probe) but the legacy @dbhattrs_has_census_id session variable
+    // and the IF/ELSE branching are gone.
     const sql = renderStage0({ destinationPlotId: 1, censusNumber: '1', allowReload: false });
     expect(sql).not.toMatch(/@dbhattrs_has_census_id/);
-    expect(sql).not.toMatch(/information_schema/i);
   });
 
   it('escapes census number to prevent injection', () => {
@@ -296,8 +314,6 @@ describe('renderStage1', () => {
       'SpeciesName',
       'SpeciesAuthority',
       'SubspeciesName',
-      'SubspeciesAuthority',
-      'IDLevel',
       'DBH',
       'HOM',
       'ExactDate',
@@ -316,13 +332,34 @@ describe('renderStage1', () => {
     ]) {
       expect(sql).toContain(col);
     }
+    // IDLevel and SubspeciesAuthority were dropped — nothing in Stages 2/5/6/7/8/9
+    // reads them, so they no longer roundtrip through staging.
+    expect(sql).not.toMatch(/^\s+IDLevel\s+VARCHAR/m);
+    expect(sql).not.toMatch(/^\s+SubspeciesAuthority\s+VARCHAR/m);
   });
 
-  it('staging_attributes has all required columns including Errors', () => {
+  it('staging_measurements indexes CoreMeasurementID uniquely (Stage 9 joins on it)', () => {
     const sql = renderStage1(opts());
-    for (const col of ['TempAttrID', 'CoreMeasurementID', 'TempMeasurementID', 'TSMCode', 'TSMID', 'DBHID', 'Errors']) {
+    expect(sql).toMatch(/UNIQUE KEY uxCoreMeasurementID \(CoreMeasurementID\)/);
+  });
+
+  it('staging text columns are wider than CTFS destination widths so Stage 5 owns width errors', () => {
+    const sql = renderStage1(opts());
+    expect(sql).toMatch(/Tag\s+VARCHAR\(64\)/);
+    expect(sql).toMatch(/StemTag\s+VARCHAR\(64\)/);
+    expect(sql).toMatch(/Mnemonic\s+VARCHAR\(64\)/);
+    expect(sql).toMatch(/SpeciesAuthority\s+VARCHAR\(256\)/);
+    expect(sql).toMatch(/TSMCode\s+VARCHAR\(64\) NOT NULL/);
+  });
+
+  it('staging_attributes has all required columns including Errors and indexes CoreMeasurementID', () => {
+    const sql = renderStage1(opts());
+    for (const col of ['TempAttrID', 'CoreMeasurementID', 'TSMCode', 'TSMID', 'DBHID', 'Errors']) {
       expect(sql).toContain(col);
     }
+    // TempMeasurementID was dropped — Stage 9 joins on CoreMeasurementID instead.
+    expect(sql).not.toMatch(/TempMeasurementID/);
+    expect(sql).toMatch(/KEY idxCoreMeasurementID \(CoreMeasurementID\)/);
   });
 
   it('emits no INSERT statements when both row arrays are empty', () => {
@@ -344,8 +381,6 @@ describe('renderStage1', () => {
       SpeciesName: 'foo',
       SpeciesAuthority: 'L.',
       SubspeciesName: null,
-      SubspeciesAuthority: null,
-      IDLevel: 'species',
       DBH: 12.3,
       HOM: '1.3',
       ExactDate: '2024-06-01',
@@ -360,11 +395,11 @@ describe('renderStage1', () => {
     expect(sql).toMatch(/'Fooaceae','Foo','foo','L\.'/);
   });
 
-  it('emits INSERT chunks for attribute rows', () => {
-    const attr: AttributeStagingRow = { CoreMeasurementID: 1, TempMeasurementID: 1, TSMCode: 'LI' };
+  it('emits INSERT chunks for attribute rows (no positional TempMeasurementID)', () => {
+    const attr: AttributeStagingRow = { CoreMeasurementID: 1, TSMCode: 'LI' };
     const sql = renderStage1(opts({ attributeRows: [attr] }));
-    expect(sql).toMatch(/INSERT INTO `staging_attributes` \(/);
-    expect(sql).toMatch(/\(1,1,'LI'\)/);
+    expect(sql).toMatch(/INSERT INTO `staging_attributes` \(CoreMeasurementID, TSMCode\) VALUES/);
+    expect(sql).toMatch(/\(1,'LI'\)/);
   });
 
   it('chunks at 1000 rows per multi-row VALUES', () => {
@@ -381,8 +416,6 @@ describe('renderStage1', () => {
       SpeciesName: 'foo',
       SpeciesAuthority: null,
       SubspeciesName: null,
-      SubspeciesAuthority: null,
-      IDLevel: null,
       DBH: null,
       HOM: null,
       ExactDate: '2024-06-01',
@@ -464,6 +497,16 @@ describe('renderStage2', () => {
     expect(sql()).toMatch(/UPDATE `staging_attributes` a\s+JOIN TSMAttributes tsm ON tsm\.TSMCode = a\.TSMCode\s+SET a\.TSMID = tsm\.TSMID/);
   });
 
+  it('Stage 2c applies Suzanne HOM=1.3 default for new stems (StemID IS NULL, DBH > 0, HOM IS NULL)', () => {
+    const s = sql();
+    expect(s).toMatch(/Stage 2c: destination-contract normalization rules/);
+    expect(s).toMatch(/SET HOM = '1\.3'\s+WHERE StemID IS NULL\s+AND DBH IS NOT NULL\s+AND DBH > 0\s+AND HOM IS NULL/);
+  });
+
+  it('Stage 2c nulls out HOM when DBH is NULL (belt-and-braces)', () => {
+    expect(sql()).toMatch(/UPDATE `staging_measurements` SET HOM = NULL WHERE DBH IS NULL/);
+  });
+
   it('does not join on Mnemonic anywhere in Stage 2', () => {
     expect(sql()).not.toMatch(/JOIN .+ ON .+Mnemonic/);
   });
@@ -487,14 +530,24 @@ describe('renderStage5', () => {
   const opts = { measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' };
   const sql = () => renderStage5(opts);
 
-  it('check 1: required-field NOT NULL', () => {
+  it('check 1: required-field NOT NULL (catches empty strings as well as NULLs)', () => {
     expect(sql()).toMatch(/'Missing required field'/);
-    expect(sql()).toMatch(/Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL/);
+    // Empty strings for Tag/Mnemonic/QuadratName fail too — app schema stores
+    // these with a `default ''` so the NULL-only test let collisions through.
+    expect(sql()).toMatch(
+      /Tag IS NULL OR Tag = '' OR StemTag IS NULL OR Mnemonic IS NULL OR Mnemonic = ''\s+OR QuadratName IS NULL OR QuadratName = '' OR ExactDate IS NULL/
+    );
   });
 
-  it('check 2: taxonomy not uniquely resolved', () => {
+  it("check 1b: empty StemTag collisions are caught (app schema stores StemTag with default '')", () => {
+    expect(sql()).toMatch(/Empty StemTag collides with another stem under same Tree\+Quadrat/);
+    expect(sql()).toMatch(/_stage5_empty_stemtag/);
+  });
+
+  it('check 2: taxonomy not uniquely resolved (error includes the conflicting destination IDs)', () => {
     expect(sql()).toMatch(/'Taxonomy not uniquely resolved'/);
-    expect(sql()).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM taxonomy_lookup tx[\s\S]+tx\.TaxonCount = 1/);
+    expect(sql()).toMatch(/GROUP_CONCAT\(DISTINCT CONCAT\(SpeciesID/);
+    expect(sql()).toMatch(/COUNT\(DISTINCT CONCAT\(SpeciesID, ':', COALESCE\(SubSpeciesID, 0\)\)\) AS taxon_count/);
   });
 
   it('check 3: ambiguous tree key (TreeCount > 1)', () => {
@@ -524,7 +577,8 @@ describe('renderStage5', () => {
 
   it('check 8: duplicate new-stem natural key', () => {
     expect(sql()).toMatch(/'Duplicate new-stem natural key'/);
-    expect(sql()).toMatch(/GROUP BY TreeID, StemTag, QuadratID\s+HAVING COUNT\(\*\) > 1/);
+    expect(sql()).toMatch(/CASE\s+WHEN TreeID IS NOT NULL THEN CONCAT\('existing:', TreeID\)\s+ELSE CONCAT\('new:', COALESCE\(Tag, ''\)/);
+    expect(sql()).toMatch(/GROUP BY TreeKey, StemTag, QuadratID\s+HAVING COUNT\(\*\) > 1/);
   });
 
   it('check 9: ambiguous pre-existing Tree (orphan)', () => {
@@ -533,7 +587,14 @@ describe('renderStage5', () => {
   });
 
   it('check 10: string lengths for measurements + TSMCode width for attributes', () => {
-    expect(sql()).toMatch(/CHAR_LENGTH\(Tag\) > 10 OR CHAR_LENGTH\(StemTag\) > 32 OR CHAR_LENGTH\(QuadratName\) > 8 OR CHAR_LENGTH\(Comments\) > 128/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(Tag\) > 10/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(StemTag\) > 32/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(Mnemonic\) > 10/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(QuadratName\) > 8/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(Comments\) > 128/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(Family\) > 64/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(SpeciesAuthority\) > 128/);
+    expect(sql()).toMatch(/CHAR_LENGTH\(SubspeciesName\) > 64/);
     expect(sql()).toMatch(/'TSMCode too long for CTFS'/);
     expect(sql()).toMatch(/CHAR_LENGTH\(TSMCode\) > 10/);
   });
@@ -554,10 +615,8 @@ describe('renderStage5', () => {
     );
   });
 
-  it('final SELECT for attributes carries trace columns', () => {
-    expect(sql()).toMatch(
-      /SELECT TempAttrID, CoreMeasurementID, TempMeasurementID, TSMCode, Errors\s+FROM `staging_attributes` WHERE Errors IS NOT NULL ORDER BY TempAttrID/
-    );
+  it('final SELECT for attributes carries trace columns (no positional TempMeasurementID)', () => {
+    expect(sql()).toMatch(/SELECT TempAttrID, CoreMeasurementID, TSMCode, Errors\s+FROM `staging_attributes` WHERE Errors IS NOT NULL ORDER BY TempAttrID/);
   });
 
   it('uses one stable short SIGNAL message; no LEFT(_,128) truncation', () => {
@@ -659,8 +718,12 @@ describe('legacy default constants', () => {
 describe('renderStage9DBHAttributes', () => {
   const sql = () => renderStage9DBHAttributes({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' });
 
-  it('emits two statements: DBHID join-back + bulk INSERT', () => {
-    expect(sql()).toMatch(/UPDATE `staging_attributes` a\s+JOIN `staging_measurements` m ON m\.TempID = a\.TempMeasurementID\s+SET a\.DBHID = m\.DBHID/);
+  it('emits two statements: DBHID join-back via CoreMeasurementID + bulk INSERT', () => {
+    // JOIN on CoreMeasurementID instead of positional TempID/TempMeasurementID —
+    // see render-procedure docs for rationale.
+    expect(sql()).toMatch(
+      /UPDATE `staging_attributes` a\s+JOIN `staging_measurements` m ON m\.CoreMeasurementID = a\.CoreMeasurementID\s+SET a\.DBHID = m\.DBHID/
+    );
     expect(sql()).toMatch(/INSERT INTO DBHAttributes \(TSMID, DBHID\)\s+SELECT TSMID, DBHID\s+FROM `staging_attributes`/);
   });
 
@@ -719,77 +782,16 @@ describe('renderStage10', () => {
   });
 });
 
-describe('renderFullPipeline', () => {
-  const SAMPLE_CSV_ROW = {
-    tag: 'T001',
-    stemtag: 'S001',
-    spcode: 'QURU',
-    quadrat: 'A01',
-    lx: '1.5',
-    ly: '2.5',
-    dbh: '12.3',
-    hom: '1.3',
-    date: '2024-03-15',
-    codes: 'A'
-  };
-
-  const sampleRow = mapCsvRowToStagingRow(SAMPLE_CSV_ROW, 7, '4');
-
-  const baseArgs = () => ({
-    plotId: 7,
-    censusNumber: '4',
-    allowReload: false,
-    tempTable: 'TempAllTrees'
+describe('renderPostLoadViewFullTableCall', () => {
+  it("emits CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable'); after the load procedure", () => {
+    const sql = renderPostLoadViewFullTableCall();
+    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
+    expect(sql).toMatch(/runs outside the load transaction/);
   });
 
-  it('returns a non-empty string', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    expect(typeof sql).toBe('string');
-    expect(sql.length).toBeGreaterThan(0);
-  });
-
-  it('contains the procedure envelope (DROP/CREATE/END/CALL/DROP) with placeholder procedure name', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    // renderFullPipeline uses a placeholder name; tests verify the structure exists
-    expect(sql).toMatch(/DROP PROCEDURE IF EXISTS csv_to_sql_v2_load;/);
-    expect(sql).toMatch(/CREATE PROCEDURE csv_to_sql_v2_load\(\)/);
-    expect(sql).toMatch(/END \/\//);
-    expect(sql).toMatch(/CALL csv_to_sql_v2_load\(\);/);
-    expect(sql).toMatch(/DROP PROCEDURE csv_to_sql_v2_load;/);
-  });
-
-  it('emits 9 stage headers in order after pivot: 0, 1, 2, 5, 6, 7, 8, 9, 10', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    const headers = ['-- Stage 0:', '-- Stage 1:', '-- Stage 2:', '-- Stage 5:', '-- Stage 6:', '-- Stage 7:', '-- Stage 8:', '-- Stage 9:', '-- Stage 10:'];
-    const indices = headers.map(h => sql.indexOf(h));
-    for (let i = 0; i < indices.length; i++) {
-      expect(indices[i], `header missing: ${headers[i]}`).toBeGreaterThan(0);
-    }
-    for (let i = 1; i < indices.length; i++) {
-      expect(indices[i], `expected ${headers[i]} (at ${indices[i]}) to appear after ${headers[i - 1]} (at ${indices[i - 1]})`).toBeGreaterThan(indices[i - 1]);
-    }
-  });
-
-  it('does not emit deleted stage headers (2b, 3, 4, 9a, 9b)', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    expect(sql).not.toMatch(/-- Stage 2b:/);
-    expect(sql).not.toMatch(/-- Stage 3:/);
-    expect(sql).not.toMatch(/-- Stage 4:/);
-    expect(sql).not.toMatch(/-- Stage 9a:/);
-    expect(sql).not.toMatch(/-- Stage 9b:/);
-  });
-
-  it('emits no cursor declarations since stages 6/7/8 use set-based bulk inserts', () => {
-    const sql = renderFullPipeline({ ...baseArgs(), stagingRows: [sampleRow] });
-    expect(sql).not.toContain('cur_new_trees CURSOR');
-    expect(sql).not.toContain('cur_new_stems CURSOR');
-    expect(sql).not.toContain('cur_dbh CURSOR');
-  });
-
-  it('uses hardcoded staging_measurements and staging_attributes in all stages (tempTable field now unused)', () => {
-    const args = { plotId: 7, censusNumber: '4', allowReload: false, tempTable: 'MyCustomStaging' };
-    const sql = renderFullPipeline({ ...args, stagingRows: [sampleRow] });
-    expect(sql).toMatch(/`staging_measurements`/);
-    expect(sql).toMatch(/`staging_attributes`/);
+  it('does not wrap the CALL in DELIMITER //, so it runs as a top-level statement', () => {
+    const sql = renderPostLoadViewFullTableCall();
+    expect(sql).not.toMatch(/DELIMITER/);
+    expect(sql).not.toMatch(/CREATE PROCEDURE/);
   });
 });

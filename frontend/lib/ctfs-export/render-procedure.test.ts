@@ -29,8 +29,6 @@ const sampleMeasurement: MeasurementStagingRow = {
   SpeciesName: 'foo',
   SpeciesAuthority: 'L.',
   SubspeciesName: null,
-  SubspeciesAuthority: null,
-  IDLevel: 'species',
   DBH: 10,
   HOM: '1.3',
   ExactDate: '2024-06-01',
@@ -42,16 +40,15 @@ const sampleMeasurement: MeasurementStagingRow = {
 
 const sampleAttribute: AttributeStagingRow = {
   CoreMeasurementID: 1,
-  TempMeasurementID: 1,
   TSMCode: 'AB'
 };
 
 /**
- * Strip header and normalize random suffix to allow deterministic comparison
- * across renders with different timestamps and random suffixes.
+ * Strip only the header for deterministic comparison — the body (including
+ * the procedure name's hash suffix) is fully deterministic now that
+ * deterministicSuffix is hash-based.
  */
-const stripHeaderAndNormalizeSuffix = (s: string) =>
-  s.replace(/^-- BEGIN HEADER\n[\s\S]*?-- END HEADER\n/, '').replace(/csv_to_sql_v2_load_(\d+)_([A-Za-z0-9_]+)_[0-9a-f]{8}/g, 'csv_to_sql_v2_load_$1_$2_RAND');
+const stripHeader = (s: string) => s.replace(/^-- BEGIN HEADER\n[\s\S]*?-- END HEADER\n/, '');
 
 describe('renderArtifact', () => {
   it('returns procedureName matching the pattern csv_to_sql_v2_load_<plotId>_<slug>_<randomSuffix>', () => {
@@ -93,7 +90,10 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/-- END HEADER\n/);
   });
 
-  it('body below END HEADER is deterministic across different timestamps when suffix is normalized', () => {
+  it('body below END HEADER is fully byte-deterministic across different timestamps', () => {
+    // Spec line 347: body is byte-deterministic for the same input.
+    // deterministicSuffix hashes the inputs, so the procedure name is stable
+    // and we no longer need to normalize away a random suffix.
     const a = renderArtifact(
       baseInput({
         generatedAt: new Date('2026-05-19T00:00:00Z'),
@@ -106,7 +106,16 @@ describe('renderArtifact', () => {
         measurementRows: [sampleMeasurement]
       })
     );
-    expect(stripHeaderAndNormalizeSuffix(a.sql)).toBe(stripHeaderAndNormalizeSuffix(b.sql));
+    expect(stripHeader(a.sql)).toBe(stripHeader(b.sql));
+  });
+
+  it('body changes when input data changes (deterministic but input-sensitive)', () => {
+    const a = renderArtifact(baseInput({ measurementRows: [sampleMeasurement], schema: 'forestgeo_a' }));
+    const b = renderArtifact(baseInput({ measurementRows: [sampleMeasurement], schema: 'forestgeo_b' }));
+    // Different schemas hash to different procedure suffixes — preventing DDL
+    // collisions across concurrent exports to the same destination.
+    expect(a.procedureName).not.toBe(b.procedureName);
+    expect(stripHeader(a.sql)).not.toBe(stripHeader(b.sql));
   });
 
   it('emits Stage 0b when allowReload is true', () => {
@@ -128,7 +137,7 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/ROLLBACK TO SAVEPOINT reload_dry/);
   });
 
-  it('reloadDryRun does NOT emit Stages 1-10', () => {
+  it('reloadDryRun does NOT emit Stages 1-10 and skips the ViewFullTable rebuild CALL', () => {
     const { sql } = renderArtifact(baseInput({ reloadDryRun: true, measurementRows: [sampleMeasurement] }));
     expect(sql).not.toMatch(/staging_measurements/);
     expect(sql).not.toMatch(/CREATE TEMPORARY TABLE staging_measurements/);
@@ -140,6 +149,7 @@ describe('renderArtifact', () => {
     expect(sql).not.toMatch(/Stage 8:/);
     expect(sql).not.toMatch(/Stage 9:/);
     expect(sql).not.toMatch(/Stage 10:/);
+    expect(sql).not.toMatch(/CALL ctfsweb_webuser\.CreateFullView/);
   });
 
   it('non-reload, non-dry-run emits all Stages 1-10', () => {
@@ -152,6 +162,33 @@ describe('renderArtifact', () => {
     expect(sql).toMatch(/Stage 8:/);
     expect(sql).toMatch(/Stage 9:/);
     expect(sql).toMatch(/Stage 10:/);
+  });
+
+  it('non-dry-run emits the ViewFullTable rebuild CALL outside the load procedure', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    // The CALL must run AFTER the load procedure's DROP PROCEDURE: CreateFullView
+    // does DDL (DROP/CREATE TABLE) which would auto-commit and break the load txn.
+    expect(sql).toMatch(/CALL ctfsweb_webuser\.CreateFullView\(DATABASE\(\), 'ViewFullTable'\);/);
+    const callIdx = sql.indexOf("CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');");
+    const lastDropIdx = sql.lastIndexOf('DROP PROCEDURE ');
+    expect(callIdx).toBeGreaterThan(lastDropIdx);
+  });
+
+  it('Stage 0 probes for ctfsweb_webuser.CreateFullView before loading anything', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/information_schema\.ROUTINES[\s\S]+CreateFullView/);
+    expect(sql).toMatch(/Source creating_ViewFullTable\.sql/);
+    // Probe must come BEFORE the data-load WHERE/JOIN section.
+    const probeIdx = sql.indexOf("ROUTINE_NAME = 'CreateFullView'");
+    const stage1Idx = sql.indexOf('Stage 1:');
+    expect(probeIdx).toBeGreaterThan(0);
+    expect(probeIdx).toBeLessThan(stage1Idx);
+  });
+
+  it('Stage 0 probes that DBHAttributes no longer has CensusID (post-DBCHANGES2014f)', () => {
+    const { sql } = renderArtifact(baseInput({ measurementRows: [sampleMeasurement] }));
+    expect(sql).toMatch(/DBHAttributes still has a CensusID column/);
+    expect(sql).toMatch(/apply DBCHANGES2014f\.sql/);
   });
 
   it('allowReload=true (non-dry-run) emits Stage 0b but not SAVEPOINT', () => {

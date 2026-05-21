@@ -17,7 +17,8 @@ import {
   renderStage7NewStems,
   renderStage8DBH,
   renderStage9DBHAttributes,
-  renderStage10
+  renderStage10,
+  renderPostLoadViewFullTableCall
 } from '../csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../csv-to-sql-shared';
 import { buildProcedureName, buildLockName } from './identifier-safety';
@@ -67,9 +68,15 @@ export interface RenderArtifactResult {
  */
 export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult {
   const effectiveAllowReload = input.allowReload || input.reloadDryRun;
+  // Procedure name suffix hashes all input keys so concurrent exports from
+  // different source schemas to the same destination produce distinct
+  // procedure identifiers (spec line 413 open question).
   const procedureName = buildProcedureName({
     destinationPlotId: input.destinationPlotId,
-    plotCensusNumber: input.plotCensusNumber
+    plotCensusNumber: input.plotCensusNumber,
+    schema: input.schema,
+    appPlotId: input.appPlotId,
+    appCensusId: input.appCensusId
   });
   const lockName = buildLockName({
     destinationPlotId: input.destinationPlotId,
@@ -131,15 +138,22 @@ export function renderArtifact(input: RenderArtifactInput): RenderArtifactResult
 
   const body = stages.join('\n\n');
 
-  // Wrap all stages in the procedure envelope (GET_LOCK, START TRANSACTION, etc.)
-  const sql =
-    header +
-    renderProcedureEnvelope({
-      procedureName,
-      lockName,
-      cursorDeclarations: [],
-      body
-    });
+  // The ViewFullTable rebuild CALL must run OUTSIDE the procedure body — it
+  // executes DROP/CREATE TABLE inside ctfsweb_webuser.CreateFullView, which
+  // would cause implicit commits inside the load procedure's transaction.
+  // The Stage 0 install probe SIGNALs earlier if CreateFullView is missing,
+  // so reaching the post-procedure CALL line implies the proc exists.
+  // Dry-run skips both because no data is loaded.
+  const envelope = renderProcedureEnvelope({
+    procedureName,
+    lockName,
+    cursorDeclarations: [],
+    body
+  });
+
+  const postProcedure = input.reloadDryRun ? '' : '\n' + renderPostLoadViewFullTableCall();
+
+  const sql = header + envelope + postProcedure;
 
   return { sql, procedureName, lockName };
 }

@@ -51,6 +51,10 @@ export interface StagingRow {
  * are server-populated during join stages and do not appear in this type.
  * `Errors` is populated by Stage 5 contract checks and also does not appear here.
  * These columns appear in the staging-table DDL but must not be supplied via INSERT VALUES.
+ *
+ * `IDLevel` and `SubspeciesAuthority` are not exported: nothing in Stages 2/5/6/7/8/9
+ * reads them after the pivot, so carrying them through staging only bloats the
+ * artifact. Re-add if a future stage needs them.
  */
 export interface MeasurementStagingRow {
   CoreMeasurementID: number;
@@ -65,8 +69,6 @@ export interface MeasurementStagingRow {
   SpeciesName: string;
   SpeciesAuthority: string | null;
   SubspeciesName: string | null;
-  SubspeciesAuthority: string | null;
-  IDLevel: string | null;
   DBH: number | null;
   HOM: string | null;
   ExactDate: string;
@@ -81,15 +83,18 @@ export interface MeasurementStagingRow {
  *
  * `TempAttrID` is server-assigned by AUTO_INCREMENT.
  * `TSMID` is populated by Stage 2 (lookup against `TSMAttributes.TSMCode`).
- * `DBHID` is populated by Stage 9 (join-back to `staging_measurements.DBHID`).
+ * `DBHID` is populated by Stage 9 via JOIN on `CoreMeasurementID`.
  * `Errors` is populated by Stage 5 contract checks.
  *
- * These four columns appear in the staging-table DDL but not in this type,
- * because the app must not supply them via INSERT VALUES.
+ * Attribute rows are linked back to their parent measurement by
+ * `CoreMeasurementID` only — no positional `TempMeasurementID`. The previous
+ * design relied on the AUTO_INCREMENT ordering of `staging_measurements.TempID`
+ * matching the array index in the rendered INSERT VALUES tuples, which is
+ * implementation-defined and would silently misattach attributes if MySQL
+ * ever burned an AUTO_INCREMENT value between rows.
  */
 export interface AttributeStagingRow {
   CoreMeasurementID: number;
-  TempMeasurementID: number;
   TSMCode: string;
 }
 
@@ -319,24 +324,26 @@ export function renderInsertChunks(tableName: string, rows: StagingRow[], chunkS
  */
 export function renderCreateStagingMeasurements(tableName: string): string {
   const t = escapeSqlIdentifier(tableName);
+  // Staging text columns intentionally exceed CTFS destination widths so Stage
+  // 5 can emit row-level diagnostics instead of failing during Stage 1 INSERT.
+  // CoreMeasurementID is the natural link to staging_attributes; Stage 9
+  // joins on it (not TempID) so we avoid relying on AUTO_INCREMENT ordering.
   return [
     `DROP TEMPORARY TABLE IF EXISTS ${t};`,
     `CREATE TEMPORARY TABLE ${t} (`,
     `  TempID              INT UNSIGNED AUTO_INCREMENT,`,
     `  CoreMeasurementID   INT UNSIGNED NOT NULL,`,
     `  SourceRowIndex      INT UNSIGNED,`,
-    `  Tag                 VARCHAR(10),`,
-    `  StemTag             VARCHAR(32),`,
-    `  Mnemonic            VARCHAR(10),`,
-    `  QuadratName         VARCHAR(12),`,
+    `  Tag                 VARCHAR(64),`,
+    `  StemTag             VARCHAR(64),`,
+    `  Mnemonic            VARCHAR(64),`,
+    `  QuadratName         VARCHAR(64),`,
     `  PlotCensusNumber    VARCHAR(16),`,
-    `  Family              VARCHAR(64),`,
-    `  Genus               VARCHAR(64),`,
-    `  SpeciesName         VARCHAR(64),`,
-    `  SpeciesAuthority    VARCHAR(128),`,
-    `  SubspeciesName      VARCHAR(64),`,
-    `  SubspeciesAuthority VARCHAR(128),`,
-    `  IDLevel             VARCHAR(32),`,
+    `  Family              VARCHAR(128),`,
+    `  Genus               VARCHAR(128),`,
+    `  SpeciesName         VARCHAR(128),`,
+    `  SpeciesAuthority    VARCHAR(256),`,
+    `  SubspeciesName      VARCHAR(128),`,
     `  DBH                 FLOAT(8),`,
     `  HOM                 VARCHAR(16),`,
     `  ExactDate           DATE,`,
@@ -353,6 +360,7 @@ export function renderCreateStagingMeasurements(tableName: string): string {
     `  DBHID               INT UNSIGNED,`,
     `  Errors              VARCHAR(256),`,
     `  PRIMARY KEY (TempID),`,
+    `  UNIQUE KEY uxCoreMeasurementID (CoreMeasurementID),`,
     `  KEY idxTagStemTag (Tag, StemTag),`,
     `  KEY idxQuadratName (QuadratName)`,
     `) ENGINE=InnoDB;`
@@ -365,18 +373,20 @@ export function renderCreateStagingMeasurements(tableName: string): string {
  */
 export function renderCreateStagingAttributes(tableName: string): string {
   const t = escapeSqlIdentifier(tableName);
+  // TSMCode is wider than CTFS here for the same reason as measurement staging:
+  // Stage 5 owns the operator-facing width error.
+  // CoreMeasurementID is the link to staging_measurements (no positional join).
   return [
     `DROP TEMPORARY TABLE IF EXISTS ${t};`,
     `CREATE TEMPORARY TABLE ${t} (`,
     `  TempAttrID        INT UNSIGNED AUTO_INCREMENT,`,
     `  CoreMeasurementID INT UNSIGNED NOT NULL,`,
-    `  TempMeasurementID INT UNSIGNED NOT NULL,`,
-    `  TSMCode           VARCHAR(10) NOT NULL,`,
+    `  TSMCode           VARCHAR(64) NOT NULL,`,
     `  TSMID             INT UNSIGNED,`,
     `  DBHID             INT UNSIGNED,`,
     `  Errors            VARCHAR(256),`,
     `  PRIMARY KEY (TempAttrID),`,
-    `  KEY idxTempMeasurement (TempMeasurementID),`,
+    `  KEY idxCoreMeasurementID (CoreMeasurementID),`,
     `  KEY idxTSMCode (TSMCode)`,
     `) ENGINE=InnoDB;`
   ].join('\n');
@@ -395,8 +405,6 @@ const MEASUREMENT_INSERT_COLUMNS = [
   'SpeciesName',
   'SpeciesAuthority',
   'SubspeciesName',
-  'SubspeciesAuthority',
-  'IDLevel',
   'DBH',
   'HOM',
   'ExactDate',
@@ -406,7 +414,7 @@ const MEASUREMENT_INSERT_COLUMNS = [
   'PrimaryStem'
 ] as const satisfies ReadonlyArray<keyof MeasurementStagingRow>;
 
-const ATTRIBUTE_INSERT_COLUMNS = ['CoreMeasurementID', 'TempMeasurementID', 'TSMCode'] as const satisfies ReadonlyArray<keyof AttributeStagingRow>;
+const ATTRIBUTE_INSERT_COLUMNS = ['CoreMeasurementID', 'TSMCode'] as const satisfies ReadonlyArray<keyof AttributeStagingRow>;
 
 /**
  * Render INSERT INTO ... VALUES chunks for measurement rows.
@@ -426,13 +434,12 @@ export function renderInsertChunksAttributes(tableName: string, rows: AttributeS
 
 /**
  * Generic helper for rendering INSERT chunks from a set of rows and column list.
+ *
+ * The row constraint is `unknown` rather than `Record<string, unknown>` so
+ * narrow interfaces (no index signature) satisfy it. Per-column access is
+ * type-safe through `keyof R & string`.
  */
-function renderInsertChunksGeneric<R extends Record<string, unknown>>(
-  tableName: string,
-  rows: R[],
-  columns: ReadonlyArray<keyof R & string>,
-  chunkSize: number
-): string[] {
+function renderInsertChunksGeneric<R>(tableName: string, rows: R[], columns: ReadonlyArray<keyof R & string>, chunkSize: number): string[] {
   if (rows.length === 0) return [];
   const t = escapeSqlIdentifier(tableName);
   const head = `INSERT INTO ${t} (${columns.join(', ')}) VALUES`;

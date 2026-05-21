@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
 import { getConn } from '@/components/processors/processormacros';
 import { auth } from '@/auth';
 import { requireSession, getSessionUserId } from '@/lib/auth-helpers';
@@ -17,34 +17,48 @@ type RouteProps = { params: Promise<{ schema: string; plotID: string; censusID: 
 // ---------------------------------------------------------------------------
 // Permission helpers
 //
-// The exact role mapping for export/reload authority is unresolved (spec
-// line 74: "the PI or data manager of each plot" — confirmed by Jess/David
-// still pending). These stubs encode the current policy placeholder and are
-// the only code that changes when the permission model is finalised.
+// Scope model: schema membership grants the user access to every (plotID,
+// censusID) in that schema. The `census` row probe below uses a combined
+// PlotID + CensusID WHERE so a forged path-traversal that mixes a known
+// PlotID with another schema's CensusID returns 404 (the row doesn't exist
+// at that combination in this schema). This is consistent with the rest of
+// the app's data routes, which gate on schema and not on per-plot ACLs.
+//
+// The PI/data-manager-only export authority Suzanne suggested (spec line 74)
+// is still unresolved (Jess/David pending); current placeholder is:
+//   - app admins (global / db admin) can export any schema, and can reload.
+//   - lead technicians can export schemas in their session-scoped site list,
+//     non-reload only.
 // ---------------------------------------------------------------------------
 
-/**
- * Returns true when the authenticated user may read measurements for the given
- * schema.
- *
- * TODO: Replace with a schema-to-user permission lookup once the app's
- * permission model is finalised. Any authenticated session is granted read
- * access in this MVP to unblock operators.
- */
-async function userCanReadSchema(_session: Session, _schema: string): Promise<boolean> {
-  return true;
+function userCanExportSchema(session: Session, schema: string): boolean {
+  const role = session.user?.userStatus;
+  if (userIsAdmin(session)) {
+    return true;
+  }
+  if (role !== 'lead technician') {
+    return false;
+  }
+  return (session.user?.sites ?? []).some(site => site.schemaName === schema);
 }
 
-/**
- * Returns true when the authenticated user is allowed to generate reload
- * artifacts (`allowReload=true` or `reloadDryRun=true`).
- *
- * TODO: Replace with an admin/data-manager role check once the permission
- * model is finalised. Defaults to false so the destructive reload path is
- * inaccessible until an explicit policy decision is made.
- */
-async function userCanReload(_session: Session): Promise<boolean> {
-  return false;
+function userCanReload(session: Session): boolean {
+  return userIsAdmin(session);
+}
+
+function userIsAdmin(session: Session): boolean {
+  return session.user?.userStatus === 'global' || session.user?.userStatus === 'db admin';
+}
+
+function buildDownloadFilename(destinationPlotId: number, plotCensusNumber: string, timestampMs: number): string {
+  // identifier-safety throws on an empty PlotCensusNumber slug before we get
+  // here, so we don't need a fallback for the empty-string case.
+  const censusSlug = plotCensusNumber
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `ctfs-export-${destinationPlotId}-${censusSlug}-${timestampMs}.sql`;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,8 +78,8 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
     return NextResponse.json({ error: 'Invalid schema name' }, { status: HTTPResponses.BAD_REQUEST });
   }
 
-  // --- Schema-level read permission ---
-  if (!(await userCanReadSchema(session!, schema))) {
+  // --- Schema-level export permission ---
+  if (!userCanExportSchema(session!, schema)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: HTTPResponses.FORBIDDEN });
   }
 
@@ -89,13 +103,28 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
   // --- Query params: reload flags ---
   const allowReload = request.nextUrl.searchParams.get('allowReload') === 'true';
   const reloadDryRun = request.nextUrl.searchParams.get('reloadDryRun') === 'true';
-  if ((allowReload || reloadDryRun) && !(await userCanReload(session!))) {
+  if ((allowReload || reloadDryRun) && !userCanReload(session!)) {
     return NextResponse.json({ error: 'Reload export requires elevated permission' }, { status: HTTPResponses.FORBIDDEN });
   }
+
+  // Single timestamp covers both the artifact header (passed to renderArtifact)
+  // and the download filename — they used to be two distinct `Date.now()` calls
+  // that could disagree if any async work landed between them.
+  const generatedAt = new Date();
 
   // --- Database work ---
   const conn = await getConn();
   try {
+    // Resolve PlotCensusNumber and verify (plotID, censusID) belongs to this
+    // schema. The combined WHERE prevents path-traversal across schemas: a
+    // CensusID from another schema returns no row here.
+    const censusSql = safeFormatQuery(schema, `SELECT PlotCensusNumber FROM ??.census WHERE PlotID = ? AND CensusID = ? AND IsActive = 1`);
+    const [censusRows] = await conn.query<any[]>(censusSql, [appPlotId, appCensusId]);
+    if (!Array.isArray(censusRows) || censusRows.length === 0) {
+      return NextResponse.json({ error: 'Census not found' }, { status: HTTPResponses.NOT_FOUND });
+    }
+    const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
+
     // Precondition: census must be fully validated and clean before export.
     const precondition = await checkFinishedCensus(conn, { schema, plotId: appPlotId, censusId: appCensusId });
     if (!precondition.ok) {
@@ -109,13 +138,6 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       censusId: appCensusId
     });
 
-    // Resolve PlotCensusNumber — needed for the procedure identifier and lock name.
-    const [censusRows] = await conn.query<any[]>(`SELECT PlotCensusNumber FROM \`${schema}\`.census WHERE CensusID = ?`, [appCensusId]);
-    if (!Array.isArray(censusRows) || censusRows.length === 0) {
-      return NextResponse.json({ error: 'Census not found' }, { status: HTTPResponses.NOT_FOUND });
-    }
-    const plotCensusNumber = String(censusRows[0].PlotCensusNumber);
-
     // Render the complete SQL artifact.
     const { sql, procedureName, lockName } = renderArtifact({
       schema,
@@ -125,12 +147,12 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       plotCensusNumber,
       allowReload,
       reloadDryRun,
-      generatedAt: new Date(),
+      generatedAt,
       measurementRows,
       attributeRows
     });
 
-    const filename = `ctfs-export-${destinationPlotId}-${plotCensusNumber}-${Date.now()}.sql`;
+    const filename = buildDownloadFilename(destinationPlotId, plotCensusNumber, generatedAt.getTime());
     const userId = getSessionUserId(session!);
 
     ailogger.info('ctfs-sql export generated', {
@@ -157,9 +179,9 @@ export async function GET(request: NextRequest, props: RouteProps): Promise<Next
       }
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    ailogger.error('ctfs-sql export failed', { schema, appPlotId, appCensusId, message });
-    return NextResponse.json({ error: message || 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+    const error = err instanceof Error ? err : new Error(String(err));
+    ailogger.error('ctfs-sql export failed', error, { schema, appPlotId, appCensusId });
+    return NextResponse.json({ error: error.message || 'Export failed' }, { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     conn.release();
   }

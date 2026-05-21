@@ -11,6 +11,7 @@
  */
 
 import type { Connection } from 'mysql2/promise';
+import { exportableMeasurementBaseWhere } from './exportable-measurement';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -116,11 +117,12 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   const notValidatedIds = await gatherIds(
     conn,
     `SELECT CoreMeasurementID
-       FROM ${s}.coremeasurements
-      WHERE CensusID = ? AND IsActive = 1
+       FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND (IsValidated IS NULL OR IsValidated = FALSE)
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (notValidatedIds.length > 0) {
     reasons.push({
@@ -135,11 +137,12 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     conn,
     `SELECT DISTINCT cm.CoreMeasurementID
        FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.measurement_error_log mel ON mel.MeasurementID = cm.CoreMeasurementID
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND COALESCE(mel.IsResolved, FALSE) = FALSE
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (unresolvedIds.length > 0) {
     reasons.push({
@@ -153,11 +156,12 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
   const noStemIds = await gatherIds(
     conn,
     `SELECT CoreMeasurementID
-       FROM ${s}.coremeasurements
-      WHERE CensusID = ? AND IsActive = 1
+       FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND StemGUID IS NULL
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (noStemIds.length > 0) {
     reasons.push({
@@ -172,15 +176,16 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     conn,
     `SELECT cm.CoreMeasurementID
        FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.stems st ON st.StemGUID = cm.StemGUID
        JOIN ${s}.trees t  ON t.TreeID    = st.TreeID
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND (
           st.IsActive = 0 OR st.DeletedAt IS NOT NULL
           OR t.IsActive = 0 OR t.DeletedAt IS NOT NULL
         )
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (inactiveIds.length > 0) {
     reasons.push({
@@ -198,12 +203,13 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     conn,
     `SELECT DISTINCT cm.CoreMeasurementID
        FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.cmattributes cma ON cma.CoreMeasurementID = cm.CoreMeasurementID
        LEFT JOIN ${s}.attributes a ON a.Code = cma.Code AND a.IsActive = 1
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND a.Code IS NULL
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (unknownAttrIds.length > 0) {
     reasons.push({
@@ -221,12 +227,13 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     conn,
     `SELECT cm.CoreMeasurementID
        FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.stems   st  ON st.StemGUID  = cm.StemGUID
        JOIN ${s}.trees   t   ON t.TreeID     = st.TreeID
        JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
        JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
        JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND (
           sp.SpeciesCode IS NULL OR sp.SpeciesCode = ''
           OR sp.SpeciesName IS NULL  OR sp.SpeciesName = ''
@@ -234,7 +241,7 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
           OR fam.Family     IS NULL  OR fam.Family = ''
         )
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (missingTaxonomyIds.length > 0) {
     reasons.push({
@@ -256,13 +263,14 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     conn,
     `SELECT cm.CoreMeasurementID
        FROM ${s}.coremeasurements cm
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
        JOIN ${s}.stems   st  ON st.StemGUID  = cm.StemGUID
        JOIN ${s}.trees   t   ON t.TreeID     = st.TreeID
        JOIN ${s}.quadrats q  ON q.QuadratID  = st.QuadratID
        JOIN ${s}.species sp  ON sp.SpeciesID = t.SpeciesID
        JOIN ${s}.genus   gn  ON gn.GenusID   = sp.GenusID
        JOIN ${s}.family  fam ON fam.FamilyID = gn.FamilyID
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
+      WHERE c.PlotID = ? AND cm.CensusID = ? AND cm.IsActive = 1
         AND (
           CHAR_LENGTH(t.TreeTag)                        > ${CTFS_LIMITS.treeTag}
           OR CHAR_LENGTH(st.StemTag)                    > ${CTFS_LIMITS.stemTag}
@@ -270,14 +278,21 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
           OR CHAR_LENGTH(COALESCE(cm.Description, ''))  > ${CTFS_LIMITS.dbhComments}
           OR CHAR_LENGTH(COALESCE(sp.SpeciesCode, ''))  > ${CTFS_LIMITS.speciesMnemonic}
           OR CHAR_LENGTH(COALESCE(sp.SpeciesName, ''))  > ${CTFS_LIMITS.taxonomyName}
+          OR CHAR_LENGTH(COALESCE(sp.SubspeciesName, '')) > ${CTFS_LIMITS.taxonomyName}
           OR CHAR_LENGTH(COALESCE(gn.Genus, ''))        > ${CTFS_LIMITS.taxonomyName}
           OR CHAR_LENGTH(COALESCE(fam.Family, ''))      > ${CTFS_LIMITS.taxonomyName}
           OR CHAR_LENGTH(COALESCE(sp.SpeciesAuthority, ''))    > ${CTFS_LIMITS.taxonomyAuthority}
           OR CHAR_LENGTH(COALESCE(sp.SubspeciesAuthority, '')) > ${CTFS_LIMITS.taxonomyAuthority}
           OR CHAR_LENGTH(COALESCE(gn.GenusAuthority, ''))      > ${CTFS_LIMITS.taxonomyAuthority}
+          OR EXISTS (
+            SELECT 1
+              FROM ${s}.cmattributes cma
+             WHERE cma.CoreMeasurementID = cm.CoreMeasurementID
+               AND CHAR_LENGTH(COALESCE(cma.Code, '')) > ${CTFS_LIMITS.tsmCode}
+          )
         )
       LIMIT ?`,
-    [input.censusId, fetchLimit]
+    [input.plotId, input.censusId, fetchLimit]
   );
   if (tooLongIds.length > 0) {
     reasons.push({
@@ -293,18 +308,20 @@ export async function checkFinishedCensus(conn: Connection, input: PreconditionI
     return { ok: false, reasons };
   }
 
-  // Check 8: Zero exportable rows remain after all filters.
+  // Check 8: Zero exportable rows remain after all filters. Uses the shared
+  // "exportable measurement" base WHERE so this precondition matches the
+  // filter that selectMeasurements applies — preventing drift between "I
+  // would let you export this" and "here's what would actually export."
+  // Aliases: cm = coremeasurements, c = census, s = stems, t = trees (matching
+  // exportableMeasurementBaseWhere conventions). Bound params: [censusId, plotId].
   const [countRows] = await conn.query<any[]>(
     `SELECT COUNT(*) AS n
        FROM ${s}.coremeasurements cm
-       JOIN ${s}.stems st ON st.StemGUID = cm.StemGUID
-       JOIN ${s}.trees t  ON t.TreeID    = st.TreeID
-      WHERE cm.CensusID = ? AND cm.IsActive = 1
-        AND cm.IsValidated = TRUE
-        AND cm.StemGUID IS NOT NULL
-        AND st.IsActive = 1 AND st.DeletedAt IS NULL
-        AND t.IsActive = 1  AND t.DeletedAt  IS NULL`,
-    [input.censusId]
+       JOIN ${s}.census c ON c.CensusID = cm.CensusID
+       JOIN ${s}.stems s  ON s.StemGUID = cm.StemGUID
+       JOIN ${s}.trees t  ON t.TreeID   = s.TreeID
+      WHERE ${exportableMeasurementBaseWhere}`,
+    [input.censusId, input.plotId]
   );
   const count = Number((countRows as Array<{ n: number }>)[0].n);
 

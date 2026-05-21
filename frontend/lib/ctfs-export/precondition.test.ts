@@ -84,6 +84,15 @@ describe('checkFinishedCensus', () => {
     }
   });
 
+  it('treats the route plotId as part of the export scope', async () => {
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: 999, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false when CensusID exists under a different PlotID').toBe(false);
+    if (!result.ok) {
+      expect(result.reasons.map(r => r.kind)).toContain('zero-exportable-rows');
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Check 1: not-validated
   // -------------------------------------------------------------------------
@@ -356,6 +365,32 @@ describe('checkFinishedCensus', () => {
     if (!result.ok) {
       const failure = result.reasons.find(r => r.kind === 'string-too-long');
       expect(failure, 'string-too-long failure should be present for oversized SpeciesCode').toBeDefined();
+    }
+  });
+
+  it('fails with string-too-long when SubspeciesName exceeds 64 characters', async () => {
+    await conn.query('ALTER TABLE species MODIFY SubspeciesName varchar(96)');
+    await conn.query('UPDATE species SET SubspeciesName = ? WHERE SpeciesID = 1', ['S'.repeat(65)]);
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false for 65-char SubspeciesName').toBe(false);
+    if (!result.ok) {
+      const failure = result.reasons.find(r => r.kind === 'string-too-long');
+      expect(failure, 'string-too-long failure should be present for oversized SubspeciesName').toBeDefined();
+    }
+  });
+
+  it('fails with string-too-long when cmattributes.Code exceeds 10 characters', async () => {
+    await conn.query('ALTER TABLE cmattributes MODIFY Code varchar(32)');
+    await conn.query("UPDATE cmattributes SET Code = 'TOOLONGCODE' WHERE CoreMeasurementID = 1");
+
+    const result = await checkFinishedCensus(conn, { schema: DB_NAME, plotId: PLOT_ID, censusId: CENSUS_ID });
+
+    expect(result.ok, 'expected ok=false for 11-char cmattributes.Code').toBe(false);
+    if (!result.ok) {
+      const failure = result.reasons.find(r => r.kind === 'string-too-long');
+      expect(failure, 'string-too-long failure should be present for oversized cmattributes.Code').toBeDefined();
     }
   });
 

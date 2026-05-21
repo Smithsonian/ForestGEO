@@ -39,7 +39,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/auth', () => ({ auth: mocks.auth }));
 
-vi.mock('@/config/utils/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  isValidSchema: mocks.isValidSchema,
+  // The route now uses safeFormatQuery for the census probe. The mock returns
+  // the query verbatim — backticks aren't relevant since conn.query is itself
+  // mocked.
+  safeFormatQuery: (_schema: string, query: string) => query.replace(/\?\?/g, '`mocked_schema`')
+}));
 
 vi.mock('@/components/processors/processormacros', () => ({
   getConn: vi.fn(async () => ({
@@ -99,7 +105,13 @@ function makeProps(schema = VALID_SCHEMA, plotID = VALID_PLOT_ID, censusID = VAL
 
 // Minimal session shape that satisfies requireSession + getSessionUserId.
 const AUTHED_SESSION = {
-  user: { email: 'researcher@example.com', name: 'Researcher', userStatus: 'field crew', sites: [], allsites: [] }
+  user: {
+    email: 'researcher@example.com',
+    name: 'Researcher',
+    userStatus: 'lead technician',
+    sites: [{ schemaName: VALID_SCHEMA }],
+    allsites: [{ schemaName: VALID_SCHEMA }]
+  }
 };
 
 // Default happy-path ctfs-export responses.
@@ -165,6 +177,44 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
     const body = await res.json();
     expect(body.error).toMatch(/invalid schema/i);
+  });
+
+  it('returns 403 when a non-admin session lacks access to the requested schema', async () => {
+    mocks.auth.mockResolvedValue({
+      user: {
+        email: 'outsider@example.com',
+        name: 'Outsider',
+        userStatus: 'lead technician',
+        sites: [{ schemaName: 'forestgeo_other' }],
+        allsites: [{ schemaName: 'forestgeo_other' }]
+      }
+    });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+    const body = await res.json();
+    expect(body.error).toMatch(/forbidden/i);
+    expect(mocks.connQuery).not.toHaveBeenCalled();
+    expect(mocks.connRelease).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when a field crew session has schema access but not export authority', async () => {
+    mocks.auth.mockResolvedValue({
+      user: {
+        email: 'field@example.com',
+        name: 'Field User',
+        userStatus: 'field crew',
+        sites: [{ schemaName: VALID_SCHEMA }],
+        allsites: [{ schemaName: VALID_SCHEMA }]
+      }
+    });
+
+    const res = await GET(makeRequest(), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+    expect(mocks.connQuery).not.toHaveBeenCalled();
+    expect(mocks.connRelease).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -248,6 +298,24 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(body.error).toMatch(/reload export requires elevated permission/i);
   });
 
+  it('allows admin users to generate allowReload artifacts', async () => {
+    mocks.auth.mockResolvedValue({
+      user: {
+        email: 'admin@example.com',
+        name: 'Admin',
+        userStatus: 'db admin',
+        sites: [],
+        allsites: []
+      }
+    });
+    const url = makeUrl({ allowReload: 'true' });
+
+    const res = await GET(makeRequest(url), makeProps());
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ allowReload: true, reloadDryRun: false }));
+  });
+
   // -------------------------------------------------------------------------
   // Precondition failure
   // -------------------------------------------------------------------------
@@ -285,6 +353,7 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(res.status).toBe(HTTPResponses.NOT_FOUND);
     const body = await res.json();
     expect(body.error).toMatch(/census not found/i);
+    expect(mocks.checkFinishedCensus).not.toHaveBeenCalled();
     expect(mocks.connRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -303,6 +372,16 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
     expect(body).toBe(STUB_RENDER_RESULT.sql);
   });
 
+  it('sanitizes PlotCensusNumber before placing it in the download filename', async () => {
+    mocks.connQuery.mockResolvedValue([[{ PlotCensusNumber: '2025 A/pilot' }]]);
+
+    const res = await GET(makeRequest(), makeProps());
+
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    expect(disposition).toMatch(/^attachment; filename=ctfs-export-1-2025-A-pilot-\d+\.sql$/);
+    expect(mocks.renderArtifact).toHaveBeenCalledWith(expect.objectContaining({ plotCensusNumber: '2025 A/pilot' }));
+  });
+
   it('calls checkFinishedCensus with the parsed plotId and censusId', async () => {
     await GET(makeRequest(), makeProps());
 
@@ -311,6 +390,12 @@ describe('GET /api/export/ctfs-sql/:schema/:plotID/:censusID', () => {
       plotId: 7,
       censusId: 42
     });
+  });
+
+  it('resolves PlotCensusNumber using the parsed plotId and censusId pair', async () => {
+    await GET(makeRequest(), makeProps());
+
+    expect(mocks.connQuery).toHaveBeenCalledWith(expect.stringMatching(/WHERE PlotID = \? AND CensusID = \? AND IsActive = 1/), [7, 42]);
   });
 
   it('calls selectMeasurements with the parsed plotId and censusId', async () => {

@@ -1,13 +1,10 @@
 import SqlString from 'sqlstring';
 import {
   escapeSqlIdentifier,
-  renderCreateStagingTable,
-  renderInsertChunks,
   renderCreateStagingMeasurements,
   renderCreateStagingAttributes,
   renderInsertChunksMeasurements,
   renderInsertChunksAttributes,
-  type StagingRow,
   type MeasurementStagingRow,
   type AttributeStagingRow
 } from './csv-to-sql-shared';
@@ -21,6 +18,7 @@ export interface ProcedureEnvelopeOptions {
   lockName: string;
   cursorDeclarations: string[];
   body: string;
+  postCommitBody?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -33,64 +31,56 @@ export interface ProcedureEnvelopeOptions {
 export const LEGACY_DEFAULT_STEM_NUMBER = 0;
 export const LEGACY_DEFAULT_MEASURE_ID = 0;
 
-/**
- * All scalar and cursor-fetch variable declarations for the procedure.
- * These must appear before any cursor DECLAREs in the MySQL procedure body.
- */
+// Live scalars only — resprout/cursor scratch removed with the pivot.
+// `_viewfulltable_installed` is populated by the Stage 0 ViewFullTable probe.
 const SCALAR_DECLARES = [
   'DECLARE _message TEXT;',
   'DECLARE _census_count INT DEFAULT 0;',
   'DECLARE _target_census_id INT UNSIGNED;',
-  'DECLARE _target_plot_id INT UNSIGNED;',
-  'DECLARE _target_start_date DATE;',
-  'DECLARE _done BOOL DEFAULT FALSE;',
   'DECLARE _existing_dbh_count INT DEFAULT 0;',
-  'DECLARE _resprout_candidates INT DEFAULT 0;',
-  'DECLARE _bad TEXT;'
+  'DECLARE _viewfulltable_installed INT DEFAULT 0;',
+  'DECLARE _lock_result INT DEFAULT 0;'
 ];
 
 /**
  * Renders the full procedure SQL envelope.
  *
- * MySQL requires declaration order inside a procedure body:
- *   1. Variable DECLAREs (scalars + fetch variables)
- *   2. Cursor DECLAREs (plain DECLARE cur_X CURSOR FOR ...)
- *   3. Handler DECLAREs (HANDLER FOR NOT FOUND, then EXIT HANDLER)
+ * MySQL requires DECLAREs precede other statements in the procedure body.
+ * After the pivot there are no cursors, so `cursorDeclarations` is kept only
+ * to preserve the caller signature; passing a non-empty array is unsupported.
  *
- * Caller-supplied `cursorDeclarations` must be plain DECLARE...CURSOR FOR...
- * statements — no handlers. The shared CONTINUE HANDLER FOR NOT FOUND is
- * emitted here and covers all cursors declared above it.
+ * GET_LOCK runs before START TRANSACTION — MySQL's GET_LOCK is non-transactional
+ * and survives ROLLBACK, so acquiring it first avoids opening a transaction we
+ * never use when the lock is contended.
  *
- * GET_LOCK is acquired before START TRANSACTION — MySQL's GET_LOCK is
- * non-transactional and survives ROLLBACK, so acquiring it before the
- * transaction means we don't open a transaction we won't use if the lock
- * is held.
+ * GET_LOCK returns 1 (acquired), 0 (timeout), or NULL (error). The two failure
+ * modes have separate, operator-actionable messages — "another export running"
+ * vs. "lock subsystem error" — to avoid the misleading single-message we used
+ * to emit on both branches.
  *
  * `procedureName` is validated via escapeSqlIdentifier and stripped of
  * backticks for bare interpolation. `lockName` is SQL-escaped via
  * mysql2's string-literal escaping.
  */
 export function renderProcedureEnvelope(opts: ProcedureEnvelopeOptions): string {
-  // Validate procedure name and strip backticks for bare interpolation
+  if (opts.cursorDeclarations.length > 0) {
+    throw new Error('cursorDeclarations is unsupported after the pivot; pass an empty array.');
+  }
   const quoted = escapeSqlIdentifier(opts.procedureName);
   const procName = quoted.replace(/`/g, '');
 
-  // SQL-escape the lock name for string literal
   const lockLit = SqlString.escape(opts.lockName);
 
   const indent = (line: string) => `  ${line}`;
-
   const scalars = SCALAR_DECLARES.map(indent).join('\n');
-  const cursors = opts.cursorDeclarations.length > 0 ? '\n\n' + opts.cursorDeclarations.map(indent).join('\n') : '';
 
   return `DROP PROCEDURE IF EXISTS ${procName};
 
 DELIMITER //
 CREATE PROCEDURE ${procName}()
 main: BEGIN
-${scalars}${cursors}
+${scalars}
 
-  DECLARE CONTINUE HANDLER FOR NOT FOUND SET _done = TRUE;
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
   BEGIN
     ROLLBACK;
@@ -98,7 +88,12 @@ ${scalars}${cursors}
     RESIGNAL;
   END;
 
-  IF GET_LOCK(${lockLit}, 0) <> 1 THEN
+  SET _lock_result = GET_LOCK(${lockLit}, 0);
+  IF _lock_result IS NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'ctfs-sql export lock subsystem returned NULL (server error or invalid lock name)';
+  END IF;
+  IF _lock_result = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Another ctfs-sql export is running for this destination (plot, census)';
   END IF;
@@ -108,6 +103,7 @@ ${scalars}${cursors}
 ${opts.body}
 
   COMMIT;
+${opts.postCommitBody ? `\n${opts.postCommitBody}` : ''}
   DO RELEASE_LOCK(${lockLit});
 END //
 DELIMITER ;
@@ -131,8 +127,13 @@ export interface Stage0Options {
  * Renders the Stage 0 procedure-body fragment.
  *
  * Always emits:
+ *   - DBHAttributes schema probe (post-2014f shape required; SIGNAL with
+ *     install-DBCHANGES2014f message if the legacy CensusID column is present)
+ *   - ViewFullTable install probe (SIGNAL with helpful install message if
+ *     ctfsweb_webuser.CreateFullView is missing; the post-procedure CALL
+ *     would otherwise blow up after the data committed)
  *   - SELECT COUNT(*)/MIN() INTO scalars from Census WHERE PlotID + PlotCensusNumber
- *   - IF _census_count <> 1 THEN SIGNAL block
+ *   - IF _census_count <> 1 THEN SIGNAL block (includes the search keys in the message)
  *   - SET @target_census_id and @target_plot_id session variables
  *
  * Without --allow-reload: counts DBH rows for the census and SIGNALs if any exist.
@@ -147,15 +148,49 @@ export function renderStage0(opts: Stage0Options): string {
 
   const censusLit = SqlString.escape(opts.censusNumber);
 
-  const guard = `  -- Stage 0: target census guard
-  SELECT COUNT(*), MIN(CensusID), MIN(StartDate)
-    INTO _census_count, _target_census_id, _target_start_date
+  const guard = `  -- Stage 0a: destination schema probes (fail before any inserts if the
+  -- destination is missing required CTFSWeb post-load infrastructure).
+
+  -- Detect a pre-DBCHANGES2014f destination — DBHAttributes.CensusID was
+  -- dropped in 2014f and the Stage 9 INSERT does not supply it. Fail loudly
+  -- rather than blowing up on a generic NOT NULL constraint error.
+  SELECT COUNT(*) INTO _existing_dbh_count
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'DBHAttributes'
+      AND COLUMN_NAME = 'CensusID';
+  IF _existing_dbh_count > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'DBHAttributes still has a CensusID column — apply DBCHANGES2014f.sql to the destination first.';
+  END IF;
+  SET _existing_dbh_count = 0;
+
+  -- ctfsweb_webuser.CreateFullView is invoked AFTER the load commits, so if it
+  -- is missing the operator gets data in but no reporting table refresh. Probe
+  -- here so the load aborts cleanly with installation instructions.
+  SELECT COUNT(*) INTO _viewfulltable_installed
+    FROM information_schema.ROUTINES
+    WHERE ROUTINE_SCHEMA = 'ctfsweb_webuser'
+      AND ROUTINE_NAME = 'CreateFullView'
+      AND ROUTINE_TYPE = 'PROCEDURE';
+  IF _viewfulltable_installed = 0 THEN
+    -- MESSAGE_TEXT is capped at 128 chars by MySQL SIGNAL; keep the key install
+    -- hint terse and use the comment block above for the longer rationale.
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'ctfsweb_webuser.CreateFullView missing. Source creating_ViewFullTable.sql into the destination MySQL, then retry.';
+  END IF;
+
+  -- Stage 0: target census guard
+  SELECT COUNT(*), MIN(CensusID)
+    INTO _census_count, _target_census_id
     FROM Census
     WHERE PlotID = ${opts.destinationPlotId}
       AND PlotCensusNumber = ${censusLit};
 
   IF _census_count <> 1 THEN
-    SET _message = CONCAT('Expected exactly one Census row for PlotID + PlotCensusNumber; found ', _census_count);
+    SET _message = CONCAT(
+      'Expected exactly one Census row for PlotID=${opts.destinationPlotId}, PlotCensusNumber=', ${censusLit},
+      '; found ', _census_count);
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = _message;
   END IF;
 
@@ -164,7 +199,6 @@ export function renderStage0(opts: Stage0Options): string {
 `;
 
   if (opts.allowReload) {
-    // Reload cleanup is now produced by renderStage0bReload; composer is responsible for including it.
     return guard;
   }
 
@@ -405,6 +439,22 @@ export function renderStage2(opts: Stage2Options): string {
   UPDATE ${a} a
     JOIN TSMAttributes tsm ON tsm.TSMCode = a.TSMCode
     SET a.TSMID = tsm.TSMID;
+
+  -- Stage 2c: destination-contract normalization rules from Suzanne's
+  -- "Upload scripts" email (TempMultiStems / TempNewPlants behavior):
+  --   * For new stems (StemID IS NULL after destination lookup), default HOM
+  --     to '1.3' when DBH is present but HOM is missing. The app already
+  --     normalizes HOM=0 to NULL during ingestion (processbulkingestion.tsx),
+  --     so HOM IS NULL is the signal that no operator value exists.
+  --   * Belt-and-braces: HOM must be NULL when DBH is NULL.
+  UPDATE ${m}
+    SET HOM = '1.3'
+    WHERE StemID IS NULL
+      AND DBH IS NOT NULL
+      AND DBH > 0
+      AND HOM IS NULL;
+
+  UPDATE ${m} SET HOM = NULL WHERE DBH IS NULL;
 `;
 }
 
@@ -432,9 +482,12 @@ export interface Stage5Options {
  *   5. Unknown quadrat (QuadratID IS NULL after Stage 2)
  *   6. Unknown TSMCode on staging_attributes (TSMID IS NULL after Stage 2)
  *   7. No duplicate (StemID, CensusID) destinations within the batch
- *   8. (TreeID, StemTag, QuadratID) uniqueness among new-stem rows (StemID IS NULL)
+ *   8. New-stem natural-key uniqueness. Existing trees use TreeID; unresolved
+ *      new trees use their pending Tree natural key so different new trees that
+ *      share a common StemTag do not collide while TreeID is still NULL.
  *   9. No pre-existing orphan Tree for new tree keys (fail if matching Tree exists with no Stem)
- *   10. Destination string lengths: Tag>10, StemTag>32, QuadratName>8, Comments>128 for measurements; TSMCode>10 for attributes
+ *   10. Destination string lengths for measurement natural keys, taxonomy
+ *       context, comments, and attribute TSMCode.
  *
  * After all checks, a single IF EXISTS block emits SELECTs of failed rows from
  * both tables and a SIGNAL with a stable short message.
@@ -453,16 +506,63 @@ export function renderStage5(opts: Stage5Options): string {
 
   return `  -- Stage 5: destination contract checks
 
-${appendErr(m, 'Missing required field', `Tag IS NULL OR StemTag IS NULL OR Mnemonic IS NULL OR QuadratName IS NULL OR ExactDate IS NULL`)}
-
 ${appendErr(
   m,
-  'Taxonomy not uniquely resolved',
-  `NOT EXISTS (
-       SELECT 1 FROM taxonomy_lookup tx
-       WHERE tx.TempID = ${m}.TempID AND tx.TaxonCount = 1
-     )`
+  'Missing required field',
+  `Tag IS NULL OR Tag = '' OR StemTag IS NULL OR Mnemonic IS NULL OR Mnemonic = ''
+       OR QuadratName IS NULL OR QuadratName = '' OR ExactDate IS NULL`
 )}
+
+  -- Stage 5 check 1b: empty StemTag is a destination contract failure when the
+  -- destination tree already has another stem with the same empty tag. The app
+  -- stores stems.StemTag with default '' NOT NULL, so legitimate "no stem tag"
+  -- rows arrive here as empty strings; reject duplicates explicitly rather than
+  -- silently colliding on the <=> match in Stage 2/7.
+  DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
+  CREATE TEMPORARY TABLE _stage5_empty_stemtag AS
+    SELECT TreeID, QuadratID, COUNT(*) AS cnt
+      FROM ${m}
+     WHERE StemID IS NULL
+       AND (StemTag IS NULL OR StemTag = '')
+       AND TreeID IS NOT NULL
+       AND QuadratID IS NOT NULL
+     GROUP BY TreeID, QuadratID
+    HAVING COUNT(*) > 1
+       OR EXISTS (
+            SELECT 1 FROM Stem s
+             WHERE s.TreeID = TreeID
+               AND s.QuadratID = QuadratID
+               AND (s.StemTag IS NULL OR s.StemTag = '')
+          );
+
+  UPDATE ${m}
+    SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Empty StemTag collides with another stem under same Tree+Quadrat')
+    WHERE StemID IS NULL
+      AND (StemTag IS NULL OR StemTag = '')
+      AND TreeID IS NOT NULL
+      AND QuadratID IS NOT NULL
+      AND EXISTS (SELECT 1 FROM _stage5_empty_stemtag e WHERE e.TreeID = ${m}.TreeID AND e.QuadratID = ${m}.QuadratID);
+
+  DROP TEMPORARY TABLE IF EXISTS _stage5_empty_stemtag;
+
+  -- Stage 5 check 2: taxonomy uniqueness — include the conflicting destination
+  -- SpeciesID set in the error reason so operators can dedup CurrentTaxonFlag
+  -- on the destination without a separate query.
+  UPDATE ${m} t
+    LEFT JOIN (
+      SELECT TempID,
+             GROUP_CONCAT(DISTINCT CONCAT(SpeciesID, IFNULL(CONCAT(':', SubSpeciesID), '')) ORDER BY SpeciesID SEPARATOR ',') AS ambiguous_ids,
+             COUNT(DISTINCT CONCAT(SpeciesID, ':', COALESCE(SubSpeciesID, 0))) AS taxon_count
+        FROM taxonomy_lookup
+       GROUP BY TempID
+    ) tx ON tx.TempID = t.TempID
+    SET t.Errors = CONCAT(
+      COALESCE(t.Errors, ''),
+      CASE WHEN t.Errors IS NULL THEN '' ELSE '; ' END,
+      'Taxonomy not uniquely resolved',
+      CASE WHEN tx.ambiguous_ids IS NULL THEN '' ELSE CONCAT(' (matches ', tx.ambiguous_ids, ')') END
+    )
+    WHERE COALESCE(tx.taxon_count, 0) <> 1;
 
 ${appendErr(
   m,
@@ -510,16 +610,29 @@ ${appendErr(a, 'Unknown TSMCode', `TSMID IS NULL AND TSMCode IS NOT NULL`)}
   -- Same materialisation pattern to avoid ER_CANT_REOPEN_TABLE.
   DROP TEMPORARY TABLE IF EXISTS _stage5_dup8;
   CREATE TEMPORARY TABLE _stage5_dup8 AS
-    SELECT TreeID, StemTag, QuadratID
+    SELECT CASE
+             WHEN TreeID IS NOT NULL THEN CONCAT('existing:', TreeID)
+             ELSE CONCAT('new:', COALESCE(Tag, ''), ':', COALESCE(SpeciesID, 'NULL'), ':', COALESCE(SubSpeciesID, 'NULL'))
+           END AS TreeKey,
+           StemTag,
+           QuadratID
       FROM ${m}
      WHERE StemID IS NULL
-     GROUP BY TreeID, StemTag, QuadratID
+     GROUP BY TreeKey, StemTag, QuadratID
     HAVING COUNT(*) > 1;
 
   UPDATE ${m}
     SET Errors = CONCAT(COALESCE(Errors, ''), CASE WHEN Errors IS NULL THEN '' ELSE '; ' END, 'Duplicate new-stem natural key')
     WHERE StemID IS NULL
-      AND EXISTS (SELECT 1 FROM _stage5_dup8 d WHERE d.TreeID <=> ${m}.TreeID AND d.StemTag <=> ${m}.StemTag AND d.QuadratID <=> ${m}.QuadratID);
+      AND EXISTS (
+        SELECT 1 FROM _stage5_dup8 d
+         WHERE d.TreeKey = CASE
+                 WHEN ${m}.TreeID IS NOT NULL THEN CONCAT('existing:', ${m}.TreeID)
+                 ELSE CONCAT('new:', COALESCE(${m}.Tag, ''), ':', COALESCE(${m}.SpeciesID, 'NULL'), ':', COALESCE(${m}.SubSpeciesID, 'NULL'))
+               END
+           AND d.StemTag <=> ${m}.StemTag
+           AND d.QuadratID <=> ${m}.QuadratID
+      );
 
   DROP TEMPORARY TABLE IF EXISTS _stage5_dup8;
 
@@ -536,7 +649,20 @@ ${appendErr(
    )`
 )}
 
-${appendErr(m, 'String too long for CTFS', `CHAR_LENGTH(Tag) > 10 OR CHAR_LENGTH(StemTag) > 32 OR CHAR_LENGTH(QuadratName) > 8 OR CHAR_LENGTH(Comments) > 128`)}
+${appendErr(
+  m,
+  'String too long for CTFS',
+  `CHAR_LENGTH(Tag) > 10
+     OR CHAR_LENGTH(StemTag) > 32
+     OR CHAR_LENGTH(Mnemonic) > 10
+     OR CHAR_LENGTH(QuadratName) > 8
+     OR CHAR_LENGTH(Comments) > 128
+     OR CHAR_LENGTH(Family) > 64
+     OR CHAR_LENGTH(Genus) > 64
+     OR CHAR_LENGTH(SpeciesName) > 64
+     OR CHAR_LENGTH(SpeciesAuthority) > 128
+     OR CHAR_LENGTH(SubspeciesName) > 64`
+)}
 
 ${appendErr(a, 'TSMCode too long for CTFS', `CHAR_LENGTH(TSMCode) > 10`)}
 
@@ -544,7 +670,7 @@ ${appendErr(a, 'TSMCode too long for CTFS', `CHAR_LENGTH(TSMCode) > 10`)}
      OR EXISTS (SELECT 1 FROM ${a} WHERE Errors IS NOT NULL) THEN
     SELECT TempID, CoreMeasurementID, SourceRowIndex, Tag, StemTag, Mnemonic, QuadratName, Errors
       FROM ${m} WHERE Errors IS NOT NULL ORDER BY TempID;
-    SELECT TempAttrID, CoreMeasurementID, TempMeasurementID, TSMCode, Errors
+    SELECT TempAttrID, CoreMeasurementID, TSMCode, Errors
       FROM ${a} WHERE Errors IS NOT NULL ORDER BY TempAttrID;
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Validation failed; see prior SELECT for per-row details';
   END IF;
@@ -664,9 +790,14 @@ export function renderStage8DBH(opts: StageBulkInsertOptions): string {
 export function renderStage9DBHAttributes(opts: { measurementsTable: string; attributesTable: string }): string {
   const m = escapeSqlIdentifier(opts.measurementsTable);
   const a = escapeSqlIdentifier(opts.attributesTable);
+  // JOIN on CoreMeasurementID — the natural key on both staging tables — rather
+  // than positional TempID/TempMeasurementID. The previous design relied on
+  // implementation-defined AUTO_INCREMENT ordering aligning with INSERT VALUES
+  // tuple order, which would silently misattach attributes if MySQL ever
+  // burned an AUTO_INCREMENT value between rows.
   return `  -- Stage 9: populate DBHAttributes (post-DBCHANGES2014f shape: TSMID, DBHID)
   UPDATE ${a} a
-    JOIN ${m} m ON m.TempID = a.TempMeasurementID
+    JOIN ${m} m ON m.CoreMeasurementID = a.CoreMeasurementID
     SET a.DBHID = m.DBHID;
 
   INSERT INTO DBHAttributes (TSMID, DBHID)
@@ -696,67 +827,28 @@ export function renderStage10(opts: { measurementsTable: string; attributesTable
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline composer
+// Post-load: ViewFullTable handling
 // ---------------------------------------------------------------------------
 
-export interface RenderFullPipelineOptions {
-  plotId: number;
-  censusNumber: string;
-  allowReload: boolean;
-  tempTable: string;
-  stagingRows: StagingRow[];
-}
-
 /**
- * Composes every stage renderer into one .sql file string.
+ * Emit the post-COMMIT, post-procedure CTFSWeb reporting rebuild step.
  *
- * Stage ordering (after pivot, deleted stages 2b/3/4/9):
+ * Suzanne's provided `creating_ViewFullTable.sql` installs `CreateFullView`
+ * (and helpers) into `ctfsweb_webuser`. The Stage 0 install probe already
+ * SIGNALed if the procedure was missing, so by the time we reach this point
+ * the procedure is known to exist on the destination.
  *
- *   Stage 0 -> [0b] -> 1 -> 2 -> 5 -> 6 -> 7 -> 8 -> 10
- *
- * Stage 0b (reload cleanup) is included only when allowReload is true.
- *
- * Stages 6/7/8 now emit set-based bulk INSERTs + UPDATE join-backs; no cursor
- * declarations are required.
- *
- * NOTE: This is a transitional stub. In a later task, the app endpoint will
- * call the individual renderers directly instead of using this composer.
- *
- * Stage 1 now uses the new two-table signature; this composer calls it with
- * empty measurement/attribute arrays as a placeholder. The legacy RenderFullPipelineOptions
- * stagingRows field is now dead-weight; the new pipeline will replace it entirely.
+ * `CreateFullView` does DROP/CREATE TABLE (DDL → implicit commit), so it
+ * cannot live inside the load transaction. It runs outside the procedure
+ * envelope so a failure here does not invalidate the just-committed data
+ * load and the operator can re-run the rebuild independently.
  */
-export function renderFullPipeline(opts: RenderFullPipelineOptions): string {
-  const { plotId, censusNumber, allowReload } = opts;
-
-  const stage6 = renderStage6NewTrees({ measurementsTable: 'staging_measurements' });
-  const stage7 = renderStage7NewStems({ measurementsTable: 'staging_measurements' });
-  const stage8 = renderStage8DBH({ measurementsTable: 'staging_measurements' });
-
-  const body = [
-    renderStage0({ destinationPlotId: plotId, censusNumber, allowReload }),
-    allowReload ? renderStage0bReload({ mode: 'real' }) : '',
-    renderStage1({
-      measurementsTable: 'staging_measurements',
-      attributesTable: 'staging_attributes',
-      measurementRows: [],
-      attributeRows: []
-    }),
-    renderStage2({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
-    renderStage5({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
-    stage6,
-    stage7,
-    stage8,
-    renderStage9DBHAttributes({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' }),
-    renderStage10({ measurementsTable: 'staging_measurements', attributesTable: 'staging_attributes' })
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
-  return renderProcedureEnvelope({
-    procedureName: 'csv_to_sql_v2_load', // placeholder; orchestrator (later task) supplies a unique per-artifact name
-    lockName: 'ctfs-export:legacy:placeholder', // placeholder; orchestrator supplies real lock name
-    cursorDeclarations: [],
-    body
-  });
+export function renderPostLoadViewFullTableCall(): string {
+  return `-- Post-load: rebuild CTFSWeb ViewFullTable (DDL — runs outside the load transaction).
+-- The Stage 0 install probe SIGNALed earlier if ctfsweb_webuser.CreateFullView
+-- was missing, so the load only reaches this line when the procedure is
+-- installed on the destination.
+CALL ctfsweb_webuser.CreateFullView(DATABASE(), 'ViewFullTable');
+SELECT 'ViewFullTable rebuild' AS scope, 'completed' AS status;
+`;
 }

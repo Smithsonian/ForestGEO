@@ -25,7 +25,8 @@ import {
   renderStage7NewStems,
   renderStage8DBH,
   renderStage9DBHAttributes,
-  renderStage10
+  renderStage10,
+  renderPostLoadViewFullTableCall
 } from '../../lib/csv-to-sql-v2';
 import type { MeasurementStagingRow, AttributeStagingRow } from '../../lib/csv-to-sql-shared';
 
@@ -36,6 +37,7 @@ const FIXTURE_DIR = path.resolve(__dirname, '../fixtures/csv-to-sql-v2');
 const CANONICAL_DDL_PATH = path.join(FIXTURE_DIR, 'canonical-ddl.sql');
 const SEED_CENSUS_1_PATH = path.join(FIXTURE_DIR, 'seed-census-1.sql');
 const SEED_WITH_PRIORS_PATH = path.join(FIXTURE_DIR, 'seed-with-priors.sql');
+const CTFSWEB_STUB_PATH = path.resolve(__dirname, '../fixtures/ctfs-export/install-ctfsweb-stub.sql');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -71,28 +73,37 @@ function buildArtifact(input: ArtifactInput): string {
 
   const isReload = input.allowReload || !!input.reloadDryRun;
 
-  // Dry-run mode: emit Stage 0b in SAVEPOINT mode then LEAVE to skip all DML stages.
-  // The composer is responsible for adding LEAVE main after Stage 0b per the renderer's contract.
-  const stage0bFragment = isReload
-    ? renderStage0bReload({ mode: input.reloadDryRun ? 'dry-run' : 'real' }) + (input.reloadDryRun ? '\n  LEAVE main;' : '')
-    : '';
+  const stage0bFragment = isReload ? renderStage0bReload({ mode: input.reloadDryRun ? 'dry-run' : 'real' }) : '';
 
   const stages = [
     renderStage0({ destinationPlotId: input.destinationPlotId, censusNumber: input.censusNumber, allowReload: isReload }),
     stage0bFragment,
-    renderStage1({ measurementsTable, attributesTable, measurementRows: input.measurementRows, attributeRows: input.attributeRows }),
-    renderStage2({ measurementsTable, attributesTable }),
-    renderStage5({ measurementsTable, attributesTable }),
-    renderStage6NewTrees({ measurementsTable }),
-    renderStage7NewStems({ measurementsTable }),
-    renderStage8DBH({ measurementsTable }),
-    renderStage9DBHAttributes({ measurementsTable, attributesTable }),
-    renderStage10({ measurementsTable, attributesTable })
+    ...(input.reloadDryRun
+      ? []
+      : [
+          renderStage1({ measurementsTable, attributesTable, measurementRows: input.measurementRows, attributeRows: input.attributeRows }),
+          renderStage2({ measurementsTable, attributesTable }),
+          renderStage5({ measurementsTable, attributesTable }),
+          renderStage6NewTrees({ measurementsTable }),
+          renderStage7NewStems({ measurementsTable }),
+          renderStage8DBH({ measurementsTable }),
+          renderStage9DBHAttributes({ measurementsTable, attributesTable }),
+          renderStage10({ measurementsTable, attributesTable })
+        ])
   ]
     .filter(Boolean)
     .join('\n\n');
 
-  return renderProcedureEnvelope({ procedureName, lockName, cursorDeclarations: [], body: stages });
+  const envelope = renderProcedureEnvelope({
+    procedureName,
+    lockName,
+    cursorDeclarations: [],
+    body: stages
+  });
+
+  // The ViewFullTable rebuild CALL runs OUTSIDE the load procedure — see
+  // render-procedure.ts for why. Dry-run skips it entirely.
+  return input.reloadDryRun ? envelope : envelope + '\n' + renderPostLoadViewFullTableCall();
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +127,6 @@ function makeMeasurement(overrides: Partial<MeasurementStagingRow> = {}): Measur
     SpeciesName: 'foo',
     SpeciesAuthority: null,
     SubspeciesName: null,
-    SubspeciesAuthority: null,
-    IDLevel: 'species',
     DBH: 10,
     HOM: '1.3',
     ExactDate: '2024-01-15',
@@ -132,7 +141,6 @@ function makeMeasurement(overrides: Partial<MeasurementStagingRow> = {}): Measur
 function makeAttribute(measurementId: number, tsmCode: string, coreMeasurementId?: number): AttributeStagingRow {
   return {
     CoreMeasurementID: coreMeasurementId ?? measurementId,
-    TempMeasurementID: measurementId,
     TSMCode: tsmCode
   };
 }
@@ -171,6 +179,17 @@ async function loadCanonicalDdl(connection: mysql.Connection, filePath: string):
 
 async function loadSeedFile(connection: mysql.Connection, filePath: string): Promise<void> {
   for (const stmt of splitSqlFile(readFileSync(filePath, 'utf8'))) {
+    await connection.query(stmt.sql);
+  }
+}
+
+/**
+ * Install the ctfsweb_webuser.CreateFullView stub the Stage 0 probe requires.
+ * Idempotent.
+ */
+async function installCtfswebStub(connection: mysql.Connection): Promise<void> {
+  for (const stmt of splitSqlFile(readFileSync(CTFSWEB_STUB_PATH, 'utf8'))) {
+    if (!stmt.sql.trim()) continue;
     await connection.query(stmt.sql);
   }
 }
@@ -244,6 +263,8 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     // The canonical DDL's DBCHANGES2014f section already drops DBHAttributes.CensusID
     // (line: ALTER TABLE DBHAttributes DROP COLUMN censusid). No further ALTER needed.
     await loadSeedFile(connection, SEED_CENSUS_1_PATH);
+    // Install the CTFSWeb post-load stub so the Stage 0 probe passes.
+    await installCtfswebStub(connection);
   });
 
   afterEach(async () => {
@@ -275,6 +296,26 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
     expect(dbhRows).toHaveLength(1);
     expect(Number(dbhRows[0].DBH)).toBeCloseTo(12, 4);
     expect(String(dbhRows[0].HOM)).toBe('1.3');
+  });
+
+  it('new-stem duplicate check allows different new trees with the same StemTag in the same quadrat', async () => {
+    const measurementRows = [
+      makeMeasurement({ Tag: 'NT1', StemTag: '1', QuadratName: 'A1', LX: 1, LY: 1 }),
+      makeMeasurement({ Tag: 'NT2', StemTag: '1', QuadratName: 'A1', LX: 2, LY: 2 })
+    ];
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows,
+      attributeRows: []
+    });
+
+    await executeArtifact(connection, artifact);
+
+    expect(await countRows(connection, 'Tree')).toBe(2);
+    expect(await countRows(connection, 'Stem')).toBe(2);
+    expect(await countRows(connection, 'DBH', 'CensusID = 1')).toBe(2);
   });
 
   // -------------------------------------------------------------------------
@@ -448,8 +489,8 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
       Family: 'Testaceae',
       Genus: 'Foobaria',
       SpeciesName: 'foo',
-      SubspeciesName: 'foovar',
-      SubspeciesAuthority: 'L.'
+      SubspeciesName: 'foovar'
+      // SubspeciesAuthority dropped from staging — see csv-to-sql-shared.ts.
     });
     const artifact = buildArtifact({
       destinationPlotId: DESTINATION_PLOT_ID,
@@ -826,11 +867,26 @@ describe('csv-to-sql-v2 pivoted destination procedure (integration)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // ViewFullTable (deferred)
+  // ViewFullTable handling
   // -------------------------------------------------------------------------
 
-  it.skip('rebuilds ViewFullTable after load (deferred — Suzanne TBD)', () => {
-    // Sentinel: will fail-as-skipped until Suzanne provides the refresh procedure.
+  it('emits explicit ViewFullTable rebuild instruction after successful load', async () => {
+    const row = makeMeasurement({ Tag: 'VF1', StemTag: '1', DBH: 10 });
+    const artifact = buildArtifact({
+      destinationPlotId: DESTINATION_PLOT_ID,
+      censusNumber: CENSUS_NUMBER_1,
+      allowReload: false,
+      measurementRows: [row],
+      attributeRows: []
+    });
+
+    const resultSets = await executeArtifact(connection, artifact);
+
+    // The post-load step now CALLS the installed stub (not just SELECTs an instruction).
+    const stubResultSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ctfsweb_webuser.CreateFullView (test stub)');
+    expect(stubResultSet, 'post-load CALL must execute ctfsweb_webuser.CreateFullView').toBeDefined();
+    const completedSet = resultSets.find(rs => rs.length > 0 && rs[0].scope === 'ViewFullTable rebuild' && rs[0].status === 'completed');
+    expect(completedSet, 'post-load must emit the completed sentinel').toBeDefined();
   });
 
   // -------------------------------------------------------------------------
