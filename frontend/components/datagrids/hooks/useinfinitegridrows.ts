@@ -25,7 +25,8 @@ export type UseInfiniteGridRowsResult<R> = {
   isLoadingMore: boolean;
   hasMore: boolean;
   loadMore: () => void;
-  refresh: () => void;
+  refresh: () => Promise<void>;
+  retry: () => void;
   error: Error | null;
   softCapExceeded: boolean;
   upsertRow: (row: R) => void;
@@ -34,6 +35,25 @@ export type UseInfiniteGridRowsResult<R> = {
 
 export const INFINITE_SOFT_CAP = 10_000;
 export const INFINITE_DEFAULT_CHUNK = 100;
+
+function appendUniqueRows<R>(existingRows: R[], incomingRows: R[], rowIdKey: keyof R): R[] {
+  const nextRows = existingRows.slice();
+  const indexByID = new Map<R[keyof R], number>();
+  nextRows.forEach((row, index) => indexByID.set(row[rowIdKey], index));
+
+  incomingRows.forEach(row => {
+    const id = row[rowIdKey];
+    const existingIndex = indexByID.get(id);
+    if (existingIndex === undefined) {
+      indexByID.set(id, nextRows.length);
+      nextRows.push(row);
+      return;
+    }
+    nextRows[existingIndex] = row;
+  });
+
+  return nextRows;
+}
 
 export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): UseInfiniteGridRowsResult<R> {
   const { fetcher, infiniteChunkSize = INFINITE_DEFAULT_CHUNK, resetKey, rowIdKey, paginated } = opts;
@@ -44,11 +64,13 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
   const [page, setPage] = useState<number>(0);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
+  const [failedPage, setFailedPage] = useState<number | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const tokenRef = useRef<number>(0);
   const inflightRef = useRef<boolean>(false);
   const lastResetKey = useRef<unknown>(resetKey);
+  const lastMode = useRef<GridMode>(mode);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
@@ -71,14 +93,16 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       try {
         const res = await fetcherRef.current({ page: targetPage, pageSize: infiniteChunkSize, signal: ctrl.signal });
         if (token !== tokenRef.current) return;
-        setAccumulator(prev => (targetPage === 0 ? res.rows : prev.concat(res.rows)));
+        setAccumulator(prev => (targetPage === 0 ? res.rows : appendUniqueRows(prev, res.rows, rowIdKey)));
         setInfiniteTotal(res.totalRows);
         setPage(targetPage);
+        setFailedPage(null);
       } catch (e) {
         if (token !== tokenRef.current) return;
         const err = e as { name?: string };
         if (err && err.name === 'AbortError') return;
         setError(e as Error);
+        setFailedPage(targetPage);
       } finally {
         if (token === tokenRef.current) {
           inflightRef.current = false;
@@ -86,41 +110,41 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         }
       }
     },
-    [abortInFlight, infiniteChunkSize]
+    [abortInFlight, infiniteChunkSize, rowIdKey]
   );
 
-  const setMode = useCallback(
-    (next: GridMode) => {
-      setModeInternal(prev => {
-        if (prev === next) return prev;
-        if (next === 'infinite') {
-          setAccumulator([]);
-          setInfiniteTotal(0);
-          setPage(0);
-          setError(null);
-          void fetchPage(0);
-        } else {
-          abortInFlight();
-          setAccumulator([]);
-          setInfiniteTotal(0);
-          setError(null);
-        }
-        return next;
-      });
-    },
-    [abortInFlight, fetchPage]
-  );
+  const resetInfiniteState = useCallback(() => {
+    setAccumulator([]);
+    setInfiniteTotal(0);
+    setPage(0);
+    setError(null);
+    setFailedPage(null);
+  }, []);
+
+  const setMode = useCallback((next: GridMode) => setModeInternal(next), []);
+
+  useEffect(() => {
+    if (lastMode.current === mode) return;
+    lastMode.current = mode;
+
+    if (mode === 'infinite') {
+      resetInfiniteState();
+      void fetchPage(0);
+      return;
+    }
+
+    abortInFlight();
+    resetInfiniteState();
+  }, [abortInFlight, fetchPage, mode, resetInfiniteState]);
 
   useEffect(() => {
     if (lastResetKey.current === resetKey) return;
     lastResetKey.current = resetKey;
     if (mode === 'infinite') {
-      setAccumulator([]);
-      setInfiniteTotal(0);
-      setPage(0);
+      resetInfiniteState();
       void fetchPage(0);
     }
-  }, [resetKey, mode, fetchPage]);
+  }, [resetKey, mode, fetchPage, resetInfiniteState]);
 
   useEffect(() => () => abortInFlight(), [abortInFlight]);
 
@@ -132,8 +156,14 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
   }, [mode, isLoadingMore, hasMore, fetchPage, page]);
 
   const refresh = useCallback(() => {
-    if (mode === 'infinite') void fetchPage(0);
+    if (mode !== 'infinite') return Promise.resolve();
+    return fetchPage(0);
   }, [mode, fetchPage]);
+
+  const retry = useCallback(() => {
+    if (mode !== 'infinite') return;
+    void fetchPage(failedPage ?? 0);
+  }, [failedPage, fetchPage, mode]);
 
   const upsertRow = useCallback(
     (row: R) => {
@@ -177,6 +207,7 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
         hasMore: false,
         loadMore: () => {},
         refresh,
+        retry,
         error: null,
         softCapExceeded: false,
         upsertRow: () => {},
@@ -193,10 +224,11 @@ export function useInfiniteGridRows<R>(opts: UseInfiniteGridRowsOptions<R>): Use
       hasMore,
       loadMore,
       refresh,
+      retry,
       error,
       softCapExceeded: accumulator.length > INFINITE_SOFT_CAP,
       upsertRow,
       removeRow
     };
-  }, [mode, setMode, paginated, accumulator, infiniteTotal, isLoadingMore, hasMore, loadMore, refresh, error, upsertRow, removeRow]);
+  }, [mode, setMode, paginated, accumulator, infiniteTotal, isLoadingMore, hasMore, loadMore, refresh, retry, error, upsertRow, removeRow]);
 }

@@ -193,10 +193,6 @@ vi.mock('@/components/datagrids/customgridpagination', () => ({
   default: () => null
 }));
 
-vi.mock('@/components/datagrids/infinitegridfooter', () => ({
-  default: () => null
-}));
-
 vi.mock('@/components/datagrids/infinitegridscrollbridge', () => ({
   default: () => null
 }));
@@ -265,7 +261,10 @@ vi.mock('@/config/styleddatagrid', async () => {
         if (!oldRow || !props.processRowUpdate) return undefined;
         return props.processRowUpdate(newRow, oldRow);
       };
-    }, [rows, props.processRowUpdate]);
+      (globalThis as any).__triggerInfiniteToggle = (next: boolean) => {
+        props.slots?.pagination?.infiniteScroll?.onToggle?.(next);
+      };
+    }, [rows, props.processRowUpdate, props.slots]);
 
     return (
       <div data-testid="styled-grid">
@@ -615,20 +614,12 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
     expect(mockBeginEdit).not.toHaveBeenCalled();
   });
 
-  it('toggling Infinite scroll issues a query with pageSize 100', async () => {
+  it('selecting infinite via the pagination slot issues a query with pageSize 100', async () => {
     await mountExplorer();
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
 
-    const toggles = screen.getAllByLabelText('Infinite scroll');
-    expect(toggles.length).toBeGreaterThan(0);
-    const labelEl = toggles[0];
-    const checkbox =
-      (labelEl as HTMLElement).querySelector('input[type="checkbox"]') ??
-      (labelEl as HTMLElement).closest('label')?.querySelector('input[type="checkbox"]') ??
-      null;
-    expect(checkbox).not.toBeNull();
     await act(async () => {
-      fireEvent.click(checkbox as HTMLInputElement);
+      (globalThis as any).__triggerInfiniteToggle(true);
     });
 
     await waitFor(() => {
@@ -638,5 +629,79 @@ describe('ErrorsExplorer — row edit via shared preview flow', () => {
       });
       expect(explorerCalls.length).toBeGreaterThan(0);
     });
+  });
+
+  it('refreshes the infinite row source after an edit', async () => {
+    mockBeginEdit.mockResolvedValueOnce({
+      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+      applyErrors: [],
+      editOperationID: TEST_EDIT_OPERATION_ID,
+      validationPending: false
+    });
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    await act(async () => {
+      (globalThis as any).__triggerInfiniteToggle(true);
+    });
+    await waitFor(() =>
+      expect(
+        mockFetch.mock.calls.some(([input, init]) => {
+          const url = typeof input === 'string' ? input : input.toString();
+          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
+        })
+      ).toBe(true)
+    );
+
+    mockFetch.mockClear();
+    await act(async () => {
+      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
+    });
+
+    await waitFor(() =>
+      expect(
+        mockFetch.mock.calls.some(([input, init]) => {
+          const url = typeof input === 'string' ? input : input.toString();
+          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
+        })
+      ).toBe(true)
+    );
+  });
+
+  it('refreshes the infinite row source after undo', async () => {
+    mockBeginEdit.mockResolvedValueOnce({
+      updatedIDs: { coreMeasurementID: TEST_CORE_MEASUREMENT_ID },
+      applyErrors: [],
+      editOperationID: TEST_EDIT_OPERATION_ID,
+      validationPending: false
+    });
+
+    await mountExplorer();
+    await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain('"coreMeasurementID":101'));
+
+    await act(async () => {
+      (globalThis as any).__triggerInfiniteToggle(true);
+    });
+    await waitFor(() => expect(mockFetch.mock.calls.some(([, init]) => init?.body && JSON.parse(String(init.body)).pageSize === 100)).toBe(true));
+
+    await act(async () => {
+      await (globalThis as any).__triggerRowUpdate(TEST_CORE_MEASUREMENT_ID, { ...GRID_ROW, measuredDBH: 12 });
+    });
+    await waitFor(() => expect(screen.getByTestId(`undo-toast-${TEST_EDIT_OPERATION_ID}`)).toBeInTheDocument());
+
+    mockFetch.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('undo-toast-undo'));
+    });
+
+    await waitFor(() =>
+      expect(
+        mockFetch.mock.calls.some(([input, init]) => {
+          const url = typeof input === 'string' ? input : input.toString();
+          return url.includes('/api/errors/explorer/query') && init?.body && JSON.parse(String(init.body)).pageSize === 100;
+        })
+      ).toBe(true)
+    );
   });
 });

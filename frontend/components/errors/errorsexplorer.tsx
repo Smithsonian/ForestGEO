@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import {
   Alert,
   Autocomplete,
-  Box,
   Button,
   Card,
   Chip,
@@ -51,9 +50,8 @@ import {
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import CustomGridPagination from '@/components/datagrids/customgridpagination';
-import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
-import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { useInfiniteGridRows, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
@@ -281,6 +279,7 @@ export default function ErrorsExplorer() {
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
   const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const infiniteRef = useRef<UseInfiniteGridRowsResult<GridRowModel> | null>(null);
 
   const editFlow = useEditPreviewFlow({
     schema: currentSite?.schemaName ?? '',
@@ -573,8 +572,10 @@ export default function ErrorsExplorer() {
         return updatedRow;
       }
 
+      const activeInfinite = infiniteRef.current;
       await Promise.all([
         fetchRows(rowScope),
+        activeInfinite?.mode === 'infinite' ? activeInfinite.refresh() : Promise.resolve(),
         fetchFacets(rowScope),
         selectedMeasurementID ? fetchDetails(selectedMeasurementID, rowScope) : Promise.resolve()
       ]);
@@ -642,36 +643,44 @@ export default function ErrorsExplorer() {
 
   const isInfiniteOn = infinite.mode === 'infinite';
 
+  useEffect(() => {
+    infiniteRef.current = infinite;
+  }, [infinite]);
+
   const wrappedProcessRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
-      const updated = await processRowUpdate(newRow, oldRow);
-      infinite.upsertRow(updated);
-      return updated;
+      return await processRowUpdate(newRow, oldRow);
     },
-    [processRowUpdate, infinite]
+    [processRowUpdate]
   );
 
-  const renderInfiniteFooter = useCallback(
-    () => (
-      <InfiniteGridFooter
-        loadedCount={infinite.rows.length}
-        totalRows={infinite.totalRows}
-        isLoadingMore={infinite.isLoadingMore}
-        hasMore={infinite.hasMore}
-        error={infinite.error}
-        softCapExceeded={infinite.softCapExceeded}
-        onRetry={infinite.refresh}
-      />
-    ),
-    [infinite]
+  const infiniteScrollDescriptor = useMemo(
+    () => ({
+      enabled: isInfiniteOn,
+      onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+      loadedCount: infinite.rows.length,
+      totalRows: infinite.totalRows,
+      isLoadingMore: infinite.isLoadingMore,
+      hasMore: infinite.hasMore,
+      error: infinite.error,
+      softCapExceeded: infinite.softCapExceeded,
+      onRetry: infinite.retry
+    }),
+    [infinite, isInfiniteOn]
   );
+
+  const ExplorerPaginationSlot = useMemo(() => {
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'ExplorerPaginationSlot';
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [infiniteScrollDescriptor]);
 
   const explorerGridSlots = useMemo(
     () => ({
-      pagination: CustomGridPagination,
-      ...(isInfiniteOn ? { footer: renderInfiniteFooter } : {})
+      pagination: ExplorerPaginationSlot
     }),
-    [isInfiniteOn, renderInfiniteFooter]
+    [ExplorerPaginationSlot]
   );
 
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
@@ -1149,15 +1158,6 @@ export default function ErrorsExplorer() {
         }}
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, px: 1, pb: 0.5 }}>
-            <Typography level="body-sm">Infinite scroll</Typography>
-            <Switch
-              size="sm"
-              aria-label="Infinite scroll"
-              checked={isInfiniteOn}
-              onChange={e => infinite.setMode(e.target.checked ? 'infinite' : 'paginated')}
-            />
-          </Box>
           <StyledDataGrid
             apiRef={explorerApiRef}
             autoHeight={false}
@@ -1169,7 +1169,6 @@ export default function ErrorsExplorer() {
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
             pageSizeOptions={[25, 50, 100]}
-            hideFooterPagination={isInfiniteOn}
             editMode="row"
             rowModesModel={rowModesModel}
             onRowModesModelChange={setRowModesModel}
@@ -1197,7 +1196,12 @@ export default function ErrorsExplorer() {
               }
             }}
           />
-          <InfiniteGridScrollBridge apiRef={explorerApiRef} enabled={isInfiniteOn} onLoadMore={infinite.loadMore} />
+          <InfiniteGridScrollBridge
+            apiRef={explorerApiRef}
+            enabled={isInfiniteOn}
+            onLoadMore={infinite.loadMore}
+            observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+          />
         </Sheet>
 
         <Sheet
@@ -1404,7 +1408,7 @@ export default function ErrorsExplorer() {
               });
               if (!response.ok) throw new Error(`revert failed (${response.status})`);
               await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
-              await fetchRows(scope);
+              await Promise.all([fetchRows(scope), isInfiniteOn ? infinite.refresh() : Promise.resolve()]);
             } catch (error: unknown) {
               const message = error instanceof Error ? error.message : String(error);
               setErrorMessage(`Undo failed: ${message}`);

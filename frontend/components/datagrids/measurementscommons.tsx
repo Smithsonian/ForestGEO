@@ -87,7 +87,6 @@ import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { EditToolbar } from '../client/datagridelements';
 import CustomGridPagination from '@/components/datagrids/customgridpagination';
-import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
@@ -516,6 +515,32 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
   const gridRows = isInfiniteOn ? infinite.rows : rows;
   const gridRowCount = isInfiniteOn ? infinite.totalRows : rowCount;
+
+  const infiniteScrollDescriptor = useMemo(
+    () =>
+      enableInfiniteScroll
+        ? {
+            enabled: isInfiniteOn,
+            onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+            loadedCount: infinite.rows.length,
+            totalRows: infinite.totalRows,
+            isLoadingMore: infinite.isLoadingMore,
+            hasMore: infinite.hasMore,
+            error: infinite.error,
+            softCapExceeded: infinite.softCapExceeded,
+            onRetry: infinite.retry
+          }
+        : undefined,
+    [enableInfiniteScroll, isInfiniteOn, infinite]
+  );
+
+  const PaginationSlot = useMemo(() => {
+    if (!enablePageJump && !enableInfiniteScroll) return undefined;
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'CustomGridPaginationSlot';
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
 
   useEffect(() => {
     if (gridError) {
@@ -1597,7 +1622,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 rowCount={gridRowCount}
                 onRowCountChange={handleRowCountChange}
                 pageSizeOptions={[10, 25, 50, 100]}
-                hideFooterPagination={isInfiniteOn}
                 sortModel={sortModel}
                 onSortModelChange={handleSortModelChange}
                 filterModel={gridFilterModel}
@@ -1610,22 +1634,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 }}
                 slots={{
                   toolbar: EditToolbar,
-                  ...(enablePageJump ? { pagination: CustomGridPagination } : {}),
-                  ...(isInfiniteOn
-                    ? {
-                        footer: () => (
-                          <InfiniteGridFooter
-                            loadedCount={infinite.rows.length}
-                            totalRows={infinite.totalRows}
-                            isLoadingMore={infinite.isLoadingMore}
-                            hasMore={infinite.hasMore}
-                            error={infinite.error}
-                            softCapExceeded={infinite.softCapExceeded}
-                            onRetry={infinite.retry}
-                          />
-                        )
-                      }
-                    : {})
+                  ...(PaginationSlot ? { pagination: PaginationSlot } : {})
                 }}
                 slotProps={{
                   toolbar: {
@@ -1666,10 +1675,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                     msControls: { show: showMS, toggle: setShowMS, count: msCount },
                     nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
                     hidingEmpty: hidingEmpty,
-                    setHidingEmpty: setHidingEmpty,
-                    infiniteScroll: enableInfiniteScroll
-                      ? { enabled: isInfiniteOn, onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated') }
-                      : undefined
+                    setHidingEmpty: setHidingEmpty
                   } as GridToolbarProps & Partial<EditToolbarCustomProps>
                 }}
                 showToolbar

@@ -143,6 +143,61 @@ describe('useInfiniteGridRows', () => {
     expect(result.current.rows).toHaveLength(100);
   });
 
+  it('retry refetches the failed page instead of restarting at page 0', async () => {
+    let calls = 0;
+    const fetcher = vi.fn(async ({ page, pageSize }: { page: number; pageSize: number }) => {
+      calls++;
+      if (page === 1 && calls === 2) throw new Error('boom');
+      const rows: R[] = [];
+      for (let i = 0; i < pageSize; i++) rows.push({ id: page * pageSize + i, name: `row-${page}-${i}` });
+      return { rows, totalRows: 250 };
+    });
+    const { result } = renderHook(() => useInfiniteGridRows<R>({ fetcher, initialPageSize: 10, resetKey: 'k', rowIdKey: 'id', paginated: PAGINATED_EMPTY }));
+    act(() => result.current.setMode('infinite'));
+    await waitFor(() => expect(result.current.rows).toHaveLength(100));
+
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.rows).toHaveLength(200));
+
+    expect(fetcher.mock.calls.map(call => call[0].page)).toEqual([0, 1, 1]);
+  });
+
+  it('dedupes overlapping pages by row id while appending', async () => {
+    const fetcher = vi.fn(async ({ page }: { page: number; pageSize: number }) => {
+      if (page === 0) {
+        return {
+          rows: [
+            { id: 1, name: 'one' },
+            { id: 2, name: 'two' }
+          ],
+          totalRows: 4
+        };
+      }
+      return {
+        rows: [
+          { id: 2, name: 'two-updated' },
+          { id: 3, name: 'three' }
+        ],
+        totalRows: 4
+      };
+    });
+    const { result } = renderHook(() =>
+      useInfiniteGridRows<R>({ fetcher, initialPageSize: 10, infiniteChunkSize: 2, resetKey: 'k', rowIdKey: 'id', paginated: PAGINATED_EMPTY })
+    );
+    act(() => result.current.setMode('infinite'));
+    await waitFor(() => expect(result.current.rows).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.rows).toHaveLength(3));
+
+    expect(result.current.rows).toEqual([
+      { id: 1, name: 'one' },
+      { id: 2, name: 'two-updated' },
+      { id: 3, name: 'three' }
+    ]);
+  });
+
   it('refresh in infinite mode refetches from page 0', async () => {
     const fetcher = buildFetcher(250);
     const { result } = renderHook(() => useInfiniteGridRows<R>({ fetcher, initialPageSize: 10, resetKey: 'k', rowIdKey: 'id', paginated: PAGINATED_EMPTY }));
@@ -151,8 +206,10 @@ describe('useInfiniteGridRows', () => {
     act(() => result.current.loadMore());
     await waitFor(() => expect(result.current.rows).toHaveLength(200));
 
-    act(() => result.current.refresh());
-    await waitFor(() => expect(result.current.rows).toHaveLength(100));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.rows).toHaveLength(100);
     expect(fetcher.mock.calls.at(-1)![0]).toMatchObject({ page: 0 });
   });
 });

@@ -358,7 +358,8 @@ export async function POST(
             paginatedQuery = `
             SELECT *
             FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
-              ${filterClause} `;
+              ${filterClause}
+            ORDER BY CoreMeasurementID ASC `;
             countQuery = `
             SELECT COUNT(*) as totalRows
             FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?

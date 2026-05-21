@@ -426,7 +426,12 @@ function sortRows(a: GroupedErrorRow, b: GroupedErrorRow): number {
   const errorCountDelta = b.allErrors.length - a.allErrors.length;
   if (errorCountDelta !== 0) return errorCountDelta;
 
-  return (a.baseRow.measurementDate ?? '').localeCompare(b.baseRow.measurementDate ?? '');
+  const dateDelta = (a.baseRow.measurementDate ?? '').localeCompare(b.baseRow.measurementDate ?? '');
+  if (dateDelta !== 0) return dateDelta;
+
+  const aID = a.baseRow.coreMeasurementID ?? Number.MAX_SAFE_INTEGER;
+  const bID = b.baseRow.coreMeasurementID ?? Number.MAX_SAFE_INTEGER;
+  return aID - bID;
 }
 
 function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): ErrorExplorerQueryResponse['summary'] {

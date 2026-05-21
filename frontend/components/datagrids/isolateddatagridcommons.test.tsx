@@ -157,16 +157,15 @@ vi.mock('@/config/styleddatagrid', async () => {
       <div>
         <div data-testid="filter-model-state">{JSON.stringify(props.filterModel ?? null)}</div>
         <div data-testid="pagination-state">{JSON.stringify(props.paginationModel ?? null)}</div>
-        <div data-testid="hide-footer-pagination">{String(Boolean(props.hideFooterPagination))}</div>
         <div data-testid="pagination-slot-present">{String(Boolean(props.slots?.pagination))}</div>
-        <div data-testid="footer-slot-present">{String(Boolean(props.slots?.footer))}</div>
-        <button type="button" onClick={() => props.slotProps?.toolbar?.infiniteScroll?.onToggle?.(true)}>
+        <div data-testid="infinite-scroll-enabled">{String(Boolean(props.slots?.pagination?.infiniteScroll?.enabled))}</div>
+        <div data-testid="infinite-scroll-prop-present">{String(Boolean(props.slots?.pagination?.infiniteScroll))}</div>
+        <button type="button" onClick={() => props.slots?.pagination?.infiniteScroll?.onToggle?.(true)}>
           Test Toggle Infinite On
         </button>
-        <button type="button" onClick={() => props.slotProps?.toolbar?.infiniteScroll?.onToggle?.(false)}>
+        <button type="button" onClick={() => props.slots?.pagination?.infiniteScroll?.onToggle?.(false)}>
           Test Toggle Infinite Off
         </button>
-        <div data-testid="infinite-scroll-prop-present">{String(Boolean(props.slotProps?.toolbar?.infiniteScroll))}</div>
         <button
           type="button"
           onClick={() =>
@@ -541,9 +540,7 @@ describe('IsolatedDataGridCommons', () => {
     await waitFor(() => expect(screen.getByTestId('row-state').textContent).toContain(ORIGINAL_TEST_SP_CODE));
 
     expect(screen.getByTestId('pagination-slot-present').textContent).toBe('false');
-    expect(screen.getByTestId('footer-slot-present').textContent).toBe('false');
     expect(screen.getByTestId('infinite-scroll-prop-present').textContent).toBe('false');
-    expect(screen.getByTestId('hide-footer-pagination').textContent).toBe('false');
   });
 
   it('renders the pagination slot and infinite toolbar prop when both flags are enabled', async () => {
@@ -575,11 +572,10 @@ describe('IsolatedDataGridCommons', () => {
 
     expect(screen.getByTestId('pagination-slot-present').textContent).toBe('true');
     expect(screen.getByTestId('infinite-scroll-prop-present').textContent).toBe('true');
-    expect(screen.getByTestId('hide-footer-pagination').textContent).toBe('false');
-    expect(screen.getByTestId('footer-slot-present').textContent).toBe('false');
+    expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('false');
   });
 
-  it('toggling infinite mode hides the pagination footer and mounts the footer slot', async () => {
+  it('toggling infinite mode flips the infinite-scroll enabled flag on the pagination slot', async () => {
     const originalRow = { id: 1, failedMeasurementID: 123, spCode: ORIGINAL_TEST_SP_CODE };
     mockFetch.mockResolvedValue({
       ok: true,
@@ -609,15 +605,13 @@ describe('IsolatedDataGridCommons', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite On' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('hide-footer-pagination').textContent).toBe('true');
-      expect(screen.getByTestId('footer-slot-present').textContent).toBe('true');
+      expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('true');
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Test Toggle Infinite Off' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('hide-footer-pagination').textContent).toBe('false');
-      expect(screen.getByTestId('footer-slot-present').textContent).toBe('false');
+      expect(screen.getByTestId('infinite-scroll-enabled').textContent).toBe('false');
     });
   });
 });

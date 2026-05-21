@@ -58,7 +58,6 @@ import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '
 import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
 import CustomGridPagination from '@/components/datagrids/customgridpagination';
-import InfiniteGridFooter from '@/components/datagrids/infinitegridfooter';
 import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
@@ -355,7 +354,11 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const gridRowCount = isInfiniteOn ? infinite.totalRows : rowCount;
 
   const handleRefresh = useCallback(async () => {
-    if (isInfiniteOn) infinite.refresh();
+    if (isInfiniteOn) {
+      await infinite.refresh();
+      void refetch().catch(ailogger.error);
+      return;
+    }
     await refetch();
   }, [refetch, isInfiniteOn, infinite]);
 
@@ -375,12 +378,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     previousRefresh.current = refresh;
   }, [refresh, currentSite, handleRefresh, setRefresh]);
 
-  // Synchronize rowModesModel with current rows - uses functional update to avoid
+  // Synchronize rowModesModel with current visible rows - uses functional update to avoid
   // having rowModesModel in dependencies (which would cause potential infinite loops)
   useEffect(() => {
     setRowModesModel(prevRowModesModel => {
       // Build new model based on current rows, preserving existing modes
-      const updatedRowModesModel = rows.reduce((acc, row) => {
+      const updatedRowModesModel = gridRows.reduce((acc, row) => {
         if (row.id) {
           acc[row.id] = prevRowModesModel[row.id] || { mode: GridRowModes.View };
         }
@@ -396,7 +399,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
       return prevRowModesModel;
     });
-  }, [rows]); // Only depend on rows - rowModesModel accessed via functional update
+  }, [gridRows]); // Only depend on visible rows - rowModesModel accessed via functional update
 
   const fetchFullData = useCallback(async () => {
     try {
@@ -628,7 +631,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
       setPendingAction({ actionType, actionId });
 
-      const row = rows.find(row => String(row.id) === String(actionId));
+      const row = gridRows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
           setIsDeleteDialogOpen(true);
@@ -637,7 +640,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
       }
     },
-    [rows]
+    [gridRows]
   );
 
   const updateRow = useCallback(
@@ -733,6 +736,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               );
 
         promiseArguments.resolve(updatedRow);
+        if (isInfiniteOn) await infinite.refresh();
+        else infinite.upsertRow(updatedRow);
 
         if (onDataUpdate) {
           await onDataUpdate(updatedRow, promiseArguments.oldRow);
@@ -757,7 +762,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       refetch,
       updateRow,
       onDataUpdate,
-      editFlowOverride
+      editFlowOverride,
+      infinite,
+      isInfiniteOn
     ]
   );
 
@@ -765,7 +772,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     async (id: GridRowId) => {
       if (locked) return;
 
-      const rowToDelete = rows.find(row => String(row.id) === String(id));
+      const rowToDelete = gridRows.find(row => String(row.id) === String(id));
       if (!rowToDelete) return;
 
       let deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
@@ -817,7 +824,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         });
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope, infinite]
+    [locked, gridRows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope, infinite]
   );
 
   const handleConfirmAction = useCallback(
@@ -863,7 +870,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      const oldRow = rows.find(row => String(row.id) === String(id));
+      const oldRow = gridRows.find(row => String(row.id) === String(id));
 
       const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
 
@@ -878,14 +885,14 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         openConfirmationDialog('save', id);
       }
     },
-    [locked, rowModesModel, rows, localApiRef, openConfirmationDialog]
+    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog]
   );
 
   const handleDeleteClick = useCallback(
     (id: GridRowId) => () => {
       if (locked) return;
       if (gridType === 'census') {
-        const rowToDelete = rows.find(row => String(row.id) === String(id));
+        const rowToDelete = gridRows.find(row => String(row.id) === String(id));
         if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges?.[0]?.censusID) {
           alert('Cannot delete the currently selected census.');
           return;
@@ -893,7 +900,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
       openConfirmationDialog('delete', id);
     },
-    [locked, gridType, currentCensus, rows, openConfirmationDialog]
+    [locked, gridType, currentCensus, gridRows, openConfirmationDialog]
   );
 
   const handleAddNewRow = useCallback(async () => {
@@ -1005,7 +1012,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               refetch,
               paginationModel
             );
-        infinite.upsertRow(updatedRow);
+        if (isInfiniteOn) await infinite.refresh();
+        else infinite.upsertRow(updatedRow);
         return updatedRow;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1024,7 +1032,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       openConfirmationDialog,
       updateRow,
       editFlowOverride,
-      infinite
+      infinite,
+      isInfiniteOn
     ]
   );
 
@@ -1084,7 +1093,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (locked) return;
       event?.preventDefault();
 
-      const row = rows.find(row => String(row.id) === String(id));
+      const row = gridRows.find(row => String(row.id) === String(id));
 
       if (row?.isNew) {
         setRows(oldRows => oldRows.filter(row => row.id !== id));
@@ -1103,7 +1112,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }));
       }
     },
-    [locked, rows]
+    [locked, gridRows]
   );
 
   // Cleanup timers on unmount to prevent memory leaks
@@ -1150,11 +1159,11 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     });
   }, []);
 
-  const rowsRef = useRef(rows);
+  const rowsRef = useRef(gridRows);
   const rowModesModelRef = useRef(rowModesModel);
   useEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
+    rowsRef.current = gridRows;
+  }, [gridRows]);
   useEffect(() => {
     rowModesModelRef.current = rowModesModel;
   }, [rowModesModel]);
@@ -1187,6 +1196,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
 
   const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
   const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
+  const gridLoading = isInfiniteOn ? infinite.isLoading : showGridLoading;
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
@@ -1243,9 +1253,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
-    if (hidingEmpty) return filterColumns(rows, columns);
+    if (hidingEmpty) return filterColumns(gridRows, columns);
     else return columns;
-  }, [rows, columns, hidingEmpty]);
+  }, [gridRows, columns, hidingEmpty]);
 
   // Grid types under "Stem & Plot Details" that don't require a census selection
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
@@ -1262,6 +1272,33 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     [gridType]
   );
 
+  const infiniteScrollDescriptor = useMemo(
+    () =>
+      enableInfiniteScroll
+        ? {
+            enabled: isInfiniteOn,
+            onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+            loadedCount: infinite.rows.length,
+            totalRows: infinite.totalRows,
+            isLoadingMore: infinite.isLoadingMore,
+            hasMore: infinite.hasMore,
+            error: infinite.error,
+            softCapExceeded: infinite.softCapExceeded,
+            onRetry: infinite.retry
+          }
+        : undefined,
+    [enableInfiniteScroll, isInfiniteOn, infinite]
+  );
+
+  const PaginationSlot = useMemo(() => {
+    if (!enablePageJump && !enableInfiniteScroll) return undefined;
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'CustomGridPaginationSlot';
+    // Test seam: expose the closure-bound descriptor so unit tests can inspect / drive the toggle.
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+
   const slotProps = useMemo(
     () => ({
       toolbar: {
@@ -1275,51 +1312,18 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         gridColumns,
         gridType,
         hidingEmpty,
-        setHidingEmpty,
-        infiniteScroll: enableInfiniteScroll
-          ? { enabled: isInfiniteOn, onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated') }
-          : undefined
+        setHidingEmpty
       } as GridToolbarProps & Partial<EditToolbarCustomProps>
     }),
-    [
-      handleAddNewRow,
-      handleRefresh,
-      fetchFullData,
-      exportAllCSV,
-      onQuickFilterChange,
-      gridFilterModel,
-      dynamicButtons,
-      gridColumns,
-      gridType,
-      hidingEmpty,
-      enableInfiniteScroll,
-      isInfiniteOn,
-      infinite
-    ]
-  );
-
-  const renderInfiniteFooter = useCallback(
-    () => (
-      <InfiniteGridFooter
-        loadedCount={infinite.rows.length}
-        totalRows={infinite.totalRows}
-        isLoadingMore={infinite.isLoadingMore}
-        hasMore={infinite.hasMore}
-        error={infinite.error}
-        softCapExceeded={infinite.softCapExceeded}
-        onRetry={infinite.refresh}
-      />
-    ),
-    [infinite]
+    [handleAddNewRow, handleRefresh, fetchFullData, exportAllCSV, onQuickFilterChange, gridFilterModel, dynamicButtons, gridColumns, gridType, hidingEmpty]
   );
 
   const gridSlots = useMemo(
     () => ({
       toolbar: EditToolbar,
-      ...(enablePageJump ? { pagination: CustomGridPagination } : {}),
-      ...(isInfiniteOn ? { footer: renderInfiniteFooter } : {})
+      ...(PaginationSlot ? { pagination: PaginationSlot } : {})
     }),
-    [enablePageJump, isInfiniteOn, renderInfiniteFooter]
+    [PaginationSlot]
   );
 
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
@@ -1340,7 +1344,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }}
       >
         <Box sx={{ width: '100%', flexDirection: 'column', position: 'relative' }}>
-          <LoadingBar active={isValidating && hasLoadedGrid} />
+          <LoadingBar active={!isInfiniteOn && isValidating && hasLoadedGrid} />
           {showInitialGridSkeleton ? (
             <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
           ) : (
@@ -1359,14 +1363,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 onCellKeyDown={handleCellKeyDown}
                 processRowUpdate={handleProcessRowUpdate}
                 onProcessRowUpdateError={handleProcessRowUpdateError}
-                loading={showGridLoading}
+                loading={gridLoading}
                 paginationMode="server"
                 filterMode="server"
                 onPaginationModelChange={handlePaginationModelChange}
                 paginationModel={paginationModel}
                 rowCount={gridRowCount}
                 pageSizeOptions={pageSizeOptions}
-                hideFooterPagination={isInfiniteOn}
                 filterModel={gridFilterModel}
                 onFilterModelChange={handleFilterModelChange}
                 ignoreDiacritics
@@ -1375,7 +1378,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 slotProps={slotProps}
                 showToolbar
               />
-              <InfiniteGridScrollBridge apiRef={localApiRef} enabled={isInfiniteOn} onLoadMore={infinite.loadMore} />
+              <InfiniteGridScrollBridge
+                apiRef={localApiRef}
+                enabled={isInfiniteOn}
+                onLoadMore={infinite.loadMore}
+                observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+              />
             </>
           )}
         </Box>

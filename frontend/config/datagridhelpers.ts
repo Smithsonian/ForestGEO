@@ -174,7 +174,6 @@ export interface EditToolbarCustomProps {
   pendingControls?: RowControl;
   hidingEmpty?: boolean;
   setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
-  infiniteScroll?: { enabled: boolean; onToggle: (next: boolean) => void };
 }
 
 export interface IsolatedDataGridCommonProps {

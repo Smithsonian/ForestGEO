@@ -321,6 +321,23 @@ describe('POST /api/fixeddatafilter/[dataType]/[[...slugs]]', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('viewfulltable: uses deterministic CoreMeasurementID ordering for filtered paginated chunks', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    exec.mockResolvedValueOnce([{ COLUMN_NAME: 'CoreMeasurementID' }]);
+    exec.mockResolvedValueOnce([{ CoreMeasurementID: 10 }]);
+    exec.mockResolvedValueOnce([{ totalRows: 1 }]);
+
+    const req = makeRequest({ filterModel: baseFilterModel });
+    const res = await POST(req, makeProps('viewfulltable', ['myschema', '0', '25', '7', '3']));
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+
+    expect(String(body.finishedQuery)).toMatch(/ORDER BY CoreMeasurementID ASC\s+LIMIT/i);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,3,0,25\]/);
+  });
+
   it('personnel: finishedQuery binds census before plot for CensusActive', async () => {
     const cm = (ConnectionManager as any).getInstance();
     const exec = vi.spyOn(cm, 'executeQuery');
