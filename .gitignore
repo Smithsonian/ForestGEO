@@ -48,7 +48,6 @@ next-env.d.ts
 .github/workflows/new-file-upload-system_forestgeo-livesite.yml
 /.fleet
 /frontend/sampledata
-/frontend/scripts
 /frontend/.vscode
 /documentation/.obsidian
 /documentation/.obsidian/*
@@ -56,6 +55,7 @@ frontend/liquibase/
 
 *.sh
 !frontend/db-migrations/unified-measurements-migrations/run-branch-refresh.sh
+!scripts/verify-clone-runnable.sh
 *.properties
 .jscpd
 CLAUDE.md
@@ -67,6 +67,8 @@ frontend/docs/.vscode/**
 
 # DB migration backups and generated SQL
 frontend/db-migrations/unified-measurements-migrations/backups/
+frontend/backups/
+*deployment_log*.txt
 frontend/db-migrations/unified-measurements-migrations/branch_refresh_00_ensure_upload_tracking_tables.sql
 # superpowers scratch (plans, specs, mockups) — ignored everywhere
 superpowers/
