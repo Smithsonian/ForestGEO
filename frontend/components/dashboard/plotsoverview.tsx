@@ -149,10 +149,16 @@ function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
           : undefined
       }
       sx={{
-        background: gradient,
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%, rgba(0,0,0,0.1) 100%),
+          ${gradient}
+        `,
+        backgroundPosition: 'calc(100% + 20px) -20px, calc(100% + 20px) -20px, center, center',
+        backgroundSize: '20px 20px, 20px 20px, auto, auto',
         color: 'white',
         minHeight: 200,
-        position: 'relative',
         overflow: 'hidden',
         border: 'none',
         ...(onSelect && {
@@ -162,41 +168,10 @@ function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
             transform: 'translateY(-3px)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
           }
-        }),
-
-        // Decorative gradient overlay
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%, rgba(0,0,0,0.1) 100%)',
-          pointerEvents: 'none'
-        }
+        })
       }}
     >
-      {/* Background decoration - grid pattern */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          top: -20,
-          right: -20,
-          width: 100,
-          height: 100,
-          opacity: 0.08,
-          pointerEvents: 'none',
-          backgroundImage: `
-            linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)
-          `,
-          backgroundSize: '20px 20px'
-        }}
-      />
-
-      <CardContent sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
           <Avatar
             alt=""
@@ -378,21 +353,20 @@ function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
 
         {/* Census count badge */}
         {plot.censusCount !== undefined && plot.censusCount > 0 && (
-          <Chip
-            size="sm"
-            variant="soft"
-            sx={{
-              position: 'absolute',
-              bottom: 8,
-              right: 8,
-              bgcolor: 'rgba(255,255,255,0.95)',
-              color: gradient.includes('#059669') ? '#059669' : '#0891b2',
-              fontWeight: 700,
-              fontSize: '0.6875rem'
-            }}
-          >
-            {plot.censusCount} {plot.censusCount === 1 ? 'Census' : 'Censuses'}
-          </Chip>
+          <Box sx={{ mt: plot.numQuadrats !== undefined && plot.numQuadrats > 0 ? 1 : 'auto', display: 'flex', justifyContent: 'flex-end' }}>
+            <Chip
+              size="sm"
+              variant="soft"
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.95)',
+                color: gradient.includes('#059669') ? '#059669' : '#0891b2',
+                fontWeight: 700,
+                fontSize: '0.6875rem'
+              }}
+            >
+              {plot.censusCount} {plot.censusCount === 1 ? 'Census' : 'Censuses'}
+            </Chip>
+          </Box>
         )}
       </CardContent>
     </Card>

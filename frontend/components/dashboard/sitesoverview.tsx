@@ -78,10 +78,9 @@ function SiteCard({ site, index, onSelect }: SiteCardProps) {
           : undefined
       }
       sx={{
-        background: gradient,
+        background: `radial-gradient(circle at calc(100% + 30px) -30px, rgba(255,255,255,0.08) 0 60px, transparent 61px), radial-gradient(circle at 100% 0%, rgba(255,255,255,0.15) 0%, transparent 50%), ${gradient}`,
         color: 'white',
         minHeight: 180,
-        position: 'relative',
         overflow: 'hidden',
         border: 'none',
         ...(onSelect && {
@@ -91,37 +90,10 @@ function SiteCard({ site, index, onSelect }: SiteCardProps) {
             transform: 'translateY(-3px)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
           }
-        }),
-
-        // Decorative background pattern
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.15) 0%, transparent 50%)',
-          pointerEvents: 'none'
-        }
+        })
       }}
     >
-      {/* Background decoration */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          top: -30,
-          right: -30,
-          width: 120,
-          height: 120,
-          borderRadius: '50%',
-          bgcolor: 'rgba(255,255,255,0.08)',
-          pointerEvents: 'none'
-        }}
-      />
-
-      <CardContent sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
           <Avatar
             alt=""

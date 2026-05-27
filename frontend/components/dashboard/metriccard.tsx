@@ -43,13 +43,12 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
   const formattedValue = typeof value === 'number' ? value.toLocaleString() : value;
 
   const cardStyles = {
-    background: gradients[gradient],
+    background: `radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%), ${gradients[gradient]}`,
     color: 'white',
     minHeight: '160px',
     display: 'flex',
     flexDirection: 'column' as const,
     justifyContent: 'space-between',
-    position: 'relative' as const,
     overflow: 'hidden' as const,
     cursor: onClick ? 'pointer' : 'default',
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -70,24 +69,12 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
     '&:active': {
       transform: 'translateY(-1px)',
       boxShadow: designTokens.shadows.lg
-    },
-
-    // Subtle pattern overlay
-    '&::before': {
-      content: '""',
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%)',
-      pointerEvents: 'none'
     }
   };
 
   const cardContent = (
     <>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box>
           <Typography
             level="body-sm"
@@ -139,8 +126,6 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
             gap: 1,
             alignItems: 'center',
             mt: 2,
-            position: 'relative',
-            zIndex: 1,
             backgroundColor: 'rgba(0, 0, 0, 0.15)',
             backdropFilter: 'blur(4px)',
             borderRadius: 'sm',

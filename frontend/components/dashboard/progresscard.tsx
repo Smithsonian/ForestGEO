@@ -58,14 +58,12 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
 
       <Box
         sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          position: 'relative',
+          display: 'grid',
+          placeItems: 'center',
           my: 2
         }}
       >
-        <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+        <Box sx={{ display: 'grid', placeItems: 'center' }}>
           <CircularProgress
             determinate
             value={100}
@@ -75,7 +73,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
               '--CircularProgress-trackThickness': '12px',
               '--CircularProgress-progressThickness': '12px',
               color: 'neutral.outlinedBorder',
-              position: 'absolute'
+              gridArea: '1 / 1'
             }}
           />
 
@@ -87,6 +85,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
               '--CircularProgress-size': '180px',
               '--CircularProgress-trackThickness': '12px',
               '--CircularProgress-progressThickness': '12px',
+              gridArea: '1 / 1',
               '--CircularProgress-progressColor': percentValue >= 90 ? 'var(--joy-palette-success-500)' : 'var(--joy-palette-primary-500)',
               '& .MuiCircularProgress-progress': {
                 strokeLinecap: 'round',
@@ -102,11 +101,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
 
           <Box
             sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              bottom: 0,
-              right: 0,
+              gridArea: '1 / 1',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
