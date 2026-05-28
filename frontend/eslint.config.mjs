@@ -232,5 +232,27 @@ export default [
         { patterns: [{ group: ['@/components/*', '@/components/**'], message: 'config/lib must not depend on components (inverts dependency direction).' }] }
       ]
     }
+  },
+
+  // SQL injection guard: flag raw ${schema} / ${schemaParam} interpolation in route handlers.
+  // These identifiers must pass through safeFormatQuery() or validatedSchema() before reaching SQL.
+  // This is a warning so pre-existing instances (~228) do NOT fail the build; new code gets flagged.
+  {
+    files: ['app/api/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "TemplateLiteral > Identifier[name='schema']",
+          message:
+            "Raw '${schema}' interpolation in a route handler is a SQL injection risk. Use safeFormatQuery(schema, ...) or validatedSchema(schema) instead."
+        },
+        {
+          selector: "TemplateLiteral > Identifier[name='schemaParam']",
+          message:
+            "Raw '${schemaParam}' interpolation in a route handler is a SQL injection risk. Use safeFormatQuery(schemaParam, ...) or validatedSchema(schemaParam) instead."
+        }
+      ]
+    }
   }
 ];
