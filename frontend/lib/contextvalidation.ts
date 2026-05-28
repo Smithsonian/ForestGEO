@@ -134,6 +134,15 @@ export async function validateContextualValues(
           )
         };
       }
+      // The session exists but its permissions lookup failed upstream — treat
+      // as infra outage (retryable) rather than user denial. Mirrors
+      // lib/auth-helpers.ts:requireSession and lib/authz.ts:assertSchemaAccess.
+      if (session.user.permissionsUnavailable) {
+        return {
+          success: false,
+          response: NextResponse.json({ error: 'permissions unavailable', code: 'PERMISSIONS_UNAVAILABLE' }, { status: HTTPResponses.SERVICE_UNAVAILABLE })
+        };
+      }
       if (!isAdminSession(session) && !hasSchemaAccess(session, values.schema)) {
         ailogger.warn(`[contextvalidation] Schema access denied for schema: ${values.schema}`);
         return {

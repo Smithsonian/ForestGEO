@@ -28,6 +28,7 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 const AUTHORIZED_SCHEMA = 'forestgeo_testing';
 const STATUS_UNAUTHENTICATED = 401;
 const STATUS_FORBIDDEN = 403;
+const STATUS_SERVICE_UNAVAILABLE = 503;
 const STATUS_OK = 200;
 
 function makeRequest(schema?: string) {
@@ -41,6 +42,12 @@ function makeRequest(schema?: string) {
 function sessionWithSites(schemaNames: string[], userStatus?: string): Session {
   const sites = schemaNames.map(name => ({ schemaName: name }) as SitesRDS);
   return { user: { sites, allsites: [], userStatus } } as unknown as Session;
+}
+
+function sessionWithPermissionsUnavailable(): Session {
+  // Mirrors what auth() returns when the upstream identity callback succeeds
+  // but the per-user permissions lookup fails — no sites resolved, flag set.
+  return { user: { sites: [], allsites: [], permissionsUnavailable: true } } as unknown as Session;
 }
 
 describe('validateContextualValues — per-site schema authorization', () => {
@@ -83,6 +90,22 @@ describe('validateContextualValues — per-site schema authorization', () => {
     expect(result.response!.status).toBe(STATUS_UNAUTHENTICATED);
     const body = await result.response!.json();
     expect(body.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('returns 503 PERMISSIONS_UNAVAILABLE (NOT 403) when the session is present but permissions lookup failed', async () => {
+    // The user is authenticated, but the permissions/sites callback failed
+    // upstream. Without this branch, the empty sites array would fall through
+    // to the membership check and respond 403 SCHEMA_ACCESS_DENIED — masking
+    // an infra outage as a user denial.
+    authMock.mockResolvedValue(sessionWithPermissionsUnavailable());
+
+    const result = await validateContextualValues(makeRequest(AUTHORIZED_SCHEMA), { requireSchema: true });
+
+    expect(result.success).toBe(false);
+    expect(result.response).toBeDefined();
+    expect(result.response!.status).toBe(STATUS_SERVICE_UNAVAILABLE);
+    const body = await result.response!.json();
+    expect(body.code).toBe('PERMISSIONS_UNAVAILABLE');
   });
 
   it('allows an admin session regardless of site membership', async () => {
