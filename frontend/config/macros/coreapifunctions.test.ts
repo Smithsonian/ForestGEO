@@ -313,9 +313,12 @@ describe('CoreAPIFunctions', () => {
 
       const response = await POST(mockRequest, { params: Promise.resolve(mockParams) });
 
+      // POST now wraps its writes in withTransaction; the underlying
+      // begin/commit still fire (the mock models that), but the route no longer
+      // threads the transaction id or calls closeConnection itself.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('transaction-123');
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
       expect(response.status).toBe(200);
     });
 
@@ -374,7 +377,7 @@ describe('CoreAPIFunctions', () => {
       expect(response.status).toBe(200);
     });
 
-    it('should close connection in finally block', async () => {
+    it('rolls back via withTransaction when a write fails in POST', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'POST',
         body: JSON.stringify({ newRow: {} })
@@ -387,9 +390,13 @@ describe('CoreAPIFunctions', () => {
         slugs: ['testSchema', 'plotID', '1', '1']
       };
 
-      await POST(mockRequest, { params: Promise.resolve(mockParams) });
+      const response = await POST(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      // POST now delegates rollback to withTransaction and no longer calls
+      // closeConnection itself.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
+      expect(response.status).toBe(500);
     });
   });
 
@@ -430,9 +437,12 @@ describe('CoreAPIFunctions', () => {
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
+      // DELETE now wraps its writes in withTransaction; begin/commit still
+      // fire (the mock models that), but the route no longer threads the
+      // transaction id or calls closeConnection itself.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('transaction-123');
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
       expect(response.status).toBe(200);
     });
 
@@ -471,11 +481,13 @@ describe('CoreAPIFunctions', () => {
 
       const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith('DELETE FROM testSchema.species WHERE SpeciesID = ?', [99]);
+      // tx.query in the mock delegates to executeQuery(sql, params, transactionID),
+      // so the assertion includes the threaded transaction id as the trailing arg.
+      expect(mockConnectionManager.executeQuery).toHaveBeenCalledWith('DELETE FROM testSchema.species WHERE SpeciesID = ?', [99], 'transaction-123');
       expect(response.status).toBe(200);
     });
 
-    it('should close connection in finally block on error', async () => {
+    it('rolls back via withTransaction when a write fails in DELETE', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'DELETE',
         body: JSON.stringify({ newRow: { PlotID: 123 } })
@@ -488,9 +500,11 @@ describe('CoreAPIFunctions', () => {
         slugs: ['testSchema', 'plotID', '123']
       };
 
-      await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
+      const response = await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
+      expect(response.status).toBe(500);
     });
   });
 
@@ -531,8 +545,10 @@ describe('CoreAPIFunctions', () => {
 
       await POST(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      // POST delegates rollback to withTransaction; it no longer rolls back or
+      // closes the connection in its own finally.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
     });
 
     it('should handle transaction rollback on error in DELETE', async () => {
@@ -550,8 +566,10 @@ describe('CoreAPIFunctions', () => {
 
       await DELETE(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      // DELETE delegates rollback to withTransaction; it no longer rolls back or
+      // closes the connection in its own finally.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
     });
   });
 

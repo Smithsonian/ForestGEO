@@ -142,114 +142,115 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
 
   const connectionManager = ConnectionManager.getInstance();
   const { newRow } = await request.json();
-  let insertIDs: Record<string, number> = {};
-  let transactionID: string | undefined = undefined;
   try {
-    transactionID = await connectionManager.beginTransaction();
+    const insertIDs = await connectionManager.withTransaction(async tx => {
+      const createdIDs: Record<string, number> = {};
 
-    if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
+      if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
-    const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-    const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+      const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
-    if (params.dataType === 'alltaxonomiesview') {
-      const { Family } = newRowData;
-      const { Genus, GenusAuthority } = newRowData;
-      const { SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, ValidCode, FieldFamily, Description } = newRowData;
+      if (params.dataType === 'alltaxonomiesview') {
+        const { Family } = newRowData;
+        const { Genus, GenusAuthority } = newRowData;
+        const { SpeciesCode, SpeciesName, SubspeciesName, IDLevel, SpeciesAuthority, SubspeciesAuthority, ValidCode, FieldFamily, Description } = newRowData;
 
-      const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID', transactionID);
+        // handleUpsert still takes a string transactionID; threading tx.id keeps
+        // these upserts on the same tx connection as the rest of this handler.
+        const { id: newFamilyID } = await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family }, 'FamilyID', tx.id);
 
-      const { id: newGenusID } = await handleUpsert<GenusResult>(
-        connectionManager,
-        schema,
-        'genus',
-        {
-          Genus,
-          GenusAuthority,
-          FamilyID: newFamilyID
-        },
-        'GenusID',
-        transactionID
-      );
-
-      await handleUpsert<SpeciesResult>(
-        connectionManager,
-        schema,
-        'species',
-        {
-          GenusID: newGenusID,
-          SpeciesCode,
-          SpeciesName,
-          SubspeciesName,
-          IDLevel,
-          SpeciesAuthority,
-          SubspeciesAuthority,
-          ValidCode,
-          FieldFamily,
-          Description
-        },
-        'SpeciesID',
-        transactionID
-      );
-    } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
-      if (params.dataType === 'attributes') {
-        await connectionManager.executeQuery(format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]));
-      } else if (params.dataType === 'personnel') {
-        await connectionManager.executeQuery(`INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [
-          censusID ?? 0,
-          newRowData.PersonnelID
-        ]);
-      } else {
-        const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData;
-        const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
-        await connectionManager.executeQuery(insertQuery);
-      }
-    } else {
-      delete newRowData[demappedGridID];
-      if (params.dataType === 'plots') delete newRowData.NumQuadrats;
-      if (params.dataType === 'personnel') delete newRowData.CensusActive;
-
-      let insertQuery = '';
-      if (params.dataType === 'failedmeasurements') {
-        const inserted = await insertIngestionFailureRows(
+        const { id: newGenusID } = await handleUpsert<GenusResult>(
           connectionManager,
           schema,
-          [
-            {
-              plotID: Number(newRowData.PlotID ?? 0),
-              censusID: Number(newRowData.CensusID ?? censusID ?? 0),
-              tag: newRowData.Tag ?? null,
-              stemTag: newRowData.StemTag ?? null,
-              spCode: newRowData.SpCode ?? null,
-              quadrat: newRowData.Quadrat ?? null,
-              x: newRowData.X ?? null,
-              y: newRowData.Y ?? null,
-              dbh: newRowData.DBH ?? null,
-              hom: newRowData.HOM ?? null,
-              date: newRowData.Date ?? null,
-              codes: newRowData.Codes ?? null,
-              comments: newRowData.Comments ?? null,
-              failureReason: newRowData.FailureReasons ?? null,
-              fileID: newRowData.FileID ?? null,
-              batchID: newRowData.BatchID ?? null,
-              sourceRowIndex: newRowData.SourceRowIndex ?? null
-            }
-          ],
-          transactionID
+          'genus',
+          {
+            Genus,
+            GenusAuthority,
+            FamilyID: newFamilyID
+          },
+          'GenusID',
+          tx.id
         );
-        insertIDs = { [params.dataType]: inserted[0] ?? 0 };
+
+        await handleUpsert<SpeciesResult>(
+          connectionManager,
+          schema,
+          'species',
+          {
+            GenusID: newGenusID,
+            SpeciesCode,
+            SpeciesName,
+            SubspeciesName,
+            IDLevel,
+            SpeciesAuthority,
+            SubspeciesAuthority,
+            ValidCode,
+            FieldFamily,
+            Description
+          },
+          'SpeciesID',
+          tx.id
+        );
+      } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
+        if (params.dataType === 'attributes') {
+          await tx.query(format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]));
+        } else if (params.dataType === 'personnel') {
+          await tx.query(`INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`, [censusID ?? 0, newRowData.PersonnelID]);
+        } else {
+          const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData;
+          const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
+          await tx.query(insertQuery);
+        }
       } else {
-        insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-        const results = await connectionManager.executeQuery(insertQuery);
-        insertIDs = { [params.dataType]: results.insertId };
+        delete newRowData[demappedGridID];
+        if (params.dataType === 'plots') delete newRowData.NumQuadrats;
+        if (params.dataType === 'personnel') delete newRowData.CensusActive;
+
+        if (params.dataType === 'failedmeasurements') {
+          const inserted = await insertIngestionFailureRows(
+            connectionManager,
+            schema,
+            [
+              {
+                plotID: Number(newRowData.PlotID ?? 0),
+                censusID: Number(newRowData.CensusID ?? censusID ?? 0),
+                tag: newRowData.Tag ?? null,
+                stemTag: newRowData.StemTag ?? null,
+                spCode: newRowData.SpCode ?? null,
+                quadrat: newRowData.Quadrat ?? null,
+                x: newRowData.X ?? null,
+                y: newRowData.Y ?? null,
+                dbh: newRowData.DBH ?? null,
+                hom: newRowData.HOM ?? null,
+                date: newRowData.Date ?? null,
+                codes: newRowData.Codes ?? null,
+                comments: newRowData.Comments ?? null,
+                failureReason: newRowData.FailureReasons ?? null,
+                fileID: newRowData.FileID ?? null,
+                batchID: newRowData.BatchID ?? null,
+                sourceRowIndex: newRowData.SourceRowIndex ?? null
+              }
+            ],
+            tx.id
+          );
+          createdIDs[params.dataType] = inserted[0] ?? 0;
+        } else {
+          const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+          const results = await tx.query(insertQuery);
+          createdIDs[params.dataType] = results.insertId;
+        }
       }
-    }
-    await connectionManager.commitTransaction(transactionID ?? '');
+
+      return createdIDs;
+    });
+
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow, transactionID ?? undefined);
-  } finally {
-    await connectionManager.closeConnection();
+    // withTransaction has already rolled back on throw; pass no transactionID so
+    // handleError only formats the response and does not attempt a second
+    // rollback (same change Task 5 made for PATCH).
+    return handleError(error, connectionManager, newRow);
   }
 }
 
@@ -263,37 +264,35 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const primaryKeyColumn = PRIMARY_KEY_MAP[params.dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const demappedGridID = primaryKeyColumn;
   const { newRow } = await request.json();
-  let transactionID: string | undefined = undefined;
   try {
-    transactionID = await connectionManager.beginTransaction();
-
-    const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-    const { [demappedGridID]: gridIDKey } = deleteRowData;
-    if (params.dataType === 'alltaxonomiesview') {
-      const { SpeciesID } = deleteRowData;
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
-    } else if (params.dataType === 'failedmeasurements') {
-      // Measurement deletes bypass the edit_operations ledger: deletion is a
-      // terminal operation, not a revertable edit, and the ledger's
-      // single-row revert path cannot reconstruct a deleted coremeasurements
-      // row from beforeState alone (stems/trees/cmattributes dependencies).
-      // Audit trail for deletes lives in the uploadmetrics and database
-      // binlog, not edit_operations.
-      const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
-      await connectionManager.executeQuery(deleteFailedQuery, [gridIDKey]);
-    } else if (params.dataType === 'measurementssummary') {
-      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE MeasurementID = ?', [`${schema}.measurement_error_log`]), [gridIDKey]);
-      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmattributes`, demappedGridID, gridIDKey]));
-      await connectionManager.executeQuery(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.coremeasurements`, demappedGridID, gridIDKey]));
-    } else {
-      const softDelete = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(softDelete);
-    }
-    await connectionManager.commitTransaction(transactionID ?? '');
+    await connectionManager.withTransaction(async tx => {
+      const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+      const { [demappedGridID]: gridIDKey } = deleteRowData;
+      if (params.dataType === 'alltaxonomiesview') {
+        const { SpeciesID } = deleteRowData;
+        await tx.query(`DELETE FROM ${schema}.species WHERE SpeciesID = ?`, [SpeciesID]);
+      } else if (params.dataType === 'failedmeasurements') {
+        // Measurement deletes bypass the edit_operations ledger: deletion is a
+        // terminal operation, not a revertable edit, and the ledger's
+        // single-row revert path cannot reconstruct a deleted coremeasurements
+        // row from beforeState alone (stems/trees/cmattributes dependencies).
+        // Audit trail for deletes lives in the uploadmetrics and database
+        // binlog, not edit_operations.
+        const deleteFailedQuery = format('DELETE FROM ??.coremeasurements WHERE CoreMeasurementID = ? AND StemGUID IS NULL', [schema]);
+        await tx.query(deleteFailedQuery, [gridIDKey]);
+      } else if (params.dataType === 'measurementssummary') {
+        await tx.query(format('DELETE FROM ?? WHERE MeasurementID = ?', [`${schema}.measurement_error_log`]), [gridIDKey]);
+        await tx.query(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.cmattributes`, demappedGridID, gridIDKey]));
+        await tx.query(format('DELETE FROM ?? WHERE ?? = ?', [`${schema}.coremeasurements`, demappedGridID, gridIDKey]));
+      } else {
+        const softDelete = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+        await tx.query(softDelete);
+      }
+    });
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
+      // withTransaction has already rolled back; no manual rollback here.
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
@@ -304,7 +303,5 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
       );
     } else return handleError(error, connectionManager, newRow);
-  } finally {
-    await connectionManager.closeConnection();
   }
 }
