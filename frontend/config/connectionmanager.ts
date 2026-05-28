@@ -382,19 +382,24 @@ class ConnectionManager {
     if (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS) {
       ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
 
-      // Wait for a slot to become available using a promise queue
+      // Wait for a slot to become available using a promise queue.
+      // wrappedResolve is the function actually pushed to the queue, so the
+      // timeout cleanup must look that up — NOT the bare resolve, which is
+      // never in the queue and whose indexOf always returned -1 (leaving the
+      // dead wrappedResolve stranded; releaseTransactionSlot would later
+      // shift+call it, silently consuming a slot release for a waiter that
+      // has already been rejected).
       await new Promise<void>((resolve, reject) => {
+        let wrappedResolve: () => void;
         const timeoutId = setTimeout(() => {
-          // Remove from queue if still waiting
-          const index = this.transactionSlotQueue.indexOf(resolve);
+          const index = this.transactionSlotQueue.indexOf(wrappedResolve);
           if (index !== -1) {
             this.transactionSlotQueue.splice(index, 1);
           }
           reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
         }, 60000); // 1 minute max wait
 
-        // Add to queue with cleanup
-        const wrappedResolve = () => {
+        wrappedResolve = () => {
           clearTimeout(timeoutId);
           resolve();
         };
