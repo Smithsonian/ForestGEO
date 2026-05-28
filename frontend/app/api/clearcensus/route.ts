@@ -4,6 +4,8 @@ import ConnectionManager from '@/config/connectionmanager';
 import ailogger from '@/ailogger';
 import { format } from 'mysql2/promise';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
+import { requireAdmin } from '@/lib/auth-helpers';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -14,6 +16,10 @@ const VALID_CENSUS_TYPES = ['msmts', 'full', 'measurements', 'attributes', 'pers
 type CensusType = (typeof VALID_CENSUS_TYPES)[number];
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  const adminError = requireAdmin(session);
+  if (adminError) return adminError;
+
   const schema = request.nextUrl.searchParams.get('schema');
   const censusIDParam = request.nextUrl.searchParams.get('censusID');
   const type = request.nextUrl.searchParams.get('type');

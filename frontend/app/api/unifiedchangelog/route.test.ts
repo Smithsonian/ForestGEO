@@ -113,7 +113,7 @@ vi.mock('@/app/actions/cookiemanager', () => ({
 
 vi.mock('@/auth', () => ({
   auth: vi.fn(async () => ({
-    user: { id: 'test-user-id', email: 'test@example.com' }
+    user: { id: 'test-user-id', email: 'test@example.com', userStatus: 'global' }
   }))
 }));
 
