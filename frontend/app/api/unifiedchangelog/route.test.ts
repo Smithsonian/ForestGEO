@@ -74,6 +74,17 @@ vi.mock('@/config/connectionmanager', async () => {
     closeConnection: vi.fn(async () => {})
   };
 
+  // The PATCH path now runs inside ConnectionManager.withTransaction and issues
+  // its statements via the scoped TxExecutor (tx.query). Model that faithfully:
+  // open a real transaction id, hand the callback a TxExecutor whose query
+  // delegates to the same executeQuery spy the assertions inspect, then commit.
+  instance.withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+    const transactionId = await instance.beginTransaction();
+    const result = await fn({ query: (sql: string, params?: unknown[]) => instance.executeQuery(sql, params), id: transactionId });
+    await instance.commitTransaction(transactionId);
+    return result;
+  });
+
   const getInstance = vi.fn(() => instance);
 
   return {

@@ -44,7 +44,9 @@ const mocks = vi.hoisted(() => {
     loggerWarn: vi.fn(),
     loggerError: vi.fn(),
     ensureUploadSessionsTable: vi.fn(),
-    withTransaction: vi.fn(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1')),
+    withTransaction: vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+      fn({ query: (sql: string, params?: unknown[]) => mocks.executeQuery(sql, params), id: 'tx-1' })
+    ),
     acquireApplicationLock: vi.fn(async () => true),
     executeQuery: vi.fn<(...args: any[]) => Promise<any>>(async () => []),
     closeConnection: vi.fn(async () => undefined),
@@ -246,7 +248,10 @@ describe('POST /api/revisionupload/apply', () => {
     mocks.auth.mockResolvedValue({ user: { name: 'Mason', email: 'mason@example.com', userStatus: 'global', sites: [] } });
     mocks.isValidSchema.mockReturnValue(true);
     mocks.ensureUploadSessionsTable.mockResolvedValue(undefined);
-    mocks.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    mocks.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+        fn({ query: (sql: string, params?: unknown[]) => mocks.executeQuery(sql, params), id: 'tx-1' })
+    );
     mocks.acquireApplicationLock.mockResolvedValue(true);
     mocks.executeQuery.mockResolvedValue([]);
     mocks.closeConnection.mockResolvedValue(undefined);
@@ -651,9 +656,11 @@ describe('POST /api/revisionupload/apply', () => {
     });
 
     // Simulate withTransaction: run fn and propagate errors (no commit swallow).
-    mocks.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => {
-      return fn('tx-1');
-    });
+    mocks.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
+        return fn({ query: (sql: string, params?: unknown[]) => mocks.executeQuery(sql, params), id: 'tx-1' });
+      }
+    );
 
     const response = await POST(
       buildRequest(

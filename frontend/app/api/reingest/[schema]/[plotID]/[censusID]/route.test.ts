@@ -8,7 +8,9 @@ vi.mock('@/config/connectionmanager', () => {
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
   const acquireApplicationLock = vi.fn();
-  const withTransaction = vi.fn(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+  const withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+    fn({ query: (sql: string, params?: unknown[]) => executeQuery(sql, params), id: 'test-transaction-id' })
+  );
   const instance = {
     executeQuery,
     closeConnection,
@@ -85,7 +87,10 @@ describe('reingest API routes', () => {
     mockConnectionManager.cleanupStaleTransactions.mockResolvedValue(undefined);
     mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
-    mockConnectionManager.withTransaction.mockImplementation(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+    mockConnectionManager.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+        fn({ query: (sql: string, params?: unknown[]) => mockConnectionManager.executeQuery(sql, params), id: 'test-transaction-id' })
+    );
 
     const { validateContextualValues } = await import('@/lib/contextvalidation');
     mockValidateContextualValues = validateContextualValues as any;

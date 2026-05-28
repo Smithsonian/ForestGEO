@@ -92,7 +92,9 @@ function makeProps() {
 function mockSuccessfulProcedureRun() {
   const cm = ConnectionManager.getInstance() as any;
   cm.acquireApplicationLock.mockResolvedValue(true);
-  cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+  cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+    fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
+  );
   cm.executeQuery
     .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
     .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 0 }])
@@ -140,7 +142,9 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
     const cm = ConnectionManager.getInstance() as any;
     shouldRecoverFailedInitialCensus.mockReturnValue(true);
     cm.acquireApplicationLock.mockResolvedValue(true);
-    cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+      fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
+    );
     cm.executeQuery
       .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
       .mockResolvedValueOnce([{ completedUploads: 0, incompleteUploads: 1, treeCount: 1, stemCount: 1, coreMeasurementCount: 244 }])
@@ -179,7 +183,9 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
   it('removes stale unresolved rows from prior same-file batches before processing', async () => {
     const cm = ConnectionManager.getInstance() as any;
     cm.acquireApplicationLock.mockResolvedValue(true);
-    cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+      fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
+    );
     cm.executeQuery
       .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
@@ -207,7 +213,9 @@ describe('GET /api/setupbulkprocedure/[fileID]/[batchID]', () => {
   it('removes stale unresolved ingestion rows that match the current staged upload even when the file name changed', async () => {
     const cm = ConnectionManager.getInstance() as any;
     cm.acquireApplicationLock.mockResolvedValue(true);
-    cm.withTransaction.mockImplementation(async (fn: (transactionId: string) => Promise<unknown>) => fn('tx-1'));
+    cm.withTransaction.mockImplementation(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+      fn({ query: (sql: string, params?: unknown[]) => cm.executeQuery(sql, params), id: 'tx-1' })
+    );
     cm.executeQuery
       .mockResolvedValueOnce([{ PlotID: 22, CensusID: 6, rowCount: 5 }])
       .mockResolvedValueOnce([{ completedUploads: 1, incompleteUploads: 0, treeCount: 0, stemCount: 0, coreMeasurementCount: 244 }])
