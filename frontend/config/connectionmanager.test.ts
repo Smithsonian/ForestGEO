@@ -10,7 +10,7 @@ const { getConnMock, runQueryMock, loggerMock } = vi.hoisted(() => ({
   }
 }));
 
-vi.mock('@/components/processors/processormacros', () => ({
+vi.mock('@/lib/db/primitives', () => ({
   getConn: getConnMock,
   runQuery: runQueryMock
 }));

@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
 import {
   runSessionCleanup,

@@ -47,7 +47,7 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
   safeFormatQuery: (_schema: string, query: string) => query.replace(/\?\?/g, '`mocked_schema`')
 }));
 
-vi.mock('@/components/processors/processormacros', () => ({
+vi.mock('@/lib/db/primitives', () => ({
   getConn: vi.fn(async () => ({
     query: mocks.connQuery,
     release: mocks.connRelease
