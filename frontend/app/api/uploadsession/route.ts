@@ -133,10 +133,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Generate idempotency key if file hash provided
     const idempotencyKey = fileHash ? generateUploadSessionIdempotencyKey(schema, parsedPlotId, parsedCensusId, userId, fileHash, mode) : undefined;
 
-    const uploadSession = await connectionManager.withTransaction(async transactionID => {
+    const uploadSession = await connectionManager.withTransaction(async tx => {
       const scopeLockAcquired = await connectionManager.acquireApplicationLock(
         buildMeasurementScopeLockName(schema, parsedPlotId, parsedCensusId),
-        transactionID,
+        tx.id,
         MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
       );
 

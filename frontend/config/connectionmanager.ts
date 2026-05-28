@@ -17,6 +17,24 @@ interface MySQLError extends Error {
   sqlMessage?: string;
 }
 
+/**
+ * Scoped query executor handed to `ConnectionManager.withTransaction` callbacks.
+ *
+ * `query` runs a statement on the transaction's dedicated connection — callers
+ * no longer need to thread the raw transaction-id string into every
+ * `executeQuery` call. New code should use `tx.query(...)`.
+ */
+export interface TxExecutor {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query<T = any>(sql: string, params?: unknown[]): Promise<T>;
+  /**
+   * Migration bridge ONLY: pass to acquireApplicationLock / legacy string-id
+   * helpers not yet migrated to accept a TxExecutor. New code should use
+   * tx.query, not tx.id.
+   */
+  readonly id: string;
+}
+
 interface QueryTimingDetails {
   schema: string | null;
   transactionId?: string;
@@ -357,7 +375,7 @@ class ConnectionManager {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
   }
 
-  public async withTransaction<T>(fn: (transactionId: string) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
+  public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
     // Race condition fix: use promise-based queue instead of polling
@@ -454,11 +472,19 @@ class ConnectionManager {
       }, timeoutMs);
     });
 
+    // Scoped executor: binds executeQuery to this transaction's connection so
+    // callbacks call tx.query(...) instead of threading the id string. tx.id is
+    // the migration bridge for legacy helpers still typed against a string id.
+    const tx: TxExecutor = {
+      query: (sql, params) => this.executeQuery(sql, params, transactionId!),
+      id: transactionId!
+    };
+
     // Capture the fn promise so we can handle its rejection if a timeout fires.
     // Without this, the orphaned fn promise produces an unhandled rejection that
     // can crash the Node.js process when it eventually fails (e.g. "No connection
     // found for transaction" after the connection was released by rollback).
-    const fnPromise = fn(transactionId!);
+    const fnPromise = fn(tx);
 
     try {
       const result = (await Promise.race([fnPromise, timeoutPromise])) as T;

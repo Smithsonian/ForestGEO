@@ -60,9 +60,9 @@ export async function GET(
     // extended session timeouts) — the outer BEGIN/COMMIT is effectively a no-op
     // since the procedure's START TRANSACTION implicitly commits it.
     const result = await connectionManager.withTransaction(
-      async transactionID => {
+      async tx => {
         ailogger.info(`Triggering collapser for census ${censusID} in schema ${schema}`);
-        await connectionManager.executeQuery(collapserSQL, [censusID], transactionID);
+        await tx.query(collapserSQL, [censusID]);
         ailogger.info('Successfully collapsed & de-duped data!');
         return { responseMessage: 'Processing procedure executed' };
       },

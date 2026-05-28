@@ -80,9 +80,9 @@ async function main() {
   console.log('\n=== Test B: executeQuery within withTransaction ===');
   try {
     const txResult = await cm.withTransaction(
-      async (transactionID: string) => {
-        console.log('Transaction started:', transactionID);
-        const procedureResult = await cm.executeQuery(procedureSQL, ['trace_test', 'trace_002'], transactionID);
+      async tx => {
+        console.log('Transaction started:', tx.id);
+        const procedureResult = await tx.query(procedureSQL, ['trace_test', 'trace_002']);
         console.log('Procedure returned within transaction');
         if (Array.isArray(procedureResult) && Array.isArray(procedureResult[0]) && procedureResult[0].length > 0) {
           console.log('Result row:', procedureResult[0][0]);
