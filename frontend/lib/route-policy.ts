@@ -39,6 +39,16 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   // ── Authed routes (session required, no per-site restriction) ────────────
   // Catalog user lookup – cross-site catalog.users table, no schema scoping
   'catalog/[firstName]/[lastName]': 'authed',
+  // Raw SQL query endpoint – hybrid posture, NOT a pure admin route:
+  //   • requires a session (requireSession) — hence 'authed', not 'public'
+  //   • admins may run any SQL; non-admins may run read-only SELECTs against
+  //     schemas in session.user.sites (enforced in authorizeQuery via
+  //     hasSchemaAccess). Multi-statement and write SQL are 403 for non-admins.
+  // This does not fit 'site-scoped' (no single declared schema in the URL) nor
+  // 'admin' (the route is reachable to non-admins for read-only queries).
+  // Do not re-tighten to 'admin' without removing the non-admin branch in
+  // authorizeQuery — the prior 'admin' classification mismatched the runtime.
+  query: 'authed',
 
   // ── Admin routes (admin role required) ───────────────────────────────────
   // Hard-delete of table data for a census – destructive, admin only
@@ -56,8 +66,6 @@ export const ROUTE_POLICIES: Record<string, RoutePolicy> = {
   'administrative/fetch/[type]': 'admin',
   // Validation rule CRUD – modifying site validation config is admin-only
   'validations/crud': 'admin',
-  // Raw SQL query endpoint – highly privileged, admin only
-  query: 'admin',
   // Schema structure introspection – exposes full table/column metadata
   'structure/[schema]': 'admin',
   // Global cleanup of abandoned sessions and orphaned data
