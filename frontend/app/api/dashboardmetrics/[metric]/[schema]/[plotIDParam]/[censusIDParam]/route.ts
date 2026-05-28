@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateContextualValues } from '@/lib/contextvalidation';
+import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -35,7 +38,7 @@ export async function GET(
   });
 
   if (!validation.success) {
-    // Try to use URL parameters as fallback
+    // Try to use URL parameters as fallback — must still validate schema pattern and authorize access
     if (schemaParam && plotIDParam && censusIDParam) {
       const plotID = parseInt(plotIDParam);
       const censusID = parseInt(censusIDParam);
@@ -44,17 +47,31 @@ export async function GET(
         return NextResponse.json({ error: 'Invalid plot ID or census ID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
 
-      // Continue with URL parameters
-      return await processMetrics(metric, schemaParam, plotID, censusID, plotName);
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+
+      let schema: SchemaName;
+      try {
+        schema = validatedSchema(schemaParam);
+      } catch {
+        return NextResponse.json({ error: 'Invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
+
+      return await processMetrics(metric, schema, plotID, censusID, plotName);
     }
     return validation.response!;
   }
 
   const { schema, plotID, censusID } = validation.values!;
-  return await processMetrics(metric, schema!, plotID!, censusID!, plotName);
+  return await processMetrics(metric, validatedSchema(schema!), plotID!, censusID!, plotName);
 }
 
-async function processMetrics(metric: string, schema: string, plotID: number, censusID: number, _plotName: string): Promise<NextResponse> {
+async function processMetrics(metric: string, schema: SchemaName, plotID: number, censusID: number, _plotName: string): Promise<NextResponse> {
   const connectionManager = ConnectionManager.getInstance();
 
   // count active users?

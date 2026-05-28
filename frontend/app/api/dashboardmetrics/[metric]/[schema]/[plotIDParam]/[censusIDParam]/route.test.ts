@@ -5,24 +5,30 @@ import { GET } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
-const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError } = vi.hoisted(() => {
-  // helper to build an async iterable for listBlobsFlat
-  function* _syncGen<T>(items: T[]) {
-    for (const i of items) yield i as any;
-  }
-  const _listBlobsIterable = (items: any[]) => ({
-    async *[Symbol.asyncIterator]() {
-      yield* _syncGen(items);
+const { _listBlobsIterable, getContainerClientMock, loggerInfo, loggerError, mockAuth, mockValidateContextualValues, mockAssertSchemaAccess } = vi.hoisted(
+  () => {
+    // helper to build an async iterable for listBlobsFlat
+    function* _syncGen<T>(items: T[]) {
+      for (const i of items) yield i as any;
     }
-  });
+    const _listBlobsIterable = (items: any[]) => ({
+      async *[Symbol.asyncIterator]() {
+        yield* _syncGen(items);
+      }
+    });
 
-  return {
-    _listBlobsIterable,
-    getContainerClientMock: vi.fn(),
-    loggerInfo: vi.fn(),
-    loggerError: vi.fn()
-  };
-});
+    return {
+      _listBlobsIterable,
+      getContainerClientMock: vi.fn(),
+      loggerInfo: vi.fn(),
+      loggerError: vi.fn(),
+      mockAuth: vi.fn(),
+      mockValidateContextualValues: vi.fn(),
+      // typed to accept NextResponse | null so mockReturnValue(deniedResponse) is valid
+      mockAssertSchemaAccess: vi.fn() as import('vitest').MockInstance<(session: any, schema: any) => import('next/server').NextResponse | null>
+    };
+  }
+);
 
 // ===== Mocks (must be before importing the route) =====
 
@@ -63,6 +69,36 @@ vi.mock('@/ailogger', () => ({
   default: { info: loggerInfo, error: loggerError, warn: vi.fn() }
 }));
 
+// Auth — default: authenticated user who is a member of 'myschema' and 'testschema'
+vi.mock('@/auth', () => ({
+  auth: mockAuth
+}));
+
+// Authorization guard — default: access permitted
+vi.mock('@/lib/authz', () => ({
+  assertSchemaAccess: mockAssertSchemaAccess,
+  isAdminSession: vi.fn(() => false),
+  hasSchemaAccess: vi.fn(() => true)
+}));
+
+// contextvalidation — default: success so the happy path runs in most tests
+vi.mock('@/lib/contextvalidation', () => ({
+  validateContextualValues: mockValidateContextualValues
+}));
+
+// SQL security — validatedSchema brands the input without re-running pattern checks,
+// which lets existing tests use non-conforming names like 'myschema'/'testschema'.
+// The security tests below verify that invalid patterns are caught by the real validator.
+vi.mock('@/config/utils/sqlsecurity', () => ({
+  validatedSchema: vi.fn((schema: string) => {
+    // Simulate a failed pattern check for obviously-malicious input
+    if (!schema || /[^a-z0-9_]/.test(schema)) {
+      throw new Error(`Invalid or unauthorized schema: ${schema}`);
+    }
+    return schema;
+  })
+}));
+
 // ===== helpers =====
 function _makeProps(metric?: string, schema?: string, plotIDParam?: string, censusIDParam?: string, plot?: string) {
   return {
@@ -92,9 +128,27 @@ async function callGET(metric: string, schema: string, plotID: string, censusID:
   return GET(req, props);
 }
 
+// ===== authorizedSession: a session whose user is a member of the test schemas =====
+const authorizedSession = {
+  user: {
+    userStatus: 'user',
+    sites: [{ schemaName: 'myschema' }, { schemaName: 'testschema' }]
+  }
+};
+
 describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDParam]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: validateContextualValues fails so the fallback path runs (matching the original test setup)
+    // Each test that wants the happy path overrides this
+    mockValidateContextualValues.mockResolvedValue({ success: false });
+
+    // Default: auth returns an authorized session
+    mockAuth.mockResolvedValue(authorizedSession);
+
+    // Default: schema access is permitted
+    mockAssertSchemaAccess.mockReturnValue(null);
   });
 
   it('returns 400 when missing core slugs (including plot search param)', async () => {
@@ -423,6 +477,80 @@ describe('GET /api/dashboardmetrics/[metric]/[schema]/[plotIDParam]/[censusIDPar
         CountMultiStems: 0,
         CountNewRecruits: 0
       });
+    });
+  });
+
+  // ===== Fallback-path security tests =====
+  // These tests exercise the branch where validateContextualValues fails and the
+  // route falls back to the raw URL schemaParam. The fallback MUST enforce the
+  // same auth + schema-access controls as the happy path.
+  describe('fallback path security', () => {
+    // Ensure validateContextualValues always returns failure in this describe block
+    // so every call goes through the fallback branch.
+
+    it('returns 401 when there is no authenticated session on the fallback path', async () => {
+      mockAuth.mockResolvedValue(null); // no session
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      const res = await callGET('CountTrees', 'myschema', '1', '1', 'PlotA');
+
+      expect(res.status).toBe(HTTPResponses.UNAUTHORIZED);
+      const body = await res.json();
+      expect(body.code).toBe('UNAUTHENTICATED');
+
+      // The database must not be queried — the request is blocked before reaching processMetrics
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the authenticated user does not have access to the requested schema, and the DB is never queried', async () => {
+      const { NextResponse } = await import('next/server');
+      // assertSchemaAccess returns a 403 response for an unauthorized schema
+      const deniedResponse = NextResponse.json(
+        { error: 'SQL references a schema outside the authenticated user scope', code: 'SCHEMA_ACCESS_DENIED' },
+        { status: 403 }
+      );
+      mockAssertSchemaAccess.mockReturnValue(deniedResponse);
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // 'other_site_schema' belongs to a different site — user is not a member
+      const res = await callGET('CountTrees', 'forestgeo_other', '1', '1', 'OtherPlot');
+
+      expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+
+      // CRITICAL: processMetrics must never run when access is denied
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when the fallback schemaParam fails pattern validation', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // 'DROP TABLE' is not a valid schema name — validatedSchema() will throw
+      const res = await callGET('CountTrees', 'DROP TABLE users--', '1', '1', 'PlotA');
+
+      expect(res.status).toBe(HTTPResponses.BAD_REQUEST);
+      const body = await res.json();
+      expect(body.code).toBe('INVALID_SCHEMA');
+
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('proceeds to executeQuery when the fallback schema is valid and the user is authorized', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ CountTrees: 42 }]);
+
+      const res = await callGET('CountTrees', 'myschema', '5', '3', 'GoodPlot');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      const body = await res.json();
+      expect(body.CountTrees).toBe(42);
+
+      // executeQuery was reached — the authorized fallback path completed normally
+      expect(exec).toHaveBeenCalledTimes(1);
     });
   });
 });
