@@ -43,6 +43,10 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm install
 
+      - name: Dependency-cycle gate
+        run: node scripts/check-cycles.mjs
+        working-directory: frontend
+
       - name: Install Cypress binary
         run: cd frontend && npx cypress install
 
