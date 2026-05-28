@@ -52,7 +52,7 @@ function routeFileToKey(absolutePath: string): string {
 }
 
 // Recognised authz signals in route source code.
-// A route that uses any of these is considered "explicitly protected."
+// Signal presence alone is necessary but NOT sufficient — see AUTHZ_RETURN_PATTERNS.
 const AUTHZ_SIGNAL_PATTERNS = [
   // validateContextualValues calls auth() internally and checks schema membership
   /validateContextualValues/,
@@ -60,20 +60,68 @@ const AUTHZ_SIGNAL_PATTERNS = [
   /assertSchemaAccess/,
   // validatedSchema from sqlsecurity (used together with auth check)
   /validatedSchema\b/,
-  // validateSchemaOrThrow is SQL-injection safety only — not an authz signal on its own
   // requireSession from lib/auth-helpers — confirms identity but not schema access
   // We only count requireSession when paired with auth() AND a schema ownership check
   // (edit routes use assertSessionMayEdit which internally calls hasSchemaAccess)
   /assertSessionMayEdit/,
   // requireAdmin from lib/auth-helpers — admin implies cross-site privilege
-  /requireAdmin/,
-  // Explicit auth() + assertSchemaAccess combination
-  /assertSchemaAccess/
+  /requireAdmin/
 ] as const;
 
-function routeSourceIsProtected(absolutePath: string): boolean {
+/**
+ * Return-on-failure patterns: each one proves the matching authz signal's
+ * failure short-circuits the handler before any business logic runs. A signal
+ * without a corresponding return is "security theater" — it runs the check
+ * but never returns the failure response.
+ *
+ * Patterns recognised:
+ *   - `if (!validation.success) … return validation.response` (validateContextualValues)
+ *   - `if (denied) return denied` (assertSchemaAccess)
+ *   - `if (adminError) return adminError` (requireAdmin)
+ *   - `if (authError) return authError` (requireAdmin/requireSession alt naming)
+ *   - `if (sessionError) return sessionError` (requireSession)
+ *   - `assertSessionMayEdit(…)` followed by a return (returns a NextResponse on denial)
+ *   - `try { validatedSchema(…) } catch { return … }` (validatedSchema throws on invalid)
+ */
+const AUTHZ_RETURN_PATTERNS = [
+  /if\s*\(\s*!\s*validation\.success\s*\)[\s\S]{0,1000}?return\s+validation\.response/,
+  /if\s*\(\s*denied\s*\)\s*return\s+denied/,
+  /if\s*\(\s*adminError\s*\)\s*return\s+adminError/,
+  /if\s*\(\s*authError\s*\)\s*return\s+authError/,
+  /if\s*\(\s*sessionError\s*\)\s*return\s+sessionError/,
+  /assertSessionMayEdit[\s\S]{0,300}?return/,
+  /try\s*\{[\s\S]{0,300}?validatedSchema[\s\S]{0,300}?\}\s*catch[\s\S]{0,200}?return/
+] as const;
+
+/**
+ * Fallback-bypass detector. A route that uses `validateContextualValues` but
+ * also references a raw URL `schemaParam` in a fallback branch must run a
+ * proper auth gate (`auth()` + `assertSchemaAccess`, or `requireAdmin`) inside
+ * that branch — otherwise the validation signal is silently defeated.
+ *
+ * This was the root cause of the dashboardmetrics fallback bug and the
+ * batchedupload fallback bug. The check stays heuristic (regex over source,
+ * no AST) and conservative: when in doubt, fail the gate.
+ */
+function hasFallbackBypass(source: string): boolean {
+  const usesValidation = /if\s*\(\s*!\s*validation\.success\s*\)/.test(source);
+  const referencesUrlSchema = /\bschemaParam\b/.test(source);
+  if (!usesValidation || !referencesUrlSchema) return false;
+  // If the file calls auth() AND uses an authz gate (assertSchemaAccess or
+  // requireAdmin), we assume the fallback is gated. Conservative — admits a
+  // few false positives but never false negatives.
+  const hasAuthGate = /\bauth\s*\(/.test(source) && /(assertSchemaAccess|requireAdmin\b)/.test(source);
+  return !hasAuthGate;
+}
+
+function routeSourceIsProtected(absolutePath: string): { protected: boolean; reason?: string } {
   const source = fs.readFileSync(absolutePath, 'utf8');
-  return AUTHZ_SIGNAL_PATTERNS.some(pattern => pattern.test(source));
+  const hasSignal = AUTHZ_SIGNAL_PATTERNS.some(pattern => pattern.test(source));
+  if (!hasSignal) return { protected: false, reason: 'no authz signal' };
+  const hasReturn = AUTHZ_RETURN_PATTERNS.some(pattern => pattern.test(source));
+  if (!hasReturn) return { protected: false, reason: 'signal present but no return-on-failure pattern' };
+  if (hasFallbackBypass(source)) return { protected: false, reason: 'fallback references schemaParam without an auth gate' };
+  return { protected: true };
 }
 
 // ── Build the ground truth ────────────────────────────────────────────────────
@@ -109,12 +157,12 @@ describe('Route authorization policy matrix', () => {
     expect(stale).toHaveLength(0);
   });
 
-  it('(c) SITE-SCOPED PROTECTION: every site-scoped route is protected or listed in UNVERIFIED_SCHEMA_ACCESS', () => {
+  it('(c) SITE-SCOPED PROTECTION: every site-scoped route is honestly protected (signal + return-on-failure, no fallback bypass) or in UNVERIFIED_SCHEMA_ACCESS', () => {
     const siteScopedEntries = Object.entries(ROUTE_POLICIES).filter(([, policy]) => policy === 'site-scoped') as [string, RoutePolicy][];
 
     const routeKeyToFile = new Map<string, string>(allRouteFiles.map(f => [routeFileToKey(f), f]));
 
-    const unprotected: string[] = [];
+    const unprotected: { key: string; reason: string }[] = [];
     let protectedCount = 0;
     let unverifiedCount = 0;
 
@@ -130,21 +178,22 @@ describe('Route authorization policy matrix', () => {
         continue;
       }
 
-      if (routeSourceIsProtected(absolutePath)) {
+      const result = routeSourceIsProtected(absolutePath);
+      if (result.protected) {
         protectedCount++;
       } else {
-        unprotected.push(key);
+        unprotected.push({ key, reason: result.reason ?? 'unknown' });
       }
     }
 
     // Print debt summary — visible in test output
-    console.log(`[route-policy] site-scoped routes: ` + `${protectedCount} protected, ${unverifiedCount} in UNVERIFIED_SCHEMA_ACCESS (tracked debt)`);
+    console.log(`[route-policy] site-scoped routes: ${protectedCount} protected, ${unverifiedCount} in UNVERIFIED_SCHEMA_ACCESS (tracked debt)`);
 
     if (unprotected.length > 0) {
-      const list = unprotected.map(k => `  - ${k}`).join('\n');
+      const list = unprotected.map(({ key, reason }) => `  - ${key} (${reason})`).join('\n');
       throw new Error(
-        `${unprotected.length} site-scoped route(s) lack an authz signal and are not in UNVERIFIED_SCHEMA_ACCESS.\n` +
-          `Either add an authz signal to the route source or add the key to UNVERIFIED_SCHEMA_ACCESS in lib/route-policy.ts:\n${list}`
+        `${unprotected.length} site-scoped route(s) fail the strengthened authz gate and are not in UNVERIFIED_SCHEMA_ACCESS.\n` +
+          `Either add a return-on-failure pattern (and gate any URL-param fallback) or add the key to UNVERIFIED_SCHEMA_ACCESS in lib/route-policy.ts:\n${list}`
       );
     }
 

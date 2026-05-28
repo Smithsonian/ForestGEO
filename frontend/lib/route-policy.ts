@@ -174,6 +174,10 @@ export const UNVERIFIED_SCHEMA_ACCESS: ReadonlySet<string> = new Set([
   'refreshviews/[view]/[schema]',
   // reingestsinglefailure: uses safeFormatQuery (SQL safety only), no auth
   'reingestsinglefailure/[schema]/[targetRowID]',
+  // reingest: validateContextualValues signal present but URL-param fallback accepts
+  // raw schemaParam without auth() / assertSchemaAccess (same shape as the
+  // batchedupload fallback bypass before it was fixed).
+  'reingest/[schema]/[plotID]/[censusID]',
   // resettableview: uses validateContextualValues but skipSchemaAuth may apply;
   // direct schema path falls back without auth check
   'resettableview/[gridType]/[plotID]/[censusID]',
