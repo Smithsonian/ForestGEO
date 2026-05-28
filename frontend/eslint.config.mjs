@@ -117,7 +117,7 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       ...prettierPlugin.configs?.rules,
       'import/order': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/member-ordering': 'off',
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
@@ -146,7 +146,7 @@ export default [
       'react/no-unescaped-entities': 'off',
       '@next/next/no-page-custom-font': 'off',
       // Retaining custom rules that are relevant to Next.js projects
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/member-ordering': 'off',
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
@@ -201,6 +201,35 @@ export default [
             }
           ]
         }
+      ]
+    }
+  },
+
+  // Architectural boundary: UI components must not reach into the DB layer directly.
+  {
+    files: ['components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'warn',
+        {
+          patterns: [
+            {
+              group: ['@/config/connectionmanager', '@/lib/db/*', '@/lib/db'],
+              message: 'UI must not import the DB layer. Call a feature server module instead.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  // Architectural boundary: config/lib must not depend on UI components.
+  {
+    files: ['config/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'warn',
+        { patterns: [{ group: ['@/components/*', '@/components/**'], message: 'config/lib must not depend on components (inverts dependency direction).' }] }
       ]
     }
   }
