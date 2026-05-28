@@ -69,6 +69,27 @@ describe('CoreAPIFunctions', () => {
       executeQuery: vi.fn(() => Promise.resolve([]))
     };
 
+    // PATCH now drives its writes through withTransaction. Faithfully model the
+    // real semantics: run the callback with a TxExecutor whose query() delegates
+    // to the same executeQuery mock (so existing query assertions still hold),
+    // commit on success, and roll back + re-throw on failure (so the route's
+    // outer catch -> handleError path runs exactly as in production).
+    mockConnectionManager.withTransaction = vi.fn(async (fn: (tx: any) => Promise<any>) => {
+      const transactionID = await mockConnectionManager.beginTransaction();
+      const tx = {
+        id: transactionID,
+        query: (sql: string, params?: unknown[]) => mockConnectionManager.executeQuery(sql, params, transactionID)
+      };
+      try {
+        const result = await fn(tx);
+        await mockConnectionManager.commitTransaction(transactionID);
+        return result;
+      } catch (err) {
+        await mockConnectionManager.rollbackTransaction(transactionID);
+        throw err;
+      }
+    });
+
     (ConnectionManager.getInstance as any).mockReturnValue(mockConnectionManager);
 
     // Setup mock Mapper
@@ -125,13 +146,16 @@ describe('CoreAPIFunctions', () => {
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
+      // PATCH now wraps its writes in withTransaction; the underlying
+      // begin/commit still fire (the mock models that), but the route no longer
+      // threads the transaction id or calls closeConnection itself.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
       expect(mockConnectionManager.commitTransaction).toHaveBeenCalledWith('transaction-123');
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
       expect(response.status).toBe(200);
     });
 
-    it('should close connection in finally block even on error', async () => {
+    it('rolls back via withTransaction when a write fails', async () => {
       const mockRequest = new NextRequest('http://localhost/api/test', {
         method: 'PATCH',
         body: JSON.stringify({ newRow: {}, oldRow: {} })
@@ -144,9 +168,11 @@ describe('CoreAPIFunctions', () => {
         slugs: ['testSchema', 'plotID']
       };
 
-      await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
+      const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalledWith('transaction-123');
+      expect(response.status).toBe(500);
     });
 
     it('should handle alltaxonomiesview dataType with handleUpsertForSlices', async () => {
@@ -484,8 +510,10 @@ describe('CoreAPIFunctions', () => {
 
       await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(mockConnectionManager.beginTransaction).toHaveBeenCalled();
-      expect(mockConnectionManager.closeConnection).toHaveBeenCalled();
+      // PATCH delegates rollback to withTransaction; it no longer rolls back or
+      // closes the connection in its own finally.
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalled();
+      expect(mockConnectionManager.rollbackTransaction).toHaveBeenCalled();
     });
 
     it('should handle transaction rollback on error in POST', async () => {

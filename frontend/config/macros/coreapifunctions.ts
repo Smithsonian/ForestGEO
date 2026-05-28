@@ -57,24 +57,26 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   const primaryKeyColumn = PRIMARY_KEY_MAP[dataType] || gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const demappedGridID = primaryKeyColumn;
   const { newRow, oldRow } = await request.json();
-  let updateIDs: Record<string, number> = {};
-  let transactionID: string | undefined = undefined;
 
   try {
-    transactionID = await connectionManager.beginTransaction();
+    const updateIDs = await connectionManager.withTransaction(async tx => {
+      if (dataType === 'alltaxonomiesview') {
+        let queryConfig;
+        switch (dataType) {
+          case 'alltaxonomiesview':
+            queryConfig = AllTaxonomiesViewQueryConfig;
+            break;
+          default:
+            throw new Error('Incorrect view call');
+        }
 
-    if (dataType === 'alltaxonomiesview') {
-      let queryConfig;
-      switch (dataType) {
-        case 'alltaxonomiesview':
-          queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        default:
-          throw new Error('Incorrect view call');
+        // NOTE (deferred): handleUpsertForSlices does not accept a transaction id
+        // and calls handleUpsert without threading one, so its writes run on
+        // autocommit pool connections OUTSIDE this transaction. Migrating that
+        // helper to a TxExecutor is out of scope for this fix; left as-is.
+        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig);
       }
 
-      updateIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig);
-    } else {
       const mapper = MapperFactory.getMapper<any, any>(dataType);
       const oldRowData = mapper.demapData([oldRow])[0];
       const newRowData = mapper.demapData([{ ...oldRow, ...newRow }])[0];
@@ -106,23 +108,27 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           const query = CensusActive
             ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
             : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
-          await connectionManager.executeQuery(query, [censusID, previousGridIDKey]);
+          await tx.query(query, [censusID, previousGridIDKey]);
         }
         dataToUpdate = personnelTrimmed;
       } else dataToUpdate = remainingProperties;
 
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${dataType}`, dataToUpdate, demappedGridID, previousGridIDKey]);
-      await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
-      await connectionManager.executeQuery(updateQuery);
+      // Must run on the same connection as the UPDATE so the changelog trigger
+      // reads the session variable this statement sets — hence tx.query, not a
+      // fresh pool connection.
+      await tx.query(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
+      await tx.query(updateQuery);
 
-      updateIDs = { [dataType]: updatedGridIDKey };
-    }
-    await connectionManager.commitTransaction(transactionID ?? '');
+      return { [dataType]: updatedGridIDKey };
+    });
+
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow, transactionID ?? undefined);
-  } finally {
-    await connectionManager.closeConnection();
+    // withTransaction has already rolled back on throw; pass no transactionID so
+    // handleError only formats the response and does not attempt a second
+    // rollback (which would log against an already-released connection).
+    return handleError(error, connectionManager, newRow);
   }
 }
 
