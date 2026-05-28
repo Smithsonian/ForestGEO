@@ -375,6 +375,22 @@ class ConnectionManager {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
   }
 
+  /**
+   * Run `fn` inside a managed MySQL transaction. The callback receives a scoped
+   * {@link TxExecutor}: `tx.query` binds to the transaction's dedicated
+   * connection, `tx.id` is the migration bridge for legacy string-id helpers.
+   *
+   * Timeout semantics — KNOWN LIMITATION: the timeout uses `Promise.race`
+   * against `fn(tx)`. When the timeout wins, this method rolls back and
+   * releases the connection, but it does NOT cancel the in-flight callback or
+   * any `tx.query` already submitted to MySQL — `Promise.race` cannot abort
+   * the loser. The orphan `fnPromise` rejection is silently consumed (see the
+   * inline comment near `fnPromise`) so the process does not crash with an
+   * unhandled rejection. Real cancellation requires threading an
+   * `AbortSignal` through `tx.query` → connection.query — tracked as a
+   * follow-up. Callers that need hard cancellation should not rely on
+   * timeoutMs alone.
+   */
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
