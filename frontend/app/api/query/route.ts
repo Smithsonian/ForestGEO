@@ -5,6 +5,7 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { requireSession } from '@/lib/auth-helpers';
+import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 import type { Session } from 'next-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -17,12 +18,7 @@ interface QueryRequest {
   format?: boolean; // Whether to format the query with parameters
 }
 
-const ADMIN_ROLES = new Set(['global', 'db admin']);
 const SYSTEM_SCHEMAS = new Set(['catalog', 'information_schema', 'mysql', 'performance_schema', 'sys']);
-
-function isAdminSession(session: Session): boolean {
-  return ADMIN_ROLES.has(session.user.userStatus ?? '');
-}
 
 function stripSqlComments(query: string): string {
   return query
@@ -49,10 +45,6 @@ function extractTableSchemas(query: string): string[] {
   }
 
   return [...schemas];
-}
-
-function hasSchemaAccess(session: Session, schema: string): boolean {
-  return (session.user.sites ?? []).some(site => site.schemaName?.toLowerCase() === schema.toLowerCase());
 }
 
 function authorizeQuery(session: Session, query: string): NextResponse | null {
