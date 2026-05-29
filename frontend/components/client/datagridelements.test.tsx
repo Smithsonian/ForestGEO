@@ -259,4 +259,27 @@ describe('EditToolbar', () => {
 
     expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
   });
+
+  it('MUST render the More button when only a validation menu is present', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[]}
+        validationMenu={<div>validation</div>}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
+  });
 });
