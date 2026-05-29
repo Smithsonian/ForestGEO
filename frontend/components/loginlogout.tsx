@@ -1,6 +1,6 @@
 // loginlogout.tsx
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Avatar from '@mui/joy/Avatar';
 import Box from '@mui/joy/Box';
 import Typography from '@mui/joy/Typography';
@@ -18,6 +18,22 @@ export const LoginLogout = () => {
   const { data: session, status } = useSession();
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
   const router = useRouter();
+  const menuRef = useRef<HTMLUListElement | null>(null);
+  const menuId = 'user-settings-menu';
+  const isMenuOpen = Boolean(anchorSettings);
+
+  useEffect(() => {
+    if (isMenuOpen) {
+      const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]');
+      firstItem?.focus();
+    }
+  }, [isMenuOpen]);
+
+  const closeMenu = () => {
+    const trigger = anchorSettings;
+    setAnchorSettings(null);
+    trigger?.focus();
+  };
 
   const userName = session?.user?.name;
   const userInitials =
@@ -57,6 +73,9 @@ export const LoginLogout = () => {
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <IconButton
           aria-label={userInitials ? `${userInitials}, open user menu` : 'Open user menu'}
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
+          aria-controls={isMenuOpen ? menuId : undefined}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           onKeyDown={event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -89,6 +108,9 @@ export const LoginLogout = () => {
           disabled={!['global', 'db admin'].includes(session?.user?.userStatus ?? '')}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           aria-label="Settings menu"
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
+          aria-controls={isMenuOpen ? menuId : undefined}
           title="Settings menu"
           size="sm"
         >
@@ -100,40 +122,28 @@ export const LoginLogout = () => {
           {status == 'loading' ? <CircularProgress size={'lg'} aria-label="Loading user session" /> : <LogoutRoundedIcon />}
         </IconButton>
         <Menu
+          ref={menuRef}
+          id={menuId}
           anchorEl={anchorSettings}
-          open={Boolean(anchorSettings)}
-          onClose={() => setAnchorSettings(null)}
+          open={isMenuOpen}
+          onClose={closeMenu}
           placement={'top-end'}
           disablePortal
           sx={{ zIndex: 1500 }}
         >
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/users');
-              setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/users');
-                setAnchorSettings(null);
-              }
+              closeMenu();
             }}
           >
             User Settings
             <ManageAccountsRounded />
           </MenuItem>
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/sites');
-              setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/sites');
-                setAnchorSettings(null);
-              }
+              closeMenu();
             }}
           >
             Site Settings
@@ -141,16 +151,9 @@ export const LoginLogout = () => {
           </MenuItem>
 
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/userstosites');
-              setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/userstosites');
-                setAnchorSettings(null);
-              }
+              closeMenu();
             }}
           >
             User-Site Assignments
