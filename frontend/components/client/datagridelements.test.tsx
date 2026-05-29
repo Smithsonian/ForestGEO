@@ -11,7 +11,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
 vi.mock('@mui/x-data-grid', () => ({
   ColumnsPanelTrigger: ({ render }: any) => <>{render}</>,
   FilterPanelTrigger: ({ render }: any) => <>{render}</>,
-  QuickFilter: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+  QuickFilter: ({ children, defaultExpanded, expanded, onExpandedChange, ...props }: any) => <div {...props}>{children}</div>,
   QuickFilterControl: ({ slotProps, ...props }: any) => <input aria-label={slotProps?.input?.['aria-label']} {...props} />,
   QuickFilterClear: ({ children, ...props }: any) => (
     <button type="button" {...props}>
@@ -19,11 +19,14 @@ vi.mock('@mui/x-data-grid', () => ({
     </button>
   ),
   Toolbar: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-  ToolbarButton: ({ children, ...props }: any) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
+  ToolbarButton: ({ render, children, ...props }: any) =>
+    render ? (
+      render
+    ) : (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
   GridColDef: {},
   GridFilterModel: {},
   GridSlotProps: {},
@@ -117,6 +120,41 @@ describe('EditToolbar', () => {
     expect(togglePending).toHaveBeenCalledWith(false);
     expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-label', 'Hide pending measurements (2)');
     expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps the Refresh button operable when registered as a toolbar item', async () => {
+    const user = userEvent.setup();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={refresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: true, toggle: vi.fn(), count: 3 }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    const refreshButton = screen.getByTestId('refresh-button');
+    expect(refreshButton).toBeInTheDocument();
+
+    await user.click(refreshButton);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('can hide the action buttons section for read-only pages', () => {

@@ -285,7 +285,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               />
               <Divider orientation={'vertical'} sx={{ mx: 0.5, flexShrink: 0 }} />
               <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow sx={{ flex: 1, minWidth: '150px', maxWidth: '400px' }}>
-                <QuickFilter style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                <QuickFilter defaultExpanded style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                   <QuickFilterControl
                     style={{ display: 'flex', flex: 1, minWidth: '100px' }}
                     placeholder={'Search All Fields...'}
@@ -314,105 +314,133 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               </Tooltip>
             </Box>
             <Divider orientation={'vertical'} sx={{ mx: 1, flexShrink: 0 }} />
-            <Button
-              style={{ display: 'flex', minWidth: 'fit-content', flexShrink: 0 }}
-              color={'primary'}
-              startDecorator={<RefreshIcon />}
-              onClick={async () => await handleRefresh()}
-              data-testid="refresh-button"
-            >
-              Refresh
-            </Button>
+            <ToolbarButton
+              render={
+                <Button
+                  style={{ display: 'flex', minWidth: 'fit-content', flexShrink: 0 }}
+                  color={'primary'}
+                  startDecorator={<RefreshIcon />}
+                  onClick={async () => await handleRefresh()}
+                  data-testid="refresh-button"
+                >
+                  Refresh
+                </Button>
+              }
+            />
             {gridType === 'measurements' && (
               <Stack direction={'row'} spacing={1.5} sx={{ display: 'flex', alignItems: 'center', ml: 1, flexWrap: 'nowrap', flexShrink: 0 }}>
                 <Tooltip title={`Invalid: ${errorControls.count} (rows with unresolved errors)`}>
                   <Badge badgeContent={errorControls.count} size={'sm'}>
-                    <IconButton
-                      disabled={!errorControls.count}
-                      variant="soft"
-                      color={errorControls.show ? 'danger' : 'neutral'}
-                      onClick={() => errorControls.toggle(!errorControls.show)}
-                      aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
-                      aria-pressed={errorControls.show}
-                      data-testid="filter-errors"
-                    >
-                      <Warning />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          disabled={!errorControls.count}
+                          variant="soft"
+                          color={errorControls.show ? 'danger' : 'neutral'}
+                          onClick={() => errorControls.toggle(!errorControls.show)}
+                          aria-label={`${errorControls.show ? 'Hide' : 'Show'} invalid measurements (${errorControls.count})`}
+                          aria-pressed={errorControls.show}
+                          data-testid="filter-errors"
+                        >
+                          <Warning />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
                 <Tooltip title={`Valid: (${validControls.count})`}>
                   <Badge badgeContent={validControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!validControls.count}
-                      color={validControls.show ? 'success' : 'neutral'}
-                      onClick={() => validControls.toggle(!validControls.show)}
-                      aria-label={`${validControls.show ? 'Hide' : 'Show'} valid measurements (${validControls.count})`}
-                      aria-pressed={validControls.show}
-                      data-testid="filter-valid"
-                    >
-                      <VerifiedIcon />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          variant="soft"
+                          disabled={!validControls.count}
+                          color={validControls.show ? 'success' : 'neutral'}
+                          onClick={() => validControls.toggle(!validControls.show)}
+                          aria-label={`${validControls.show ? 'Hide' : 'Show'} valid measurements (${validControls.count})`}
+                          aria-pressed={validControls.show}
+                          data-testid="filter-valid"
+                        >
+                          <VerifiedIcon />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
                 <Tooltip title={`Pending: (${pendingControls.count})`}>
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!pendingControls.count}
-                      color={pendingControls.show ? 'primary' : 'neutral'}
-                      onClick={() => pendingControls.toggle(!pendingControls.show)}
-                      aria-label={`${pendingControls.show ? 'Hide' : 'Show'} pending measurements (${pendingControls.count})`}
-                      aria-pressed={pendingControls.show}
-                      data-testid="filter-pending"
-                    >
-                      <ScheduleIcon />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          variant="soft"
+                          disabled={!pendingControls.count}
+                          color={pendingControls.show ? 'primary' : 'neutral'}
+                          onClick={() => pendingControls.toggle(!pendingControls.show)}
+                          aria-label={`${pendingControls.show ? 'Hide' : 'Show'} pending measurements (${pendingControls.count})`}
+                          aria-pressed={pendingControls.show}
+                          data-testid="filter-pending"
+                        >
+                          <ScheduleIcon />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
                 <Tooltip title={`Old Trees: ${otControls.count}`}>
                   <Badge badgeContent={otControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!otControls.count}
-                      color={otControls.show ? 'primary' : 'neutral'}
-                      onClick={() => otControls.toggle(!otControls.show)}
-                      aria-label={`${otControls.show ? 'Hide' : 'Show'} old trees (${otControls.count})`}
-                      aria-pressed={otControls.show}
-                      data-testid="filter-ot"
-                    >
-                      <Forest />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          variant="soft"
+                          disabled={!otControls.count}
+                          color={otControls.show ? 'primary' : 'neutral'}
+                          onClick={() => otControls.toggle(!otControls.show)}
+                          aria-label={`${otControls.show ? 'Hide' : 'Show'} old trees (${otControls.count})`}
+                          aria-pressed={otControls.show}
+                          data-testid="filter-ot"
+                        >
+                          <Forest />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
                 <Tooltip title={`Multi-Stems: ${msControls.count}`}>
                   <Badge badgeContent={msControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!msControls.count}
-                      color={msControls.show ? 'primary' : 'neutral'}
-                      onClick={() => msControls.toggle(!msControls.show)}
-                      aria-label={`${msControls.show ? 'Hide' : 'Show'} multi-stem trees (${msControls.count})`}
-                      aria-pressed={msControls.show}
-                      data-testid="filter-ms"
-                    >
-                      <CallSplit />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          variant="soft"
+                          disabled={!msControls.count}
+                          color={msControls.show ? 'primary' : 'neutral'}
+                          onClick={() => msControls.toggle(!msControls.show)}
+                          aria-label={`${msControls.show ? 'Hide' : 'Show'} multi-stem trees (${msControls.count})`}
+                          aria-pressed={msControls.show}
+                          data-testid="filter-ms"
+                        >
+                          <CallSplit />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
                 <Tooltip title={`New Recruits: ${nrControls.count}`}>
                   <Badge badgeContent={nrControls.count} size={'sm'}>
-                    <IconButton
-                      variant="soft"
-                      disabled={!nrControls.count}
-                      color={nrControls.show ? 'primary' : 'neutral'}
-                      onClick={() => nrControls.toggle(!nrControls.show)}
-                      aria-label={`${nrControls.show ? 'Hide' : 'Show'} new recruits (${nrControls.count})`}
-                      aria-pressed={nrControls.show}
-                      data-testid="filter-nr"
-                    >
-                      <Grass />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          variant="soft"
+                          disabled={!nrControls.count}
+                          color={nrControls.show ? 'primary' : 'neutral'}
+                          onClick={() => nrControls.toggle(!nrControls.show)}
+                          aria-label={`${nrControls.show ? 'Hide' : 'Show'} new recruits (${nrControls.count})`}
+                          aria-pressed={nrControls.show}
+                          data-testid="filter-nr"
+                        >
+                          <Grass />
+                        </IconButton>
+                      }
+                    />
                   </Badge>
                 </Tooltip>
               </Stack>
@@ -428,9 +456,13 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   .filter((button: any) => button.label === 'Manual Entry Form')
                   .map((button: any, index: number) => (
                     <Tooltip key={index} title={button.tooltip || 'Manual Entry Form'} placement="top" arrow>
-                      <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
-                        {button.icon}
-                      </IconButton>
+                      <ToolbarButton
+                        render={
+                          <IconButton onClick={button.onClick} variant="soft" color="primary" size="sm" aria-label="Manual Entry Form">
+                            {button.icon}
+                          </IconButton>
+                        }
+                      />
                     </Tooltip>
                   ))}
                 {/* Upload - keep as button with text */}
@@ -438,43 +470,55 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   .filter((button: any) => button.label === 'Upload')
                   .map((button: any, index: number) => (
                     <Tooltip key={index} title={button.tooltip} placement="top" arrow>
-                      <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
-                        {button.label}
-                      </Button>
+                      <ToolbarButton
+                        render={
+                          <Button onClick={button.onClick} variant="soft" color="primary" size="sm" startDecorator={button.icon} sx={{ whiteSpace: 'nowrap' }}>
+                            {button.label}
+                          </Button>
+                        }
+                      />
                     </Tooltip>
                   ))}
                 {/* Export as CSV button */}
                 {hasAnyExport && (
                   <Tooltip title="Export as CSV" placement="top" arrow>
-                    <IconButton
-                      onClick={async () => {
-                        if (handleExport) {
-                          setOpenExportModal(true);
-                        } else if (handleExportCSV) {
-                          await handleExportCSV();
-                        } else {
-                          await handleExportAll!();
-                        }
-                      }}
-                      variant="soft"
-                      color="primary"
-                      aria-label="Export as CSV"
-                    >
-                      <CloudDownloadIcon />
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          onClick={async () => {
+                            if (handleExport) {
+                              setOpenExportModal(true);
+                            } else if (handleExportCSV) {
+                              await handleExportCSV();
+                            } else {
+                              await handleExportAll!();
+                            }
+                          }}
+                          variant="soft"
+                          color="primary"
+                          aria-label="Export as CSV"
+                        >
+                          <CloudDownloadIcon />
+                        </IconButton>
+                      }
+                    />
                   </Tooltip>
                 )}
                 {/* Show/Hide empty columns button */}
                 {setHidingEmpty && (
                   <Tooltip title={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'} placement="top" arrow>
-                    <IconButton
-                      onClick={() => setHidingEmpty(!hidingEmpty)}
-                      variant="soft"
-                      color="primary"
-                      aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
-                    >
-                      {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
-                    </IconButton>
+                    <ToolbarButton
+                      render={
+                        <IconButton
+                          onClick={() => setHidingEmpty(!hidingEmpty)}
+                          variant="soft"
+                          color="primary"
+                          aria-label={hidingEmpty ? 'Show empty columns' : 'Hide empty columns'}
+                        >
+                          {hidingEmpty ? <UnfoldMore sx={{ transform: 'rotate(90deg)' }} /> : <UnfoldLess sx={{ transform: 'rotate(-90deg)' }} />}
+                        </IconButton>
+                      }
+                    />
                   </Tooltip>
                 )}
                 {/* Kebab menu for additional actions */}
