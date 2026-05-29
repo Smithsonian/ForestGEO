@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import GithubFeedbackModal from './githubfeedbackmodal';
+import { createGitHubIssue } from '@/app/actions/github';
 
 // The component destructures { submitForm, isSubmitting } from useFormSubmission.
 const mockUseFormSubmission = vi.fn();
@@ -73,5 +74,44 @@ describe('GithubFeedbackModal - Accessibility', () => {
     expect(document.querySelectorAll(`#${DIALOG_TITLE_ID}`)).toHaveLength(1);
     expect(document.querySelectorAll(`#${DIALOG_DESCRIPTION_ID}`)).toHaveLength(1);
     expect(document.getElementById(DIALOG_TITLE_ID)).toHaveTextContent(ACCESSIBLE_NAME);
+  });
+
+  it('MUST keep the title and description present, unique, and the accessible name stable in the success state', async () => {
+    const createdIssue = {
+      status: 'open',
+      html_url: 'https://github.com/example/repo/issues/1',
+      title: 'APP-USER-GENERATED: Feedback Ticket: other',
+      body: '### Description\nexample',
+      created_at: '2026-05-29T00:00:00Z'
+    };
+    vi.mocked(createGitHubIssue).mockResolvedValue({ success: true, issue: createdIssue });
+
+    // Drive the component into the createdIssue branch by having submitForm run the
+    // real submit callback the component passes to useFormSubmission, which awaits
+    // createGitHubIssue and calls setCreatedIssue with the resolved issue.
+    mockUseFormSubmission.mockImplementation((submitCallback: () => Promise<void>) => ({
+      submitForm: () => {
+        void submitCallback();
+      },
+      isSubmitting: false
+    }));
+
+    render(<GithubFeedbackModal open onClose={() => {}} />);
+
+    // The Confirm button is disabled until name, issue type, and description are set.
+    fireEvent.change(screen.getByLabelText(/input for name of person reporting feedback/i), { target: { value: 'Person Doe' } });
+    fireEvent.click(screen.getByRole('radio', { name: /other issue/i }));
+    fireEvent.change(screen.getByLabelText(/description box/i), { target: { value: 'example' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/issue created/i)).toBeInTheDocument();
+    });
+
+    expect(document.querySelectorAll(`#${DIALOG_TITLE_ID}`)).toHaveLength(1);
+    expect(document.querySelectorAll(`#${DIALOG_DESCRIPTION_ID}`)).toHaveLength(1);
+    expect(document.getElementById(DIALOG_TITLE_ID)).toHaveTextContent(ACCESSIBLE_NAME);
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(ACCESSIBLE_NAME);
   });
 });

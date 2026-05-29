@@ -67,6 +67,8 @@ const issueTypes = [
   { value: 'other', label: 'Other Issue', icon: <Info />, tooltip: 'Any other feedback or issues not listed above.' }
 ];
 
+const DIALOG_ACCESSIBLE_NAME = 'GitHub Feedback Form';
+
 type IssueType = (typeof issueTypes)[number]['value'];
 
 interface GithubFeedbackModalProps {
@@ -167,14 +169,14 @@ ${pathname}
         <ModalDialog role="dialog" aria-labelledby="github-feedback-title" aria-describedby="github-feedback-description">
           <ModalClose variant="outlined" onClick={handleCancel} />
           <span id="github-feedback-title" className="sr-only">
-            GitHub Feedback Form
+            {DIALOG_ACCESSIBLE_NAME}
           </span>
           <span id="github-feedback-description" className="sr-only">
             Report a bug or request a feature for the ForestGEO application.
           </span>
           {!createdIssue && !isSubmitting && (
             <>
-              <DialogTitle>GitHub Feedback Form</DialogTitle>
+              <DialogTitle>{DIALOG_ACCESSIBLE_NAME}</DialogTitle>
               <DialogContent sx={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                 <Divider orientation="horizontal" sx={{ my: 1 }} />
                 <Grid container spacing={1}>
