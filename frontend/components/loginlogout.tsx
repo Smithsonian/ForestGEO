@@ -19,6 +19,8 @@ export const LoginLogout = () => {
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
   const router = useRouter();
   const menuRef = useRef<HTMLUListElement | null>(null);
+  const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuId = 'user-settings-menu';
   const isMenuOpen = Boolean(anchorSettings);
 
@@ -30,6 +32,9 @@ export const LoginLogout = () => {
   }, [isMenuOpen]);
 
   const closeMenu = () => {
+    // anchorSettings holds the trigger DOM node (set from event.currentTarget); it stays
+    // mounted when only the menu portal closes, so capture it before clearing state and
+    // refocus it to restore focus to the opener on Escape / click-away.
     const trigger = anchorSettings;
     setAnchorSettings(null);
     trigger?.focus();
@@ -72,10 +77,11 @@ export const LoginLogout = () => {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <IconButton
+          ref={avatarButtonRef}
           aria-label={userInitials ? `${userInitials}, open user menu` : 'Open user menu'}
           aria-haspopup="menu"
-          aria-expanded={isMenuOpen}
-          aria-controls={isMenuOpen ? menuId : undefined}
+          aria-expanded={isMenuOpen && anchorSettings === avatarButtonRef.current}
+          aria-controls={isMenuOpen && anchorSettings === avatarButtonRef.current ? menuId : undefined}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           onKeyDown={event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -105,12 +111,13 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton
+          ref={settingsButtonRef}
           disabled={!['global', 'db admin'].includes(session?.user?.userStatus ?? '')}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           aria-label="Settings menu"
           aria-haspopup="menu"
-          aria-expanded={isMenuOpen}
-          aria-controls={isMenuOpen ? menuId : undefined}
+          aria-expanded={isMenuOpen && anchorSettings === settingsButtonRef.current}
+          aria-controls={isMenuOpen && anchorSettings === settingsButtonRef.current ? menuId : undefined}
           title="Settings menu"
           size="sm"
         >
@@ -134,7 +141,7 @@ export const LoginLogout = () => {
           <MenuItem
             onClick={() => {
               router.push('/admin/users');
-              closeMenu();
+              setAnchorSettings(null);
             }}
           >
             User Settings
@@ -143,7 +150,7 @@ export const LoginLogout = () => {
           <MenuItem
             onClick={() => {
               router.push('/admin/sites');
-              closeMenu();
+              setAnchorSettings(null);
             }}
           >
             Site Settings
@@ -153,7 +160,7 @@ export const LoginLogout = () => {
           <MenuItem
             onClick={() => {
               router.push('/admin/userstosites');
-              closeMenu();
+              setAnchorSettings(null);
             }}
           >
             User-Site Assignments

@@ -256,6 +256,31 @@ describe('LoginLogout - Functional Tests', () => {
       expect(menu).toHaveAttribute('id', 'user-settings-menu');
       expect(trigger).toHaveAttribute('aria-controls', 'user-settings-menu');
     });
+
+    it('MUST move focus to the first menu item when the menu opens', async () => {
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      await user.click(screen.getByRole('button', { name: /open user menu/i }));
+      const firstItem = await screen.findByRole('menuitem', { name: /user settings/i });
+      expect(firstItem).toHaveFocus();
+    });
+
+    it('MUST close the menu and not trap focus inside it when dismissed', async () => {
+      // Joy's Menu Escape/click-away dismissal does not fire in jsdom (disablePortal,
+      // no rendered backdrop), so the Escape-specific onClose path is not observable
+      // here. We assert the dismissal contract via the toggle path that does fire:
+      // the menu closes and focus returns to the trigger rather than staying trapped
+      // on a now-unmounted menu item.
+      const user = userEvent.setup();
+      render(<LoginLogout />);
+      const trigger = screen.getByRole('button', { name: /open user menu/i });
+      await user.click(trigger);
+      await screen.findByRole('menu');
+      await user.click(trigger);
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+      expect(document.activeElement?.closest('[role="menu"]')).toBeNull();
+      expect(trigger).toHaveFocus();
+    });
   });
 
   describe('Settings Menu Navigation', () => {
