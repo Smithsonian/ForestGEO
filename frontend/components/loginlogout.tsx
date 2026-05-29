@@ -18,7 +18,9 @@ export const LoginLogout = () => {
   const { data: session, status } = useSession();
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
   const router = useRouter();
-  const menuRef = useRef<HTMLUListElement | null>(null);
+  // Joy Menu types its ref as HTMLDivElement even though it forwards to the listbox <ul>;
+  // we only need querySelector on it, so match the declared type to compile cleanly.
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
   const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuId = 'user-settings-menu';
