@@ -277,6 +277,32 @@ describe('GET /api/fetchall/[[...slugs]]', () => {
     expect(params).toEqual([42, 42]);
   });
 
+  it('species: returns active species rows only for selectable options', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([
+      { SpeciesID: 314, SpeciesCode: 'CRATSN', IsActive: 1 },
+      { SpeciesID: 291, SpeciesCode: 'RUBI04', IsActive: 1 }
+    ]);
+
+    const req = makeRequest('myschema');
+    const res = await GET(req, makeProps(['species', '1', '2']));
+
+    expect(res.status).toBe(HTTPResponses.OK);
+    expect(await res.json()).toEqual([
+      { SpeciesID: 314, SpeciesCode: 'CRATSN', IsActive: 1, mapped: true },
+      { SpeciesID: 291, SpeciesCode: 'RUBI04', IsActive: 1, mapped: true }
+    ]);
+
+    const [sql, params] = exec.mock.calls[0];
+    expect(String(sql)).toMatch(/FROM myschema\.species/i);
+    expect(String(sql)).toMatch(/WHERE IsActive IS TRUE/i);
+    expect(String(sql)).toMatch(/SpeciesCode IS NOT NULL/i);
+    expect(String(sql)).toMatch(/ORDER BY SpeciesCode/i);
+    expect(String(sql)).not.toMatch(/\bLIMIT\b/i);
+    expect(params).toBeUndefined();
+    expect(getMapperSpy).toHaveBeenCalledWith('species');
+  });
+
   it('default branch: generic SELECT * FROM schema.table; maps results', async () => {
     const cm = (ConnectionManager as any).getInstance();
     vi.spyOn(cm, 'executeQuery').mockResolvedValueOnce([{ A: 1 }, { A: 2 }]);

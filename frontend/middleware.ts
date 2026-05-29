@@ -1,59 +1,76 @@
 /**
- * Middleware to handle authentication for Next.js requests.
+ * Edge-runtime authentication gate.
  *
- * Redirects unauthenticated users to the login page if trying to access protected routes.
- * Redirects authenticated users to the dashboard page from the home page.
- * Allows the request to continue if no redirect conditions are met.
+ * Imports ONLY the lightweight auth.config (no DB mappers, no App Insights,
+ * no Node-only modules). NextAuth v5's documented split: middleware uses
+ * auth.config; full callbacks live in auth.ts and run in Node-runtime
+ * route handlers / server components.
+ *
+ * Behavior:
+ * - In E2E mode (NEXT_PUBLIC_E2E_TESTING=true AND NODE_ENV !== 'production')
+ *   middleware is bypassed so Cypress can mock auth client-side.
+ * - Public API routes listed below pass through without auth.
+ * - Unauthenticated requests to /api/* return 401 JSON (not a redirect).
+ * - Unauthenticated requests to protected pages → redirect to /login.
+ * - Authenticated requests to / → redirect to /dashboard.
+ * - Otherwise → continue.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
 import NextAuth from 'next-auth';
+import { NextResponse } from 'next/server';
 import authConfig from './auth.config';
 
-const { auth: nextAuthMiddleware } = NextAuth(authConfig);
+const { auth } = NextAuth(authConfig);
 
-export default auth(async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+function isPathOrChild(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
 
-  // Health check endpoint must be publicly accessible for deployment verification
-  if (pathname === '/api/health') return NextResponse.next();
+function isPublicApiPath(pathname: string): boolean {
+  return (
+    pathname === '/api/health' ||
+    pathname === '/api/clearallcookies' ||
+    pathname === '/api/diagnostics/streaming-timeout' ||
+    isPathOrChild(pathname, '/api/animations') ||
+    isPathOrChild(pathname, '/api/auth') ||
+    isPathOrChild(pathname, '/api/customsignin')
+  );
+}
 
-  if (pathname.includes('/api/customsignin')) return NextResponse.next();
+export default auth(req => {
+  const { pathname } = req.nextUrl;
 
-  // E2E TESTING BYPASS
-  // When running Cypress E2E tests, skip authentication middleware
-  // This allows E2E tests to mock authentication client-side with cy.intercept()
   if (process.env.NEXT_PUBLIC_E2E_TESTING === 'true' && process.env.NODE_ENV !== 'production') {
-    console.log('[E2E MODE] Middleware auth bypass active');
     return NextResponse.next();
   }
 
-  const url = request.nextUrl.clone();
-  const session = await nextAuthMiddleware(); // Fetch session once
+  if (isPublicApiPath(pathname)) return NextResponse.next();
 
-  const isAuthenticated = !!session;
-  const isProtectedRoute = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => url.pathname.startsWith(route));
+  const isApi = pathname.startsWith('/api/');
+  const isAuthenticated = !!req.auth;
 
-  if (isProtectedRoute && !isAuthenticated) {
-    // Redirect unauthenticated users trying to access protected routes
-    if (url.pathname !== '/login') {
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
-    }
-  } else if (url.pathname === '/') {
-    // Redirect from home to dashboard if authenticated, otherwise to login
-    if (isAuthenticated) {
-      url.pathname = '/dashboard';
-    } else {
-      url.pathname = '/login';
-    }
+  if (isApi && !isAuthenticated) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  const url = req.nextUrl.clone();
+  const isProtectedPage = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => pathname.startsWith(route));
+
+  if (isProtectedPage && !isAuthenticated) {
+    url.pathname = '/login';
+    return NextResponse.redirect(url);
+  } else if (pathname === '/') {
+    url.pathname = isAuthenticated ? '/dashboard' : '/login';
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next(); // Allow request to continue if no conditions are met
+  return NextResponse.next();
 });
 
 export const config = {
-  matcher: ['/', '/admin/:path*', '/dashboard/:path*', '/measurementshub/:path*', '/fixeddatainput/:path*', '/api/health']
+  // Matches everything except Next.js internals and static assets.
+  // _next/static and _next/image: build output. favicon.ico and image
+  // extensions: static assets. Public allowlisting and unauthenticated
+  // 401 handling for /api/* routes lives in the middleware body above.
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)']
 };

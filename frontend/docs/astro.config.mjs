@@ -26,6 +26,7 @@ export default defineConfig({
         {
           label: 'Onboarding & Getting Started',
           items: [
+            { label: 'Quick Start', slug: 'quick-start' },
             { label: 'Getting Started', slug: 'getting-started' },
             { label: 'Navigation, Dashboard & Tools', slug: 'navigation-dashboard-tools' },
             { label: 'Adding Historical Data', slug: 'adding-historical-data' }
@@ -41,6 +42,10 @@ export default defineConfig({
         {
           label: 'Validations & Statistics',
           slug: 'validations-statistics'
+        },
+        {
+          label: 'Administration',
+          items: [{ label: 'Site Provisioning', slug: 'admin/site-provisioning' }]
         },
         {
           label: 'Error Guide & Troubleshooting',
@@ -60,7 +65,8 @@ export default defineConfig({
           items: [
             { label: 'CTFSWeb vs ForestGEO Comparison', slug: 'migration/ctfsweb-forestgeo-comparison' },
             { label: 'Data Model Reference', slug: 'migration/ctfsweb-data-model' },
-            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' }
+            { label: 'Data Specifications Guide', slug: 'migration/ctfsweb-data-specs' },
+            { label: 'Publishing a Census to CTFSWeb', slug: 'migration/publishing-census-to-ctfs' }
           ]
         },
         {

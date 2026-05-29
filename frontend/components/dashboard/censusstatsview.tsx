@@ -158,13 +158,10 @@ function QuadratCoverageCard({ total, populated, percent, unpopulated }: { total
 
         {/* Progress Bar Visualization */}
         <Box sx={{ mb: 3 }}>
-          <Box sx={{ position: 'relative', height: 32, borderRadius: 'md', overflow: 'hidden', bgcolor: 'neutral.100' }}>
+          <Box sx={{ display: 'flex', height: 32, borderRadius: 'md', overflow: 'hidden', bgcolor: 'neutral.100' }}>
             {/* Populated section */}
             <Box
               sx={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
                 height: '100%',
                 width: `${percent}%`,
                 bgcolor: isComplete ? 'success.500' : isNearComplete ? 'success.400' : 'primary.500',
@@ -185,12 +182,13 @@ function QuadratCoverageCard({ total, populated, percent, unpopulated }: { total
             {percent < 85 && unpopulatedCount > 0 && (
               <Box
                 sx={{
-                  position: 'absolute',
-                  right: 8,
-                  top: 0,
                   height: '100%',
+                  flex: 1,
+                  minWidth: 0,
                   display: 'flex',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  justifyContent: 'flex-end',
+                  pr: 1
                 }}
               >
                 <Typography level="body-xs" color="neutral">

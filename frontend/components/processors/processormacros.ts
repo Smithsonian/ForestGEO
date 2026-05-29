@@ -14,10 +14,10 @@ async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
-    // Acquire the connection and ping to validate it
+    // Acquire the connection. The query path handles stale connection failures
+    // so read-heavy routes do not pay a ping round-trip before every statement.
     connection = await getPoolMonitorInstance().getConnection();
     connectionAcquired = true;
-    await connection.ping(); // Use ping to check the connection
     const conn = connection;
     connectionAcquired = false; // Successfully returning, caller now responsible
     return conn; // Resolve the connection when successful

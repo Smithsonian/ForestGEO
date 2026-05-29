@@ -45,13 +45,14 @@ Errors related to data quality checks and business rule validations.
 
 ### 3. Failed Measurements
 
-Measurements that could not be processed into the database.
+Rows that didn't pass validation during upload. **As of Feb 2026 these are no longer in a separate table** — they live in `coremeasurements` with `StemGUID = NULL` and the original CSV codes preserved.
 
 **See:** [Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/)
 
-- Common failure reasons
-- How to review and fix failures
-- Reingestion process
+- Where failed rows actually live now
+- The three correction paths: reference-data fix, inline edit, Revision Upload
+- The unified edit pipeline (Impact Summary, typed confirmation, per-row revert)
+- Reingestion (same row ID survives corrections)
 
 ### 4. Authentication & Access Errors
 

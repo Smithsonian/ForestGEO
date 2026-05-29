@@ -19,6 +19,7 @@ import {
   GridColDef,
   GridEventListener,
   GridFilterModel,
+  GridPaginationModel,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -51,6 +52,13 @@ import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
 import ailogger from '@/ailogger';
+import { useForestQuery, queryKey, QueryNamespace, QueryScope, defaultFetcher, QueryError, invalidateAfter, MutationKind } from '@/lib/query';
+import { LoadingBar, ContentSkeleton } from '@/components/loading';
+import { areGridFilterModelsEqual, hasServerFilter, toServerFilterModel } from '@/lib/datagrid/filterModel';
+import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
+import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
 
 const sanitizeCsvValue = (value: unknown, options?: { isDate?: boolean }) => {
   if (value === undefined || value === null || value === '') {
@@ -81,6 +89,28 @@ export type IsolatedDataGridCommonsHandle = {
   showSnackbar: (message: string, severity: 'success' | 'error') => void;
 };
 
+const QUADRAT_GRID_TYPES = new Set(['quadrats', 'quadratpersonnel']);
+const TAXONOMY_GRID_TYPES = new Set(['taxonomies', 'alltaxonomiesview', 'stemtaxonomiesview']);
+export const FILTER_APPLY_DEBOUNCE_MS = 500;
+
+const INITIAL_FILTER_MODEL: GridFilterModel = { items: [], quickFilterValues: [] };
+const AUTO_ROW_HEIGHT = () => 'auto' as const;
+// Pairing getRowHeight='auto' with an estimated height stops the virtualizer's
+// dimensions ResizeObserver loop (sub-pixel measurement feedback) on flex parents.
+const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
+const GRID_ROOT_SX = { width: '100%' } as const;
+
+function arePaginationModelsEqual(left: GridPaginationModel, right: GridPaginationModel): boolean {
+  return left.page === right.page && left.pageSize === right.pageSize;
+}
+
+function resolveDeleteMutationKind(gridType: string): MutationKind | null {
+  if (QUADRAT_GRID_TYPES.has(gridType)) return 'delete-quadrat';
+  if (gridType === 'attributes') return 'delete-attribute';
+  if (TAXONOMY_GRID_TYPES.has(gridType)) return 'delete-taxonomy';
+  return null;
+}
+
 const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommonsInner(
   props: Readonly<IsolatedDataGridCommonProps>,
   ref: ForwardedRef<IsolatedDataGridCommonsHandle>
@@ -98,7 +128,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     apiRef = undefined,
     adminEmail = undefined,
     onDataUpdate,
-    onDataLoaded
+    onDataLoaded,
+    editFlowOverride,
+    enablePageJump = false,
+    enableInfiniteScroll = false
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -109,14 +142,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     page: 0,
     pageSize: 10
   });
-  const [loading, setLoading] = useState(false);
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [_shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
-  const [_usingQuery, setUsingQuery] = useState('');
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -128,10 +159,23 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
-  const [filterModel, setFilterModel] = useState<GridFilterModel>({
-    items: [],
-    quickFilterValues: []
-  });
+  const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
+
+  const resetPageOnFilterCommit = useCallback(() => {
+    setPaginationModel(prev => (prev.page === 0 ? prev : { ...prev, page: 0 }));
+  }, []);
+
+  const {
+    uiModel: gridFilterModel,
+    serverModel: filterModel,
+    applyChange: applyFilterChange
+  } = useDebouncedFilterModel<GridFilterModel>(
+    INITIAL_FILTER_MODEL,
+    FILTER_APPLY_DEBOUNCE_MS,
+    areGridFilterModelsEqual,
+    toServerFilterModel,
+    resetPageOnFilterCommit
+  );
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -146,104 +190,177 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   const internalApiRef = useGridApiRef();
   const localApiRef = apiRef === undefined ? internalApiRef : apiRef;
 
-  const PAGE_CACHE_TTL_MS = 30_000;
-  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
   const skipNextProcessRowUpdateRef = useRef(false);
-  const clearPageCache = useCallback(() => {
-    pageCacheRef.current.clear();
-  }, []);
 
-  const fetchPaginatedData = useCallback(
-    async (pageToFetch: number) => {
-      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
-      const cached = pageCacheRef.current.get(cacheKey);
-      const now = Date.now();
+  const hasFilter = hasServerFilter(filterModel);
 
-      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
-        setRows(cached.rows);
-        setRowCount(cached.totalCount);
-        if (onDataLoaded) onDataLoaded(cached.rows);
-        return;
-      }
-
-      setLoading(true);
-      let paginatedQuery =
-        (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
-          ? createQFFetchQuery(
-              currentSite?.schemaName ?? '',
-              gridType,
-              pageToFetch,
-              paginationModel.pageSize,
-              currentPlot?.plotID,
-              currentCensus?.plotCensusNumber,
-              currentQuadrat?.quadratID
-            )
-          : createFetchQuery(
-              currentSite?.schemaName ?? '',
-              gridType,
-              pageToFetch,
-              paginationModel.pageSize,
-              currentPlot?.plotID,
-              currentCensus?.plotCensusNumber,
-              currentQuadrat?.quadratID
-            );
-      if (adminEmail) paginatedQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
-      try {
-        const response = await fetch(paginatedQuery, {
-          method:
-            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0) ? 'POST' : 'GET',
-          headers: { 'Content-Type': 'application/json' },
-          body:
-            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
-              ? JSON.stringify({ filterModel })
-              : undefined
-        });
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          throw new Error(errorBody.message || `Server returned ${response.status}`);
-        }
-        const data = await response.json();
-        setRows(data.output);
-        setRowCount(data.totalCount);
-        setUsingQuery(data.finishedQuery);
-        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
-
-        // Notify parent component that data has been loaded
-        if (onDataLoaded) {
-          onDataLoaded(data.output);
-        }
-      } catch (error: unknown) {
-        ailogger.error('Error fetching data:', error instanceof Error ? error : new Error(String(error)));
-        setSnackbar({ children: 'Error fetching data', severity: 'error' });
-      } finally {
-        setLoading(false);
-      }
-    },
-    [
-      filterModel,
-      currentSite?.schemaName,
+  const fetchUrl = React.useMemo(() => {
+    if (!currentSite?.schemaName) return null;
+    if (adminEmail) return `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
+    const buildQuery = hasFilter ? createQFFetchQuery : createFetchQuery;
+    return buildQuery(
+      currentSite.schemaName,
       gridType,
+      paginationModel.page,
       paginationModel.pageSize,
       currentPlot?.plotID,
       currentCensus?.plotCensusNumber,
-      currentQuadrat?.quadratID,
-      adminEmail,
-      setSnackbar,
-      setLoading,
-      onDataLoaded
-    ]
+      currentQuadrat?.quadratID
+    );
+  }, [
+    currentSite?.schemaName,
+    gridType,
+    paginationModel.page,
+    paginationModel.pageSize,
+    currentPlot?.plotID,
+    currentCensus?.plotCensusNumber,
+    currentQuadrat?.quadratID,
+    adminEmail,
+    hasFilter
+  ]);
+
+  const queryScope: QueryScope = useMemo(
+    () => ({
+      siteSchema: currentSite?.schemaName,
+      plotID: currentPlot?.plotID,
+      censusID: currentCensus?.dateRanges?.[0]?.censusID
+    }),
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
   );
 
-  const handleRefresh = useCallback(async () => {
-    clearPageCache();
-    await fetchPaginatedData(paginationModel.page);
-  }, [clearPageCache, paginationModel.page, fetchPaginatedData]);
+  const gridQueryKey = fetchUrl
+    ? queryKey(`grid:${gridType}` as QueryNamespace, queryScope, {
+        page: paginationModel.page,
+        pageSize: paginationModel.pageSize,
+        filterModel
+      })
+    : null;
+
+  const filterBodyFetcher = React.useCallback(
+    async (u: string): Promise<{ output: any[]; totalCount: number; finishedQuery?: string }> => {
+      if (!hasFilter) {
+        return defaultFetcher<{ output: any[]; totalCount: number; finishedQuery?: string }>(u);
+      }
+      const res = await fetch(u, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => undefined);
+        throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
+      }
+      return (await res.json()) as { output: any[]; totalCount: number; finishedQuery?: string };
+    },
+    [hasFilter, filterModel]
+  );
+
+  const {
+    data: gridData,
+    isLoading,
+    isValidating,
+    error: gridError,
+    refetch
+  } = useForestQuery<{
+    output: any[];
+    totalCount: number;
+    finishedQuery?: string;
+  }>(
+    gridQueryKey,
+    fetchUrl,
+    useMemo(
+      () => ({
+        fetcher: filterBodyFetcher,
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
+        revalidateIfStale: false
+      }),
+      [filterBodyFetcher]
+    )
+  );
 
   useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
-      fetchPaginatedData(paginationModel.page).catch(ailogger.error);
+    if (gridError) {
+      ailogger.error('Error fetching data:', gridError);
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
     }
-  }, [currentPlot, currentCensus, paginationModel.page, filterModel, fetchPaginatedData, isNewRowAdded]);
+  }, [gridError]);
+
+  useEffect(() => {
+    if (gridData) {
+      setRows(gridData.output);
+      setRowCount(gridData.totalCount);
+      setHasLoadedGrid(true);
+      if (onDataLoaded) onDataLoaded(gridData.output);
+    }
+  }, [gridData, onDataLoaded]);
+
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      if (!currentSite?.schemaName) return { rows: [], totalRows: 0 };
+      const useFilter = hasFilter;
+      const url = adminEmail
+        ? `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`
+        : (useFilter ? createQFFetchQuery : createFetchQuery)(
+            currentSite.schemaName,
+            gridType,
+            p,
+            ps,
+            currentPlot?.plotID,
+            currentCensus?.plotCensusNumber,
+            currentQuadrat?.quadratID
+          );
+      const res = useFilter
+        ? await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filterModel }),
+            signal
+          })
+        : await fetch(url, { credentials: 'include', signal });
+      if (!res.ok) throw new QueryError(res.status, undefined, `${useFilter ? 'POST' : 'GET'} ${url} ${res.status}`);
+      const json = (await res.json()) as { output?: any[]; totalCount?: number };
+      return { rows: json.output ?? [], totalRows: json.totalCount ?? 0 };
+    },
+    [adminEmail, currentSite?.schemaName, gridType, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentQuadrat?.quadratID, hasFilter, filterModel]
+  );
+
+  const infiniteResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        filter: filterModel,
+        site: currentSite?.schemaName,
+        plot: currentPlot?.plotID,
+        census: currentCensus?.plotCensusNumber,
+        quadrat: currentQuadrat?.quadratID,
+        gridType,
+        adminEmail
+      }),
+    [filterModel, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentQuadrat?.quadratID, gridType, adminEmail]
+  );
+
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'id',
+    paginated: { rows: rows as GridRowModel[], totalRows: rowCount, isLoading: isValidating }
+  });
+
+  const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  const gridRows = isInfiniteOn ? infinite.rows : rows;
+  const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
+
+  const handleRefresh = useCallback(async () => {
+    if (isInfiniteOn) {
+      await infinite.refresh();
+      void refetch().catch(ailogger.error);
+      return;
+    }
+    await refetch();
+  }, [refetch, isInfiniteOn, infinite]);
 
   // Handle refresh signal from parent - use ref to track previous state
   const previousRefresh = useRef(refresh);
@@ -261,12 +378,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     previousRefresh.current = refresh;
   }, [refresh, currentSite, handleRefresh, setRefresh]);
 
-  // Synchronize rowModesModel with current rows - uses functional update to avoid
+  // Synchronize rowModesModel with current visible rows - uses functional update to avoid
   // having rowModesModel in dependencies (which would cause potential infinite loops)
   useEffect(() => {
     setRowModesModel(prevRowModesModel => {
       // Build new model based on current rows, preserving existing modes
-      const updatedRowModesModel = rows.reduce((acc, row) => {
+      const updatedRowModesModel = gridRows.reduce((acc, row) => {
         if (row.id) {
           acc[row.id] = prevRowModesModel[row.id] || { mode: GridRowModes.View };
         }
@@ -282,10 +399,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
       return prevRowModesModel;
     });
-  }, [rows]); // Only depend on rows - rowModesModel accessed via functional update
+  }, [gridRows]); // Only depend on visible rows - rowModesModel accessed via functional update
 
   const fetchFullData = useCallback(async () => {
-    setLoading(true);
     try {
       const tempQuery = createQFFetchQuery(
         currentSite?.schemaName ?? '',
@@ -330,13 +446,10 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     } catch (error: unknown) {
       ailogger.error('Error fetching full data:', error instanceof Error ? error : new Error(String(error)));
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
-    } finally {
-      setLoading(false);
     }
   }, [filterModel, currentPlot, currentCensus, currentSite, gridType, paginationModel.page, paginationModel.pageSize]);
 
   const exportAllCSV = useCallback(async () => {
-    setLoading(true);
     try {
       switch (gridType) {
         case 'attributes':
@@ -511,8 +624,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     } catch (error: any) {
       ailogger.error('Error exporting CSV:', error);
       setSnackbar({ children: 'Error exporting data', severity: 'error' });
-    } finally {
-      setLoading(false);
     }
   }, [currentPlot, currentCensus, currentSite, gridType, filterModel, fetchFullData, setSnackbar]);
 
@@ -520,7 +631,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
       setPendingAction({ actionType, actionId });
 
-      const row = rows.find(row => String(row.id) === String(actionId));
+      const row = gridRows.find(row => String(row.id) === String(actionId));
       if (row) {
         if (actionType === 'delete') {
           setIsDeleteDialogOpen(true);
@@ -529,7 +640,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }
       }
     },
-    [rows]
+    [gridRows]
   );
 
   const updateRow = useCallback(
@@ -541,8 +652,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
       setIsNewRowAdded: (value: boolean) => void,
       setShouldAddRowAfterFetch: (value: boolean) => void,
-      fetchPaginatedData: (page: number) => Promise<void>,
-      paginationModel: { page: number }
+      refetchData: () => Promise<unknown>,
+      _paginationModel: { page: number }
     ): Promise<GridRowModel> => {
       const gridID = getGridID(gridType);
       if ('date' in newRow && newRow.date) {
@@ -557,7 +668,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges?.[0]?.censusID);
       if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
       try {
-        setLoading(true);
         const response = await fetch(fetchProcessQuery, {
           method: oldRow.isNew ? 'POST' : 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -582,8 +692,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         if (oldRow.isNew) {
           setIsNewRowAdded(false);
           setShouldAddRowAfterFetch(false);
-          clearPageCache();
-          await fetchPaginatedData(paginationModel.page);
+          await refetchData();
         }
 
         return newRow;
@@ -591,18 +700,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         const message = error instanceof Error ? error.message : String(error);
         setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(newRow);
-      } finally {
-        setLoading(false);
       }
     },
-    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail, clearPageCache]
+    [currentPlot?.plotID, currentCensus?.dateRanges, adminEmail]
   );
 
   const performSaveAction = useCallback(
     async (id: GridRowId, confirmedRow: GridRowModel) => {
       if (locked || !promiseArguments) return;
 
-      setLoading(true);
       try {
         // Confirmation-driven saves already persist via updateRow below. When the
         // row mode flips back to view, MUI will invoke processRowUpdate; skip the
@@ -613,33 +719,35 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           [id]: { mode: GridRowModes.View }
         }));
 
-        const updatedRow = await updateRow(
-          gridType,
-          currentSite?.schemaName,
-          confirmedRow,
-          promiseArguments.oldRow,
-          setSnackbar,
-          setIsNewRowAdded,
-          setShouldAddRowAfterFetch,
-          fetchPaginatedData,
-          paginationModel
-        );
+        const isNewRow = promiseArguments.oldRow.isNew || !confirmedRow.id;
+        const updatedRow =
+          editFlowOverride && !isNewRow
+            ? await editFlowOverride(confirmedRow, promiseArguments.oldRow)
+            : await updateRow(
+                gridType,
+                currentSite?.schemaName,
+                confirmedRow,
+                promiseArguments.oldRow,
+                setSnackbar,
+                setIsNewRowAdded,
+                setShouldAddRowAfterFetch,
+                refetch,
+                paginationModel
+              );
 
         promiseArguments.resolve(updatedRow);
+        if (isInfiniteOn) await infinite.refresh();
+        else infinite.upsertRow(updatedRow);
 
         if (onDataUpdate) {
           await onDataUpdate(updatedRow, promiseArguments.oldRow);
         }
       } catch (error) {
         promiseArguments.reject(error);
-      } finally {
-        setLoading(false);
       }
 
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-      setLoading(false);
-      clearPageCache();
-      await fetchPaginatedData(paginationModel.page);
+      await refetch();
     },
     [
       locked,
@@ -651,11 +759,12 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       setShouldAddRowAfterFetch,
       paginationModel,
       triggerRefresh,
-      setLoading,
-      clearPageCache,
-      fetchPaginatedData,
+      refetch,
       updateRow,
-      onDataUpdate
+      onDataUpdate,
+      editFlowOverride,
+      infinite,
+      isInfiniteOn
     ]
   );
 
@@ -663,9 +772,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
     async (id: GridRowId) => {
       if (locked) return;
 
-      setLoading(true);
-
-      const rowToDelete = rows.find(row => String(row.id) === String(id));
+      const rowToDelete = gridRows.find(row => String(row.id) === String(id));
       if (!rowToDelete) return;
 
       let deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
@@ -695,13 +802,19 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           }
         } else {
           setRows(prevRows => prevRows.filter(row => row.id !== id));
+          infinite.removeRow(id);
           setSnackbar({
             children: 'Row successfully deleted',
             severity: 'success'
           });
           triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-          clearPageCache();
-          await fetchPaginatedData(paginationModel.page);
+          await refetch();
+          const deleteMutationKind = resolveDeleteMutationKind(gridType);
+          if (deleteMutationKind) {
+            await invalidateAfter(deleteMutationKind, queryScope);
+          } else {
+            ailogger.info(`no fan-out wired for gridType ${gridType}`);
+          }
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Deletion failed';
@@ -709,11 +822,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           children: `Error: ${message}`,
           severity: 'error'
         });
-      } finally {
-        setLoading(false);
       }
     },
-    [locked, rows, currentSite, gridType, setSnackbar, paginationModel, triggerRefresh, setLoading, adminEmail, clearPageCache, fetchPaginatedData]
+    [locked, gridRows, currentSite, gridType, setSnackbar, triggerRefresh, adminEmail, refetch, queryScope, infinite]
   );
 
   const handleConfirmAction = useCallback(
@@ -759,7 +870,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      const oldRow = rows.find(row => String(row.id) === String(id));
+      const oldRow = gridRows.find(row => String(row.id) === String(id));
 
       const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
 
@@ -774,14 +885,14 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         openConfirmationDialog('save', id);
       }
     },
-    [locked, rowModesModel, rows, localApiRef, openConfirmationDialog]
+    [locked, rowModesModel, gridRows, localApiRef, openConfirmationDialog]
   );
 
   const handleDeleteClick = useCallback(
     (id: GridRowId) => () => {
       if (locked) return;
       if (gridType === 'census') {
-        const rowToDelete = rows.find(row => String(row.id) === String(id));
+        const rowToDelete = gridRows.find(row => String(row.id) === String(id));
         if (currentCensus && rowToDelete && rowToDelete.censusID === currentCensus.dateRanges?.[0]?.censusID) {
           alert('Cannot delete the currently selected census.');
           return;
@@ -789,7 +900,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
       openConfirmationDialog('delete', id);
     },
-    [locked, gridType, currentCensus, rows, openConfirmationDialog]
+    [locked, gridType, currentCensus, gridRows, openConfirmationDialog]
   );
 
   const handleAddNewRow = useCallback(async () => {
@@ -831,11 +942,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         setSnackbar,
         setIsNewRowAdded,
         setShouldAddRowAfterFetch,
-        fetchPaginatedData,
+        refetch,
         paginationModel
       );
     },
-    fetchPaginatedData: async () => await fetchPaginatedData(paginationModel.page),
+    fetchPaginatedData: async () => {
+      await refetch();
+    },
     showSnackbar: (message: string, severity: 'success' | 'error') => {
       setSnackbar({ children: message, severity });
     }
@@ -852,8 +965,6 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         return oldRow;
       }
 
-      setLoading(true);
-
       if (newRow.isNew || !newRow.id) {
         setPromiseArguments({
           resolve: async (confirmedRow: GridRowModel) => {
@@ -866,7 +977,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
                 setSnackbar,
                 setIsNewRowAdded,
                 setShouldAddRowAfterFetch,
-                fetchPaginatedData,
+                refetch,
                 paginationModel
               );
               return updatedRow;
@@ -874,12 +985,9 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
               const message = error instanceof Error ? error.message : String(error);
               setSnackbar({ children: `Error: ${message}`, severity: 'error' });
               return Promise.reject(error);
-            } finally {
-              setLoading(false);
             }
           },
           reject: reason => {
-            setLoading(false);
             return Promise.reject(reason);
           },
           oldRow,
@@ -891,24 +999,26 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       }
 
       try {
-        const updatedRow = await updateRow(
-          gridType,
-          currentSite?.schemaName,
-          newRow,
-          oldRow,
-          setSnackbar,
-          setIsNewRowAdded,
-          setShouldAddRowAfterFetch,
-          fetchPaginatedData,
-          paginationModel
-        );
+        const updatedRow = editFlowOverride
+          ? await editFlowOverride(newRow, oldRow)
+          : await updateRow(
+              gridType,
+              currentSite?.schemaName,
+              newRow,
+              oldRow,
+              setSnackbar,
+              setIsNewRowAdded,
+              setShouldAddRowAfterFetch,
+              refetch,
+              paginationModel
+            );
+        if (isInfiniteOn) await infinite.refresh();
+        else infinite.upsertRow(updatedRow);
         return updatedRow;
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         setSnackbar({ children: `Error: ${message}`, severity: 'error' });
         return Promise.reject(error);
-      } finally {
-        setLoading(false);
       }
     },
     [
@@ -917,10 +1027,13 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       setSnackbar,
       setIsNewRowAdded,
       setShouldAddRowAfterFetch,
-      fetchPaginatedData,
+      refetch,
       paginationModel,
       openConfirmationDialog,
-      updateRow
+      updateRow,
+      editFlowOverride,
+      infinite,
+      isInfiniteOn
     ]
   );
 
@@ -938,8 +1051,15 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           ailogger.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
         }
       });
+      if (JSON.stringify(updatedModel) === JSON.stringify(prevModel)) {
+        return prevModel;
+      }
       return updatedModel;
     });
+  }, []);
+
+  const handlePaginationModelChange = useCallback((newPaginationModel: GridPaginationModel) => {
+    setPaginationModel(prevModel => (arePaginationModelsEqual(prevModel, newPaginationModel) ? prevModel : newPaginationModel));
   }, []);
 
   const handleCloseSnackbar = useCallback(() => setSnackbar(null), []);
@@ -973,7 +1093,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (locked) return;
       event?.preventDefault();
 
-      const row = rows.find(row => String(row.id) === String(id));
+      const row = gridRows.find(row => String(row.id) === String(id));
 
       if (row?.isNew) {
         setRows(oldRows => oldRows.filter(row => row.id !== id));
@@ -992,11 +1112,8 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
         }));
       }
     },
-    [locked, rows]
+    [locked, gridRows]
   );
-
-  // Debounced filter change to prevent excessive re-renders and API calls
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Cleanup timers on unmount to prevent memory leaks
   useEffect(() => {
@@ -1004,29 +1121,82 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
       if (editClickTimerRef.current) {
         clearTimeout(editClickTimerRef.current);
       }
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
     };
   }, []);
 
-  const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => {
-    // Clear existing timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
+  const onQuickFilterChange = useCallback((incomingValues: GridFilterModel) => applyFilterChange(incomingValues), [applyFilterChange]);
 
-    // Set new timer to update filter after 500ms of inactivity
-    debounceTimerRef.current = setTimeout(() => {
-      setFilterModel(prevFilterModel => {
-        return {
-          ...prevFilterModel,
-          items: [...(incomingValues.items || [])],
-          quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-        };
-      });
-    }, 500);
+  const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
+
+  const handleCellDoubleClick = useCallback<GridEventListener<'cellDoubleClick'>>(
+    params => {
+      if (locked) return;
+      setRowModesModel(prevModel => ({
+        ...prevModel,
+        [params.id]: { mode: GridRowModes.Edit }
+      }));
+    },
+    [locked]
+  );
+
+  const handleCellKeyDown = useCallback<GridEventListener<'cellKeyDown'>>(
+    (_params, event) => {
+      if (event.key === 'Enter' && !locked) {
+        event.defaultMuiPrevented = true;
+      }
+      if (event.key === 'Escape') {
+        event.defaultMuiPrevented = true;
+      }
+    },
+    [locked]
+  );
+
+  const handleProcessRowUpdateError = useCallback((error: Error) => {
+    ailogger.error('Row update error:', error);
+    setSnackbar({
+      children: 'Error updating row',
+      severity: 'error'
+    });
   }, []);
+
+  const rowsRef = useRef(gridRows);
+  const rowModesModelRef = useRef(rowModesModel);
+  useEffect(() => {
+    rowsRef.current = gridRows;
+  }, [gridRows]);
+  useEffect(() => {
+    rowModesModelRef.current = rowModesModel;
+  }, [rowModesModel]);
+
+  const handleProcessRowUpdate = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      const waitForStateUpdates = async () => {
+        return new Promise<void>(resolve => {
+          const checkUpdates = () => {
+            if (rowsRef.current.length > 0 && Object.keys(rowModesModelRef.current).length > 0) {
+              resolve();
+            } else {
+              setTimeout(checkUpdates, 50);
+            }
+          };
+          checkUpdates();
+        });
+      };
+      await waitForStateUpdates();
+      try {
+        return await processRowUpdate(newRow, oldRow);
+      } catch (error: unknown) {
+        ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
+        setSnackbar({ children: 'Error updating row', severity: 'error' });
+        return Promise.reject(error);
+      }
+    },
+    [processRowUpdate]
+  );
+
+  const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
+  const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
+  const gridLoading = isInfiniteOn ? infinite.isLoading : showGridLoading;
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: React.ReactElement, onClick: React.MouseEventHandler<HTMLButtonElement>) => (
@@ -1083,30 +1253,78 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
   }, [gridColumns, locked, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
-    if (hidingEmpty) return filterColumns(rows, columns);
+    if (hidingEmpty) return filterColumns(gridRows, columns);
     else return columns;
-  }, [rows, columns, hidingEmpty]);
-
-  const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
-    if (locked) return;
-    setRowModesModel(prevModel => ({
-      ...prevModel,
-      [params.id]: { mode: GridRowModes.Edit }
-    }));
-  };
-
-  const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (_params, event) => {
-    if (event.key === 'Enter' && !locked) {
-      event.defaultMuiPrevented = true;
-    }
-    if (event.key === 'Escape') {
-      event.defaultMuiPrevented = true;
-    }
-  };
+  }, [gridRows, columns, hidingEmpty]);
 
   // Grid types under "Stem & Plot Details" that don't require a census selection
   const censusIndependentGridTypes = ['attributes', 'personnel', 'quadrats', 'alltaxonomiesview'];
   const requiresCensus = !censusIndependentGridTypes.includes(gridType);
+
+  const pageSizeOptions = useMemo(() => [paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10], [paginationModel.pageSize]);
+
+  const gridInitialState = useMemo(
+    () => ({
+      columns: {
+        columnVisibilityModel: getColumnVisibilityModel(gridType)
+      }
+    }),
+    [gridType]
+  );
+
+  const infiniteScrollDescriptor = useMemo(
+    () =>
+      enableInfiniteScroll
+        ? {
+            enabled: isInfiniteOn,
+            onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+            loadedCount: infinite.rows.length,
+            totalRows: infinite.totalRows,
+            isLoadingMore: infinite.isLoadingMore,
+            hasMore: infinite.hasMore,
+            error: infinite.error,
+            softCapExceeded: infinite.softCapExceeded,
+            onRetry: infinite.retry
+          }
+        : undefined,
+    [enableInfiniteScroll, isInfiniteOn, infinite]
+  );
+
+  const PaginationSlot = useMemo(() => {
+    if (!enablePageJump && !enableInfiniteScroll) return undefined;
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'CustomGridPaginationSlot';
+    // Test seam: expose the closure-bound descriptor so unit tests can inspect / drive the toggle.
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+
+  const slotProps = useMemo(
+    () => ({
+      toolbar: {
+        handleAddNewRow,
+        handleRefresh,
+        handleExportAll: fetchFullData,
+        handleExportCSV: exportAllCSV,
+        handleQuickFilterChange: onQuickFilterChange,
+        filterModel: gridFilterModel,
+        dynamicButtons,
+        gridColumns,
+        gridType,
+        hidingEmpty,
+        setHidingEmpty
+      } as GridToolbarProps & Partial<EditToolbarCustomProps>
+    }),
+    [handleAddNewRow, handleRefresh, fetchFullData, exportAllCSV, onQuickFilterChange, gridFilterModel, dynamicButtons, gridColumns, gridType, hidingEmpty]
+  );
+
+  const gridSlots = useMemo(
+    () => ({
+      toolbar: EditToolbar,
+      ...(PaginationSlot ? { pagination: PaginationSlot } : {})
+    }),
+    [PaginationSlot]
+  );
 
   // Skip redirect for admin/catalog pages (when adminEmail is provided)
   // Census-independent grids only need site + plot; others need all three
@@ -1125,88 +1343,49 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           }
         }}
       >
-        <Box sx={{ width: '100%', flexDirection: 'column' }}>
-          <StyledDataGrid
-            apiRef={localApiRef}
-            sx={{ width: '100%' }}
-            rows={rows}
-            columns={filteredColumns}
-            editMode="row"
-            rowModesModel={rowModesModel}
-            disableColumnSelector
-            onRowModesModelChange={handleRowModesModelChange}
-            onRowEditStop={handleRowEditStop}
-            onCellDoubleClick={handleCellDoubleClick}
-            onCellKeyDown={handleCellKeyDown}
-            processRowUpdate={async (newRow, oldRow) => {
-              const waitForStateUpdates = async () => {
-                return new Promise<void>(resolve => {
-                  const checkUpdates = () => {
-                    if (rows.length > 0 && Object.keys(rowModesModel).length > 0) {
-                      resolve();
-                    } else {
-                      setTimeout(checkUpdates, 50);
-                    }
-                  };
-                  checkUpdates();
-                });
-              };
-              await waitForStateUpdates();
-              try {
-                return await processRowUpdate(newRow, oldRow);
-              } catch (error: unknown) {
-                ailogger.error('Error processing row update:', error instanceof Error ? error : new Error(String(error)));
-                setSnackbar({ children: 'Error updating row', severity: 'error' });
-                return Promise.reject(error);
-              }
-            }}
-            onProcessRowUpdateError={(error: Error) => {
-              ailogger.error('Row update error:', error);
-              setSnackbar({
-                children: 'Error updating row',
-                severity: 'error'
-              });
-            }}
-            loading={refresh || loading}
-            paginationMode="server"
-            filterMode="server"
-            onPaginationModelChange={setPaginationModel}
-            paginationModel={paginationModel}
-            rowCount={rowCount}
-            pageSizeOptions={[paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10]}
-            onFilterModelChange={newFilterModel => {
-              setFilterModel(prevModel => ({
-                ...prevModel,
-                ...newFilterModel
-              }));
-            }}
-            ignoreDiacritics
-            initialState={{
-              columns: {
-                columnVisibilityModel: getColumnVisibilityModel(gridType)
-              }
-            }}
-            slots={{
-              toolbar: EditToolbar
-            }}
-            slotProps={{
-              toolbar: {
-                handleAddNewRow: handleAddNewRow,
-                handleRefresh: handleRefresh,
-                handleExportAll: fetchFullData,
-                handleExportCSV: exportAllCSV,
-                handleQuickFilterChange: onQuickFilterChange,
-                filterModel: filterModel,
-                dynamicButtons: dynamicButtons,
-                gridColumns: gridColumns,
-                gridType: gridType,
-                hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty
-              } as GridToolbarProps & Partial<EditToolbarCustomProps>
-            }}
-            showToolbar
-            getRowHeight={() => 'auto'}
-          />
+        <Box sx={{ width: '100%', flexDirection: 'column', position: 'relative' }}>
+          <LoadingBar active={!isInfiniteOn && isValidating && hasLoadedGrid} />
+          {showInitialGridSkeleton ? (
+            <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
+          ) : (
+            <>
+              <StyledDataGrid
+                apiRef={localApiRef}
+                sx={GRID_ROOT_SX}
+                rows={gridRows}
+                columns={filteredColumns}
+                editMode="row"
+                rowModesModel={rowModesModel}
+                disableColumnSelector
+                onRowModesModelChange={handleRowModesModelChange}
+                onRowEditStop={handleRowEditStop}
+                onCellDoubleClick={handleCellDoubleClick}
+                onCellKeyDown={handleCellKeyDown}
+                processRowUpdate={handleProcessRowUpdate}
+                onProcessRowUpdateError={handleProcessRowUpdateError}
+                loading={gridLoading}
+                paginationMode="server"
+                filterMode="server"
+                onPaginationModelChange={handlePaginationModelChange}
+                paginationModel={paginationModel}
+                rowCount={gridRowCount}
+                pageSizeOptions={pageSizeOptions}
+                filterModel={gridFilterModel}
+                onFilterModelChange={handleFilterModelChange}
+                ignoreDiacritics
+                initialState={gridInitialState}
+                slots={gridSlots}
+                slotProps={slotProps}
+                showToolbar
+              />
+              <InfiniteGridScrollBridge
+                apiRef={localApiRef}
+                enabled={isInfiniteOn}
+                onLoadMore={infinite.loadMore}
+                observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+              />
+            </>
+          )}
         </Box>
         {!!snackbar && (
           <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>

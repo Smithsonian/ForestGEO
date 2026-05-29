@@ -57,7 +57,7 @@ export default function ValidationsPage() {
   });
 
   useEffect(() => {
-    if (session && !['db admin', 'global'].includes(session.user.userStatus)) {
+    if (session && !['db admin', 'global'].includes(session.user.userStatus ?? '')) {
       setAccessDenied(true);
     }
   }, [session]);

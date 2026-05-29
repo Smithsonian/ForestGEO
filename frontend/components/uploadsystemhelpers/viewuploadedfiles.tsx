@@ -13,6 +13,7 @@ import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import ailogger from '@/ailogger';
 import { getContainerNameWithFallback } from '@/config/macros/containernames';
+import { useSiteContext } from '@/app/contexts/compat-hooks';
 interface LoadingFilesProps {
   currentPlot: Plot | null;
   currentCensus: OrgCensus;
@@ -81,6 +82,7 @@ interface VUFProps {
 
 export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const { currentPlot, currentCensus, refreshFileList, setRefreshFileList } = props;
+  const currentSite = useSiteContext();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const [_openSnackbar, setOpenSnackbar] = useState(false);
@@ -89,16 +91,36 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   // Track mounted state to prevent state updates after unmount
   const { isMountedRef } = useIsMounted();
 
+  const buildScopedParams = useCallback(
+    (filename?: string) => {
+      if (!currentSite?.schemaName || !currentCensus?.plotCensusNumber || (!currentPlot?.plotID && !currentPlot?.plotName)) {
+        throw new Error('Missing required file scope (site, plot, or census)');
+      }
+
+      const params = new URLSearchParams({
+        schema: currentSite.schemaName,
+        census: currentCensus.plotCensusNumber.toString()
+      });
+
+      if (currentPlot?.plotID) {
+        params.append('plotID', currentPlot.plotID.toString());
+      }
+      if (currentPlot?.plotName) {
+        params.append('plotName', currentPlot.plotName.trim());
+      }
+      if (filename) {
+        params.append('filename', filename);
+      }
+
+      return params;
+    },
+    [currentSite?.schemaName, currentCensus?.plotCensusNumber, currentPlot?.plotID, currentPlot?.plotName]
+  );
+
   const handleDownload = async (filename: string) => {
     try {
-      const { primary, legacy } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
-
-      const response = await fetch(
-        `/api/files/download?` +
-          `container=${encodeURIComponent(primary.toLowerCase())}&` +
-          `filename=${encodeURIComponent(filename)}` +
-          (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : '')
-      );
+      const params = buildScopedParams(filename);
+      const response = await fetch(`/api/files/download?${params.toString()}`);
 
       if (!response.ok) throw new Error('Error getting download link');
 
@@ -115,17 +137,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDelete = async (filename: string) => {
     try {
-      const { primary, legacy } = getContainerNameWithFallback(currentPlot?.plotID, currentPlot?.plotName, currentCensus?.plotCensusNumber);
-
-      const response = await fetch(
-        `/api/files/delete?` +
-          `container=${encodeURIComponent(primary.toLowerCase())}&` +
-          `filename=${encodeURIComponent(filename)}` +
-          (legacy ? `&legacyContainer=${encodeURIComponent(legacy.toLowerCase())}` : ''),
-        {
-          method: 'DELETE'
-        }
-      );
+      const params = buildScopedParams(filename);
+      const response = await fetch(`/api/files/delete?${params.toString()}`, {
+        method: 'DELETE'
+      });
 
       if (!response.ok) throw new Error('Error deleting file');
 
@@ -144,18 +159,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const getListOfFiles = useCallback(async () => {
     try {
-      // Build query parameters with both new (plotID) and legacy (plotName) for backward compatibility
-      const params = new URLSearchParams();
-
-      if (currentPlot?.plotID) {
-        params.append('plotID', currentPlot.plotID.toString());
-      }
-      if (currentPlot?.plotName) {
-        params.append('plotName', currentPlot.plotName.trim());
-      }
-      if (currentCensus?.plotCensusNumber) {
-        params.append('census', currentCensus.plotCensusNumber.toString());
-      }
+      const params = buildScopedParams();
 
       const response = await fetch(`/api/files/list?${params.toString()}`, {
         method: 'GET'
@@ -178,7 +182,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setOpenSnackbar(true);
       }
     }
-  }, [currentPlot, currentCensus]);
+  }, [buildScopedParams, currentPlot, currentCensus]);
 
   // Handle refresh file list - use ref to track previous state to avoid infinite rerender
   const previousRefreshFileList = useRef(refreshFileList);

@@ -8,7 +8,8 @@
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Skeleton } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import ForestIcon from '@mui/icons-material/Forest';
 import ParkIcon from '@mui/icons-material/Park';
@@ -40,89 +41,59 @@ interface SiteWithPlotCount extends SitesRDS {
 export interface SitesOverviewProps {
   sites: SiteWithPlotCount[];
   isLoading?: boolean;
+  onSelectSite?: (site: SiteWithPlotCount) => void;
 }
 
 function SiteCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: 180,
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant="circular" width={48} height={48} />
-          <Skeleton variant="rectangular" width={80} height={24} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="text" width="70%" height={24} sx={{ mb: 1 }} />
-        <Skeleton variant="text" width="50%" height={18} sx={{ mb: 2 }} />
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Skeleton variant="rectangular" width={100} height={22} sx={{ borderRadius: 'sm' }} />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 interface SiteCardProps {
   site: SiteWithPlotCount;
   index: number;
+  onSelect?: (site: SiteWithPlotCount) => void;
 }
 
-function SiteCard({ site, index }: SiteCardProps) {
+function SiteCard({ site, index, onSelect }: SiteCardProps) {
   const IconComponent = SITE_ICONS[index % SITE_ICONS.length];
   const gradient = SITE_GRADIENTS[index % SITE_GRADIENTS.length];
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
-      component="article"
+      component={onSelect ? 'div' : 'article'}
       variant="solid"
-      aria-label={`Site: ${site.siteName}. Schema: ${site.schemaName}.${site.plotCount !== undefined ? ` ${site.plotCount} plots available.` : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Site: ${site.siteName}. Schema: ${site.schemaName}.${site.plotCount !== undefined ? ` ${site.plotCount} plots available.` : ''}${onSelect ? ' Click to select.' : ''}`}
+      onClick={onSelect ? () => onSelect(site) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(site);
+              }
+            }
+          : undefined
+      }
       sx={{
-        background: gradient,
+        background: `radial-gradient(circle at calc(100% + 30px) -30px, rgba(255,255,255,0.08) 0 60px, transparent 61px), radial-gradient(circle at 100% 0%, rgba(255,255,255,0.15) 0%, transparent 50%), ${gradient}`,
         color: 'white',
         minHeight: 180,
-        position: 'relative',
         overflow: 'hidden',
         border: 'none',
-
-        // Decorative background pattern
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.15) 0%, transparent 50%)',
-          pointerEvents: 'none'
-        }
+        ...(onSelect && {
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
+          }
+        })
       }}
     >
-      {/* Background decoration */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          top: -30,
-          right: -30,
-          width: 120,
-          height: 120,
-          borderRadius: '50%',
-          bgcolor: 'rgba(255,255,255,0.08)',
-          pointerEvents: 'none'
-        }}
-      />
-
-      <CardContent sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
           <Avatar
             alt=""
@@ -220,7 +191,7 @@ function SiteCard({ site, index }: SiteCardProps) {
   );
 }
 
-export default function SitesOverview({ sites, isLoading = false }: SitesOverviewProps) {
+export default function SitesOverview({ sites, isLoading = false, onSelectSite }: SitesOverviewProps) {
   if (isLoading) {
     return (
       <Box
@@ -298,7 +269,7 @@ export default function SitesOverview({ sites, isLoading = false }: SitesOvervie
     >
       {sites.map((site, index) => (
         <Box component="li" key={site.siteID ?? index}>
-          <SiteCard site={site} index={index} />
+          <SiteCard site={site} index={index} onSelect={onSelectSite} />
         </Box>
       ))}
     </Box>

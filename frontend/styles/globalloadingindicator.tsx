@@ -41,6 +41,9 @@ const segmentAnimation = (gradientId: string) => css`
     ${rotate} 2s linear infinite,
     ${swirl} 6s linear infinite;
   stroke: url(#${gradientId});
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 `;
 
 const StyledSegment = styled.circle<StyledSegmentProps>`

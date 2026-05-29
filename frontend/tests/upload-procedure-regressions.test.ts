@@ -130,7 +130,16 @@ describe('upload procedure regressions', () => {
     for (const sql of [coreValidation14, procedureValidation14, migrationSql]) {
       expect(sql).toContain('cm.RawCodes');
       expect(sql).toContain('cross join json_table(');
+      expect(sql).toContain("and TRIM(jt.code) != ''");
       expect(sql).not.toContain('join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID');
     }
+  });
+
+  it('ignores empty code tokens created by doubled or trailing semicolons', () => {
+    const canonicalSql = readSql('sqlscripting/storedprocedures.sql');
+    const ctfsMigrationSql = readSql('db-migrations/ctfs-migrations/15_deploy_bulkingestionprocess.sql');
+
+    expect(canonicalSql).toContain("WHERE rcm.Codes IS NOT NULL AND TRIM(rcm.Codes) != '' AND TRIM(jt.code) != '';");
+    expect(ctfsMigrationSql).toContain("WHERE f.Codes is not null AND trim(f.Codes) != '' AND trim(jt.code) != '';");
   });
 });

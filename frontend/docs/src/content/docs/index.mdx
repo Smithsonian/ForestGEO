@@ -19,14 +19,20 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 ## Quick Start
 
 <CardGrid stagger>
-  <Card title="Getting Started" icon="rocket">
-    Learn how to log in, navigate the dashboard, and set up your first census. [Read the guide →](/ForestGEO/getting-started/)
+  <Card title="Quick Start (visual)" icon="rocket">
+    Two-page visual tour: set up a site, import a census, and edit the data. [Open quick start →](/ForestGEO/quick-start/)
   </Card>
-  <Card title="Upload Process" icon="document">
-    Understand the complete file upload workflow from start to finish. [Learn more →](/ForestGEO/upload-process-breakdown/)
+  <Card title="Getting Started (full)" icon="open-book">
+    Long-form walkthrough of every selection screen and sidebar control. [Read the guide →](/ForestGEO/getting-started/)
+  </Card>
+  <Card title="Upload & Revisions" icon="document">
+    The complete upload workflow plus the new Revision Upload mode for correcting ingested censuses. [Learn more →](/ForestGEO/upload-process-breakdown/)
+  </Card>
+  <Card title="Site Provisioning" icon="setting">
+    Stand up a brand-new site through the in-app wizard. [Provision a site →](/ForestGEO/admin/site-provisioning/)
   </Card>
   <Card title="Error Guide" icon="warning">
-    Find solutions to common errors you may encounter. [Troubleshoot →](/ForestGEO/errors/error-guide-overview/)
+    Find solutions to upload, validation, and authentication errors. [Troubleshoot →](/ForestGEO/errors/error-guide-overview/)
   </Card>
   <Card title="CTFSWeb Migration" icon="seti:db">
     Compare CTFSWeb vs ForestGEO and understand migration requirements. [View comparison →](/ForestGEO/migration/ctfsweb-forestgeo-comparison/)
@@ -35,8 +41,11 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## Key Features
 
-- **File Upload System** - CSV/TSV upload with auto-delimiter detection
-- **Automated Validation** - 12+ configurable data quality checks
-- **Failed Measurements Recovery** - Review and reingest failed records
-- **Audit Trail** - Complete change tracking for compliance
-- **Azure Integration** - Automatic cloud backup of uploaded files
+- **File Upload System** — CSV/TSV upload with auto-delimiter detection and per-header preview
+- **Measurement Revision Upload** *(new, April 2026)* — correct specific rows in an existing census via a small CSV; multi-tab review screen before any database write
+- **Unified Row Editing** *(new, May 2026)* — Impact Summary preview, typed `APPLY N` confirmation for destructive edits, per-row revert
+- **In-App Site Provisioning** *(new, May 2026)* — four-step wizard creates schema, plot, census, and quadrat grid with audit and retry support
+- **Automated Validation** — 14+ configurable data quality checks, including cross-census growth, dead-to-alive regression, and HOM-shift detection
+- **Hard-Failure Visibility** *(April 2026)* — failed rows are no longer silently dropped; they live in `coremeasurements` with original codes preserved
+- **Audit Trail** — complete change tracking; failed rows keep their ID through reingestion
+- **Azure Integration** — automatic cloud backup of uploaded files

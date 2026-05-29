@@ -124,7 +124,7 @@ export async function GET(
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'viewfulltable':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? ORDER BY CoreMeasurementID ASC LIMIT ?, ?`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'attributes':

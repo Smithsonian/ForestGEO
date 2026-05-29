@@ -97,6 +97,22 @@ Trees rarely shrink significantly. Large shrinkage usually indicates measurement
 
 ---
 
+### Invalid Attribute Codes
+
+| Detail             | Information                                                                |
+| ------------------ | -------------------------------------------------------------------------- |
+| **What it checks** | Attribute / stem codes (`L`, `Q`, `D2`, etc.) exist in the Attributes list |
+| **Severity**       | **Soft warning** (April 2026) — the row is saved, the unknown code is flagged |
+
+**Behavior change (April 2026):** Invalid attribute codes used to block ingestion. They are now **soft warnings** — the row goes into the database and the unknown code is surfaced in the row's flags. You can either add the missing code to the Attributes list or correct the value via inline edit or Revision Upload.
+
+**How to fix:**
+
+1. Note the unrecognised code from the warning
+2. Either add it under **Fixed Data → Attributes / Stem Codes**, or correct the row to use a known code
+
+---
+
 ### Different Species on Same Tree
 
 | Detail             | Information                                    |
@@ -233,8 +249,14 @@ Each stem can only have one measurement per census. Duplicates indicate double-e
 | 8   | Stems Outside Plots         | Coordinates in bounds   | Error    |
 | 9   | Stems in Different Quadrats | Same quadrat per tree   | Warning  |
 | 11  | DBH Outside Species Bounds  | Within species limits   | Warning  |
-| 12  | Measurements on Dead Stems  | No measurements if dead | Warning  |
-| 13  | Missing Measurements Live   | Measurements if alive   | Warning  |
+| 12  | Measurements on Dead Stems  | No measurements if dead | Warning (disabled by default) |
+| 13  | Missing Measurements Live   | Measurements if alive   | Warning (disabled by default) |
+| 17  | Dead → Alive Regression *(new)* | Stem alive after a prior census recorded it dead | Warning |
+| 18  | HOM Change > 0.5 m *(new)*  | HOM shifted more than 0.5 m vs. previous census | Warning |
+
+:::note
+**Removed:** Validation 16 was retired in 2026 — its check duplicated logic already run inline during ingestion. If you see references to V16 in older notes, ignore them.
+:::
 
 ---
 

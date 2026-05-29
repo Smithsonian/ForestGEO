@@ -6,6 +6,7 @@ import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { isValidSchema, safeFormatQuery } from '@/config/utils/sqlsecurity';
 import moment from 'moment/moment';
+import { requireSession } from '@/lib/auth-helpers';
 
 // Force Node.js runtime for database compatibility
 export const runtime = 'nodejs';
@@ -44,9 +45,8 @@ interface PrevalidateResponse {
 export async function POST(request: NextRequest) {
   // Authentication check
   const session = await auth();
-  if (!session?.user) {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: HTTPResponses.UNAUTHORIZED });
-  }
+  const authError = requireSession(session);
+  if (authError) return authError;
 
   let body;
   try {

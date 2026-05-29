@@ -54,7 +54,7 @@ describe('NextAuth route (App Router compliant)', () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  it('propagates failures from poll URL during session retrieval', async () => {
+  it('soft-fails poll URL failures into a 200 session with permissionsUnavailable', async () => {
     const mod = await loadRoute<any>(ROUTE_PATH);
     const { GET } = pickHandlers(mod);
     expect(GET).toBeTypeOf('function');
@@ -64,8 +64,13 @@ describe('NextAuth route (App Router compliant)', () => {
     const req = new Request('http://localhost/api/auth/session', { method: 'GET' });
     const res = await GET!(req, { params: { nextauth: ['session'] } });
 
+    // The mock route handler calls the session callback internally then always
+    // returns 200. The key assertion is that a poll-URL failure does NOT bubble
+    // up as a 4xx/5xx — it soft-fails. The callback-level invariant (that the
+    // resulting session carries permissionsUnavailable:true) is covered in
+    // depth by the 'soft-fails permission fetch' test below.
     expect(__auth.spies.fetchMock).toHaveBeenCalledTimes(1);
-    expect([200, 401, 500, 503]).toContain(res.status);
+    expect(res.status).toBe(200);
   });
 
   it('only uses the E2E session shortcut for e2e-credentials tokens', async () => {
@@ -116,6 +121,52 @@ describe('NextAuth route (App Router compliant)', () => {
         process.env.NODE_ENV = previousNodeEnv;
       }
     }
+  });
+
+  it('soft-fails permission fetch into a permissions-unavailable session (does not throw)', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+    expect(cfg?.callbacks?.session).toBeTypeOf('function');
+
+    __auth.pushFetchFail(503, { error: 'auth function down' });
+
+    const result = await cfg.callbacks.session({
+      session: { user: { email: 'transient-failure@example.com' } },
+      token: { email: 'transient-failure@example.com', isE2ETestUser: false }
+    });
+
+    expect(result.user.email).toBe('transient-failure@example.com');
+    expect(result.user.userStatus).toBeUndefined();
+    expect(result.user.sites).toEqual([]);
+    expect(result.user.allsites).toEqual([]);
+    expect(result.user.permissionsUnavailable).toBe(true);
+  });
+
+  it('does NOT mark permissionsUnavailable on the success path', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+
+    __auth.pushFetchOk(__auth.makeSessionOkPayload());
+
+    const result = await cfg.callbacks.session({
+      session: { user: { email: 'happy@example.com' } },
+      token: { email: 'happy@example.com', isE2ETestUser: false }
+    });
+
+    expect(result.user.permissionsUnavailable).toBeUndefined();
+    expect(result.user.userStatus).toBeDefined();
+  });
+
+  it('still throws when JWT has no email (tampered or malformed)', async () => {
+    await loadRoute<any>(ROUTE_PATH);
+    const cfg = __auth.getConfig();
+
+    await expect(
+      cfg.callbacks.session({
+        session: { user: {} },
+        token: { isE2ETestUser: false }
+      })
+    ).rejects.toThrow(/email/i);
   });
 
   it('handles signin POST', async () => {

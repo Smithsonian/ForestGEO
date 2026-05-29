@@ -5,7 +5,7 @@ import { useIsMounted } from '@/app/hooks/useismounted';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
 import { Box, Button, Typography, Stack, LinearProgress } from '@mui/joy';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/compat-hooks';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ailogger from '@/ailogger';
 import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider';
@@ -14,7 +14,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
   uploadForm,
   setIsDataUnsaved,
-  user,
   setUploadError,
   setErrorComponent,
   setReviewState
@@ -29,6 +28,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   const hasUploaded = useRef(false);
   const { isMountedRef } = useIsMounted();
+  const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const { getAnimationUrl } = useAnimationCacheContext();
@@ -44,22 +44,28 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           // const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
           // formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
-        const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+        const censusNumber = currentCensus?.plotCensusNumber;
 
         // Validate context before attempting upload
-        if (!currentPlot?.plotName || !censusID || !user) {
-          const errorMsg = 'Missing required context for upload (plot, census, or user)';
+        if (!currentSite?.schemaName || !currentPlot?.plotName || !currentPlot?.plotID || !censusNumber || !uploadForm) {
+          const errorMsg = 'Missing required context for upload (site, plot, census, or form type)';
           ailogger.error(errorMsg, new Error(errorMsg));
           throw new Error(errorMsg);
         }
 
-        const response = await fetch(
-          `/api/files/upload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${censusID.toString().trim()}&user=${user}&formType=${uploadForm}`,
-          {
-            method: 'POST',
-            body: formData
-          }
-        );
+        const params = new URLSearchParams({
+          fileName: file.name,
+          schema: currentSite.schemaName,
+          plotID: currentPlot.plotID.toString(),
+          plotName: currentPlot.plotName.trim(),
+          census: censusNumber.toString(),
+          formType: uploadForm
+        });
+
+        const response = await fetch(`/api/files/upload?${params.toString()}`, {
+          method: 'POST',
+          body: formData
+        });
         if (isMountedRef.current) {
           setCompletedOperations(prevCompleted => prevCompleted + 1);
         }
@@ -73,7 +79,16 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         }
       }
     },
-    [currentCensus?.dateRanges, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, uploadForm, user]
+    [
+      currentCensus?.plotCensusNumber,
+      currentPlot?.plotID,
+      currentPlot?.plotName,
+      currentSite?.schemaName,
+      setErrorComponent,
+      setReviewState,
+      setUploadError,
+      uploadForm
+    ]
   );
 
   useEffect(() => {

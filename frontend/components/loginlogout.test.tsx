@@ -172,7 +172,7 @@ describe('LoginLogout - Functional Tests', () => {
     it('MUST have accessible avatar button', () => {
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       expect(avatarButton).toBeInTheDocument();
       expect(avatarButton).toHaveAccessibleName();
     });
@@ -182,7 +182,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       await waitFor(() => {
@@ -197,7 +197,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
 
       // Open menu
       await user.click(avatarButton);
@@ -217,7 +217,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       avatarButton.focus();
 
       await user.keyboard('{Enter}');
@@ -232,7 +232,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       avatarButton.focus();
 
       await user.keyboard(' ');
@@ -262,7 +262,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const userSettingsItem = await screen.findByText('User Settings');
@@ -276,7 +276,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const siteSettingsItem = await screen.findByText('Site Settings');
@@ -290,7 +290,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const usersToSitesItem = await screen.findByText('User-Site Assignments');
@@ -304,7 +304,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const userSettingsItem = await screen.findByText('User Settings');
@@ -320,7 +320,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const siteSettingsItem = await screen.findByText('Site Settings');
@@ -336,7 +336,7 @@ describe('LoginLogout - Functional Tests', () => {
 
       render(<LoginLogout />);
 
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      const avatarButton = screen.getByRole('button', { name: /open user menu/i });
       await user.click(avatarButton);
 
       const userSettingsItem = await screen.findByText('User Settings');
@@ -552,8 +552,9 @@ describe('LoginLogout - Functional Tests', () => {
       const avatar = screen.getByText('AT');
       expect(avatar).toBeInTheDocument();
 
-      // Avatar button has aria-label for screen reader context
-      const avatarButton = screen.getByRole('button', { name: /user avatar/i });
+      // WCAG 2.5.3 (Label in Name): the visible initials must appear in the
+      // button's accessible name so speech-control users can target it.
+      const avatarButton = screen.getByRole('button', { name: /AT, open user menu/i });
       expect(avatarButton).toHaveAccessibleName();
     });
 

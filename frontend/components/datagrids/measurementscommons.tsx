@@ -1,8 +1,10 @@
 // measurementcommons datagrid
 'use client';
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebouncedFilterModel } from '@/lib/datagrid/useDebouncedFilterModel';
 import { useIsMounted } from '@/app/hooks/useismounted';
 import { ErrorBoundary } from '@/components/errorboundary';
+import { isMuiRowEditCancelled } from '@/lib/muirowedit';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -19,7 +21,7 @@ import {
   GridToolbarProps,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Snackbar } from '@mui/material';
+import { Alert, AlertColor, AlertPropsColorOverrides, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -57,6 +59,9 @@ import {
   sortRowsByMeasurementDate,
   VisibleFilter
 } from '@/config/datagridhelpers';
+import { useForestQuery, queryKey, QueryNamespace, QueryScope, invalidateAfter } from '@/lib/query';
+import { QueryError } from '@/lib/query/fetcher';
+import { LoadingBar, ContentSkeleton } from '@/components/loading';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useRouter } from 'next/navigation';
@@ -80,22 +85,31 @@ import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core
 import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CallSplit, Forest, Grass } from '@mui/icons-material';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
-import { debounce, EditToolbar } from '../client/datagridelements';
-import { loadSelectableOptions } from '@/components/client/clientmacros';
+import { EditToolbar } from '../client/datagridelements';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
+import { useInfiniteGridRows } from '@/components/datagrids/hooks/useinfinitegridrows';
+import { getSelectableOptionsForField, loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
 import ailogger from '@/ailogger';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
+import { isFieldEditableOnSurface } from '@/config/editplan/fieldpolicy';
 import ValidationActionsMenu from '@/components/client/validationactionsmenu';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
+  areExtendedFilterModelsEqual,
   areGridSortModelsEqual,
   arePaginationModelsEqual,
+  buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
-  mergeMeasurementFilterModel,
   shouldRefreshMeasurementsAfterValidationTransition,
-  shouldUseAutoMeasurementRowHeight
+  shouldUseAutoMeasurementRowHeight,
+  toServerMeasurementFilterModel
 } from './measurementscommonsutils';
 import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefilters';
 
@@ -103,6 +117,7 @@ import { buildMeasurementVisibleConditionSql } from '@/config/measurementstatefi
 const AUTO_ROW_HEIGHT = () => 'auto' as const;
 const ESTIMATED_AUTO_ROW_HEIGHT = () => 112;
 const FIREFOX_FIXED_ROW_HEIGHT = 112;
+export const FILTER_APPLY_DEBOUNCE_MS = 500;
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -160,14 +175,16 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
     locked = false,
-    dynamicButtons
+    dynamicButtons,
+    enablePageJump = false,
+    enableInfiniteScroll = false
   } = props;
 
   const initialErrorRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('errors') : true;
   const initialValidRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('valid') : true;
   const initialPendingRowsVisible = initialVisibleFilters ? initialVisibleFilters.includes('pending') : true;
 
-  const [newLastPage, setNewLastPage] = useState<number | null>(null);
+  const [_newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -198,12 +215,31 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [showNR, setShowNR] = useState<boolean>(true);
 
   const [hidingEmpty, setHidingEmpty] = useState(true);
-  const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>({
+
+  const initialFilterModel: ExtendedGridFilterModel = {
     items: [],
     quickFilterValues: [],
     visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
     tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-  });
+  };
+
+  const resetPageOnFilterCommit = useCallback(() => {
+    setPaginationModel(prev => (prev.page === 0 ? prev : { ...prev, page: 0 }));
+  }, [setPaginationModel]);
+
+  const {
+    uiModel: gridFilterModel,
+    serverModel: filterModel,
+    applyChange: applyFilterChange,
+    flush: flushFilterChange
+  } = useDebouncedFilterModel<ExtendedGridFilterModel>(
+    initialFilterModel,
+    FILTER_APPLY_DEBOUNCE_MS,
+    areExtendedFilterModelsEqual,
+    toServerMeasurementFilterModel,
+    resetPageOnFilterCommit
+  );
+  const [hasLoadedGrid, setHasLoadedGrid] = useState(false);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [invalidCount, setInvalidCount] = useState<number>(0);
   const [validationErrorCount, setValidationErrorCount] = useState<number>(0);
@@ -215,10 +251,10 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
   const [attributesMap, setAttributesMap] = useState<Map<string, AttributesRDS>>(new Map());
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
-    tag: [],
+    treeTag: [],
     stemTag: [],
-    quadrat: [],
-    spCode: []
+    quadratName: [],
+    speciesCode: []
   });
   const [reloadAttrs, setReloadAttrs] = useState(true);
 
@@ -240,8 +276,22 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
   const useAutoMeasurementRowHeight = useMemo(() => shouldUseAutoMeasurementRowHeight(typeof navigator === 'undefined' ? undefined : navigator.userAgent), []);
 
-  const PAGE_CACHE_TTL_MS = 30_000;
-  const pageCacheRef = useRef<Map<string, { rows: any[]; totalCount: number; timestamp: number }>>(new Map());
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const editPreviewLoadingMessage = 'Saving changes...';
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'measurementssummary',
+    onError: error => {
+      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+    },
+    onBlockingBusyChange: busy => {
+      setLoading(busy, editPreviewLoadingMessage, undefined, 'api');
+    }
+  });
+
   const previousValidationStatusRef = useRef(backgroundValidationStatus);
 
   const refreshMeasurementsSummaryView = useCallback(async () => {
@@ -347,105 +397,157 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, rowCount, paginationModel, addNewRowToGrid]);
 
-  const fetchPaginatedDataCore = useCallback(
-    async (pageToFetch: number) => {
-      if (!currentSite || !currentPlot || !currentCensus) {
-        ailogger.warn('Missing necessary context for fetchPaginatedData');
-        return;
-      }
-
-      const cacheKey = `${gridType}:${pageToFetch}:${paginationModel.pageSize}`;
-      const cached = pageCacheRef.current.get(cacheKey);
-      const now = Date.now();
-
-      if (cached && now - cached.timestamp < PAGE_CACHE_TTL_MS) {
-        setRows(cached.rows);
-        setRowCount(cached.totalCount);
-        if (isNewRowAdded && pageToFetch === newLastPage) {
-          addNewRowToGrid();
-        }
-        return;
-      }
-
-      setLoading(true);
-      const paginatedQuery = createQFFetchQuery(
-        currentSite?.schemaName ?? '',
-        gridType,
-        pageToFetch,
-        paginationModel.pageSize,
-        currentPlot?.plotID,
-        currentCensus?.plotCensusNumber
-      );
-
-      try {
-        // Filter to only include valid, complete filter items (Bug #1 fix)
-        const validItems =
-          filterModel.items?.filter(item => {
-            // Field and operator are always required
-            if (!item.field || item.field === '' || !item.operator || item.operator === '') {
-              return false;
-            }
-            // isEmpty/isNotEmpty operators don't require a value
-            if (item.operator === 'isEmpty' || item.operator === 'isNotEmpty') {
-              return true;
-            }
-            // All other operators require a value
-            return item.value !== undefined && item.value !== null && item.value !== '';
-          }) ?? [];
-
-        const sanitizedFilterModel = {
-          ...filterModel,
-          items: validItems
-        };
-
-        const response = await fetch(paginatedQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel: sanitizedFilterModel })
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Error fetching data');
-
-        setRows(data.output);
-        setRowCount(data.totalCount);
-        pageCacheRef.current.set(cacheKey, { rows: data.output, totalCount: data.totalCount, timestamp: Date.now() });
-
-        if (isNewRowAdded && pageToFetch === newLastPage) {
-          addNewRowToGrid();
-        }
-      } catch (error: unknown) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        ailogger.error('Error fetching data:', errorObj);
-        setSnackbar({ children: 'Error fetching data', severity: 'error' });
-      } finally {
-        setLoading(false);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      filterModel,
-      currentSite,
-      currentPlot,
-      currentCensus,
+  const fetchUrl = React.useMemo(() => {
+    if (!currentSite?.schemaName) return null;
+    return createQFFetchQuery(
+      currentSite.schemaName,
+      gridType,
       paginationModel.page,
       paginationModel.pageSize,
-      isNewRowAdded,
-      newLastPage,
-      gridType,
-      addNewRowToGrid
-    ]
+      currentPlot?.plotID,
+      currentCensus?.plotCensusNumber,
+      undefined
+    );
+  }, [currentSite?.schemaName, gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
+
+  const queryScope: QueryScope = useMemo(
+    () => ({
+      siteSchema: currentSite?.schemaName,
+      plotID: currentPlot?.plotID,
+      censusID: currentCensus?.dateRanges?.[0]?.censusID
+    }),
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
   );
 
-  const debouncedFetchPaginatedData = useMemo(
+  const gridQueryKey = fetchUrl
+    ? queryKey(`grid:${gridType}` as QueryNamespace, queryScope, {
+        page: paginationModel.page,
+        pageSize: paginationModel.pageSize,
+        filterModel,
+        sortModel
+      })
+    : null;
+
+  const filterBodyFetcher = React.useCallback(
+    async (u: string): Promise<{ output: any[]; totalCount: number }> => {
+      const res = await fetch(u, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel, sortModel })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => undefined);
+        throw new QueryError(res.status, body, `POST ${u} ${res.status}`);
+      }
+      return (await res.json()) as { output: any[]; totalCount: number };
+    },
+    [filterModel, sortModel]
+  );
+
+  const {
+    data: gridData,
+    isLoading,
+    isValidating,
+    error: gridError,
+    refetch
+  } = useForestQuery<{ output: any[]; totalCount: number }>(
+    gridQueryKey,
+    fetchUrl,
+    useMemo(
+      () => ({
+        fetcher: filterBodyFetcher,
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
+        revalidateIfStale: false
+      }),
+      [filterBodyFetcher]
+    )
+  );
+
+  useEffect(() => {
+    if (gridData) {
+      setRows(gridData.output);
+      setRowCount(gridData.totalCount);
+      setHasLoadedGrid(true);
+    }
+  }, [gridData, setRows, setRowCount]);
+
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      if (!currentSite?.schemaName) return { rows: [], totalRows: 0 };
+      const url = createQFFetchQuery(currentSite.schemaName, gridType, p, ps, currentPlot?.plotID, currentCensus?.plotCensusNumber, undefined);
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterModel, sortModel }),
+        signal
+      });
+      if (!res.ok) throw new QueryError(res.status, undefined, `POST ${url} ${res.status}`);
+      const json = (await res.json()) as { output?: any[]; totalCount?: number };
+      return { rows: json.output ?? [], totalRows: json.totalCount ?? 0 };
+    },
+    [currentSite?.schemaName, gridType, currentPlot?.plotID, currentCensus?.plotCensusNumber, filterModel, sortModel]
+  );
+
+  const infiniteResetKey = useMemo(
     () =>
-      debounce((pageToFetch: number) => {
-        fetchPaginatedDataCore(pageToFetch);
-      }, 250),
-    [fetchPaginatedDataCore]
+      JSON.stringify({
+        filter: filterModel,
+        sort: sortModel,
+        site: currentSite?.schemaName,
+        plot: currentPlot?.plotID,
+        census: currentCensus?.plotCensusNumber,
+        gridType
+      }),
+    [filterModel, sortModel, currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, gridType]
   );
 
-  const fetchPaginatedData = fetchPaginatedDataCore;
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'id',
+    paginated: { rows: rows as GridRowModel[], totalRows: rowCount, isLoading: isValidating }
+  });
+
+  const isInfiniteOn = enableInfiniteScroll && infinite.mode === 'infinite';
+  const gridRows = isInfiniteOn ? infinite.rows : rows;
+  const gridRowCount = isInfiniteOn ? infinite.rows.length : rowCount;
+
+  const infiniteScrollDescriptor = useMemo(
+    () =>
+      enableInfiniteScroll
+        ? {
+            enabled: isInfiniteOn,
+            onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+            loadedCount: infinite.rows.length,
+            totalRows: infinite.totalRows,
+            isLoadingMore: infinite.isLoadingMore,
+            hasMore: infinite.hasMore,
+            error: infinite.error,
+            softCapExceeded: infinite.softCapExceeded,
+            onRetry: infinite.retry
+          }
+        : undefined,
+    [enableInfiniteScroll, isInfiniteOn, infinite]
+  );
+
+  const PaginationSlot = useMemo(() => {
+    if (!enablePageJump && !enableInfiniteScroll) return undefined;
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'CustomGridPaginationSlot';
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [enablePageJump, enableInfiniteScroll, infiniteScrollDescriptor]);
+
+  useEffect(() => {
+    if (gridError) {
+      ailogger.error('Error fetching data:', gridError);
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
+    }
+  }, [gridError, setSnackbar]);
 
   const fetchValidationErrors = useCallback(async () => {
     try {
@@ -499,24 +601,27 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber]);
 
   const runFetchPaginated = useCallback(async () => {
-    await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
-  }, [fetchPaginatedData, paginationModel.page, fetchValidationErrors]);
+    await Promise.all([refetch(), fetchValidationErrors()]);
+  }, [refetch, fetchValidationErrors]);
 
   useEffect(() => {
-    setFilterModel(prevModel =>
-      mergeMeasurementFilterModel(prevModel, {
-        visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
-        tss: buildMeasurementTssFilters(showOT, showMS, showNR)
-      })
-    );
-  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
+    if (!currentPlot || !currentCensus || paginationModel.page < 0) return;
+    fetchValidationErrors().catch(ailogger.error);
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel, fetchValidationErrors]);
+
+  useEffect(() => {
+    applyFilterChange({
+      visible: buildMeasurementVisibleFilters(showErrorRows, showValidRows, showPendingRows),
+      tss: buildMeasurementTssFilters(showOT, showMS, showNR)
+    });
+    flushFilterChange();
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR, applyFilterChange, flushFilterChange]);
 
   // Handle refresh signal - use ref to guard against concurrent/redundant fetches
   const isRefreshing = useRef(false);
   useEffect(() => {
     if (!refresh || isRefreshing.current) return;
     isRefreshing.current = true;
-    pageCacheRef.current.clear();
 
     Promise.all([runFetchPaginated(), refreshCounts()])
       .catch(ailogger.error)
@@ -539,6 +644,32 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
+
+  const loadAttributes = useCallback(async () => {
+    if (!currentSite?.schemaName) return;
+    try {
+      const response = await fetch(`/api/query`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      const attrMap = new Map<string, AttributesRDS>();
+      data.forEach(attr => {
+        if (attr.code) attrMap.set(attr.code, attr);
+      });
+      setAttributesMap(attrMap);
+      setReloadAttrs(false);
+    } catch (e: unknown) {
+      const errorObj = e instanceof Error ? e : new Error(String(e));
+      ailogger.error('Failed to load attributes:', errorObj);
+    }
+  }, [currentSite?.schemaName]);
+
+  useEffect(() => {
+    loadAttributes();
+  }, [loadAttributes]);
+
   // helper functions for usage:
   const handleSortModelChange = useCallback(
     (newModel: GridSortModel) => {
@@ -693,55 +824,62 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  const updateRow = async (
-    gridType: string,
-    schemaName: string | undefined,
-    newRow: GridRowModel,
-    oldRow: GridRowModel,
-    setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>,
-    setIsNewRowAdded: (value: boolean) => void,
-    setShouldAddRowAfterFetch: (value: boolean) => void,
-    fetchPaginatedData: (page: number) => Promise<void>,
-    paginationModel: { page: number }
-  ): Promise<GridRowModel> => {
+  const createNewRowPost = async (gridType: string, schemaName: string | undefined, newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
     newRow.measurementDate = moment(newRow.measurementDate).format('YYYY-MM-DD');
     newRow.userDefinedFields = JSON.stringify(newRow.userDefinedFields);
     try {
       const response = await fetch(fetchProcessQuery, {
-        method: oldRow.isNew ? 'POST' : 'PATCH',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
-
       const responseJSON = await response.json();
-
       if (!response.ok) {
-        setSnackbar({
-          children: `Error: ${responseJSON.message}`,
-          severity: 'error'
-        });
+        setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row);
       }
-
-      setSnackbar({
-        children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-        severity: 'success'
-      });
-
-      if (oldRow.isNew) {
-        setIsNewRowAdded(false);
-        setShouldAddRowAfterFetch(false);
-        await Promise.all([fetchPaginatedData(paginationModel.page), fetchValidationErrors()]);
-      }
-
+      setSnackbar({ children: 'New row added!', severity: 'success' });
+      setIsNewRowAdded(false);
+      setShouldAddRowAfterFetch(false);
+      await Promise.all([refetch(), fetchValidationErrors()]);
       return newRow;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setSnackbar({ children: `Error: ${message}`, severity: 'error' });
       return Promise.reject(newRow);
     }
+  };
+
+  const applyEditViaPreviewFlow = async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    const coreMeasurementID = Number(newRow.coreMeasurementID ?? oldRow.coreMeasurementID);
+    if (!Number.isFinite(coreMeasurementID) || coreMeasurementID <= 0) {
+      setSnackbar({ children: 'Error: missing CoreMeasurementID for edit', severity: 'error' });
+      return Promise.reject(new Error('missing CoreMeasurementID'));
+    }
+    const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, 'measurementssummary');
+    if (Object.keys(editableDiff).length === 0) {
+      if (roundedNoOpFields.length > 0) {
+        setSnackbar({
+          children: `No change saved: ${roundedNoOpFields.join(', ')} rounded to the existing value (server stores at fixed precision).`,
+          severity: 'info'
+        });
+      }
+      return newRow;
+    }
+    if (roundedNoOpFields.length > 0) {
+      setSnackbar({
+        children: `${roundedNoOpFields.join(', ')} rounded to the existing value and was not changed; other edits applied.`,
+        severity: 'info'
+      });
+    }
+    const result = await editFlow.beginEdit(coreMeasurementID, editableDiff);
+    if (result.editOperationID !== null) {
+      setUndoToastOperationID(result.editOperationID);
+    }
+    setSnackbar({ children: 'Row updated!', severity: 'success' });
+    return newRow;
   };
 
   const openConfirmationDialog = useCallback(
@@ -788,22 +926,29 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
 
   const performSaveAction = async (id: GridRowId) => {
     if (locked || !promiseArguments) return;
-    setLoading(true, 'Saving changes...');
+    // The new-row path is a single network call → blocking overlay is appropriate.
+    // The edit path goes through useEditPreviewFlow, which surfaces a Modal whose
+    // own busy state is the user feedback during apply; raising the global overlay
+    // here would block the dialog from receiving its own Apply/Cancel clicks until
+    // the loading provider's 30s default timeout fires.
+    const isLegacyCreate = promiseArguments.oldRow.isNew;
+    if (isLegacyCreate) {
+      setLoading(true, editPreviewLoadingMessage);
+    }
     try {
-      const updatedRow = await updateRow(
-        gridType,
-        currentSite?.schemaName,
-        promiseArguments.newRow,
-        promiseArguments.oldRow,
-        setSnackbar,
-        setIsNewRowAdded,
-        setShouldAddRowAfterFetch,
-        fetchPaginatedData,
-        paginationModel
-      );
+      const updatedRow = isLegacyCreate
+        ? await createNewRowPost(gridType, currentSite?.schemaName, promiseArguments.newRow, promiseArguments.oldRow)
+        : await applyEditViaPreviewFlow(promiseArguments.newRow, promiseArguments.oldRow);
       promiseArguments.resolve(updatedRow);
     } catch (error: unknown) {
       promiseArguments.reject(error);
+      const wasCancelled = isMuiRowEditCancelled(error);
+      if (wasCancelled && !promiseArguments.oldRow.isNew) {
+        setRowModesModel(oldModel => ({
+          ...oldModel,
+          [id]: { mode: GridRowModes.Edit }
+        }));
+      }
     }
     const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
@@ -813,24 +958,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     if (handleSelectQuadrat) handleSelectQuadrat(null);
 
     if (reloadAttrs) {
-      try {
-        const response = await fetch(`/api/query`, {
-          method: 'POST',
-          body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
-        });
-        const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
-        setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
-        // Create a map for quick lookup of attribute details by code
-        const attrMap = new Map<string, AttributesRDS>();
-        data.forEach(attr => {
-          if (attr.code) attrMap.set(attr.code, attr);
-        });
-        setAttributesMap(attrMap);
-        setReloadAttrs(false);
-      } catch (e: unknown) {
-        const errorObj = e instanceof Error ? e : new Error(String(e));
-        ailogger.error('Failed to reload attributes:', errorObj);
-      }
+      await loadAttributes();
     }
 
     try {
@@ -839,8 +967,11 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       const errorObj = e instanceof Error ? e : new Error(String(e));
       ailogger.error('Failed to fetch validation errors:', errorObj);
     } finally {
-      setLoading(false);
+      if (isLegacyCreate) {
+        setLoading(false, editPreviewLoadingMessage);
+      }
     }
+    await invalidateAfter('save-edit-plan', queryScope);
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -850,6 +981,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       setSnackbar({ children: 'Error: Site context not available', severity: 'error' });
       return;
     }
+    // destructive mutation — global overlay blocks UI for the duration of the API call
     setLoading(true, 'Deleting...');
     const deletionID = rows.find(row => String(row.id) === String(id))?.id;
     if (!deletionID) return;
@@ -886,6 +1018,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       });
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
+        // destructive mutation — global overlay blocks UI for the duration of the API call
         setLoading(true, 'Refreshing Measurements Summary View...');
         await refreshMeasurementsSummaryView();
       } catch (e: unknown) {
@@ -894,7 +1027,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
       } finally {
         setLoading(false);
       }
-      await fetchPaginatedData(paginationModel.page);
+      await refetch();
+      await invalidateAfter('delete-measurement', queryScope);
     }
   };
 
@@ -914,23 +1048,6 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     [locked, openConfirmationDialog]
   );
 
-  // Fetch on pagination, sort, or context changes (no debounce)
-  useEffect(() => {
-    if (currentPlot && currentCensus && paginationModel.page >= 0) {
-      runFetchPaginated().catch(ailogger.error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPlot, currentCensus, paginationModel.page, sortModel]);
-
-  // Debounce fetches triggered by filter model changes (rapid typing in search)
-  useEffect(() => {
-    pageCacheRef.current.clear();
-    if (currentPlot && currentCensus && paginationModel.page >= 0) {
-      debouncedFetchPaginatedData(paginationModel.page);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterModel]);
-
   useEffect(() => {
     refreshCounts().catch(ailogger.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -939,6 +1056,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>((resolve, reject) => {
+        // destructive mutation — global overlay blocks UI for the duration of the API call
         setLoading(true, 'Processing changes...');
         if (newRow.id === '') {
           setLoading(false);
@@ -1193,7 +1311,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
                 freeSolo={['treeTag', 'stemTag'].includes(column.field)}
                 clearOnBlur={false}
                 isOptionEqualToValue={(option, value) => option === value}
-                options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
+                options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
                 value={
                   column.field === 'attributes'
                     ? params.value
@@ -1360,20 +1478,23 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
   };
 
-  function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel =>
-      mergeMeasurementFilterModel(prevFilterModel, {
+  const onQuickFilterChange = useCallback(
+    (incomingValues: GridFilterModel) =>
+      applyFilterChange({
         items: incomingValues.items || [],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-      })
-    );
-  }
+      }),
+    [applyFilterChange]
+  );
+
+  const handleFilterModelChange = useCallback((newFilterModel: GridFilterModel) => applyFilterChange(newFilterModel), [applyFilterChange]);
 
   async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>, shouldRefresh: boolean = false) {
     closeModal(false);
     if (!shouldRefresh || !currentSite?.schemaName) return;
 
     try {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Refreshing Measurements Summary View...');
       await refreshMeasurementsSummaryView();
     } catch (e: unknown) {
@@ -1391,6 +1512,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
     }
 
     try {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Resetting validation states...');
 
       const resolveErrorsRequest = createResetValidationErrorsQuery(currentSite.schemaName, currentPlot.plotID, activeCensusID);
@@ -1439,6 +1561,8 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
   if (!currentSite || !currentPlot || !currentCensus) {
     return null;
   } else {
+    const showInitialGridSkeleton = isLoading && !hasLoadedGrid;
+    const showGridLoading = hasLoadedGrid && (isLoading || isValidating);
     return (
       <Box
         sx={{
@@ -1451,105 +1575,130 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           }
         }}
       >
-        <Box sx={{ width: '100%', flexDirection: 'column' }}>
-          <StyledDataGrid
-            apiRef={apiRef}
-            sx={{ width: '100%' }}
-            rows={rows}
-            columns={filteredColumns}
-            editMode="row"
-            rowModesModel={rowModesModel}
-            disableColumnSelector
-            onRowModesModelChange={handleRowModesModelChange}
-            onRowEditStop={handleRowEditStop}
-            processRowUpdate={processRowUpdate}
-            loading={refresh}
-            paginationMode="server"
-            filterMode="server"
-            onPaginationModelChange={newPaginationModel => {
-              if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
-                return;
-              }
-              setPaginationModel(newPaginationModel);
-            }}
-            onProcessRowUpdateError={(error: Error) => {
-              ailogger.error('Row update error:', error);
-              setSnackbar({
-                children: 'Error updating row',
-                severity: 'error'
-              });
-            }}
-            onCellKeyDown={(params, event) => {
-              if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event).then(() => {});
-              }
-            }}
-            paginationModel={paginationModel}
-            rowCount={rowCount}
-            onRowCountChange={handleRowCountChange}
-            pageSizeOptions={[10, 25, 50, 100]}
-            sortModel={sortModel}
-            onSortModelChange={handleSortModelChange}
-            filterModel={filterModel}
-            onFilterModelChange={newFilterModel => {
-              setFilterModel(prevModel => mergeMeasurementFilterModel(prevModel, newFilterModel));
-            }}
-            ignoreDiacritics
-            initialState={{
-              columns: {
-                columnVisibilityModel: getColumnVisibilityModel(gridType)
-              }
-            }}
-            slots={{
-              toolbar: EditToolbar
-            }}
-            slotProps={{
-              toolbar: {
-                locked: locked,
-                handleAddNewRow: handleAddNewRow,
-                handleRefresh: async () => setRefresh(true),
-                handleExport: fetchRowsForExport,
-                showToolbarActions: showToolbarActions,
-                handleQuickFilterChange: onQuickFilterChange,
-                filterModel: filterModel,
-                gridColumns: gridColumns,
-                gridType: FormType.measurements,
-                dynamicButtons: dynamicButtons,
-                validationMenu: (
-                  <ValidationActionsMenu
-                    onRunValidations={() => setIsValidationModalOpen(true)}
-                    onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
-                    onResetValidations={() => setIsResetValidationModalOpen(true)}
-                    onRefreshView={async () => {
-                      if (!currentSite?.schemaName) return;
-                      setLoading(true, 'Refreshing Measurements Summary View...');
-                      try {
-                        await refreshMeasurementsSummaryView();
-                      } finally {
-                        setLoading(false);
-                        setRefresh(true);
-                      }
-                    }}
-                    pendingCount={pendingCount}
-                    errorCount={validationErrorCount}
-                  />
-                ),
-                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
-                validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
-                pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
-                otControls: { show: showOT, toggle: setShowOT, count: otCount },
-                msControls: { show: showMS, toggle: setShowMS, count: msCount },
-                nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
-                hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty
-              } as GridToolbarProps & Partial<EditToolbarCustomProps>
-            }}
-            showToolbar
-            getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
-            getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
-            rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
-            isCellEditable={() => !locked}
-          />
+        <Box sx={{ width: '100%', flexDirection: 'column', position: 'relative' }}>
+          <LoadingBar active={isValidating && hasLoadedGrid} />
+          {showInitialGridSkeleton ? (
+            <ContentSkeleton kind="grid-rows" count={paginationModel.pageSize} />
+          ) : (
+            <>
+              <StyledDataGrid
+                apiRef={apiRef}
+                sx={{ width: '100%' }}
+                rows={gridRows}
+                columns={filteredColumns}
+                editMode="row"
+                rowModesModel={rowModesModel}
+                disableColumnSelector
+                onRowModesModelChange={handleRowModesModelChange}
+                onRowEditStop={handleRowEditStop}
+                processRowUpdate={async (newRow, oldRow) => {
+                  const result = await processRowUpdate(newRow, oldRow);
+                  if (isInfiniteOn) infinite.upsertRow(result);
+                  return result;
+                }}
+                loading={showGridLoading}
+                paginationMode="server"
+                filterMode="server"
+                onPaginationModelChange={newPaginationModel => {
+                  if (arePaginationModelsEqual(paginationModel, newPaginationModel)) {
+                    return;
+                  }
+                  setPaginationModel(newPaginationModel);
+                }}
+                onProcessRowUpdateError={(error: Error) => {
+                  if (isMuiRowEditCancelled(error)) return;
+                  ailogger.error('Row update error:', error);
+                  setSnackbar({
+                    children: 'Error updating row',
+                    severity: 'error'
+                  });
+                }}
+                onCellKeyDown={(params, event) => {
+                  if (event.key === 'Enter') {
+                    handleEnterKeyNavigation(params, event).then(() => {});
+                  }
+                }}
+                paginationModel={paginationModel}
+                rowCount={gridRowCount}
+                onRowCountChange={handleRowCountChange}
+                pageSizeOptions={[10, 25, 50, 100]}
+                sortModel={sortModel}
+                onSortModelChange={handleSortModelChange}
+                filterModel={gridFilterModel}
+                onFilterModelChange={handleFilterModelChange}
+                ignoreDiacritics
+                initialState={{
+                  columns: {
+                    columnVisibilityModel: getColumnVisibilityModel(gridType)
+                  }
+                }}
+                slots={{
+                  toolbar: EditToolbar,
+                  ...(PaginationSlot ? { pagination: PaginationSlot } : {})
+                }}
+                slotProps={{
+                  toolbar: {
+                    locked: locked,
+                    handleAddNewRow: handleAddNewRow,
+                    handleRefresh: async () => setRefresh(true),
+                    handleExport: fetchRowsForExport,
+                    showToolbarActions: showToolbarActions,
+                    handleQuickFilterChange: onQuickFilterChange,
+                    filterModel: gridFilterModel,
+                    gridColumns: gridColumns,
+                    gridType: FormType.measurements,
+                    dynamicButtons: dynamicButtons,
+                    validationMenu: (
+                      <ValidationActionsMenu
+                        onRunValidations={() => setIsValidationModalOpen(true)}
+                        onOverrideValidations={() => setIsValidationOverrideModalOpen(true)}
+                        onResetValidations={() => setIsResetValidationModalOpen(true)}
+                        onRefreshView={async () => {
+                          if (!currentSite?.schemaName) return;
+                          // destructive mutation — global overlay blocks UI for the duration of the API call
+                          setLoading(true, 'Refreshing Measurements Summary View...');
+                          try {
+                            await refreshMeasurementsSummaryView();
+                          } finally {
+                            setLoading(false);
+                            setRefresh(true);
+                          }
+                        }}
+                        pendingCount={pendingCount}
+                        errorCount={validationErrorCount}
+                      />
+                    ),
+                    errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: invalidCount },
+                    validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
+                    pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
+                    otControls: { show: showOT, toggle: setShowOT, count: otCount },
+                    msControls: { show: showMS, toggle: setShowMS, count: msCount },
+                    nrControls: { show: showNR, toggle: setShowNR, count: nrCount },
+                    hidingEmpty: hidingEmpty,
+                    setHidingEmpty: setHidingEmpty
+                  } as GridToolbarProps & Partial<EditToolbarCustomProps>
+                }}
+                showToolbar
+                getEstimatedRowHeight={useAutoMeasurementRowHeight ? ESTIMATED_AUTO_ROW_HEIGHT : undefined}
+                getRowHeight={useAutoMeasurementRowHeight ? AUTO_ROW_HEIGHT : undefined}
+                rowHeight={useAutoMeasurementRowHeight ? undefined : FIREFOX_FIXED_ROW_HEIGHT}
+                isCellEditable={params => {
+                  if (locked) return false;
+                  // Server allowlist is authoritative — fieldpolicy.isFieldEditableOnSurface
+                  // resolves the grid's column field (camelCase) through FIELD_ALIASES_BY_SURFACE
+                  // and checks against EDITABLE_FIELDS_BY_SURFACE. This keeps the grid in
+                  // lockstep with the server's rejectDisallowedFields check.
+                  return isFieldEditableOnSurface('measurementssummary', params.field);
+                }}
+              />
+              <InfiniteGridScrollBridge
+                apiRef={apiRef}
+                enabled={isInfiniteOn}
+                onLoadMore={infinite.loadMore}
+                observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
+              />
+            </>
+          )}
         </Box>
         {!!snackbar && (
           <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
@@ -1558,6 +1707,41 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
         )}
         {isDialogOpen && promiseArguments && (
           <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
+        )}
+        {editFlow.dialogState.open && editFlow.dialogState.plan && (
+          <PreviewDialog
+            plan={editFlow.dialogState.plan}
+            busy={editFlow.dialogState.busy}
+            wasRefreshed={editFlow.dialogState.wasRefreshed}
+            onConfirm={editFlow.confirmDialog}
+            onCancel={editFlow.cancelDialog}
+          />
+        )}
+        {undoToastOperationID !== null && (
+          <UndoToast
+            editOperationID={undoToastOperationID}
+            onUndo={async () => {
+              try {
+                const response = await fetch(`/api/edits/revert`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    schema: currentSite?.schemaName ?? '',
+                    plotID: currentPlot?.plotID ?? 0,
+                    censusID: activeCensusID ?? 0,
+                    editOperationID: undoToastOperationID
+                  })
+                });
+                if (!response.ok) throw new Error(`revert failed (${response.status})`);
+                setSnackbar({ children: 'Edit reverted', severity: 'success' });
+                await runFetchPaginated();
+              } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                setSnackbar({ children: `Undo failed: ${message}`, severity: 'error' });
+              }
+            }}
+            onDismiss={() => setUndoToastOperationID(null)}
+          />
         )}
         {/*{isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (*/}
         {/*  <MSVEditingModal*/}

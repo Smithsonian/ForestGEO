@@ -7,16 +7,22 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { Box, Button, Chip, Stack, Tooltip, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
-import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
+import { loadSelectableOptions, selectableAutocomplete, selectableOptionKeyForField } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
+import { invalidateAfter } from '@/lib/query';
 import ValidationCheckModal from '@/components/client/modals/validationcheckmodal';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffForSurface } from '@/components/datagrids/measurementscommonsutils';
 
 interface IsolatedFailedMeasurementsDataGridProps {
   onRowReingested?: () => void;
@@ -76,19 +82,33 @@ export function formatDetailedFailureDescription(description?: string | null): s
 export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: IsolatedFailedMeasurementsDataGridProps = {}) {
   const [refresh, setRefresh] = useState(false);
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
-    tag: [],
+    treeTag: [],
     stemTag: [],
-    quadrat: [],
-    spCode: [],
+    quadratName: [],
+    speciesCode: [],
     codes: []
   });
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [validationResults, setValidationResults] = useState<any>(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const [editFlowError, setEditFlowError] = useState<string | null>(null);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const apiRef = useGridApiRef();
+
+  const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'failedmeasurements',
+    onError: error => {
+      setEditFlowError(error.message);
+    }
+  });
 
   useEffect(() => {
     loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
@@ -145,13 +165,13 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
 
       if (!row.spCode?.trim()) {
         reasons.push('SpCode missing');
-      } else if (!selectableOpts.spCode.includes(row.spCode.trim())) {
+      } else if (!selectableOpts.speciesCode.includes(row.spCode.trim())) {
         reasons.push('SpCode invalid');
       }
 
       if (!row.quadrat?.trim()) {
         reasons.push('Quadrat missing');
-      } else if (!selectableOpts.quadrat.includes(row.quadrat.trim())) {
+      } else if (!selectableOpts.quadratName.includes(row.quadrat.trim())) {
         reasons.push('Quadrat invalid');
       }
 
@@ -192,24 +212,30 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
     [selectableOpts, countInvalidCodes]
   );
 
-  const onRowSave = useCallback(
-    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<void> => {
+  const applyEditViaPreviewFlow = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+      const failedMeasurementID = Number(newRow.failedMeasurementID ?? oldRow.failedMeasurementID);
+      if (!Number.isFinite(failedMeasurementID) || failedMeasurementID <= 0) {
+        throw new Error('Missing failedMeasurementID for edit');
+      }
+
+      const editableDiff = buildEditableFieldsDiffForSurface(newRow, oldRow, 'failedmeasurements');
       const reasons = computeFailureReasons(newRow);
       const updatedRow: GridRowModel = { ...newRow, failureReasons: reasons, currentFailureReasons: reasons };
-      const failedMeasurementID = newRow.failedMeasurementID ?? oldRow.failedMeasurementID;
+      let editOperationID: number | null = null;
+
+      if (Object.keys(editableDiff).length > 0) {
+        try {
+          const applyResult = await editFlow.beginEdit(failedMeasurementID, editableDiff);
+          editOperationID = applyResult.editOperationID;
+        } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ailogger.error('Failed to save row via edit preview flow:', err);
+          throw err;
+        }
+      }
 
       try {
-        const updateResponse = await fetch(`/api/fixeddata/failedmeasurements/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newRow: updatedRow, oldRow: oldRow })
-        });
-
-        if (!updateResponse.ok) {
-          const errorData = await updateResponse.json().catch(() => ({ message: `HTTP ${updateResponse.status}` }));
-          throw new Error(errorData.message || `Failed to save row edits: ${updateResponse.status}`);
-        }
-
         if (reasons.length === 0) {
           const reingestResponse = await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${failedMeasurementID}`);
           if (!reingestResponse.ok) {
@@ -217,23 +243,31 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             throw new Error(errorData.message || `Failed to reingest row: ${reingestResponse.status}`);
           }
 
+          await invalidateAfter('reingest', {
+            siteSchema: currentSite?.schemaName,
+            plotID: currentPlot?.plotID,
+            censusID: currentCensus?.dateRanges?.[0]?.censusID
+          });
+
           await loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts);
 
-          // Notify parent that a row was successfully reingested
           if (onRowReingested) {
             onRowReingested();
           }
+        } else if (editOperationID !== null) {
+          setUndoToastOperationID(editOperationID);
         }
 
-        // Trigger refresh immediately - no arbitrary delay needed
-        // The database operations are already complete at this point
         setRefresh(true);
-      } catch (error: any) {
-        ailogger.error('Failed to save row:', error);
-        throw error;
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('Failed to finalize row save:', err);
+        throw err;
       }
+
+      return updatedRow;
     },
-    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested]
+    [currentSite, currentPlot, currentCensus, computeFailureReasons, setSelectableOpts, onRowReingested, editFlow]
   );
 
   const displayFailureReason = useCallback(
@@ -323,15 +357,37 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
             }
             return (
               <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
-                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', width: '100%', marginY: 0.5 }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 0.5, width: '100%', marginY: 0.5 }}>
                   {column.field === 'codes' ? (
-                    ((params.value ?? '').split(';') ?? [])
-                      .filter((code: string) => selectableOpts.codes.includes(code))
-                      .map((i: string, index: number) => (
-                        <Chip key={index} variant={'soft'}>
-                          {i}
-                        </Chip>
-                      ))
+                    (params.value ?? '')
+                      .split(';')
+                      .map((code: string) => code.trim())
+                      .filter((code: string) => code !== '')
+                      .map((code: string, index: number) =>
+                        selectableOpts.codes.includes(code) ? (
+                          <Chip key={index} variant="soft">
+                            {code}
+                          </Chip>
+                        ) : (
+                          <Tooltip key={index} title="Code not in attributes table" variant="soft">
+                            <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                              {code}
+                            </Chip>
+                          </Tooltip>
+                        )
+                      )
+                  ) : column.field === 'spCode' && params.value && !selectableOpts.speciesCode.includes(String(params.value).trim()) ? (
+                    <Tooltip title="Species code not in species table" variant="soft">
+                      <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                        {String(params.value)}
+                      </Chip>
+                    </Tooltip>
+                  ) : column.field === 'quadrat' && params.value && !selectableOpts.quadratName.includes(String(params.value).trim()) ? (
+                    <Tooltip title="Quadrat not in quadrats table" variant="soft">
+                      <Chip color="danger" variant="soft" startDecorator={<ErrorOutlineIcon fontSize="small" />}>
+                        {String(params.value)}
+                      </Chip>
+                    </Tooltip>
                   ) : (
                     <Typography
                       sx={{
@@ -384,7 +440,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
                   />
                 </Box>
               );
-            } else if (Object.keys(selectableOpts).includes(column.field)) {
+            } else if (Object.prototype.hasOwnProperty.call(selectableOpts, selectableOptionKeyForField(column.field))) {
               return (
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
                   {selectableAutocomplete(params, column, selectableOpts)}
@@ -408,7 +464,7 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
   }, [selectableOpts, displayFailureReason]);
 
   return Object.keys(selectableOpts)
-    .filter(i => !['tag', 'stemTag'].includes(i))
+    .filter(i => !['treeTag', 'stemTag'].includes(i))
     .every(key => selectableOpts[key].length > 0) ? (
     <>
       <IsolatedDataGridCommons
@@ -428,8 +484,52 @@ export default function IsolatedFailedMeasurementsDataGrid({ onRowReingested }: 
         ]}
         defaultHideEmpty={false}
         apiRef={apiRef as RefObject<GridApiCommunity>}
-        onDataUpdate={onRowSave}
+        editFlowOverride={applyEditViaPreviewFlow}
       />
+      {editFlow.dialogState.open && editFlow.dialogState.plan && (
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          wasRefreshed={editFlow.dialogState.wasRefreshed}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
+      )}
+      {undoToastOperationID !== null && (
+        <UndoToast
+          editOperationID={undoToastOperationID}
+          onUndo={async () => {
+            try {
+              const response = await fetch(`/api/edits/revert`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  schema: currentSite?.schemaName ?? '',
+                  plotID: currentPlot?.plotID ?? 0,
+                  censusID: activeCensusID ?? 0,
+                  editOperationID: undoToastOperationID
+                })
+              });
+              if (!response.ok) {
+                throw new Error(`revert failed (${response.status})`);
+              }
+              setRefresh(true);
+            } catch (error: unknown) {
+              const err = error instanceof Error ? error : new Error(String(error));
+              ailogger.error('Undo failed:', err);
+              setEditFlowError(`Undo failed: ${err.message}`);
+            }
+          }}
+          onDismiss={() => setUndoToastOperationID(null)}
+        />
+      )}
+      {editFlowError !== null && (
+        <Box sx={{ mt: 1 }}>
+          <Button variant="soft" color="danger" onClick={() => setEditFlowError(null)} aria-label="Dismiss edit flow error">
+            {editFlowError}
+          </Button>
+        </Box>
+      )}
       <ValidationCheckModal open={validationModalOpen} onClose={() => setValidationModalOpen(false)} results={validationResults} />
     </>
   ) : (

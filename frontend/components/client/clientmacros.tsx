@@ -89,6 +89,27 @@ export function standardizeGridColumns(cols: GridColDef[]): GridColDef[] {
   return cols.map(col => applyStandardSettings(col));
 }
 
+const SELECTABLE_FIELD_TO_OPTION_KEY: Record<string, string> = {
+  tag: 'treeTag',
+  treeTag: 'treeTag',
+  stemtag: 'stemTag',
+  stemTag: 'stemTag',
+  quadrat: 'quadratName',
+  quadratName: 'quadratName',
+  spCode: 'speciesCode',
+  spcode: 'speciesCode',
+  speciesCode: 'speciesCode',
+  codes: 'codes'
+};
+
+export function selectableOptionKeyForField(field: string): string {
+  return SELECTABLE_FIELD_TO_OPTION_KEY[field] ?? field;
+}
+
+export function getSelectableOptionsForField(selectableOpts: Record<string, string[]>, field: string): string[] {
+  return selectableOpts[selectableOptionKeyForField(field)] ?? [];
+}
+
 /**
  * Helper function to safely fetch and map data for selectable options
  * RDS = mapped type (what we work with in the app)
@@ -109,10 +130,11 @@ async function fetchAndMapOptions<RDS, Result>(
     const data: Result[] = await response.json();
     const mapper = MapperFactory.getMapper<RDS, Result>(mapperType as any);
     const mappedData: RDS[] = mapper.mapData(data);
-    return mappedData
-      .map(extractField)
-      .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b));
+    const values = mappedData.map(extractField).filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0);
+    // Trees/stems are unique by (TreeTag, SpeciesID, CensusID), not by tag alone, so the
+    // same display string can come from distinct rows. Collapse to one autocomplete option
+    // per displayed string here.
+    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
   } catch (error: any) {
     // Ignore abort errors - they're expected during cleanup
     if (error.name === 'AbortError') {
@@ -166,10 +188,10 @@ export async function loadSelectableOptions(
   setSelectableOpts((prev: any) => {
     return {
       ...prev,
-      tag: tagOpts,
+      treeTag: tagOpts,
       stemTag: stemOpts,
-      quadrat: quadOpts,
-      spCode: specOpts,
+      quadratName: quadOpts,
+      speciesCode: specOpts,
       codes: codeOpts
     };
   });
@@ -186,7 +208,7 @@ export function selectableAutocomplete(params: any, column: GridColDef, selectab
       freeSolo={column.field !== 'codes'}
       clearOnBlur={false}
       isOptionEqualToValue={(option, value) => option === value}
-      options={[...(selectableOpts[column.field] || [])].sort((a, b) => a.localeCompare(b))}
+      options={[...getSelectableOptionsForField(selectableOpts, column.field)].sort((a, b) => a.localeCompare(b))}
       value={
         column.field === 'codes' ? (params.value ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0) : []) : (params.value ?? '')
       }

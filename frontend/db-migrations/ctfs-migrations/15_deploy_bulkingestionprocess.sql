@@ -645,7 +645,7 @@ BEGIN
                concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
             '$[*]' columns ( code varchar(10) path '$')
         ) jt
-        WHERE f.Codes is not null AND trim(f.Codes) != '';
+        WHERE f.Codes is not null AND trim(f.Codes) != '' AND trim(jt.code) != '';
 
         INSERT IGNORE INTO cmattributes (CoreMeasurementID, Code)
         SELECT tc.CoreMeasurementID, tc.Code

@@ -36,13 +36,17 @@ export default defineConfig(({ mode }) => ({
     },
     // Exclude tests that require a live database connection
     exclude: [
-      'node_modules/**',
+      '**/node_modules/**',
+      'docs/**',
       '**/*.integration.test.ts',
       '**/*.integration.test.tsx',
       'tests/validation-framework/**',
       'tests/deduplication-merge-fix.test.ts',
       'tests/e2e/**',
-      'tests/integration/**'
+      'tests/integration/**',
+      'lib/provisioning/**',
+      'lib/ctfs-export/precondition.test.ts',
+      'lib/ctfs-export/select-measurements.test.ts'
     ],
     // Strict timeout controls to prevent infinite loops
     testTimeout: 15000, // 15 seconds max per test

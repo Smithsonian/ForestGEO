@@ -17,6 +17,8 @@ import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
+import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
+import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
@@ -24,6 +26,9 @@ import { useUploadState } from '@/app/hooks/useuploadstate';
 import { useErrorHandling } from '@/app/hooks/useerrorhandling';
 import { ErrorBoundary } from '@/components/errorboundary';
 import { UploadMode } from '@/config/uploadmodes';
+import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
+import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
+import { BulkEditPlan } from '@/config/editplan/types';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -36,6 +41,61 @@ export interface DetailedCMIDRow extends CMIDRow {
   plotCensusNumber?: number;
   quadratName?: string;
   speciesName?: string;
+}
+
+function mergeFreshRevisionPlan(result: RevisionUploadResponse, freshPlan: BulkEditPlan): RevisionUploadResponse {
+  const changesByTarget = new Map<number, Record<string, { from: unknown; to: unknown }>>();
+  const invalidByTarget = new Map<number, string>();
+  const invalidByCsvIndex = new Map<number, string>();
+  for (const rowPlan of freshPlan.rowPlans) {
+    if (rowPlan.status === 'invalid') {
+      const reason = rowPlan.reason ?? 'Row failed validation';
+      if (rowPlan.targetID !== undefined) invalidByTarget.set(rowPlan.targetID, reason);
+      invalidByCsvIndex.set(rowPlan.rowIndex, reason);
+      continue;
+    }
+    if (rowPlan.targetID === undefined) continue;
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const change of rowPlan.plan?.fieldChanges ?? []) {
+      changes[change.field] = { from: change.from, to: change.to };
+    }
+    changesByTarget.set(rowPlan.targetID, changes);
+  }
+
+  const matchedRows: RevisionMatchedRow[] = [];
+  const demotedInvalidRows: RevisionInvalidRow[] = [];
+  for (const row of result.matchedRows) {
+    const invalidReason = invalidByTarget.get(row.coreMeasurementID) ?? invalidByCsvIndex.get(row.csvIndex);
+    if (invalidReason !== undefined) {
+      demotedInvalidRows.push({
+        csvRow: row.csvRow,
+        csvIndex: row.csvIndex,
+        reason: invalidReason
+      });
+      continue;
+    }
+    matchedRows.push({
+      ...row,
+      changes: changesByTarget.get(row.coreMeasurementID) ?? row.changes
+    });
+  }
+
+  const invalidRows = [...result.invalidRows, ...demotedInvalidRows];
+  const matchedWithChanges = matchedRows.filter(row => Object.keys(row.changes).length > 0 || (row.duplicateMeasurementIDsToDelete?.length ?? 0) > 0).length;
+
+  return {
+    ...result,
+    matchedRows,
+    invalidRows,
+    counts: {
+      ...result.counts,
+      matched: matchedRows.length,
+      matchedWithChanges,
+      invalid: invalidRows.length,
+      total: matchedRows.length + result.newRows.length + invalidRows.length
+    },
+    bulkPlan: freshPlan
+  };
 }
 
 interface UploadParentProps {
@@ -60,6 +120,13 @@ function UploadParentInner(props: UploadParentProps) {
   const [selectedDelimiters, setSelectedDelimiters] = useState<Record<string, string>>({});
   const [showFailedMeasurementsModal, setShowFailedMeasurementsModal] = useState(false);
   const [isReingestionMode, setIsReingestionMode] = useState(false);
+  const [revisionMatchResult, setRevisionMatchResult] = useState<RevisionUploadResponse | null>(null);
+  const [revisionConfirmNewRows, setRevisionConfirmNewRows] = useState(false);
+  // Pre-flight: when a non-admin user uploads a revisions CSV containing
+  // taxonomic-identity columns (spcode), the apply phase will hit
+  // revisionRolePolicy and block. Surface this at the parse step so the user
+  // doesn't reach the match review only to fail at Apply.
+  const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -69,6 +136,9 @@ function UploadParentInner(props: UploadParentProps) {
   const _currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const { data: session } = useSession();
+
+  const currentPlotID = _currentPlot?.plotID ?? null;
+  const currentCensusID = _currentCensus?.dateRanges?.[0]?.censusID ?? null;
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -105,6 +175,8 @@ function UploadParentInner(props: UploadParentProps) {
       fileManagement.clearFiles();
       setParsedData({});
       setIsReingestionMode(false);
+      setRevisionMatchResult(null);
+      setRevisionConfirmNewRows(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -131,6 +203,8 @@ function UploadParentInner(props: UploadParentProps) {
     fileManagement.clearFiles();
     setParsedData({});
     setIsReingestionMode(false);
+    setRevisionMatchResult(null);
+    setRevisionConfirmNewRows(false);
   }
 
   async function resetError() {
@@ -150,8 +224,112 @@ function UploadParentInner(props: UploadParentProps) {
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
+  async function parseRevisionFiles(): Promise<FileCollectionRowSet> {
+    const { default: Papa } = await import('papaparse');
+
+    const parsedFiles = await Promise.all(
+      fileManagement.files.map(
+        file =>
+          new Promise<[string, Record<string, FileRow>]>((resolve, reject) => {
+            Papa.parse<FileRow>(file, {
+              delimiter: selectedDelimiters[file.name] || undefined,
+              header: true,
+              skipEmptyLines: true,
+              transformHeader: normalizeRevisionHeader,
+              complete(results) {
+                const fileRows: Record<string, FileRow> = {};
+                results.data.forEach((row, index) => {
+                  fileRows[`row-${index}`] = canonicalizeRevisionRow(row);
+                });
+                resolve([file.name, fileRows]);
+              },
+              error(err: Error) {
+                reject(err);
+              }
+            });
+          })
+      )
+    );
+
+    return Object.fromEntries(parsedFiles);
+  }
+
   async function handleInitialSubmit() {
-    uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+    if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
+      try {
+        const stagedParsedData = await parseRevisionFiles();
+        setParsedData(stagedParsedData);
+        setRevisionMatchResult(null);
+        setRevisionConfirmNewRows(false);
+
+        // Pre-flight role check: if the file contains spcode and the user is
+        // not allowed to edit taxonomic identity, surface a warning before
+        // we even hit the match endpoint. Server-side enforcement still
+        // backstops at apply.
+        const userStatus = session?.user?.userStatus;
+        const canEditSpecies = userStatus === 'global' || userStatus === 'db admin';
+        if (!canEditSpecies) {
+          const filesWithSpCode: string[] = [];
+          for (const [fileName, rows] of Object.entries(stagedParsedData)) {
+            const firstRow = Object.values(rows)[0];
+            if (firstRow && Object.prototype.hasOwnProperty.call(firstRow, 'spcode')) {
+              filesWithSpCode.push(fileName);
+            }
+          }
+          if (filesWithSpCode.length > 0) {
+            setRevisionRolePreflightWarning(
+              `Heads up: ${filesWithSpCode.length === 1 ? `${filesWithSpCode[0]} contains` : `${filesWithSpCode.length} files contain`} a "spcode" column. ` +
+                `Species-code changes require global or db admin role and will be blocked at Apply. Other fields will still be applied.`
+            );
+          } else {
+            setRevisionRolePreflightWarning(null);
+          }
+        } else {
+          setRevisionRolePreflightWarning(null);
+        }
+
+        uploadState.setReviewState(ReviewStates.REVISION_MATCH);
+      } catch (err: unknown) {
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        setParsedData({});
+        errorHandling.setError(errorObj);
+        uploadState.setReviewState(ReviewStates.ERRORS);
+      }
+    } else {
+      uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+    }
+  }
+
+  async function handleRevisionMatch() {
+    const files = Object.entries(parsedData).map(([fileName, fileRows]) => ({
+      fileName,
+      rows: Object.values(fileRows)
+    }));
+
+    try {
+      const response = await fetch('/api/revisionupload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files,
+          plotID: currentPlotID,
+          censusID: currentCensusID,
+          schema: currentSite?.schemaName
+        })
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(errorBody.error || 'Failed to classify revision rows');
+      }
+
+      const result: RevisionUploadResponse = await response.json();
+      setRevisionMatchResult(result);
+    } catch (err: unknown) {
+      const errorObj = err instanceof Error ? err : new Error(String(err));
+      errorHandling.setError(errorObj);
+      uploadState.setReviewState(ReviewStates.ERRORS);
+    }
   }
 
   useEffect(() => {
@@ -161,6 +339,13 @@ function UploadParentInner(props: UploadParentProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.reviewState, fileManagement.fileCount, uploadState.setReviewState]);
+
+  useEffect(() => {
+    if (uploadState.state.reviewState === ReviewStates.REVISION_MATCH && !revisionMatchResult && Object.keys(parsedData).length > 0) {
+      void handleRevisionMatch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsedData, revisionMatchResult, uploadState.state.reviewState]);
 
   // Check if we should start with reingestion processing (only once on mount)
   useEffect(() => {
@@ -198,6 +383,7 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadParseFiles
             uploadForm={uploadState.state.uploadForm}
+            uploadMode={uploadState.state.uploadMode}
             acceptedFiles={fileManagement.files}
             dataViewActive={uploadState.state.dataViewActive}
             setDataViewActive={uploadState.setDataViewActive}
@@ -236,6 +422,47 @@ function UploadParentInner(props: UploadParentProps) {
             setErrorComponent={errorHandling.setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
             selectedDelimiters={selectedDelimiters}
+          />
+        );
+      case ReviewStates.REVISION_MATCH:
+        return (
+          <UploadRevisionMatch
+            matchedRows={revisionMatchResult?.matchedRows ?? []}
+            newRows={revisionMatchResult?.newRows ?? []}
+            invalidRows={revisionMatchResult?.invalidRows ?? []}
+            counts={revisionMatchResult?.counts ?? EMPTY_REVISION_MATCH_COUNTS}
+            bulkPlan={revisionMatchResult?.bulkPlan}
+            schema={currentSite?.schemaName || ''}
+            plotID={currentPlotID ?? 0}
+            censusID={currentCensusID ?? 0}
+            preflightWarning={revisionRolePreflightWarning}
+            setReviewState={uploadState.setReviewState}
+            onApply={confirmNew => {
+              setRevisionConfirmNewRows(confirmNew);
+              uploadState.setReviewState(ReviewStates.REVISION_APPLY);
+            }}
+            handleReturnToStart={handleReturnToStart}
+          />
+        );
+      case ReviewStates.REVISION_APPLY:
+        return (
+          <UploadRevisionApply
+            matchedRows={(revisionMatchResult?.matchedRows ?? []).map(row => ({
+              csvIndex: row.csvIndex,
+              coreMeasurementID: row.coreMeasurementID,
+              csvRow: row.csvRow,
+              duplicateMeasurementIDsToDelete: row.duplicateMeasurementIDsToDelete ?? []
+            }))}
+            newRows={(revisionMatchResult?.newRows ?? []).map(row => ({ csvRow: row.csvRow, csvIndex: row.csvIndex }))}
+            invalidRows={revisionMatchResult?.invalidRows ?? []}
+            confirmNewRows={revisionConfirmNewRows}
+            schema={currentSite?.schemaName || ''}
+            bulkPlanHash={revisionMatchResult?.bulkPlan?.planHash ?? ''}
+            setReviewState={uploadState.setReviewState}
+            setIsDataUnsaved={uploadState.setIsDataUnsaved}
+            onPlanConflict={freshPlan => {
+              setRevisionMatchResult(current => (current ? mergeFreshRevisionPlan(current, freshPlan) : current));
+            }}
           />
         );
       case ReviewStates.VALIDATE:

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   Alert,
   Autocomplete,
@@ -27,7 +28,8 @@ import {
   GridRowEditStopReasons,
   GridRowModes,
   GridRowModesModel,
-  GridRowModel
+  GridRowModel,
+  useGridApiRef
 } from '@mui/x-data-grid';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
@@ -47,8 +49,17 @@ import {
 } from '@/config/errorsexplorer';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { StyledDataGrid } from '@/config/styleddatagrid';
+import CustomGridPagination from '@/components/datagrids/customgridpagination';
+import InfiniteGridScrollBridge from '@/components/datagrids/infinitegridscrollbridge';
+import { useInfiniteGridRows, type UseInfiniteGridRowsResult } from '@/components/datagrids/hooks/useinfinitegridrows';
 import ContradictionComparisonPanel from './contradictioncomparisonpanel';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
+import { useEditPreviewFlow } from '@/hooks/useEditPreviewFlow';
+import { isMuiRowEditCancelled } from '@/lib/muirowedit';
+import PreviewDialog from '@/components/editplan/previewdialog';
+import UndoToast from '@/components/editplan/undotoast';
+import { buildEditableFieldsDiffWithMetaForSurface } from '@/components/datagrids/measurementscommonsutils';
+import { isFieldEditableByRole } from '@/config/editplan/fieldpolicy';
 
 const DEFAULT_FACETS: ErrorExplorerFacetsResponse = {
   messages: [],
@@ -100,7 +111,8 @@ function stripRowForUpdate(row: ErrorExplorerRow) {
     isValidated: row.isValidated,
     description: row.description,
     attributes: row.attributes,
-    userDefinedFields: row.userDefinedFields
+    userDefinedFields: row.userDefinedFields,
+    isFailedRow: row.isFailedRow
   };
 }
 
@@ -224,7 +236,13 @@ export default function ErrorsExplorer() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const { data: session } = useSession();
   const activeCensusID = currentCensus?.dateRanges?.[0]?.censusID;
+  // Keep the grid affordances aligned with editplan authorization: pending
+  // users cannot edit, and species-code edits stay admin-only.
+  const userStatus = session?.user?.userStatus;
+  const canEditRows = Boolean(userStatus && userStatus !== 'pending');
+  const canEditSpeciesCode = isFieldEditableByRole('SpeciesCode', userStatus);
   const storageKey = useMemo(
     () => getFilterStorageKey(currentSite?.schemaName, currentPlot?.plotID, activeCensusID),
     [currentSite?.schemaName, currentPlot?.plotID, activeCensusID]
@@ -260,7 +278,18 @@ export default function ErrorsExplorer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [selectableOpts, setSelectableOpts] = useState<{ codes: string[] }>({ codes: [] });
-  const editGenerationRef = useRef(0);
+  const [undoToastOperationID, setUndoToastOperationID] = useState<number | null>(null);
+  const infiniteRef = useRef<UseInfiniteGridRowsResult<GridRowModel> | null>(null);
+
+  const editFlow = useEditPreviewFlow({
+    schema: currentSite?.schemaName ?? '',
+    plotID: currentPlot?.plotID ?? 0,
+    censusID: activeCensusID ?? 0,
+    dataType: 'measurementssummary',
+    onError: error => {
+      setErrorMessage(error.message);
+    }
+  });
 
   useEffect(() => {
     if (!storageKey) return;
@@ -286,7 +315,7 @@ export default function ErrorsExplorer() {
   }, [filters, storageKey]);
 
   const fetchRows = useCallback(
-    async (scopeOverride?: ExplorerScope | null) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingRows(true);
@@ -295,6 +324,7 @@ export default function ErrorsExplorer() {
         const response = await fetch('/api/errors/explorer/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             schema: scope.schema,
             plotID: scope.plotID,
@@ -313,17 +343,18 @@ export default function ErrorsExplorer() {
           setDetails(current => (current?.row?.coreMeasurementID === selectedMeasurementID ? null : current));
         }
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingRows(false);
+        if (!signal?.aborted) setLoadingRows(false);
       }
     },
     [filters, paginationModel.page, paginationModel.pageSize, resolveExplorerScope, selectedMeasurementID]
   );
 
   const fetchFacets = useCallback(
-    async (scopeOverride?: ExplorerScope | null) => {
+    async (scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingFacets(true);
@@ -331,6 +362,7 @@ export default function ErrorsExplorer() {
         const response = await fetch('/api/errors/explorer/facets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             schema: scope.schema,
             plotID: scope.plotID,
@@ -344,17 +376,18 @@ export default function ErrorsExplorer() {
         }
         setFacets(data);
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingFacets(false);
+        if (!signal?.aborted) setLoadingFacets(false);
       }
     },
     [filters, resolveExplorerScope]
   );
 
   const fetchDetails = useCallback(
-    async (measurementID: number, scopeOverride?: ExplorerScope | null) => {
+    async (measurementID: number, scopeOverride?: ExplorerScope | null, signal?: AbortSignal) => {
       const scope = scopeOverride ?? resolveExplorerScope();
       if (!scope) return;
       setLoadingDetails(true);
@@ -367,17 +400,18 @@ export default function ErrorsExplorer() {
         if (filters.contradictionTypes.length === 1) {
           searchParams.set('activeContradictionType', filters.contradictionTypes[0]);
         }
-        const response = await fetch(`/api/errors/explorer/details/${measurementID}?${searchParams.toString()}`);
+        const response = await fetch(`/api/errors/explorer/details/${measurementID}?${searchParams.toString()}`, { signal });
         const data = (await response.json()) as ErrorExplorerDetailsResponse | { error: string };
         if (!response.ok || 'error' in data) {
           throw new Error('error' in data ? data.error : 'Failed to load row details');
         }
         setDetails(data);
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         const errorObj = error instanceof Error ? error : new Error(String(error));
         setErrorMessage(errorObj.message);
       } finally {
-        setLoadingDetails(false);
+        if (!signal?.aborted) setLoadingDetails(false);
       }
     },
     [filters.contradictionTypes, resolveExplorerScope]
@@ -449,11 +483,15 @@ export default function ErrorsExplorer() {
   }, []);
 
   useEffect(() => {
-    fetchRows().catch(() => undefined);
+    const controller = new AbortController();
+    fetchRows(undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchRows]);
 
   useEffect(() => {
-    fetchFacets().catch(() => undefined);
+    const controller = new AbortController();
+    fetchFacets(undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchFacets]);
 
   useEffect(() => {
@@ -461,7 +499,9 @@ export default function ErrorsExplorer() {
       setDetails(null);
       return;
     }
-    fetchDetails(selectedMeasurementID).catch(() => undefined);
+    const controller = new AbortController();
+    fetchDetails(selectedMeasurementID, undefined, controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [fetchDetails, selectedMeasurementID]);
 
   useEffect(() => {
@@ -492,21 +532,26 @@ export default function ErrorsExplorer() {
         throw new Error('Site context not available');
       }
 
-      const generation = ++editGenerationRef.current;
-
-      const response = await fetch(`/api/fixeddata/measurementssummary/${currentSite.schemaName}/coreMeasurementID`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          oldRow: stripRowForUpdate(oldRow as ErrorExplorerRow),
-          newRow: stripRowForUpdate(newRow as ErrorExplorerRow)
-        })
-      });
-
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body?.message || body?.error || 'Failed to update row');
+      const coreMeasurementID = Number((newRow as ErrorExplorerRow).coreMeasurementID ?? (oldRow as ErrorExplorerRow).coreMeasurementID);
+      if (!Number.isFinite(coreMeasurementID) || coreMeasurementID <= 0) {
+        throw new Error('Missing CoreMeasurementID for edit');
       }
+
+      // Failed rows (cm.StemGUID IS NULL) live in the failedmeasurements edit
+      // surface — its canonical fields and writer differ from measurementssummary.
+      // Branch per-row so editing a hard-failed row doesn't 404 in loadCurrentRow.
+      const isFailedRow = Boolean((oldRow as ErrorExplorerRow).isFailedRow);
+      const surface = isFailedRow ? 'failedmeasurements' : 'measurementssummary';
+
+      const { diff: editableDiff, roundedNoOpFields } = buildEditableFieldsDiffWithMetaForSurface(newRow, oldRow, surface);
+      if (Object.keys(editableDiff).length === 0) {
+        if (roundedNoOpFields.length > 0) {
+          setErrorMessage(`No change saved: ${roundedNoOpFields.join(', ')} rounded to the existing value (server stores at fixed precision).`);
+        }
+        return newRow;
+      }
+
+      const applyResult = await editFlow.beginEdit(coreMeasurementID, editableDiff, { dataType: surface });
 
       const updatedRow = { ...(newRow as ErrorExplorerRow) };
       if (updatedRow.attributes !== (oldRow as ErrorExplorerRow).attributes) {
@@ -515,10 +560,8 @@ export default function ErrorsExplorer() {
       const rowScope = resolveExplorerScope(updatedRow) ?? resolveExplorerScope(oldRow as ErrorExplorerRow);
       syncEditedRowLocally(updatedRow);
 
-      // A newer edit has started — skip the slow refresh+fetch cycle so we
-      // don't overwrite the newer edit's data with a stale view snapshot.
-      if (editGenerationRef.current !== generation) {
-        return updatedRow;
+      if (applyResult.editOperationID !== null) {
+        setUndoToastOperationID(applyResult.editOperationID);
       }
 
       try {
@@ -529,12 +572,10 @@ export default function ErrorsExplorer() {
         return updatedRow;
       }
 
-      if (editGenerationRef.current !== generation) {
-        return updatedRow;
-      }
-
+      const activeInfinite = infiniteRef.current;
       await Promise.all([
         fetchRows(rowScope),
+        activeInfinite?.mode === 'infinite' ? activeInfinite.refresh() : Promise.resolve(),
         fetchFacets(rowScope),
         selectedMeasurementID ? fetchDetails(selectedMeasurementID, rowScope) : Promise.resolve()
       ]);
@@ -542,6 +583,7 @@ export default function ErrorsExplorer() {
     },
     [
       currentSite?.schemaName,
+      editFlow,
       fetchDetails,
       fetchFacets,
       fetchRows,
@@ -554,8 +596,92 @@ export default function ErrorsExplorer() {
   );
 
   const handleProcessRowUpdateError = useCallback((error: Error) => {
+    if (isMuiRowEditCancelled(error)) return;
     setErrorMessage(error.message);
   }, []);
+
+  const explorerApiRef = useGridApiRef();
+
+  const infiniteFetcher = useCallback(
+    async ({ page: p, pageSize: ps, signal }: { page: number; pageSize: number; signal: AbortSignal }) => {
+      const scope = resolveExplorerScope();
+      if (!scope) return { rows: [], totalRows: 0 };
+      const response = await fetch('/api/errors/explorer/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          schema: scope.schema,
+          plotID: scope.plotID,
+          censusID: scope.censusID,
+          page: p,
+          pageSize: ps,
+          filters
+        })
+      });
+      const data = (await response.json()) as ErrorExplorerQueryResponse | { error: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data ? data.error : 'Failed to load errors');
+      }
+      return { rows: data.rows as GridRowModel[], totalRows: data.totalRows };
+    },
+    [filters, resolveExplorerScope]
+  );
+
+  const infiniteResetKey = useMemo(() => {
+    const scope = resolveExplorerScope();
+    return JSON.stringify({ filters, schema: scope?.schema, plotID: scope?.plotID, censusID: scope?.censusID });
+  }, [filters, resolveExplorerScope]);
+
+  const infinite = useInfiniteGridRows<GridRowModel>({
+    fetcher: infiniteFetcher,
+    initialPageSize: paginationModel.pageSize,
+    resetKey: infiniteResetKey,
+    rowIdKey: 'coreMeasurementID',
+    paginated: { rows: results.rows as GridRowModel[], totalRows: results.totalRows, isLoading: loadingRows }
+  });
+
+  const isInfiniteOn = infinite.mode === 'infinite';
+
+  useEffect(() => {
+    infiniteRef.current = infinite;
+  }, [infinite]);
+
+  const wrappedProcessRowUpdate = useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      return await processRowUpdate(newRow, oldRow);
+    },
+    [processRowUpdate]
+  );
+
+  const infiniteScrollDescriptor = useMemo(
+    () => ({
+      enabled: isInfiniteOn,
+      onToggle: (next: boolean) => infinite.setMode(next ? 'infinite' : 'paginated'),
+      loadedCount: infinite.rows.length,
+      totalRows: infinite.totalRows,
+      isLoadingMore: infinite.isLoadingMore,
+      hasMore: infinite.hasMore,
+      error: infinite.error,
+      softCapExceeded: infinite.softCapExceeded,
+      onRetry: infinite.retry
+    }),
+    [infinite, isInfiniteOn]
+  );
+
+  const ExplorerPaginationSlot = useMemo(() => {
+    const Slot = () => <CustomGridPagination infiniteScroll={infiniteScrollDescriptor} />;
+    Slot.displayName = 'ExplorerPaginationSlot';
+    (Slot as unknown as { infiniteScroll?: typeof infiniteScrollDescriptor }).infiniteScroll = infiniteScrollDescriptor;
+    return Slot;
+  }, [infiniteScrollDescriptor]);
+
+  const explorerGridSlots = useMemo(
+    () => ({
+      pagination: ExplorerPaginationSlot
+    }),
+    [ExplorerPaginationSlot]
+  );
 
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
@@ -565,39 +691,43 @@ export default function ErrorsExplorer() {
 
   const columns = useMemo<GridColDef[]>(
     () => [
-      {
-        field: 'actions',
-        type: 'actions',
-        headerName: 'Actions',
-        width: 74,
-        getActions: ({ id }) => {
-          const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
-          if (isInEditMode) {
-            return [
-              <GridActionsCellItem
-                key="save"
-                icon={<SaveIcon />}
-                label="Save"
-                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View } }))}
-              />,
-              <GridActionsCellItem
-                key="cancel"
-                icon={<CancelIcon />}
-                label="Cancel"
-                onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))}
-              />
-            ];
-          }
-          return [
-            <GridActionsCellItem
-              key="edit"
-              icon={<EditIcon />}
-              label="Edit"
-              onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.Edit } }))}
-            />
-          ];
-        }
-      },
+      ...(canEditRows
+        ? [
+            {
+              field: 'actions',
+              type: 'actions',
+              headerName: 'Actions',
+              width: 74,
+              getActions: ({ id }: { id: string | number }) => {
+                const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
+                if (isInEditMode) {
+                  return [
+                    <GridActionsCellItem
+                      key="save"
+                      icon={<SaveIcon />}
+                      label="Save"
+                      onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View } }))}
+                    />,
+                    <GridActionsCellItem
+                      key="cancel"
+                      icon={<CancelIcon />}
+                      label="Cancel"
+                      onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))}
+                    />
+                  ];
+                }
+                return [
+                  <GridActionsCellItem
+                    key="edit"
+                    icon={<EditIcon />}
+                    label="Edit"
+                    onClick={() => setRowModesModel(prev => ({ ...prev, [id]: { mode: GridRowModes.Edit } }))}
+                  />
+                ];
+              }
+            } satisfies GridColDef
+          ]
+        : []),
       {
         field: 'hasContradiction',
         headerName: 'Conflict',
@@ -670,7 +800,7 @@ export default function ErrorsExplorer() {
         headerName: 'Species',
         minWidth: 110,
         flex: 0.7,
-        editable: true,
+        editable: canEditSpeciesCode,
         headerAlign: 'left',
         align: 'left'
       },
@@ -699,7 +829,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'stemLocalY',
@@ -708,7 +839,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'measuredDBH',
@@ -717,7 +849,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'measuredHOM',
@@ -726,7 +859,8 @@ export default function ErrorsExplorer() {
         type: 'number',
         editable: true,
         align: 'right',
-        headerAlign: 'right'
+        headerAlign: 'right',
+        valueFormatter: (value: number | null | undefined) => Number(value ?? 0).toFixed(2)
       },
       {
         field: 'description',
@@ -783,7 +917,7 @@ export default function ErrorsExplorer() {
         )
       }
     ],
-    [rowModesModel, selectableOpts]
+    [canEditRows, canEditSpeciesCode, rowModesModel, selectableOpts]
   );
 
   return (
@@ -794,6 +928,12 @@ export default function ErrorsExplorer() {
           Review unresolved validation and ingestion errors, filter by exact message, and inspect contradiction-linked rows within the active census.
         </Typography>
       </Stack>
+
+      {!canEditRows && (
+        <Alert color="neutral" data-testid="errorsexplorer-readonly-banner">
+          Read-only view — your role can&apos;t edit these rows.
+        </Alert>
+      )}
 
       {errorMessage && (
         <Alert color="danger" startDecorator={<ReportProblemOutlinedIcon />}>
@@ -1019,11 +1159,12 @@ export default function ErrorsExplorer() {
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
           <StyledDataGrid
+            apiRef={explorerApiRef}
             autoHeight={false}
-            rows={results.rows as any[]}
+            rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}
             columns={columns}
-            loading={loadingRows}
-            rowCount={results.totalRows}
+            loading={isInfiniteOn ? infinite.isLoading : loadingRows}
+            rowCount={isInfiniteOn ? infinite.rows.length : results.totalRows}
             paginationMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
@@ -1031,10 +1172,11 @@ export default function ErrorsExplorer() {
             editMode="row"
             rowModesModel={rowModesModel}
             onRowModesModelChange={setRowModesModel}
-            processRowUpdate={processRowUpdate}
+            processRowUpdate={wrappedProcessRowUpdate}
             onProcessRowUpdateError={handleProcessRowUpdateError}
             onRowEditStop={handleRowEditStop}
             onRowClick={params => setSelectedMeasurementID(Number(params.row.coreMeasurementID))}
+            slots={explorerGridSlots}
             rowHeight={68}
             sx={{
               minHeight: 640,
@@ -1053,6 +1195,12 @@ export default function ErrorsExplorer() {
                 backgroundColor: 'rgba(59, 130, 246, 0.08)'
               }
             }}
+          />
+          <InfiniteGridScrollBridge
+            apiRef={explorerApiRef}
+            enabled={isInfiniteOn}
+            onLoadMore={infinite.loadMore}
+            observeKey={`${infinite.rows.length}:${infinite.totalRows}:${infinite.isLoadingMore}`}
           />
         </Sheet>
 
@@ -1229,6 +1377,46 @@ export default function ErrorsExplorer() {
           </Stack>
         </Sheet>
       </Sheet>
+      {editFlow.dialogState.open && editFlow.dialogState.plan && (
+        <PreviewDialog
+          plan={editFlow.dialogState.plan}
+          busy={editFlow.dialogState.busy}
+          wasRefreshed={editFlow.dialogState.wasRefreshed}
+          onConfirm={editFlow.confirmDialog}
+          onCancel={editFlow.cancelDialog}
+        />
+      )}
+      {undoToastOperationID !== null && (
+        <UndoToast
+          editOperationID={undoToastOperationID}
+          onUndo={async () => {
+            const scope = resolveExplorerScope();
+            if (!scope) {
+              setErrorMessage('Explorer scope is not available');
+              return;
+            }
+            try {
+              const response = await fetch(`/api/edits/revert`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  schema: scope.schema,
+                  plotID: scope.plotID,
+                  censusID: scope.censusID,
+                  editOperationID: undoToastOperationID
+                })
+              });
+              if (!response.ok) throw new Error(`revert failed (${response.status})`);
+              await Promise.all([refreshMeasurementsSummaryScope(scope), refreshViewFullTableScope(scope)]);
+              await Promise.all([fetchRows(scope), isInfiniteOn ? infinite.refresh() : Promise.resolve()]);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error);
+              setErrorMessage(`Undo failed: ${message}`);
+            }
+          }}
+          onDismiss={() => setUndoToastOperationID(null)}
+        />
+      )}
     </Stack>
   );
 }

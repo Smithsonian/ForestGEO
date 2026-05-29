@@ -3,6 +3,9 @@ import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
+import { auth } from '@/auth';
+import { requireSession } from '@/lib/auth-helpers';
+import type { Session } from 'next-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -14,6 +17,69 @@ interface QueryRequest {
   format?: boolean; // Whether to format the query with parameters
 }
 
+const ADMIN_ROLES = new Set(['global', 'db admin']);
+const SYSTEM_SCHEMAS = new Set(['catalog', 'information_schema', 'mysql', 'performance_schema', 'sys']);
+
+function isAdminSession(session: Session): boolean {
+  return ADMIN_ROLES.has(session.user.userStatus ?? '');
+}
+
+function stripSqlComments(query: string): string {
+  return query
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\r\n]*/g, ' ')
+    .replace(/#[^\r\n]*/g, ' ');
+}
+
+function hasMultipleStatements(query: string): boolean {
+  return stripSqlComments(query).trim().replace(/;+$/g, '').includes(';');
+}
+
+function isReadOnlySelect(query: string): boolean {
+  return stripSqlComments(query).trimStart().toLowerCase().startsWith('select ');
+}
+
+function extractTableSchemas(query: string): string[] {
+  const schemas = new Set<string>();
+  const tableReferencePattern = /\b(?:from|join)\s+(?:`([a-zA-Z0-9_]+)`|([a-zA-Z0-9_]+))\s*\./gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = tableReferencePattern.exec(query)) !== null) {
+    schemas.add((match[1] ?? match[2]).toLowerCase());
+  }
+
+  return [...schemas];
+}
+
+function hasSchemaAccess(session: Session, schema: string): boolean {
+  return (session.user.sites ?? []).some(site => site.schemaName?.toLowerCase() === schema.toLowerCase());
+}
+
+function authorizeQuery(session: Session, query: string): NextResponse | null {
+  if (hasMultipleStatements(query)) {
+    return NextResponse.json({ error: 'Multiple SQL statements are not allowed' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
+  if (isAdminSession(session)) {
+    return null;
+  }
+
+  if (!isReadOnlySelect(query)) {
+    return NextResponse.json({ error: 'Only administrators may execute write SQL' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
+  const referencedSchemas = extractTableSchemas(query);
+  if (referencedSchemas.length === 0) {
+    return NextResponse.json({ error: 'Non-admin SQL must reference an authorized site schema' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
+  if (referencedSchemas.some(schema => SYSTEM_SCHEMAS.has(schema) || !hasSchemaAccess(session, schema))) {
+    return NextResponse.json({ error: 'SQL references a schema outside the authenticated user scope' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
+  return null;
+}
+
 /**
  * Unified query execution endpoint
  * Handles both direct query execution and parameterized query formatting
@@ -23,6 +89,10 @@ interface QueryRequest {
  * 2. Object with { query, params?, format? } - Parameterized or direct execution
  */
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  const authError = requireSession(session);
+  if (authError) return authError;
+
   let body: string | QueryRequest;
 
   try {
@@ -79,6 +149,9 @@ export async function POST(request: NextRequest) {
         );
       }
     }
+
+    const queryAuthError = authorizeQuery(session!, queryToExecute);
+    if (queryAuthError) return queryAuthError;
 
     // Execute the query
     const connectionManager = ConnectionManager.getInstance();

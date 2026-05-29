@@ -3,7 +3,6 @@
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
 import React from 'react';
-import { css, keyframes } from '@emotion/react';
 import { Logo } from '@/components/icons';
 
 const generateForestColors = (): string[] => {
@@ -22,42 +21,21 @@ const generateForestColors = (): string[] => {
     'hsl(300, 60%, 50%)', // Bright Fuchsia (Flora)
     'hsl(330, 60%, 70%)' // Soft Pink (Flora)
   ];
-  return [...forestColors, ...forestColors, ...forestColors];
+  return forestColors;
 };
 
-const waveAnimation = keyframes`
-  from {
-    background-position: 0% 50%;
-  }
-  to {
-    background-position: -200% 50%;
-  }
-`;
-
-interface RainbowIconWrapperProps {
-  animate: boolean;
-}
-
-const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
+const RainbowIconWrapper = styled.div`
   width: fit-content;
   height: fit-content;
   background: linear-gradient(90deg, ${generateForestColors().join(', ')});
-  background-size: 300% 100%;
   filter: blur(0.2px);
-  animation: ${({ animate }) =>
-    animate
-      ? css`
-          ${waveAnimation} 20s linear infinite
-        `
-      : undefined};
   mask: url(#logo-mask);
   -webkit-mask: url(#logo-mask);
 `;
 
 export const RainbowIcon: React.FC = () => {
-  // Animation always enabled - removed unused state
   return (
-    <RainbowIconWrapper animate={true}>
+    <RainbowIconWrapper>
       <svg width="0" height="0">
         <mask id="logo-mask">
           <Logo fill="white" /> {/* Mask uses white to indicate visible areas */}

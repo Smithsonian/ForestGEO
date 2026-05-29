@@ -1,6 +1,9 @@
 'use client';
 import * as React from 'react';
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { preloadKey } from '@/lib/query/preload';
+import { queryKey } from '@/lib/query';
+import { createFetchQuery } from '@/config/servergridhelpers';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -10,6 +13,8 @@ import ListItemButton from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from '@/app/contexts/compat-hooks';
@@ -155,22 +160,10 @@ export default function Sidebar(props: SidebarProps) {
   const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
   const [censusToDelete, setCensusToDelete] = useState<OrgCensusRDS | null>(null);
   const [isDeletingCensus, setIsDeletingCensus] = useState(false);
-  const [adminResetDone, setAdminResetDone] = useState(false);
 
-  // Clear selections when entering admin pages
-  useEffect(() => {
-    if (isAdminPage && !adminResetDone) {
-      const clearSelections = async () => {
-        if (currentSite && siteDispatch) await siteDispatch({ site: undefined });
-        if (currentPlot && plotDispatch) await plotDispatch({ plot: undefined });
-        if (currentCensus && censusDispatch) await censusDispatch({ census: undefined });
-      };
-      clearSelections();
-      setAdminResetDone(true);
-    } else if (!isAdminPage) {
-      setAdminResetDone(false);
-    }
-  }, [isAdminPage, adminResetDone, currentSite, currentPlot, currentCensus, siteDispatch, plotDispatch, censusDispatch]);
+  // Admin pages used to forcibly clear the user's site/plot/census selections on mount.
+  // That side-effect was hostile UX (sub-paths like /admin/provision/runs would wipe state),
+  // and admin pages are overlays — they don't need a clean context. Removed in 2026-05 task 13.
 
   useEffect(() => {
     let debounceTimer: NodeJS.Timeout | null = null;
@@ -250,6 +243,7 @@ export default function Sidebar(props: SidebarProps) {
 
       setIsDeletingCensus(true);
       const loadingMessage = deleteType === 'msmts' ? 'Deleting census measurements...' : 'Deleting census measurements and fixed data...';
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, loadingMessage);
       setIsClearDropdownOpen(false);
 
@@ -711,6 +705,28 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
 
+  const navPreloadHandlers: Record<string, () => void> = React.useMemo(() => {
+    const schema = currentSite?.schemaName;
+    const plotID = currentPlot?.plotID;
+    const plotCensusNumber = currentCensus?.plotCensusNumber;
+    const censusID = currentCensus?.dateRanges?.[0]?.censusID;
+    if (!schema) return {} as Record<string, () => void>;
+
+    const scope = { siteSchema: schema, plotID, censusID };
+    const PAGE_ZERO = 0;
+    const DEFAULT_PAGE_SIZE = 10;
+    // /summary and /errors are intentionally NOT prefetched here: the live grids fetch via
+    // POST /api/fixeddatafilter with a filterModel/sortModel body, and their query keys
+    // include those models, so a GET /api/fixeddata prefetch can never warm the right cache
+    // (and measurementssummary/failedmeasurements are not even valid GET dataTypes — 400).
+    const attributesKey = queryKey('grid:attributes', scope, { page: PAGE_ZERO, pageSize: DEFAULT_PAGE_SIZE });
+    const attributesURL = createFetchQuery(schema, 'attributes', PAGE_ZERO, DEFAULT_PAGE_SIZE, plotID, plotCensusNumber);
+
+    return {
+      '/attributes': () => preloadKey(attributesKey, attributesURL)
+    };
+  }, [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentCensus?.dateRanges]);
+
   const shouldApplyTooltip = (item: SiteConfigProps, linkHref?: string): boolean => {
     if (linkHref) {
       // Check for sub-links
@@ -830,6 +846,34 @@ export default function Sidebar(props: SidebarProps) {
                         ))}
                       </Box>
                     </Box>
+                  )}
+                  {session?.user?.userStatus === 'global' && (
+                    <>
+                      <ListItemButton
+                        selected={pathname === '/admin/provision'}
+                        color={pathname === '/admin/provision' ? 'primary' : undefined}
+                        onClick={() => router.push('/admin/provision')}
+                        sx={{ borderRadius: 'sm', mb: 0.5 }}
+                        aria-label="Navigate to Provision New Site"
+                      >
+                        <AddCircleOutlineIcon />
+                        <ListItemContent>
+                          <Typography level="title-sm">Provision Site</Typography>
+                        </ListItemContent>
+                      </ListItemButton>
+                      <ListItemButton
+                        selected={pathname === '/admin/provision/runs'}
+                        color={pathname === '/admin/provision/runs' ? 'primary' : undefined}
+                        onClick={() => router.push('/admin/provision/runs')}
+                        sx={{ borderRadius: 'sm', mb: 1 }}
+                        aria-label="Navigate to Provisioning Runs"
+                      >
+                        <FormatListBulletedIcon />
+                        <ListItemContent>
+                          <Typography level="title-sm">Provisioning Runs</Typography>
+                        </ListItemContent>
+                      </ListItemButton>
+                    </>
                   )}
                   <Typography level="body-xs" sx={{ color: 'neutral.400', mb: 1 }}>
                     Select a site to exit admin and go to dashboard:
@@ -1117,6 +1161,8 @@ export default function Sidebar(props: SidebarProps) {
                                                 selected={pathname === item.href + link.href}
                                                 color={pathname === item.href + link.href ? 'primary' : undefined}
                                                 disabled={isLinkDisabled}
+                                                onMouseEnter={navPreloadHandlers[link.href]}
+                                                onFocus={navPreloadHandlers[link.href]}
                                                 onClick={async () => {
                                                   if (link.href === '/postvalidation') {
                                                     const response = await fetch(
@@ -1187,6 +1233,8 @@ export default function Sidebar(props: SidebarProps) {
                                               disabled={
                                                 currentPlot === undefined || (item.href !== '/fixeddatainput' && currentCensus === undefined) || isLinkDisabled
                                               }
+                                              onMouseEnter={navPreloadHandlers[link.href]}
+                                              onFocus={navPreloadHandlers[link.href]}
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);

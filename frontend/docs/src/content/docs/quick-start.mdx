@@ -1,0 +1,152 @@
+---
+title: Quick Start
+description: A two-page visual tour — set up a site, plot, and census, import measurements, and edit them.
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Screenshot from '../../components/Screenshot.astro';
+import ProcessFlow from '../../components/ProcessFlow.astro';
+import ConceptCard from '../../components/ConceptCard.astro';
+import Scenario from '../../components/Scenario.astro';
+
+import dashboardSites from '../../assets/dashboard-site-cards.png';
+import siteDropdown from '../../assets/site-dropdown-view.png';
+import plotsOverview from '../../assets/plot-overview-panama.png';
+import plotEdit from '../../assets/cocoli-editing-menu.png';
+import censusOverview from '../../assets/census-overview-numbered.jpg';
+import addCensus from '../../assets/add-new-census.png';
+import uploadStage from '../../assets/new-uploadstage1.png';
+import uploadHeaders from '../../assets/upload-header-guide.png';
+import uploadComplete from '../../assets/upload-complete-view.png';
+import viewData from '../../assets/view-data-measurements.png';
+import editToolbar from '../../assets/edit-toolbar-numbered.png';
+import failedMods from '../../assets/failed-measurements-modal.png';
+
+A two-page visual tour: stand up a **site → plot → census**, **import a census** from CSV, and **edit** the data once it lands.
+
+<ProcessFlow
+  title="The five-minute path"
+  direction="horizontal"
+  steps={[
+    { label: 'Pick a site' },
+    { label: 'Pick a plot' },
+    { label: 'Add a census' },
+    { label: 'Import CSV' },
+    { label: 'Review & edit' }
+  ]}
+/>
+
+---
+
+## 1 · Set up site → plot → census
+
+<ConceptCard
+  title="The selection hierarchy"
+  color="green"
+  description="Every action in the app is scoped to one site, one plot, and one census. You pick them in order from the sidebar — each unlocks the next."
+  keyPoints={[
+    'Site — a collection of plots (one MySQL schema per site)',
+    'Plot — a geographic region; subdivided into quadrats',
+    'Census — a date range during which measurements were collected'
+  ]}
+/>
+
+### Pick (or check) your site
+
+After login, the dashboard shows every site you've been granted access to. Use the **sidebar dropdown** to select one — the card view is informational only.
+
+<Screenshot src={dashboardSites} alt="Sites overview cards on the dashboard" caption="Sites overview — each card shows schema name, entry mode, and subquadrat size." />
+
+<Screenshot src={siteDropdown} alt="Site dropdown in the sidebar" width={420} caption="Selecting a site unlocks the plot view." />
+
+:::note
+Don't see your site? An administrator needs to assign it to you. Submit a help ticket from the **?** button in the lower right.
+:::
+
+### Pick or create a plot
+
+The plots view splits plots **with quadrats** from those **without**. Click the pencil icon on a card to edit name, coordinates, dimensions, and default units.
+
+<Screenshot src={plotsOverview} alt="Plot overview separated by quadrats" caption="Plots are alphabetised within each group." />
+
+<Screenshot src={plotEdit} alt="Plot editing modal" width={560} caption="The plot edit modal — coordinates and units feed validations, so change them only when needed." />
+
+### Add a census
+
+You can add a census two ways: open the **Census** dropdown in the sidebar and click **Add New Census**, **or** click the **Start new census** action on the census overview card. Either path creates the same record — a census is just a date range you'll attach measurements to next.
+
+<Screenshot src={addCensus} alt="Add new census action in the dropdown" width={420} caption="Adding a census resets your selection — re-pick site and plot to land on the new census." />
+
+<Screenshot src={censusOverview} alt="Census overview with numbered actions" caption="① Delete (partial only) · ② Start a new census from the overview." />
+
+:::caution
+You can't create a new census while the current one has **zero** measurements. Import (next section) before rolling forward.
+:::
+
+---
+
+## 2 · Import a census from CSV
+
+<ProcessFlow
+  title="Upload pipeline"
+  direction="horizontal"
+  steps={[
+    { label: 'Drop file', description: 'CSV / TSV / TXT' },
+    { label: 'Review preview', description: 'check parsed rows' },
+    { label: 'Ingest', description: 'stored proc' },
+    { label: 'Validate', description: 'site rules' },
+    { label: 'Complete', description: 'failures triaged' }
+  ]}
+/>
+
+Navigate to the **Upload** page from the sidebar (the navigation menu unlocks once a census is selected). Drop a CSV/TSV/TXT file or browse to it.
+
+<Screenshot src={uploadStage} alt="Upload stage 1 — file dropzone" caption="Stage 1 — file selection. UTF-8 encoded files only." />
+
+<Screenshot src={uploadHeaders} alt="Header guide accordion expanded" caption="Expand 'Understanding the Headers' to see required vs. optional columns and example values before you upload." />
+
+:::caution
+**Don't navigate away during upload.** Large files (50k+ rows) can take several minutes. The system **updates-forward**: existing records will be overwritten, not skipped.
+:::
+
+<Screenshot src={uploadComplete} alt="Upload complete view with summary" caption="Upload complete — successes land in coremeasurements; failures are surfaced for review." />
+
+---
+
+## 3 · Edit the census
+
+Open **View Data → Measurements** to see what landed. The grid is editable inline.
+
+<Screenshot src={viewData} alt="Measurements grid with rows" caption="The measurements grid — every column is filterable; row state colours indicate validation status." />
+
+<Screenshot src={editToolbar} alt="Edit toolbar numbered" caption="Toolbar: ① headers accordion · ② columns chooser · ③ filter · ④ clear search · ⑤ search field · ⑥ refresh · ⑦ paste · ⑧ upload · ⑨ download · ⑩ show/hide cells · ⑪ more actions." />
+
+### Fix anything that failed
+
+Rows that didn't pass validation appear in the **Failed Measurements** view with a structured reason. You have two ways to fix them: edit fields **in place** in the grid, or upload a CSV of corrected values as a **revision upload** — the same file format as the original import, scoped to the rows you're fixing. Either path ends with **Reingest**, which pushes the rows back through the validator.
+
+<Screenshot src={failedMods} alt="Failed measurements modal with reasons" caption="Each failed row carries its original CSV codes plus the consolidated failure reason." />
+
+<Scenario
+  icon="info"
+  title="A row failed — what now?"
+  cause="A measurement was rejected by a site-specific validation (e.g. DBH out of range, unknown species code, quadrat not found)."
+  steps={[
+    'Open Failed Measurements from the sidebar.',
+    'Read the consolidated reason; the raw codes from the CSV are preserved on the row.',
+    'Fix the values: edit fields inline in the grid, or — for many rows at once — export, correct in a spreadsheet, and submit as a revision upload.',
+    'Click Reingest. The row re-enters bulkingestionprocess; if it passes, it moves into coremeasurements.'
+  ]}
+  outcome="Fixed rows disappear from Failed Measurements and appear in View Data with the rest of the census."
+/>
+
+---
+
+## You're done
+
+<CardGrid stagger>
+  <LinkCard title="Getting Started (full walkthrough)" href="/ForestGEO/getting-started/" description="Long-form tour of every selection screen and sidebar control." />
+  <LinkCard title="Upload Process Breakdown" href="/ForestGEO/upload-process-breakdown/" description="Every stage of the upload pipeline in detail." />
+  <LinkCard title="Understanding SAPD Datagrids" href="/ForestGEO/understanding-sapd-datagrids/" description="How the editable grids work — filters, edits, validation feedback." />
+  <LinkCard title="Failed Measurements Guide" href="/ForestGEO/errors/failed-measurements-guide/" description="Reasons, codes, and the reingest loop in depth." />
+</CardGrid>

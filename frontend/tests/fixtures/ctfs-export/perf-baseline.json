@@ -1,0 +1,10 @@
+{
+  "1k-smoke": {
+    "rows": 1000,
+    "buildMs": 30,
+    "executeMs": 765,
+    "totalMs": 795,
+    "artifactBytes": 142373,
+    "recordedAt": "2026-05-20T20:15:55.666Z"
+  }
+}

@@ -3,6 +3,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { safeFormatQuery } from '@/config/utils/sqlsecurity';
 import ailogger from '@/ailogger';
+import { buildMeasurementScopeLockName, MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS } from '@/config/measurementscopelock';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +32,16 @@ export async function POST(request: NextRequest) {
     }
 
     transactionID = await connectionManager.beginTransaction();
+
+    const scopeLockAcquired = await connectionManager.acquireApplicationLock(
+      buildMeasurementScopeLockName(schema, plotID, censusID),
+      transactionID,
+      MEASUREMENT_SCOPE_LOCK_TIMEOUT_MS
+    );
+    if (!scopeLockAcquired) {
+      await connectionManager.commitTransaction(transactionID);
+      return NextResponse.json({ conflict: true, reason: 'A measurement operation is already in progress for this plot/census' }, { status: HTTPResponses.OK });
+    }
 
     // Lock-check: is there already a recent running row?
     const lockQuery = safeFormatQuery(

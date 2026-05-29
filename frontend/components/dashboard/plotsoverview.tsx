@@ -8,7 +8,8 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Skeleton, Divider, IconButton } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Divider, IconButton } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { PlotRDS } from '@/config/sqlrdsdefinitions/zones';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
@@ -53,44 +54,18 @@ export interface PlotsOverviewProps {
   isLoading?: boolean;
   onPlotEdit?: (plot: PlotWithCensusCount) => void;
   onAddPlot?: () => void;
+  onSelectPlot?: (plot: PlotWithCensusCount) => void;
 }
 
 function PlotCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: 200,
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant="circular" width={44} height={44} />
-          <Skeleton variant="rectangular" width={90} height={22} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="text" width="60%" height={24} sx={{ mb: 0.5 }} />
-        <Skeleton variant="text" width="80%" height={18} sx={{ mb: 1.5 }} />
-        <Box sx={{ display: 'flex', gap: 0.5, mb: 1.5 }}>
-          <Skeleton variant="rectangular" width={70} height={20} sx={{ borderRadius: 'sm' }} />
-          <Skeleton variant="rectangular" width={70} height={20} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="rectangular" width="100%" height={6} sx={{ borderRadius: 'sm' }} />
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 interface PlotCardProps {
   plot: PlotWithCensusCount;
   index: number;
   onEdit?: (plot: PlotWithCensusCount) => void;
+  onSelect?: (plot: PlotWithCensusCount) => void;
 }
 
 // Get grid size category based on quadrat count
@@ -110,7 +85,7 @@ function getGridSizeCategory(numQuadrats: number | undefined): { label: string; 
   return { label: 'Very Large', color: 'rgba(255,255,255,0.95)', dots: 25 }; // 5x5
 }
 
-function PlotCard({ plot, index, onEdit }: PlotCardProps) {
+function PlotCard({ plot, index, onEdit, onSelect }: PlotCardProps) {
   const gradient = PLOT_GRADIENTS[index % PLOT_GRADIENTS.length];
   const ShapeIcon = SHAPE_ICONS[plot.plotShape?.toLowerCase() ?? 'default'] || SHAPE_ICONS.default;
 
@@ -155,51 +130,48 @@ function PlotCard({ plot, index, onEdit }: PlotCardProps) {
   };
 
   return (
+    /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
-      component="article"
+      component={onSelect ? 'div' : 'article'}
       variant="solid"
-      aria-label={`Plot: ${plot.plotName}.${plot.locationName ? ` Location: ${plot.locationName}.` : ''}${plot.numQuadrats !== undefined ? ` ${plot.numQuadrats} quadrats.` : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Plot: ${plot.plotName}.${plot.locationName ? ` Location: ${plot.locationName}.` : ''}${plot.numQuadrats !== undefined ? ` ${plot.numQuadrats} quadrats.` : ''}${onSelect ? ' Click to select.' : ''}`}
+      onClick={onSelect ? () => onSelect(plot) : undefined}
+      onKeyDown={
+        onSelect
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(plot);
+              }
+            }
+          : undefined
+      }
       sx={{
-        background: gradient,
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%, rgba(0,0,0,0.1) 100%),
+          ${gradient}
+        `,
+        backgroundPosition: 'calc(100% + 20px) -20px, calc(100% + 20px) -20px, center, center',
+        backgroundSize: '20px 20px, 20px 20px, auto, auto',
         color: 'white',
         minHeight: 200,
-        position: 'relative',
         overflow: 'hidden',
         border: 'none',
-
-        // Decorative gradient overlay
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 40%, rgba(0,0,0,0.1) 100%)',
-          pointerEvents: 'none'
-        }
+        ...(onSelect && {
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          '&:hover': {
+            transform: 'translateY(-3px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
+          }
+        })
       }}
     >
-      {/* Background decoration - grid pattern */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          top: -20,
-          right: -20,
-          width: 100,
-          height: 100,
-          opacity: 0.08,
-          pointerEvents: 'none',
-          backgroundImage: `
-            linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)
-          `,
-          backgroundSize: '20px 20px'
-        }}
-      />
-
-      <CardContent sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
           <Avatar
             alt=""
@@ -381,21 +353,20 @@ function PlotCard({ plot, index, onEdit }: PlotCardProps) {
 
         {/* Census count badge */}
         {plot.censusCount !== undefined && plot.censusCount > 0 && (
-          <Chip
-            size="sm"
-            variant="soft"
-            sx={{
-              position: 'absolute',
-              bottom: 8,
-              right: 8,
-              bgcolor: 'rgba(255,255,255,0.95)',
-              color: gradient.includes('#059669') ? '#059669' : '#0891b2',
-              fontWeight: 700,
-              fontSize: '0.6875rem'
-            }}
-          >
-            {plot.censusCount} {plot.censusCount === 1 ? 'Census' : 'Censuses'}
-          </Chip>
+          <Box sx={{ mt: plot.numQuadrats !== undefined && plot.numQuadrats > 0 ? 1 : 'auto', display: 'flex', justifyContent: 'flex-end' }}>
+            <Chip
+              size="sm"
+              variant="soft"
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.95)',
+                color: gradient.includes('#059669') ? '#059669' : '#0891b2',
+                fontWeight: 700,
+                fontSize: '0.6875rem'
+              }}
+            >
+              {plot.censusCount} {plot.censusCount === 1 ? 'Census' : 'Censuses'}
+            </Chip>
+          </Box>
         )}
       </CardContent>
     </Card>
@@ -478,7 +449,7 @@ function AddPlotCard({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-export default function PlotsOverview({ plots, siteName, isLoading = false, onPlotEdit, onAddPlot }: PlotsOverviewProps) {
+export default function PlotsOverview({ plots, siteName, isLoading = false, onPlotEdit, onAddPlot, onSelectPlot }: PlotsOverviewProps) {
   // Separate plots with and without quadrats, sort alphabetically within each group
   const { plotsWithQuadrats, plotsWithoutQuadrats } = useMemo(() => {
     if (!Array.isArray(plots)) {
@@ -569,7 +540,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
           <Box component="ul" sx={gridStyles}>
             {plotsWithQuadrats.map((plot, index) => (
               <Box component="li" key={plot.plotID ?? `with-${index}`}>
-                <PlotCard plot={plot} index={index} onEdit={onPlotEdit} />
+                <PlotCard plot={plot} index={index} onEdit={onPlotEdit} onSelect={onSelectPlot} />
               </Box>
             ))}
           </Box>
@@ -594,7 +565,7 @@ export default function PlotsOverview({ plots, siteName, isLoading = false, onPl
           <Box component="ul" sx={gridStyles}>
             {plotsWithoutQuadrats.map((plot, index) => (
               <Box component="li" key={plot.plotID ?? `without-${index}`}>
-                <PlotCard plot={plot} index={plotsWithQuadrats.length + index} onEdit={onPlotEdit} />
+                <PlotCard plot={plot} index={plotsWithQuadrats.length + index} onEdit={onPlotEdit} onSelect={onSelectPlot} />
               </Box>
             ))}
           </Box>

@@ -270,44 +270,104 @@ See [Validations & Statistics](/ForestGEO/validations-statistics/) for details o
 
 ### Stage 4.5: Failed Measurements System
 
-Measurements that fail during ingestion are automatically stored in a dedicated **Failed Measurements** table.
+Rows that fail ingestion are **not silently dropped**. They are written into the main `coremeasurements` table with `StemGUID = NULL` so the app can tell them apart from successful rows, and the original CSV codes are preserved in the `RawCodes` column.
+
+:::note
+**Architecture change (Feb 2026):** There is no longer a separate `failedmeasurements` table. Successful and failed rows now live together in `coremeasurements`. Failed rows keep the **same row ID** through corrections, so audit history follows the row across reingestion attempts.
+:::
 
 **Common failure reasons:**
 
-| Reason                      | Cause                                  | Solution                       |
-| --------------------------- | -------------------------------------- | ------------------------------ |
-| Species not found           | `spcode` doesn't exist in Species List | Add the species, then reingest |
-| Quadrat not found           | `quadrat` doesn't exist in Quadrats    | Add the quadrat, then reingest |
-| Invalid tree/stem reference | Tag combination doesn't exist          | Check tag numbers              |
-| Duplicate record            | Same tag combo already exists          | Remove duplicate               |
+| Reason | Cause | Solution |
+|---|---|---|
+| Species not found | `spcode` doesn't exist in Species List | Add the species, then reingest |
+| Quadrat not found | `quadrat` doesn't exist in Quadrats | Add the quadrat, then reingest |
+| Invalid tree/stem reference | Tag combination doesn't exist | Check tag numbers |
+| Duplicate record (within batch) | Same identity appears twice in your file | Remove the duplicate row |
+| Invalid attribute codes | Code isn't in the Attributes list | **Soft warning** as of April 2026 — the row goes in, the code is flagged |
 
-### Accessing Failed Measurements
+### Where to see failed rows
 
-Failed measurements appear in a **modal popup** accessible from:
+- **View Data → Measurements** — inline alongside successful rows, with a status filter for "failed only".
+- **View Errors** — every row with a consolidated failure reason and the original CSV codes side-by-side.
+- **Failed Measurements modal** — pops up automatically right after an upload if anything failed.
 
-- The View Data page
-- The completion notification after upload
+### Reingesting failed rows
 
-### Reingesting Failed Measurements
-
-To recover failed measurements:
-
-1. **Review** the failed records and their error reasons
-2. **Fix** the underlying issue (e.g., add missing species)
-3. **Click "Reingest All"** to reprocess all failed records
-4. **Or reingest individually** by clicking reingest on specific rows
+1. **Review** the failure reasons in the modal or View Errors.
+2. **Fix** the underlying issue (add missing reference data, or correct the row).
+3. Click **Reingest All** to push everything back through `bulkingestionprocess`, or use the row-level reingest for one-offs.
+4. Rows that now pass move out of the failed state; rows that still fail come back with **updated** reasons.
 
 :::tip
-Reingestion uses the **same data** that originally failed - you don't need to re-upload the file!
+Reingestion replays the data the app already has — you don't need to re-upload the file.
 :::
 
-### Clearing Failed Measurements
+See **[Failed Measurements Guide](/ForestGEO/errors/failed-measurements-guide/)** for the full triage workflow.
 
-If the failed records are bad data that shouldn't be imported:
+---
 
-1. Navigate to the Failed Measurements modal
-2. Select records to remove (or all)
-3. Click **Clear** to delete them
+## Revision Upload (correcting an ingested census)
+
+**Available since April 2026.** Revision Upload is a second upload mode designed for **correcting specific rows in a census that's already ingested** — you don't have to wipe the data and start over.
+
+### When to use Revisions vs. Clean Re-upload
+
+- Use **Revisions** when the rows you want to fix are already in the database.
+- Use **Clean Re-upload** when you want to wipe the census and start from scratch.
+
+### The Revision Upload flow
+
+```
+Export CSV → Edit only the values you want changed → Upload as Revisions →
+Review match screen (tabs) → Apply
+```
+
+1. **Export** the current measurements from the data grid (the export keeps `StemGUID`, which is how rows are matched on the way back in).
+2. **Edit** only the cells you want to change. Blank or unchanged cells mean "don't change" — they will not overwrite the database.
+3. From the upload page, choose **Measurements → Revisions** and upload the edited file.
+4. The app shows a **multi-tab review screen** before any write — see below.
+5. Click **Apply**. All updates, deletions, and inserts run in a single transaction.
+
+### The review screen tabs
+
+| Tab | What's in it | What happens on Apply |
+|---|---|---|
+| **Changes** | Rows where one or more of the editable fields differs from the DB | Updated in place |
+| **Duplicate Cleanup** | Rows that match multiple measurements for the same stem (typically legacy) | Highest-ID row wins; others deleted |
+| **New Rows** | Rows that don't match anything in the census | Inserted **only if you explicitly confirm** |
+| **Ignored Edits** | Rows where you edited a column Revisions can't update yet | No DB write — surfaced so you don't think they succeeded |
+| **Unchanged** | Matched rows with no field differences | Skipped on Apply |
+| **Invalid** | Rows the app can't safely handle (missing match key, stem in a different plot, etc.) | Not touched |
+
+### Editable fields (Phase 1)
+
+You can change these five fields through a Revision Upload:
+
+- **DBH** (`MeasuredDBH` / `dbh`)
+- **HOM** (`MeasuredHOM` / `hom`)
+- **Measurement Date** (`MeasurementDate` / `date`)
+- **Codes** (`RawCodes` / `codes`)
+- **Comments** (`Description` / `comments`)
+
+Edits to `SpeciesCode`, `QuadratName`, `StemLocalX`, `StemLocalY`, `TreeTag`, or `StemTag` are **not** applied through Revisions — they appear in the **Ignored Edits** tab so you can see what wasn't written. To change those columns, use inline editing in the grid.
+
+### Common pitfalls
+
+- **Spreadsheet apps strip leading zeros.** Open the CSV in a plain text editor for safety. The app tolerates this for tags and quadrat names but not for species codes.
+- **`RawCodes` wins over `Attributes`.** If both columns are present, the raw codes are authoritative.
+- **A blank cell means "don't change," not "set to NULL."** To clear a value, edit in the grid directly.
+- **Revisions cannot be undone from the UI.** If you applied a bad revision, fix it with another Revision Upload.
+
+### Checklist before Apply
+
+- The correct **plot and census** are selected in the app.
+- The **Changes** tab lists only the edits you intended.
+- The **Ignored Edits** tab is empty, or you've accepted every entry.
+- The **New Rows** tab is empty, or every entry is something you genuinely want created.
+- The **Invalid** tab is empty, or you understand why each row is rejected.
+
+---
 
 ---
 
@@ -324,7 +384,7 @@ If the failed records are bad data that shouldn't be imported:
 6. Complete
 ```
 
-### For Measurements
+### For Measurements (initial upload)
 
 ```
 1. Select File
@@ -333,9 +393,21 @@ If the failed records are bad data that shouldn't be imported:
 4. SQL Ingestion Processing
 5. Automatic Validation
 6. Review Pre-processing Errors
-7. Review Failed Measurements
+7. Review Failed Measurements (in coremeasurements with StemGUID=NULL)
 8. Azure Backup
 9. Complete
+```
+
+### For Measurements (Revision Upload)
+
+```
+1. Export current data from grid
+2. Edit only the fields you want changed
+3. Upload as Measurements → Revisions
+4. Review tabs: Changes / Duplicates / New Rows / Ignored Edits / Invalid
+5. Apply (single transaction)
+6. Validations re-run on affected rows
+7. Grid refreshes automatically
 ```
 
 ---

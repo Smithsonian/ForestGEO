@@ -1,0 +1,108 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-22-editplan-integrity-fixes.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Shared canonicalrow module",
+      "status": "completed",
+      "description": "**Goal:** Introduce `canonicalrow.ts` that normalizes a CSV row into the stable, hashable shape the analyzer and apply path both consume, with distinct modes for matched updates and new inserts.\n\n**Files:**\n- Create: `frontend/config/editplan/canonicalrow.ts`\n- Create: `frontend/config/editplan/canonicalrow.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/canonicalrow.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/canonicalrow.ts\",\"frontend/config/editplan/canonicalrow.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/canonicalrow.test.ts\",\"acceptanceCriteria\":[\"two modes with correct field sets\",\"alias expansion\",\"normalization rules\",\"idempotence\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: P1 types + planhash canonicalization",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Introduce `DuplicateDeletion`, attach `canonicalNewRow?` to `RowPlan`, add `duplicateDeletions` to `BulkEditPlan`, canonicalize into the bulk plan hash.\n\n**Files:**\n- Modify: `frontend/config/editplan/types.ts`\n- Modify: `frontend/config/editplan/planhash.ts`\n- Modify: `frontend/config/editplan/planhash.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/planhash.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/types.ts\",\"frontend/config/editplan/planhash.ts\",\"frontend/config/editplan/planhash.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/planhash.test.ts\",\"acceptanceCriteria\":[\"DuplicateDeletion exported\",\"RowPlan.canonicalNewRow\",\"BulkEditPlan.duplicateDeletions\",\"sort by both fields\",\"no dedupe\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: bulkanalyzer populates canonicalNewRow and duplicateDeletions",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** `analyzeBulk` canonicalizes new rows via the shared module (insert mode) onto each `RowPlan`, and emits `DuplicateDeletion[]` onto the plan.\n\n**Files:**\n- Modify: `frontend/config/editplan/bulkanalyzer.ts`\n- Modify: `frontend/config/editplan/rules/duplicates.ts`\n- Modify: `frontend/config/editplan/analyzer.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/bulkanalyzer.ts\",\"frontend/config/editplan/rules/duplicates.ts\",\"frontend/config/editplan/analyzer.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/\",\"acceptanceCriteria\":[\"structured duplicate array\",\"canonicalNewRow on new rowplans\",\"duplicateDeletions on plan\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Match route uses shared canonicalizer and structured duplicates",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "**Goal:** Retire `buildAnalyzerNewRow`; build `DuplicateDeletion[]` per-matched-row; canonicalize matched (update mode) and new (insert mode) rows via shared module.\n\n**Files:**\n- Modify: `frontend/app/api/revisionupload/route.ts`\n- Modify: `frontend/app/api/revisionupload/route.test.ts`\n\n**Verify:** `cd frontend && npx vitest run app/api/revisionupload/route.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/app/api/revisionupload/route.ts\",\"frontend/app/api/revisionupload/route.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run app/api/revisionupload/route.test.ts\",\"acceptanceCriteria\":[\"shared canonicalizer used\",\"structured duplicate pairs\",\"buildAnalyzerNewRow deleted\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Apply route uses shared canonicalizer and structured duplicates",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "**Goal:** Retire `buildCanonicalNewRow`; use `canonicalizeRowForHash` with correct modes; pass structured duplicates to `bulkInputForHashCheck`.\n\n**Files:**\n- Modify: `frontend/app/api/revisionupload/apply/route.ts`\n- Modify: `frontend/app/api/revisionupload/apply/route.test.ts`\n\n**Verify:** `cd frontend && npx vitest run app/api/revisionupload/apply/route.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/app/api/revisionupload/apply/route.ts\",\"frontend/app/api/revisionupload/apply/route.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run app/api/revisionupload/apply/route.test.ts\",\"acceptanceCriteria\":[\"buildCanonicalNewRow deleted\",\"shared canonicalizer used at 3 call sites\",\"structured duplicates piped through\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: P1 integration test — hash drift",
+      "status": "completed",
+      "blockedBy": [4, 5],
+      "description": "**Goal:** End-to-end coverage: tampered new-row content and swapped duplicate survivor both produce 409 plan-hash drift.\n\n**Files:**\n- Create: `frontend/tests/integration/editplan-integrity.integration.test.ts`\n\n**Verify:** `cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/tests/integration/editplan-integrity.integration.test.ts\"],\"verifyCommand\":\"cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts\",\"acceptanceCriteria\":[\"tampered new-row content returns 409\",\"swapped duplicate pair returns 409\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: P2 types and error classes",
+      "status": "pending",
+      "description": "**Goal:** Add `TreeStemResolutionPreviewError` PreviewError variant; rename existing to `RoleForbiddenFieldPreviewError`; introduce `EditPlanUnapplicableError`, `BulkPlanUnapplicableError`, `MeasurementResolutionError`.\n\n**Files:**\n- Modify: `frontend/config/editplan/types.ts`\n- Modify: `frontend/config/editplan/analyzer.ts`\n- Modify: `frontend/config/editplan/bulkanalyzer.ts`\n- Modify: `frontend/config/editplan/writers/resolvers-mutating.ts`\n\n**Verify:** `cd frontend && npx tsc --noEmit && npx vitest run config/editplan/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/types.ts\",\"frontend/config/editplan/analyzer.ts\",\"frontend/config/editplan/bulkanalyzer.ts\",\"frontend/config/editplan/writers/resolvers-mutating.ts\"],\"verifyCommand\":\"cd frontend && npx tsc --noEmit && npx vitest run config/editplan/\",\"acceptanceCriteria\":[\"TreeStemResolutionPreviewError\",\"EditPlanUnapplicableError\",\"BulkPlanUnapplicableError\",\"MeasurementResolutionError\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: treestem rule emits errors",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** `applyTreeStemRules` returns `{effects, errors}`; emits `TreeStemResolutionPreviewError` at 7 emission points; analyzer collects errors onto the plan.\n\n**Files:**\n- Modify: `frontend/config/editplan/rules/treestem.ts`\n- Modify: `frontend/config/editplan/analyzer.ts`\n- Create/Modify: `frontend/config/editplan/rules/treestem.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/rules/treestem.test.ts config/editplan/analyzer.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/rules/treestem.ts\",\"frontend/config/editplan/analyzer.ts\",\"frontend/config/editplan/rules/treestem.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/rules/treestem.test.ts config/editplan/analyzer.test.ts\",\"acceptanceCriteria\":[\"7 emission points\",\"no emission on clean resolution\",\"canApply=false\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: maxSeverity considers errors",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Plan `maxSeverity` reflects blocking errors even when no destructive `Effect` is present.\n\n**Files:**\n- Modify: `frontend/config/editplan/analyzer.ts`\n- Modify: `frontend/config/editplan/bulkanalyzer.ts`\n- Modify: `frontend/config/editplan/analyzer.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/analyzer.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/analyzer.ts\",\"frontend/config/editplan/bulkanalyzer.ts\",\"frontend/config/editplan/analyzer.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/analyzer.test.ts\",\"acceptanceCriteria\":[\"destructive maxSeverity when errors only\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Split assertEditPlanCanApply and assertBulkPlanCanApply",
+      "status": "pending",
+      "blockedBy": [9],
+      "description": "**Goal:** Role errors throw `RoleForbiddenFieldError`; non-role blocking errors throw `EditPlanUnapplicableError` / `BulkPlanUnapplicableError`.\n\n**Files:**\n- Modify: `frontend/config/editplan/analyzer.ts`\n- Modify: `frontend/config/editplan/bulkanalyzer.ts`\n- Modify: `frontend/config/editplan/analyzer.test.ts`\n\n**Verify:** `cd frontend && npx vitest run config/editplan/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/analyzer.ts\",\"frontend/config/editplan/bulkanalyzer.ts\",\"frontend/config/editplan/analyzer.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/\",\"acceptanceCriteria\":[\"role errors throw role error\",\"non-role throws plan-unapplicable\",\"role takes priority\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: Typed mutating-resolver errors",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** `resolvers-mutating.ts` throws `MeasurementResolutionError` with `(subject, reason)` tuple.\n\n**Files:**\n- Modify: `frontend/config/editplan/writers/resolvers-mutating.ts`\n- Modify: `frontend/config/editplan/writers/resolvers-mutating.test.ts` (create if absent)\n\n**Verify:** `cd frontend && npx vitest run config/editplan/writers/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/writers/resolvers-mutating.ts\",\"frontend/config/editplan/writers/resolvers-mutating.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run config/editplan/writers/\",\"acceptanceCriteria\":[\"7 typed throws\",\"messages preserved\",\"tests assert class+tuple\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: Apply-route 422 mappings",
+      "status": "pending",
+      "blockedBy": [10, 11],
+      "description": "**Goal:** Apply routes map new error classes to 422 with structured payloads.\n\n**Files:**\n- Modify: `frontend/app/api/revisionupload/apply/route.ts`\n- Modify: `frontend/app/api/edits/apply/route.ts`\n- Modify: `frontend/app/api/revisionupload/apply/route.test.ts`\n- Modify: `frontend/app/api/edits/apply/route.test.ts`\n\n**Verify:** `cd frontend && npx vitest run app/api/` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/app/api/revisionupload/apply/route.ts\",\"frontend/app/api/edits/apply/route.ts\",\"frontend/app/api/revisionupload/apply/route.test.ts\",\"frontend/app/api/edits/apply/route.test.ts\"],\"verifyCommand\":\"cd frontend && npx vitest run app/api/\",\"acceptanceCriteria\":[\"BulkPlanUnapplicable→422\",\"EditPlanUnapplicable→422\",\"MeasurementResolutionError→422\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: P2 integration test — unresolvable species and race-case",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** Integration coverage for preview blocker on unresolvable species and apply-time race when target tree deactivated mid-flight.\n\n**Files:**\n- Modify: `frontend/tests/integration/editplan-integrity.integration.test.ts`\n- Possibly Modify: `frontend/tests/setup/local-db-setup.ts`\n\n**Verify:** `cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/tests/integration/editplan-integrity.integration.test.ts\",\"frontend/tests/setup/local-db-setup.ts\"],\"verifyCommand\":\"cd frontend && npm run test:integration -- tests/integration/editplan-integrity.integration.test.ts\",\"acceptanceCriteria\":[\"unresolvable species blocks preview\",\"race-case returns 422\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 14: P3 effective() helper for clearable fields",
+      "status": "pending",
+      "description": "**Goal:** Sync block in `writers/measurementssummary.ts` preserves explicit clears for clearable fields; revalidation receives cleared state.\n\n**Files:**\n- Modify: `frontend/config/editplan/writers/measurementssummary.ts`\n- Modify: `frontend/tests/integration/editplan-writer-measurementssummary.integration.test.ts`\n\n**Verify:** `cd frontend && npm run test:integration -- tests/integration/editplan-writer-measurementssummary.integration.test.ts` → PASS.\n\n```json:metadata\n{\"files\":[\"frontend/config/editplan/writers/measurementssummary.ts\",\"frontend/tests/integration/editplan-writer-measurementssummary.integration.test.ts\"],\"verifyCommand\":\"cd frontend && npm run test:integration -- tests/integration/editplan-writer-measurementssummary.integration.test.ts\",\"acceptanceCriteria\":[\"effective helper\",\"clears persisted as NULL\",\"identity fields unchanged\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 15: Final verification",
+      "status": "pending",
+      "blockedBy": [6, 13, 14],
+      "description": "**Goal:** Entire suite green, production build succeeds.\n\n**Files:** None (verification only).\n\n**Verify:** `cd frontend && npm run test:unit && npm run test:integration && npm run lint && npm run build`.\n\n```json:metadata\n{\"files\":[],\"verifyCommand\":\"cd frontend && npm run test:unit && npm run test:integration && npm run lint && npm run build\",\"acceptanceCriteria\":[\"all tests pass\",\"build succeeds\",\"lint clean\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-23T07:58:00.000Z"
+}

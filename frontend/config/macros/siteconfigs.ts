@@ -180,6 +180,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Site Management';
     case '/admin/userstosites':
       return 'User-Site Assignments';
+    case '/admin/provision':
+      return 'Provision New Site';
     default:
       return '';
   }

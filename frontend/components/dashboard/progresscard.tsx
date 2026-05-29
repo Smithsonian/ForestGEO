@@ -7,11 +7,12 @@
 
 'use client';
 
-import { Card, Box, Typography, CircularProgress, Chip, Stack, Tooltip, Skeleton } from '@mui/joy';
+import { Card, Box, Typography, CircularProgress, Chip, Stack, Tooltip } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import React from 'react';
+import { ContentSkeleton } from '@/components/loading';
 
 export interface ProgressCardProps {
   totalQuadrats: number;
@@ -57,14 +58,12 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
 
       <Box
         sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          position: 'relative',
+          display: 'grid',
+          placeItems: 'center',
           my: 2
         }}
       >
-        <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+        <Box sx={{ display: 'grid', placeItems: 'center' }}>
           <CircularProgress
             determinate
             value={100}
@@ -74,7 +73,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
               '--CircularProgress-trackThickness': '12px',
               '--CircularProgress-progressThickness': '12px',
               color: 'neutral.outlinedBorder',
-              position: 'absolute'
+              gridArea: '1 / 1'
             }}
           />
 
@@ -86,6 +85,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
               '--CircularProgress-size': '180px',
               '--CircularProgress-trackThickness': '12px',
               '--CircularProgress-progressThickness': '12px',
+              gridArea: '1 / 1',
               '--CircularProgress-progressColor': percentValue >= 90 ? 'var(--joy-palette-success-500)' : 'var(--joy-palette-primary-500)',
               '& .MuiCircularProgress-progress': {
                 strokeLinecap: 'round',
@@ -101,11 +101,7 @@ function ProgressCard({ totalQuadrats, populatedQuadrats, populatedPercent, unpo
 
           <Box
             sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              bottom: 0,
-              right: 0,
+              gridArea: '1 / 1',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -234,93 +230,8 @@ export default React.memo(ProgressCard, (prevProps, nextProps) => {
 });
 
 /**
- * Skeleton loader for progress card
+ * Skeleton loader for progress card — delegates to the shared ContentSkeleton primitive.
  */
 export function ProgressCardSkeleton() {
-  return (
-    <Card
-      variant="outlined"
-      sx={{
-        minHeight: '320px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-        p: 3,
-        position: 'relative',
-        overflow: 'hidden',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: '-100%',
-          width: '100%',
-          height: '100%',
-          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%)',
-          animation: 'shimmer 2s infinite',
-          pointerEvents: 'none'
-        },
-        '@keyframes shimmer': {
-          '0%': { left: '-100%' },
-          '100%': { left: '100%' }
-        }
-      }}
-    >
-      <Box>
-        <Skeleton
-          variant="text"
-          width="60%"
-          height={28}
-          sx={{
-            mb: 1,
-            opacity: 0.3,
-            backgroundColor: 'neutral.200'
-          }}
-        />
-        <Skeleton
-          variant="text"
-          width="80%"
-          height={20}
-          sx={{
-            opacity: 0.25,
-            backgroundColor: 'neutral.200'
-          }}
-        />
-      </Box>
-
-      <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-        <Skeleton
-          variant="circular"
-          width={180}
-          height={180}
-          sx={{
-            opacity: 0.3,
-            backgroundColor: 'neutral.200'
-          }}
-        />
-      </Box>
-
-      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-        <Skeleton
-          variant="rectangular"
-          width={120}
-          height={36}
-          sx={{
-            borderRadius: 'sm',
-            opacity: 0.25,
-            backgroundColor: 'neutral.200'
-          }}
-        />
-        <Skeleton
-          variant="rectangular"
-          width={100}
-          height={36}
-          sx={{
-            borderRadius: 'sm',
-            opacity: 0.25,
-            backgroundColor: 'neutral.200'
-          }}
-        />
-      </Box>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }

@@ -106,6 +106,8 @@ export default function ViewFullTableDataGrid() {
       refresh={refresh}
       setRefresh={setRefresh}
       dynamicButtons={[{ label: 'Reset View', onClick: async () => await reloadVFT(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }]}
+      enablePageJump
+      enableInfiniteScroll
     />
   );
 }

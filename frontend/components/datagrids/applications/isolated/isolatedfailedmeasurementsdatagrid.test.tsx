@@ -67,10 +67,15 @@ vi.mock('@/app/contexts/userselectionprovider', () => ({
 }));
 
 vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
-  default: ({ onDataUpdate, onDataLoaded }: any) => {
-    // Expose onDataUpdate for testing
+  default: ({ onDataUpdate, onDataLoaded, editFlowOverride }: any) => {
+    // Expose onDataUpdate / editFlowOverride for testing
     if (onDataUpdate) {
       (window as any).testOnDataUpdate = onDataUpdate;
+    }
+    if (editFlowOverride) {
+      (window as any).testEditFlowOverride = editFlowOverride;
+    } else {
+      delete (window as any).testEditFlowOverride;
     }
     if (onDataLoaded) {
       (window as any).testOnDataLoaded = onDataLoaded;
@@ -84,11 +89,44 @@ vi.mock('@/components/datagrids/isolateddatagridcommons', () => ({
 vi.mock('@/components/client/clientmacros', () => ({
   loadSelectableOptions: vi.fn().mockResolvedValue(undefined),
   selectableAutocomplete: () => <div>Mock Autocomplete</div>,
-  standardizeGridColumns: (cols: any) => cols
+  standardizeGridColumns: (cols: any) => cols,
+  selectableOptionKeyForField: (field: string) => field
 }));
 
 vi.mock('@/ailogger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+}));
+
+const mockBeginEdit = vi.fn();
+const mockConfirmDialog = vi.fn();
+const mockCancelDialog = vi.fn();
+let mockEditFlowArgs: any = null;
+let mockEditFlowDialogState: any = { open: false, plan: null, busy: false };
+
+vi.mock('@/hooks/useEditPreviewFlow', () => ({
+  useEditPreviewFlow: (args: any) => {
+    mockEditFlowArgs = args;
+    return {
+      beginEdit: mockBeginEdit,
+      confirmDialog: mockConfirmDialog,
+      cancelDialog: mockCancelDialog,
+      dialogState: mockEditFlowDialogState
+    };
+  }
+}));
+
+vi.mock('@/components/editplan/previewdialog', () => ({
+  default: () => <div data-testid="preview-dialog" />
+}));
+
+vi.mock('@/components/editplan/undotoast', () => ({
+  default: ({ editOperationID, onDismiss }: any) => (
+    <div data-testid={`undo-toast-${editOperationID}`}>
+      <button type="button" onClick={onDismiss} data-testid="undo-toast-dismiss">
+        Dismiss
+      </button>
+    </div>
+  )
 }));
 
 describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
@@ -97,6 +135,12 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
     global.fetch = vi.fn();
     delete (window as any).testOnDataUpdate;
     delete (window as any).testOnDataLoaded;
+    delete (window as any).testEditFlowOverride;
+    mockBeginEdit.mockReset();
+    mockConfirmDialog.mockReset();
+    mockCancelDialog.mockReset();
+    mockEditFlowArgs = null;
+    mockEditFlowDialogState = { open: false, plan: null, busy: false };
   });
 
   describe('Bug Fix: Ready-to-reingest snackbar should honor stored ingestion failures', () => {
@@ -128,10 +172,10 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       const { loadSelectableOptions } = await import('@/components/client/clientmacros');
       (loadSelectableOptions as any).mockImplementation(async (_site: any, _plot: any, _census: any, setSelectableOpts: any) => {
         setSelectableOpts({
-          tag: [],
+          treeTag: [],
           stemTag: [],
-          quadrat: ['0101'],
-          spCode: ['CRATSN'],
+          quadratName: ['0101'],
+          speciesCode: ['CRATSN'],
           codes: ['M']
         });
       });
@@ -357,6 +401,233 @@ describe('IsolatedFailedMeasurementsDataGrid - Critical Bug Fixes', () => {
       // which uses .indexOf to deduplicate and shows only visibleReasons[0]
 
       expect(true).toBe(true); // Placeholder - actual test is in component logic
+    });
+  });
+
+  describe('Edit preview flow wiring (Task 15)', () => {
+    async function mountGridWithOptions() {
+      const { loadSelectableOptions } = await import('@/components/client/clientmacros');
+      (loadSelectableOptions as any).mockImplementation(async (_site: any, _plot: any, _census: any, setSelectableOpts: any) => {
+        setSelectableOpts({
+          treeTag: [],
+          stemTag: [],
+          quadratName: ['0101'],
+          speciesCode: ['CRATSN'],
+          codes: ['M']
+        });
+      });
+      render(<IsolatedFailedMeasurementsDataGrid />);
+      await waitFor(() => {
+        expect((window as any).testEditFlowOverride).toBeDefined();
+      });
+    }
+
+    it('configures useEditPreviewFlow with failedmeasurements dataType', async () => {
+      await mountGridWithOptions();
+      expect(mockEditFlowArgs).toMatchObject({
+        dataType: 'failedmeasurements'
+      });
+      // Schema/plot/census may or may not be wired through the mocked contexts in unit tests;
+      // what matters for Task 15 is that the hook is configured with the correct dataType.
+      expect(mockEditFlowArgs).toHaveProperty('schema');
+      expect(mockEditFlowArgs).toHaveProperty('plotID');
+      expect(mockEditFlowArgs).toHaveProperty('censusID');
+    });
+
+    it('invokes editFlow.beginEdit with the failed measurement ID and the canonical diff only', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({
+        updatedIDs: { failedmeasurements: 123 },
+        applyErrors: [],
+        editOperationID: 555,
+        validationPending: false
+      });
+
+      // Reingest response (row has failure reasons, so no reingest fires — but be safe).
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'ok' })
+      });
+
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        tag: '011375',
+        stemTag: '5',
+        spCode: 'oldspecies',
+        quadrat: '0904',
+        x: 18.4,
+        y: 9.9,
+        dbh: 0,
+        hom: 0,
+        date: '1994-12-05',
+        codes: ''
+      };
+      const newRow = { ...oldRow, spCode: 'CRATSN', dbh: 12.0, hom: 1.3, codes: 'M', quadrat: '0101' };
+
+      await (window as any).testEditFlowOverride(newRow, oldRow);
+
+      expect(mockBeginEdit).toHaveBeenCalledTimes(1);
+      const [targetID, diff] = mockBeginEdit.mock.calls[0];
+      expect(targetID).toBe(123);
+      // Only canonical editable-field aliases should appear.
+      expect(diff).toEqual({
+        SpCode: 'CRATSN',
+        DBH: 12.0,
+        HOM: 1.3,
+        Codes: 'M',
+        Quadrat: '0101'
+      });
+      // id and failedMeasurementID should NOT be in the diff.
+      expect(Object.keys(diff)).not.toContain('id');
+      expect(Object.keys(diff)).not.toContain('failedMeasurementID');
+    });
+
+    it('shows the UndoToast with the returned editOperationID after a successful apply', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({
+        updatedIDs: { failedmeasurements: 123 },
+        applyErrors: [],
+        editOperationID: 777,
+        validationPending: false
+      });
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'ok' })
+      });
+
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        tag: '011375',
+        stemTag: '5',
+        spCode: 'oldspecies',
+        quadrat: '0101',
+        x: 18.4,
+        y: 9.9,
+        dbh: 12.0,
+        hom: 1.3,
+        date: '1994-12-05',
+        codes: 'M'
+      };
+      const newRow = { ...oldRow, dbh: 14.0 };
+
+      await (window as any).testEditFlowOverride(newRow, oldRow);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('undo-toast-777')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show UndoToast when the same save automatically reingests the row', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({
+        updatedIDs: { failedmeasurements: 123 },
+        applyErrors: [],
+        editOperationID: 888,
+        validationPending: false
+      });
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'reingest ok' })
+      });
+
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        tag: '011375',
+        stemTag: '5',
+        spCode: 'CRATSN',
+        quadrat: '0101',
+        x: 18.4,
+        y: 9.9,
+        dbh: 10.0,
+        hom: 1.3,
+        date: '1994-12-05',
+        codes: 'M'
+      };
+      const newRow = { ...oldRow, dbh: 12.0 };
+
+      await (window as any).testEditFlowOverride(newRow, oldRow);
+
+      await waitFor(() => {
+        const urls = (global.fetch as any).mock.calls.map(([url]: any[]) => url);
+        expect(urls.some((u: string) => u.includes('/api/reingestsinglefailure/') && u.endsWith('/123'))).toBe(true);
+      });
+      expect(screen.queryByTestId('undo-toast-888')).not.toBeInTheDocument();
+    });
+
+    it('skips beginEdit when the diff is empty but still handles reingest + refresh', async () => {
+      await mountGridWithOptions();
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'reingest ok' })
+      });
+
+      const row = {
+        id: 1,
+        failedMeasurementID: 123,
+        tag: '011375',
+        stemTag: '5',
+        spCode: 'CRATSN',
+        quadrat: '0101',
+        x: 18.4,
+        y: 9.9,
+        dbh: 12.0,
+        hom: 1.3,
+        date: '1994-12-05',
+        codes: 'M'
+      };
+
+      await (window as any).testEditFlowOverride({ ...row }, row);
+
+      expect(mockBeginEdit).not.toHaveBeenCalled();
+      // Reingest should have been invoked because computed reasons are empty.
+      const urls = (global.fetch as any).mock.calls.map(([url]: any[]) => url);
+      expect(urls.some((u: string) => u.includes('/api/reingestsinglefailure/') && u.endsWith('/123'))).toBe(true);
+    });
+
+    it('does not call the legacy /api/fixeddata PATCH endpoint', async () => {
+      await mountGridWithOptions();
+
+      mockBeginEdit.mockResolvedValue({
+        updatedIDs: { failedmeasurements: 123 },
+        applyErrors: [],
+        editOperationID: 1,
+        validationPending: false
+      });
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: 'ok' })
+      });
+
+      const oldRow = {
+        id: 1,
+        failedMeasurementID: 123,
+        spCode: 'old',
+        quadrat: '0101',
+        tag: '011375',
+        stemTag: '5',
+        x: 1,
+        y: 2,
+        dbh: 3,
+        hom: 4,
+        codes: '',
+        date: '1994-12-05'
+      };
+      const newRow = { ...oldRow, spCode: 'new' };
+
+      await (window as any).testEditFlowOverride(newRow, oldRow);
+
+      const fetchCalls = (global.fetch as any).mock.calls;
+      const patchCalls = fetchCalls.filter(([, init]: any[]) => init?.method === 'PATCH');
+      expect(patchCalls).toHaveLength(0);
+      const urls = fetchCalls.map(([url]: any[]) => url);
+      expect(urls.some((u: string) => u.includes('/api/fixeddata/failedmeasurements/'))).toBe(false);
     });
   });
 

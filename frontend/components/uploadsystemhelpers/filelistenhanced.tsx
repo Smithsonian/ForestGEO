@@ -10,6 +10,7 @@ import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 
 interface FileListEnhancedProps extends FileListProps {
   expectedHeaders?: string[];
+  validationHeaders?: string[];
   onDelimiterChange: (fileName: string, delimiter: string) => void;
   selectedDelimiters: Record<string, string>;
   onRemoveFile: (fileIndex: number) => void;
@@ -17,8 +18,17 @@ interface FileListEnhancedProps extends FileListProps {
 }
 
 export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
-  const { acceptedFiles, dataViewActive, setDataViewActive, expectedHeaders, onDelimiterChange, selectedDelimiters, onRemoveFile, onValidationStatusChange } =
-    props;
+  const {
+    acceptedFiles,
+    dataViewActive,
+    setDataViewActive,
+    expectedHeaders,
+    validationHeaders,
+    onDelimiterChange,
+    selectedDelimiters,
+    onRemoveFile,
+    onValidationStatusChange
+  } = props;
 
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
 
@@ -169,6 +179,7 @@ export function FileListEnhanced(props: Readonly<FileListEnhancedProps>) {
                   <FilePreviewCompact
                     file={file as File}
                     expectedHeaders={expectedHeaders}
+                    validationHeaders={validationHeaders}
                     onDelimiterChange={delimiter => onDelimiterChange(file.name, delimiter)}
                     initialDelimiter={selectedDelimiters[file.name]}
                     showPreview={expandedPreview[index]}

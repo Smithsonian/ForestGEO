@@ -1,7 +1,11 @@
 import { BlobServiceClient, BlobUploadCommonResponse, ContainerClient } from '@azure/storage-blob';
 import ailogger from '@/ailogger';
 
-export async function getContainerClient(containerName: string): Promise<ContainerClient> {
+interface GetContainerClientOptions {
+  createIfMissing?: boolean;
+}
+
+function getBlobServiceClient(): BlobServiceClient {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!storageAccountConnectionString) {
     const errorMsg = 'AZURE_STORAGE_CONNECTION_STRING environment variable is not set';
@@ -27,9 +31,19 @@ export async function getContainerClient(containerName: string): Promise<Contain
   }
 
   ailogger.info('blob service client created & connected');
+  return blobServiceClient;
+}
+
+export async function getContainerClient(containerName: string, options: GetContainerClientOptions = {}): Promise<ContainerClient> {
+  const { createIfMissing = true } = options;
+  const blobServiceClient = getBlobServiceClient();
 
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
+
+  if (!createIfMissing) {
+    return containerClient;
+  }
 
   try {
     // createIfNotExists returns { succeeded: true } if created, { succeeded: false } if already exists
@@ -72,7 +86,8 @@ export async function uploadValidFileAsBuffer(
   file: File,
   user: string,
   formType: string,
-  fileRowErrors: FileRowErrors[] = []
+  fileRowErrors: FileRowErrors[] = [],
+  blobFileName: string = file.name
 ): Promise<BlobUploadCommonResponse> {
   let buffer: Buffer;
   try {
@@ -117,7 +132,7 @@ export async function uploadValidFileAsBuffer(
     return newFileName;
   };
 
-  const newFileName = await generateNewFileName(file.name);
+  const newFileName = await generateNewFileName(blobFileName);
   ailogger.info(`Uploading blob: ${newFileName}`);
 
   // Prepare metadata

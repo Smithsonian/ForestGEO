@@ -6,6 +6,7 @@ import { useFilePreviewAnalysis, DELIMITER_OPTIONS } from './useFilePreviewAnaly
 interface FilePreviewCompactProps {
   file: File;
   expectedHeaders?: string[];
+  validationHeaders?: string[];
   onDelimiterChange: (delimiter: string) => void;
   initialDelimiter?: string;
   showPreview?: boolean;
@@ -15,6 +16,7 @@ interface FilePreviewCompactProps {
 export default function FilePreviewCompact({
   file,
   expectedHeaders,
+  validationHeaders,
   onDelimiterChange,
   initialDelimiter,
   showPreview = false,
@@ -22,7 +24,7 @@ export default function FilePreviewCompact({
 }: FilePreviewCompactProps) {
   const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, handleDelimiterChange } = useFilePreviewAnalysis({
     file,
-    expectedHeaders,
+    expectedHeaders: validationHeaders,
     onDelimiterChange,
     initialDelimiter
   });

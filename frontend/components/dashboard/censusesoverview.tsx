@@ -8,7 +8,8 @@
 'use client';
 
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, Skeleton, LinearProgress, IconButton } from '@mui/joy';
+import { Box, Card, CardContent, Typography, Chip, Stack, Avatar, LinearProgress, IconButton } from '@mui/joy';
+import { ContentSkeleton } from '@/components/loading';
 import { OrgCensusRDS, CensusDateRange } from '@/config/sqlrdsdefinitions/timekeeping';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import TimelineIcon from '@mui/icons-material/Timeline';
@@ -52,33 +53,7 @@ export interface CensusesOverviewProps {
 }
 
 function CensusCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: 180,
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-          <Skeleton variant="circular" width={48} height={48} />
-          <Skeleton variant="rectangular" width={90} height={24} sx={{ borderRadius: 'sm' }} />
-        </Box>
-        <Skeleton variant="text" width="50%" height={24} sx={{ mb: 0.5 }} />
-        <Skeleton variant="text" width="70%" height={18} sx={{ mb: 1.5 }} />
-        <Box sx={{ display: 'flex', gap: 0.5, mb: 1.5 }}>
-          <Skeleton variant="rectangular" width={70} height={20} sx={{ borderRadius: 'sm' }} />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }
 
 // Determine census status based on date ranges
@@ -175,7 +150,7 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
   return (
     /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
     <Card
-      component="article"
+      component={onSelect ? 'div' : 'article'}
       variant="solid"
       role={onSelect ? 'button' : undefined}
       tabIndex={onSelect ? 0 : undefined}
@@ -192,10 +167,9 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
           : undefined
       }
       sx={{
-        background: gradient,
+        background: `linear-gradient(90deg, transparent calc(100% - 13px), rgba(255,255,255,0.1) calc(100% - 13px), rgba(255,255,255,0.1) calc(100% - 10px), transparent calc(100% - 10px)), linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%, rgba(0,0,0,0.1) 100%), ${gradient}`,
         color: 'white',
         minHeight: 180,
-        position: 'relative',
         overflow: 'hidden',
         border: 'none',
         ...(onSelect && {
@@ -205,37 +179,10 @@ function CensusCard({ census, index, onDelete, onSelect }: CensusCardProps) {
             transform: 'translateY(-3px)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.2)'
           }
-        }),
-
-        // Decorative overlay
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%, rgba(0,0,0,0.1) 100%)',
-          pointerEvents: 'none'
-        }
+        })
       }}
     >
-      {/* Background decoration - timeline bar */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          bottom: 10,
-          width: 3,
-          opacity: 0.1,
-          background: 'white',
-          borderRadius: 2
-        }}
-      />
-
-      <CardContent sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
           <Avatar
             alt=""

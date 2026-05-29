@@ -582,6 +582,28 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'coreMeasurementID',
     headerName: '#',
     flex: 0.4,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotID',
+    headerName: 'Plot ID',
+    flex: 0.4,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusID',
+    headerName: 'Census ID',
+    flex: 0.4,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratID',
+    headerName: 'Quadrat ID',
+    flex: 0.4,
+    editable: false,
     filterable: false
   },
   {
@@ -595,7 +617,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'speciesID',
     headerName: 'Species ID',
     flex: 1,
-    editable: true,
+    editable: false,
     filterable: false
   },
   {
@@ -606,10 +628,24 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true
   },
   {
+    field: 'speciesName',
+    headerName: 'Species Name',
+    renderHeader: () => formatHeader('Species', 'Name'),
+    flex: 0.7,
+    editable: false
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'Subspecies Name',
+    renderHeader: () => formatHeader('Subspecies', 'Name'),
+    flex: 0.7,
+    editable: false
+  },
+  {
     field: 'treeID',
     headerName: 'Tree ID',
     flex: 1,
-    editable: true,
+    editable: false,
     filterable: false
   },
   {
@@ -623,7 +659,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'stemGUID',
     headerName: 'Stem ID',
     flex: 1,
-    editable: true,
+    editable: false,
     filterable: false
   },
   {

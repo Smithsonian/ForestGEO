@@ -71,13 +71,13 @@ describe('LoginLogout Component Tests', () => {
     MountWithMockedSession(mockAuthenticatedSession, 'authenticated');
 
     // Click user avatar to potentially open settings menu
-    cy.get('[aria-label="user avatar icon button"]').should('be.visible').click();
+    cy.get('[aria-label="JD, open user menu"]').should('be.visible').click();
   });
 
   it('handles keyboard navigation for avatar button', () => {
     MountWithMockedSession(mockAuthenticatedSession, 'authenticated');
 
-    cy.get('[aria-label="user avatar icon button"]').focus().type('{enter}');
+    cy.get('[aria-label="JD, open user menu"]').focus().type('{enter}');
   });
 
   it('displays proper accessibility labels', () => {

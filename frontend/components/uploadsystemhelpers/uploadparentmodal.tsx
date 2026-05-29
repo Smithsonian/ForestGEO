@@ -27,7 +27,7 @@ function getRevisionMatchLabel(formType: FormType): string {
     case FormType.quadrats:
       return 'QuadratName';
     case FormType.measurements:
-      return 'tag + stemtag + quadrat';
+      return 'StemGUID or TreeTag + StemTag';
     default:
       return 'matching key';
   }
@@ -35,7 +35,7 @@ function getRevisionMatchLabel(formType: FormType): string {
 
 export default function UploadParentModal(props: UPMProps) {
   const { formType, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
-  const requiresModeSelection = !skipToProcessing && formType !== FormType.measurements;
+  const requiresModeSelection = !skipToProcessing;
   const revisionMatchLabel = getRevisionMatchLabel(formType);
   const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
 

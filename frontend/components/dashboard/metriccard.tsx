@@ -7,11 +7,12 @@
 
 'use client';
 
-import { Card, Box, Typography, Avatar, Skeleton } from '@mui/joy';
+import { Card, Box, Typography, Avatar } from '@mui/joy';
 import { designTokens } from '@/config/design-tokens';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import React, { ReactNode } from 'react';
+import { ContentSkeleton } from '@/components/loading';
 
 export interface MetricCardProps {
   title: string;
@@ -42,13 +43,12 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
   const formattedValue = typeof value === 'number' ? value.toLocaleString() : value;
 
   const cardStyles = {
-    background: gradients[gradient],
+    background: `radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%), ${gradients[gradient]}`,
     color: 'white',
     minHeight: '160px',
     display: 'flex',
     flexDirection: 'column' as const,
     justifyContent: 'space-between',
-    position: 'relative' as const,
     overflow: 'hidden' as const,
     cursor: onClick ? 'pointer' : 'default',
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -69,24 +69,12 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
     '&:active': {
       transform: 'translateY(-1px)',
       boxShadow: designTokens.shadows.lg
-    },
-
-    // Subtle pattern overlay
-    '&::before': {
-      content: '""',
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'radial-gradient(circle at 100% 0%, rgba(255,255,255,0.1) 0%, transparent 50%)',
-      pointerEvents: 'none'
     }
   };
 
   const cardContent = (
     <>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box>
           <Typography
             level="body-sm"
@@ -138,8 +126,6 @@ function MetricCard({ title, value, icon, gradient = 'primary', trend, isLoading
             gap: 1,
             alignItems: 'center',
             mt: 2,
-            position: 'relative',
-            zIndex: 1,
             backgroundColor: 'rgba(0, 0, 0, 0.15)',
             backdropFilter: 'blur(4px)',
             borderRadius: 'sm',
@@ -209,35 +195,8 @@ export default React.memo(MetricCard, (prevProps, nextProps) => {
 });
 
 /**
- * Skeleton loader for metric cards
+ * Skeleton loader for metric cards — delegates to the shared ContentSkeleton primitive.
  */
 export function MetricCardSkeleton() {
-  return (
-    <Card
-      variant="soft"
-      sx={{
-        minHeight: '160px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.02) 50%, rgba(0,0,0,0.06) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'shimmer 1.5s infinite',
-        '@keyframes shimmer': {
-          '0%': { backgroundPosition: '200% 0' },
-          '100%': { backgroundPosition: '-200% 0' }
-        }
-      }}
-    >
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Box sx={{ flex: 1 }}>
-          <Skeleton variant="text" width="60%" height={20} sx={{ mb: 2 }} />
-          <Skeleton variant="text" width="80%" height={40} />
-        </Box>
-        <Skeleton variant="circular" width={56} height={56} />
-      </Box>
-
-      <Skeleton variant="text" width="40%" height={20} />
-    </Card>
-  );
+  return <ContentSkeleton kind="dashboard-card" />;
 }

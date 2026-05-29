@@ -175,6 +175,20 @@ describe('GET /api/fixeddata/[dataType]/[[...slugs]]', () => {
     expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[100,50\]/);
   });
 
+  it('viewfulltable: uses deterministic CoreMeasurementID ordering for paginated chunks', async () => {
+    const cm = (ConnectionManager as any).getInstance();
+    const exec = vi.spyOn(cm, 'executeQuery');
+
+    exec.mockResolvedValueOnce([{ CoreMeasurementID: 10 }]).mockResolvedValueOnce([{ totalRows: 1 }]);
+
+    const res = await GET({} as any, makeProps('viewfulltable', ['myschema', '0', '25', '7', '3']));
+    expect(res.status).toBe(HTTPResponses.OK);
+    const body = await res.json();
+
+    expect(String(body.finishedQuery)).toMatch(/ORDER BY CoreMeasurementID ASC/i);
+    expect(String(body.finishedQuery)).toMatch(/::PARAMS:\[7,3,0,25\]/);
+  });
+
   it('returns 400 for unknown dataType', async () => {
     const res = await GET({} as any, makeProps('not-a-table', ['myschema', '0', '25', '1', '1']));
     expect(res.status).toBe(HTTPResponses.INVALID_REQUEST);

@@ -2,7 +2,7 @@
 # =============================================================================
 # Unified Measurements Migration Runner
 # =============================================================================
-# Runs migrations 16-53 in order against a target schema.
+# Runs migrations 16-58 in order against a target schema.
 # Takes a full schema backup before starting and restores on failure.
 #
 # Usage:
@@ -22,6 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STORED_PROCEDURES_FILE="$REPO_ROOT/sqlscripting/storedprocedures.sql"
+CATALOG_PROVISIONING_FILE="$REPO_ROOT/sqlscripting/catalog-provisioning-tables.sql"
 MIGRATION_TRACKING_TABLE="_migration_log"
 BACKUP_DIR="$SCRIPT_DIR/backups"
 
@@ -64,6 +65,11 @@ ORDERED_MIGRATIONS=(
     "51_backfill_hard_failure_error_log.sql"
     "52_fix_validation14_rawcodes_replay.sql"
     "53_reapply_validation14_rawcodes_replay.sql"
+    "54_create_edit_operations.sql"
+    "55_extend_edit_operations_bulk_rows.sql"
+    "56_relax_edit_operations_target_id.sql"
+    "57_backfill_measurementssummary_stemguid.sql"
+    "58_refresh_rawcodes_empty_token_handling.sql"
 )
 
 # ---------------------------------------------------------------------------
@@ -129,7 +135,7 @@ if [[ -n "$DB_PASSWORD" ]]; then
 fi
 
 run_sql() {
-    mysql "${MYSQL_BASE_ARGS[@]}" "$SCHEMA" -e "$1"
+    mysql "${MYSQL_BASE_ARGS[@]}" "${@:2}" "$SCHEMA" -e "$1"
 }
 
 run_sql_file() {
@@ -282,6 +288,21 @@ deploy_stored_procedures() {
     log_success "Stored procedures deployed."
 }
 
+deploy_catalog_provisioning_tables() {
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Catalog provisioning DDL not found: $CATALOG_PROVISIONING_FILE"
+        return 1
+    fi
+    local start_time
+    start_time=$(date +%s)
+    log_info "Ensuring catalog provisioning tables exist..."
+    run_sql_file "$CATALOG_PROVISIONING_FILE"
+    local end_time
+    end_time=$(date +%s)
+    mark_applied "catalog::provisioning_tables.sql" "$(( end_time - start_time ))"
+    log_success "Catalog provisioning tables are present."
+}
+
 # ---------------------------------------------------------------------------
 # Run migrations
 # ---------------------------------------------------------------------------
@@ -299,6 +320,11 @@ main() {
     if [[ ! -f "$STORED_PROCEDURES_FILE" ]]; then
         log_error "Missing: $STORED_PROCEDURES_FILE"
         log_error "This file is required after migration 23. Aborting."
+        exit 1
+    fi
+    if [[ ! -f "$CATALOG_PROVISIONING_FILE" ]]; then
+        log_error "Missing: $CATALOG_PROVISIONING_FILE"
+        log_error "This file is required for admin site provisioning. Aborting."
         exit 1
     fi
 
@@ -328,16 +354,18 @@ main() {
         migrations_to_run+=("$file")
     done
 
-    if [[ ${#migrations_to_run[@]} -eq 0 ]]; then
-        log_success "All migrations already applied. Nothing to do."
-        exit 0
-    fi
-
     echo ""
-    log_info "Migrations to apply (${#migrations_to_run[@]}):"
-    for file in "${migrations_to_run[@]}"; do
-        echo "         $file"
-    done
+    log_info "Catalog provisioning DDL:"
+    echo "         always: catalog-provisioning-tables.sql"
+    echo ""
+    if [[ ${#migrations_to_run[@]} -eq 0 ]]; then
+        log_info "Site migrations to apply: 0 (all already applied)"
+    else
+        log_info "Migrations to apply (${#migrations_to_run[@]}):"
+        for file in "${migrations_to_run[@]}"; do
+            echo "         $file"
+        done
+    fi
     echo ""
 
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -356,7 +384,15 @@ main() {
     local failed_migration=""
     local applied_count=0
 
+    if ! deploy_catalog_provisioning_tables; then
+        failed_migration="catalog-provisioning-tables.sql"
+    fi
+
     for file in "${migrations_to_run[@]}"; do
+        if [[ -n "$failed_migration" ]]; then
+            break
+        fi
+
         local filepath="$SCRIPT_DIR/$file"
 
         if [[ ! -f "$filepath" ]]; then
@@ -384,7 +420,7 @@ main() {
         applied_count=$((applied_count + 1))
 
         # Some migrations rely on the canonical storedprocedures.sql deployment
-        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" || "$file" == "49_add_duplicate_tag_stemtag_detection.sql" ]]; then
+        if [[ "$file" == "23_update_bulkingestionprocess.sql" || "$file" == "33_refresh_measurements_summary_procedure.sql" || "$file" == "48_refresh_bulkingestionprocess_ambiguous_reference_resolution.sql" || "$file" == "49_add_duplicate_tag_stemtag_detection.sql" || "$file" == "58_refresh_rawcodes_empty_token_handling.sql" ]]; then
             log_info "Migration $file requires a stored procedure redeploy. Deploying stored procedures..."
             if ! deploy_stored_procedures; then
                 log_error "Stored procedure deployment failed after $file."

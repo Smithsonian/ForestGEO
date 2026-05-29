@@ -12,6 +12,7 @@
  */
 
 import { PoolConnection } from 'mysql2/promise';
+import { createHash } from 'node:crypto';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import ailogger from '@/ailogger';
 import ConnectionManager from './connectionmanager';
@@ -251,8 +252,9 @@ export function generateIdempotencyKey(schema: string, plotId: number, censusId:
   return `${schema}_${plotId}_${censusId}_${fileHash}`;
 }
 
-export function generateUploadSessionIdempotencyKey(schema: string, plotId: number, censusId: number, fileHash: string, mode?: string): string {
-  return [schema, plotId, censusId, fileHash, mode || 'mode:unspecified'].join('#');
+export function generateUploadSessionIdempotencyKey(schema: string, plotId: number, censusId: number, userId: string, fileHash: string, mode?: string): string {
+  const rawKey = JSON.stringify([schema, plotId, censusId, userId.trim().toLowerCase(), fileHash, mode || 'mode:unspecified']);
+  return `upload:${createHash('sha256').update(rawKey).digest('hex')}`;
 }
 
 function buildCreateUploadSessionInsertValues(

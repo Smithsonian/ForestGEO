@@ -1,0 +1,185 @@
+---
+title: Site Provisioning
+description: Stand up a new ForestGEO site, plot, census, and quadrat grid through the in-app wizard.
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import ProcessFlow from '../../../components/ProcessFlow.astro';
+import ConceptCard from '../../../components/ConceptCard.astro';
+import Scenario from '../../../components/Scenario.astro';
+
+Standing up a new ForestGEO site used to be a sequence of manual SQL steps run against the database by an engineer. As of **May 2026**, provisioning happens entirely in the app through a guided wizard at **`/admin/provision`** — admins fill out four short forms and the system handles the schema creation, table seeding, validations, catalog registration, and quadrat generation in one transactional run.
+
+:::note
+Site provisioning is restricted to users with the **global** role. If you don't see the option in the admin sidebar, you don't have access.
+:::
+
+<ConceptCard
+  title="What the wizard does for you"
+  color="green"
+  description="One in-app run replaces what used to be ~14 manual SQL steps across two schemas, plus the table/procedure scripts and the unified-measurements migrations."
+  keyPoints={[
+    'Creates the dedicated MySQL schema (forestgeo_<slug>)',
+    'Initialises all core tables, stored procedures, and current migrations',
+    'Seeds default validations and post-validation queries',
+    'Registers the site in the catalog so it appears in the site selector',
+    'Creates the first plot and the first census',
+    'Generates the quadrat grid from your dimensions (or imports a CSV layout)',
+    'Records the run for audit and supports retry / abort if anything fails'
+  ]}
+/>
+
+## The four-step wizard
+
+<ProcessFlow
+  title="Provisioning steps"
+  direction="horizontal"
+  steps={[
+    { label: 'Site' },
+    { label: 'Plot' },
+    { label: 'Quadrats' },
+    { label: 'Review' }
+  ]}
+/>
+
+### 1 · Site
+
+The first step captures the catalog-level metadata.
+
+| Field | What it is | Notes |
+|---|---|---|
+| **Site name** | Display name shown in the site selector | e.g. `Rabi` |
+| **Schema name** | The MySQL schema that will hold this site's data | Lowercase letters, numbers, underscores only. Must start with `forestgeo_` — e.g. `forestgeo_rabi` |
+| **Location** | Locality | Free text |
+| **Country** | Country name | Free text |
+| **Subquadrat dimensions** | `SQDimX` × `SQDimY` | Defaults to 5 × 5 |
+| **Default DBH unit** | `mm` (most common) | Used for upload parsing |
+| **Default HOM unit** | `m` (most common) | Used for upload parsing |
+| **Double data entry** | Whether measurements must be entered twice to be accepted | Off by default |
+
+:::caution
+**Schema name is permanent.** Once provisioning succeeds, you can't rename the schema from the UI. Pick a slug that will read well years from now.
+:::
+
+### 2 · Plot
+
+Define the first plot for the new site. You can always add more plots later — this is just the one that gets created during provisioning.
+
+| Field | Notes |
+|---|---|
+| **Plot name** | Must be unique across the site |
+| **Dimensions X × Y** | Plot size in metres (or whatever you set as the default coordinate unit) |
+| **Area** | Computed automatically from dimensions |
+| **Global X / Y / Z** | The plot's origin coordinates — used by location-based validations |
+| **Plot shape** | `square` by default; the only validated geometry today |
+| **Default units** | Dimension, coordinate, area, DBH, and HOM units. Defaults to metric |
+
+### 3 · Quadrats
+
+Two modes are available:
+
+<CardGrid>
+  <Card title="Grid mode (regular plots)">
+    Specify a quadrat size (e.g. 20 × 20 m) and the wizard will tile the plot automatically. The plot dimensions must be evenly divisible by the quadrat size — if they aren't, switch to CSV mode.
+  </Card>
+  <Card title="CSV mode (irregular plots)">
+    Upload a CSV of quadrats with `startX`, `startY`, `dimensionX`, `dimensionY`, and `quadratName` columns. The wizard validates that no quadrats overlap and that all of them fall inside the plot.
+  </Card>
+</CardGrid>
+
+Both modes show a live preview of the layout and surface any geometric problems (overlaps, out-of-bounds rows, non-divisible plot dimensions) before you can advance.
+
+:::tip
+For most established ForestGEO sites the standard 20 × 20 m quadrat grid is correct — start with Grid mode. CSV mode exists for sites that already have an irregular historical layout you want to preserve.
+:::
+
+### 4 · Review
+
+The final step summarises everything you entered. Submit to start the run.
+
+<Scenario
+  icon="info"
+  title="What happens after Submit"
+  cause="The wizard kicks off a server-side provisioning run. Each step is recorded so the system can resume or abort cleanly if anything goes wrong."
+  steps={[
+    'A run row is created with a unique runId; you can watch progress on /admin/provision/[runId].',
+    'The schema is created and tables, procedures, and migrations applied in order.',
+    'Default validations and post-validation queries are seeded.',
+    'The site is registered in catalog.sites and the first plot + census are inserted.',
+    'Quadrats are generated from your layout.',
+    'The run is marked completed and the site appears in the selector for global users immediately.'
+  ]}
+  outcome="The new site is fully usable: select it from the sidebar, pick the plot and census, and you can begin uploading supporting data (taxonomy, personnel, attributes) and measurements."
+/>
+
+## Watching and managing runs
+
+Visit **`/admin/provision/runs`** for a table of every provisioning run with its status and timestamps.
+
+| Status | Meaning |
+|---|---|
+| **running** | Currently in progress — open the run page to watch step-by-step progress |
+| **completed** | Finished successfully; site is live |
+| **failed** | A step errored. Open the run to see which step and the error message |
+| **aborted** | A user clicked Abort during the run |
+
+A heartbeat worker keeps long-running provisioning alive even across app server restarts; if a run is mid-flight when the server bounces, it will be picked back up automatically.
+
+### Retry and abort
+
+If a run **fails**, the failure detail tells you exactly which step errored. After fixing the underlying cause (e.g. a database connectivity blip), you can retry from the failed step rather than starting over — the steps that already succeeded are not re-run.
+
+**Abort** is available while a run is `running`. It tears down anything that was created in that run transactionally — there are no orphaned half-provisioned schemas left behind.
+
+## Deleting a provisioned site
+
+Sites created through the wizard can be **deleted** from the run's status page (`/admin/provision/[runId]`) using the **Delete provisioned site** button. This drops the entire site schema and removes the catalog entry — it is irreversible.
+
+:::danger
+Deleting a site **destroys every measurement, plot, census, quadrat, and supporting data row** in that schema. There is no undo. Make sure you have a backup if there's any chance you'll need the data later.
+:::
+
+### What "Delete provisioned site" does
+
+1. Verifies the run is in **completed** status — you cannot tear down a run that's still `running`, `failed`, or `aborted` from this button. For those states, use **Abort** (running) or **Retry / Mark failed** as appropriate.
+2. Asks you to **type the exact schema name** (e.g. `forestgeo_rabi`) into the confirmation dialog. This is intentional — a single click can't trigger a teardown.
+3. Runs in a single transaction:
+   - DELETE the row from `catalog.sites`
+   - DELETE any rows in `catalog.usersiterelations` that referenced the site
+   - COMMIT
+   - **DROP DATABASE** for the schema (only after the catalog commit succeeds)
+4. Logs the teardown to the provisioning audit trail with the username and run ID.
+
+Putting the `DROP DATABASE` after the catalog commit guarantees there is **never** a state where the catalog still references a missing schema (no orphans). If anything before the commit fails, nothing has changed and a retry is safe.
+
+### What this **cannot** delete
+
+The teardown button is scoped to **sites that were provisioned through the wizard**. Sites that pre-date the provisioning system don't have a provisioning run associated with them and cannot be deleted from this UI. To remove a legacy site, coordinate with engineering — the catalog row and the underlying schema have to be removed manually with the same `catalog delete → commit → drop schema` order.
+
+### When you'd actually use this
+
+- A test site you stood up to validate the wizard and never plan to use.
+- A provisioning run that was completed but used the wrong schema slug; rather than living with the typo forever, delete and re-provision with the correct name.
+- A pilot site whose data has already been exported elsewhere and is no longer needed in the live app.
+
+For anything else — a site you want to *empty* without destroying — use **partial census deletion** from the census overview instead. That clears measurements while preserving the site, plot, and supporting data.
+
+## What still needs to happen manually after provisioning
+
+The wizard sets up the **structure**; the **content** still needs to be loaded:
+
+1. **Taxonomy** — load family, genus, species, and any species limits via the standard upload flow.
+2. **Personnel & roles** — add the researchers who will be working in this site.
+3. **Attributes** — load the site's attribute/stem code definitions.
+4. **User access** — for non-global users, add `catalog.usersiterelations` rows so they can see the new site (this is on the admin Users → Sites page).
+5. **Measurements** — once supporting data is in place, you can upload the first census's measurements through the normal upload flow.
+
+## Legacy CTFS import
+
+If the new site is being created from a **CTFS legacy `stable_*` schema**, do **not** use the provisioning wizard. The CTFS path is destructive to the target schema and runs a different migration sequence. Coordinate with engineering — there's a separate CLI runner that handles legacy imports.
+
+<CardGrid stagger>
+  <LinkCard title="Quick Start" href="/ForestGEO/quick-start/" description="Two-page visual tour of site → plot → census, import, and edit." />
+  <LinkCard title="Getting Started" href="/ForestGEO/getting-started/" description="Long-form walkthrough of every selection screen." />
+  <LinkCard title="Upload Process Breakdown" href="/ForestGEO/upload-process-breakdown/" description="What happens once you start uploading measurements." />
+</CardGrid>

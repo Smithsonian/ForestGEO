@@ -185,10 +185,9 @@ describe('ProgressCard Component', () => {
 
   describe('Loading State', () => {
     it('should render skeleton when isLoading is true', () => {
-      const { container } = render(<ProgressCard {...defaultProps} isLoading={true} />);
+      render(<ProgressCard {...defaultProps} isLoading={true} />);
 
-      const skeletons = container.querySelectorAll('.MuiSkeleton-root');
-      expect(skeletons.length).toBeGreaterThan(0);
+      expect(screen.getByTestId('skeleton-dashboard-card')).toBeInTheDocument();
     });
 
     it('should render content when isLoading is false', () => {
@@ -263,38 +262,37 @@ describe('ProgressCard Component', () => {
 });
 
 describe('ProgressCardSkeleton Component', () => {
-  it('should render skeleton placeholders', () => {
+  it('should render the shared dashboard-card skeleton', () => {
+    render(<ProgressCardSkeleton />);
+
+    expect(screen.getByTestId('skeleton-dashboard-card')).toBeInTheDocument();
+  });
+
+  it('should render skeleton placeholders inside the dashboard-card skeleton', () => {
     const { container } = render(<ProgressCardSkeleton />);
 
     const skeletons = container.querySelectorAll('.MuiSkeleton-root');
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
-  it('should match card dimensions', () => {
+  it('should render a card element', () => {
     const { container } = render(<ProgressCardSkeleton />);
 
     const card = container.querySelector('.MuiCard-root');
     expect(card).toBeInTheDocument();
   });
 
-  it('should render circular skeleton for progress ring', () => {
+  it('should render circular skeleton for icon', () => {
     const { container } = render(<ProgressCardSkeleton />);
 
     const circularSkeleton = container.querySelector('.MuiSkeleton-variantCircular');
     expect(circularSkeleton).toBeInTheDocument();
   });
 
-  it('should render text skeletons for header', () => {
+  it('should render multiple text skeletons', () => {
     const { container } = render(<ProgressCardSkeleton />);
 
     const textSkeletons = container.querySelectorAll('.MuiSkeleton-variantText');
     expect(textSkeletons.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('should render rectangular skeletons for chips', () => {
-    const { container } = render(<ProgressCardSkeleton />);
-
-    const rectSkeletons = container.querySelectorAll('.MuiSkeleton-variantRectangular');
-    expect(rectSkeletons.length).toBeGreaterThanOrEqual(2);
   });
 });

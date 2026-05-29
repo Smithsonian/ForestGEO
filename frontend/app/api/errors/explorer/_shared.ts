@@ -23,6 +23,10 @@ interface RawErrorOccurrenceRow {
   QuadratID?: number | null;
   TreeID?: number | null;
   StemGUID?: number | null;
+  // Authoritative coremeasurements.StemGUID. Distinct from ms.StemGUID (which
+  // can be stale): null means the row failed ingestion and lives in the
+  // failedmeasurements edit surface.
+  CoreStemGUID: number | null;
   SpeciesID?: number | null;
   TreeTag?: string | null;
   StemTag?: string | null;
@@ -145,6 +149,7 @@ function buildRawErrorsQuery(schema: string): string {
             ms.QuadratID,
             ms.TreeID,
             ms.StemGUID,
+            cm.StemGUID AS CoreStemGUID,
             ms.SpeciesID,
             ms.TreeTag,
             ms.StemTag,
@@ -318,7 +323,8 @@ function groupErrorRows(rawRows: RawErrorOccurrenceRow[], contradictionMap: Map<
           : null,
         relatedMeasurementIDs: visibleContradictions.relatedMeasurementIDs,
         uploadFileID: rawRow.UploadFileID ?? null,
-        uploadBatchID: rawRow.UploadBatchID ?? null
+        uploadBatchID: rawRow.UploadBatchID ?? null,
+        isFailedRow: rawRow.CoreStemGUID === null
       };
       grouped.set(measurementID, {
         baseRow,
@@ -420,7 +426,12 @@ function sortRows(a: GroupedErrorRow, b: GroupedErrorRow): number {
   const errorCountDelta = b.allErrors.length - a.allErrors.length;
   if (errorCountDelta !== 0) return errorCountDelta;
 
-  return (a.baseRow.measurementDate ?? '').localeCompare(b.baseRow.measurementDate ?? '');
+  const dateDelta = (a.baseRow.measurementDate ?? '').localeCompare(b.baseRow.measurementDate ?? '');
+  if (dateDelta !== 0) return dateDelta;
+
+  const aID = a.baseRow.coreMeasurementID ?? Number.MAX_SAFE_INTEGER;
+  const bID = b.baseRow.coreMeasurementID ?? Number.MAX_SAFE_INTEGER;
+  return aID - bID;
 }
 
 function buildSummary(rows: GroupedErrorRow[], filters: ErrorExplorerFilters): ErrorExplorerQueryResponse['summary'] {

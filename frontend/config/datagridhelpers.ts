@@ -193,6 +193,9 @@ export interface IsolatedDataGridCommonProps {
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
   adminEmail?: string;
+  editFlowOverride?: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
+  enablePageJump?: boolean;
+  enableInfiniteScroll?: boolean;
 }
 
 export interface DataGridCommonProps {
@@ -277,6 +280,8 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: DynamicButton[];
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
+  enablePageJump?: boolean;
+  enableInfiniteScroll?: boolean;
 }
 
 export const failureErrorMapping: Record<string, string[]> = {

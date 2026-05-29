@@ -28,6 +28,7 @@ interface ComparisonFieldDefinition {
   key: keyof ComparableRow;
   label: string;
   showFor: 'all' | 'same_batch_conflict';
+  format?: 'decimal';
 }
 
 const COMPARISON_FIELDS: ComparisonFieldDefinition[] = [
@@ -36,19 +37,25 @@ const COMPARISON_FIELDS: ComparisonFieldDefinition[] = [
   { key: 'speciesCode', label: 'Species', showFor: 'all' },
   { key: 'quadratName', label: 'Quadrat', showFor: 'all' },
   { key: 'measurementDate', label: 'Date', showFor: 'all' },
-  { key: 'stemLocalX', label: 'X', showFor: 'all' },
-  { key: 'stemLocalY', label: 'Y', showFor: 'all' },
-  { key: 'measuredDBH', label: 'DBH', showFor: 'all' },
-  { key: 'measuredHOM', label: 'HOM', showFor: 'all' },
+  { key: 'stemLocalX', label: 'X', showFor: 'all', format: 'decimal' },
+  { key: 'stemLocalY', label: 'Y', showFor: 'all', format: 'decimal' },
+  { key: 'measuredDBH', label: 'DBH', showFor: 'all', format: 'decimal' },
+  { key: 'measuredHOM', label: 'HOM', showFor: 'all', format: 'decimal' },
   { key: 'uploadBatchID', label: 'Upload batch', showFor: 'same_batch_conflict' }
 ];
 
-function formatComparisonValue(value: ComparableRow[keyof ComparableRow]): string {
+function formatComparisonValue(value: ComparableRow[keyof ComparableRow], format?: ComparisonFieldDefinition['format']): string {
   if (value === null || value === undefined || value === '') {
     return 'No value';
   }
+  if (format === 'decimal') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric.toFixed(2);
+    }
+  }
   if (typeof value === 'number') {
-    return Number.isInteger(value) ? String(value) : value.toFixed(3);
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
   if (Array.isArray(value)) {
     return value.length > 0 ? value.join(', ') : 'No value';
@@ -247,10 +254,10 @@ export default function ContradictionComparisonPanel({
                   </Typography>
                 </td>
                 <td>
-                  <Typography level="body-sm">{formatComparisonValue(selectedComparisonRow[field.key])}</Typography>
+                  <Typography level="body-sm">{formatComparisonValue(selectedComparisonRow[field.key], field.format)}</Typography>
                 </td>
                 <td>
-                  <Typography level="body-sm">{formatComparisonValue(comparisonRow[field.key])}</Typography>
+                  <Typography level="body-sm">{formatComparisonValue(comparisonRow[field.key], field.format)}</Typography>
                 </td>
                 <td>
                   <Chip size="sm" color={different ? 'warning' : 'neutral'} variant={different ? 'solid' : 'soft'}>

@@ -26,7 +26,6 @@ import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal'
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList, reconcileCurrentCensusSelection } from '@/config/sqlrdsdefinitions/timekeeping';
-import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
 import ailogger from '@/ailogger';
 // Eager load for maximum speed (bundle size not a concern)
@@ -93,7 +92,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   // - plotID=0 and censusNumber=0 means "no filter" (fetch all)
   // - schema="" (empty) fetches across all schemas
   const fetchSiteListFn = useCallback(async () => {
-    if (!session) return;
+    if (!session || session.user.permissionsUnavailable) return;
     siteListLoad.setLoading();
     try {
       const sites = session?.user?.allsites ?? [];
@@ -212,6 +211,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     preventDuplicates: true
   });
 
+  useEffect(() => {
+    if (session?.user?.permissionsUnavailable) {
+      redirect('/loginfailed?reason=permissions-unavailable');
+    }
+  }, [session?.user?.permissionsUnavailable]);
+
   // Fetch site list after hydration when session exists
   // IMPORTANT: Wait for Zustand hydration before fetching to avoid race conditions
   useEffect(() => {
@@ -268,6 +273,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
 
     if (manualReset) {
+      // destructive mutation — global overlay blocks UI for the duration of the API call
       setLoading(true, 'Manual refresh beginning...');
 
       clearContexts()
@@ -454,7 +460,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             boxSizing: 'border-box'
           }}
         >
-          {session && <>{children}</>}
+          {session && !session.user.permissionsUnavailable && <>{children}</>}
         </Box>
         <Divider orientation="horizontal" />
         <Box
@@ -487,7 +493,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 justifyContent: 'center'
               }}
             >
-              <AcaciaVersionTypography>{siteConfig.name}</AcaciaVersionTypography>
+              {siteConfig.name}
             </Typography>
           </Stack>
           <IconButton

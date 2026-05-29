@@ -198,6 +198,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
         query = `SELECT
+                  cm.CoreMeasurementID                                AS CoreMeasurementID,
                   st.StemGUID                                         AS StemGUID,
                   t.TreeID                                            AS TreeID,
                   st.StemTag                                          AS StemTag,
@@ -214,6 +215,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
                     FROM ${schema}.cmattributes ca
                     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
                   ) as Codes,
+                  cm.Description                                      AS Comments,
                   (SELECT GROUP_CONCAT(
                             COALESCE(
                               NULLIF(CONCAT_WS(': ', NULLIF(vp.ProcedureName, ''), NULLIF(vp.Description, '')), ''),
@@ -245,6 +247,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
+          measurementID: row.CoreMeasurementID,
           stemID: row.StemGUID,
           treeID: row.TreeID,
           tag: row.TreeTag,
@@ -257,6 +260,7 @@ async function handleRequest(request: NextRequest, props: RouteProps, body?: any
           hom: row.MeasuredHOM,
           date: row.MeasurementDate,
           codes: row.Codes,
+          comments: row.Comments,
           errors: row.Errors
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });

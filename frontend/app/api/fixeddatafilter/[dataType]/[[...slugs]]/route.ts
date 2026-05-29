@@ -323,9 +323,13 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
           {
             const visibleClause = buildMeasurementVisibleClauseSql(schema, 'vft', filterModel.visible);
-            const validTss = filterModel.tss.filter(tss => ['multi stem', 'old tree', 'new recruit'].includes(tss));
+            const ALL_TSS_STATES = ['multi stem', 'old tree', 'new recruit'] as const;
+            const validTss = filterModel.tss.filter(tss => (ALL_TSS_STATES as readonly string[]).includes(tss));
+            // Rows without an assigned tree-stem-state (hard-fail ingestion rows carry NULL
+            // UserDefinedFields) would be excluded by JSON_CONTAINS. Skip the clause when every
+            // state is selected so those rows remain visible alongside state-carrying rows.
             const tssClause =
-              validTss.length > 0
+              validTss.length > 0 && validTss.length < ALL_TSS_STATES.length
                 ? ` AND (${validTss.map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`).join(' OR ')})`
                 : ``;
             const filterClause = searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : '';
@@ -354,7 +358,8 @@ export async function POST(
             paginatedQuery = `
             SELECT *
             FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
-              ${filterClause} `;
+              ${filterClause}
+            ORDER BY CoreMeasurementID ASC `;
             countQuery = `
             SELECT COUNT(*) as totalRows
             FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?

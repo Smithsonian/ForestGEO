@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GridLogicOperator } from '@mui/x-data-grid';
 import { getMeasurementCsvErrorValue } from './measurementsexportutils';
 import {
   areGridSortModelsEqual,
+  buildEditableFieldsDiff,
+  buildEditableFieldsDiffWithMetaForSurface,
   buildMeasurementTssFilters,
   buildMeasurementVisibleFilters,
   createResetValidationErrorsQuery,
   createResetValidationStatesQuery,
   mergeMeasurementFilterModel,
   shouldRefreshMeasurementsAfterValidationTransition,
-  shouldUseAutoMeasurementRowHeight
+  shouldUseAutoMeasurementRowHeight,
+  toServerMeasurementFilterModel
 } from './measurementscommonsutils';
 
 describe('MeasurementsCommons - Bug Fix Tests', () => {
@@ -88,6 +92,62 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
       expect(nextModel).toBe(previousModel);
     });
 
+    it('removes incomplete draft filter items and empty quick-filter values from the server model', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [
+            { id: 12, field: 'speciesCode', operator: 'contains', value: ' ACRU ' },
+            { id: 13, field: 'treeTag', operator: 'contains', value: '' },
+            { id: 14, field: '', operator: 'contains', value: 'TREE101' }
+          ],
+          quickFilterValues: ['TREE101', '   '],
+          quickFilterExcludeHiddenColumns: true,
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        })
+      ).toEqual({
+        items: [{ field: 'speciesCode', operator: 'contains', value: ' ACRU ' }],
+        quickFilterValues: ['TREE101'],
+        quickFilterExcludeHiddenColumns: true,
+        visible: ['errors', 'valid', 'pending'],
+        tss: ['old tree', 'multi stem', 'new recruit']
+      });
+    });
+
+    it('drops quick-filter metadata when there is no active quick filter', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [],
+          quickFilterValues: [],
+          quickFilterExcludeHiddenColumns: true,
+          quickFilterLogicOperator: GridLogicOperator.And,
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        })
+      ).toEqual({
+        items: [],
+        quickFilterValues: [],
+        visible: ['errors', 'valid', 'pending'],
+        tss: ['old tree', 'multi stem', 'new recruit']
+      });
+    });
+
+    it('keeps valueless operators as active server filters', () => {
+      expect(
+        toServerMeasurementFilterModel({
+          items: [{ id: 15, field: 'description', operator: 'isEmpty' }],
+          quickFilterValues: [],
+          visible: ['errors'],
+          tss: ['old tree']
+        })
+      ).toEqual({
+        items: [{ field: 'description', operator: 'isEmpty', value: undefined }],
+        quickFilterValues: [],
+        visible: ['errors'],
+        tss: ['old tree']
+      });
+    });
+
     it('builds stable visible and tree-state filters from toggle state', () => {
       expect(buildMeasurementVisibleFilters(true, true, true)).toEqual(['errors', 'valid', 'pending']);
       expect(buildMeasurementVisibleFilters(true, false, true)).toEqual(['errors', 'pending']);
@@ -145,6 +205,151 @@ describe('MeasurementsCommons - Bug Fix Tests', () => {
         params: ['forestgeo_testing_mason', 'forestgeo_testing_mason', 6, 22],
         format: true
       });
+    });
+  });
+
+  describe('Edit preview flow: buildEditableFieldsDiff restricts to allowed fields', () => {
+    const OLD_ROW = {
+      coreMeasurementID: 101,
+      speciesID: 5,
+      treeID: 20,
+      stemGUID: 300,
+      quadratID: 7,
+      plotID: 1,
+      censusID: 3,
+      speciesName: 'old species',
+      subspeciesName: 'old subspecies',
+      speciesCode: 'ACRU',
+      treeTag: 'T-1',
+      stemTag: 'S-1',
+      quadratName: '0101',
+      stemLocalX: 1.23,
+      stemLocalY: 4.56,
+      measurementDate: '2026-01-01',
+      measuredDBH: 10,
+      measuredHOM: 1.3,
+      description: 'old desc',
+      attributes: 'L'
+    };
+
+    it('returns canonical PascalCase fields restricted to the measurementssummary surface', () => {
+      const newRow = { ...OLD_ROW, measuredDBH: 12, measuredHOM: 1.4 };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12, MeasuredHOM: 1.4 });
+    });
+
+    it('excludes internal IDs even when the new row provides different values', () => {
+      const newRow = {
+        ...OLD_ROW,
+        coreMeasurementID: 999,
+        speciesID: 999,
+        treeID: 999,
+        stemGUID: 999,
+        quadratID: 999,
+        plotID: 999,
+        censusID: 999,
+        measuredDBH: 12
+      };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12 });
+      expect(Object.keys(diff)).not.toContain('CoreMeasurementID');
+      expect(Object.keys(diff)).not.toContain('SpeciesID');
+      expect(Object.keys(diff)).not.toContain('TreeID');
+      expect(Object.keys(diff)).not.toContain('StemGUID');
+      expect(Object.keys(diff)).not.toContain('QuadratID');
+      expect(Object.keys(diff)).not.toContain('PlotID');
+      expect(Object.keys(diff)).not.toContain('CensusID');
+    });
+
+    it('excludes taxonomy display fields SpeciesName and SubspeciesName', () => {
+      const newRow = { ...OLD_ROW, speciesName: 'new species', subspeciesName: 'new subspecies', measuredDBH: 12 };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({ MeasuredDBH: 12 });
+      expect(Object.keys(diff)).not.toContain('SpeciesName');
+      expect(Object.keys(diff)).not.toContain('SubspeciesName');
+    });
+
+    it('returns an empty diff when no editable field changed', () => {
+      const diff = buildEditableFieldsDiff({ ...OLD_ROW }, OLD_ROW);
+      expect(diff).toEqual({});
+    });
+
+    it('includes multiple editable fields when they change together', () => {
+      const newRow = {
+        ...OLD_ROW,
+        speciesCode: 'PRLA',
+        treeTag: 'T-2',
+        stemTag: 'S-2',
+        quadratName: '0202',
+        stemLocalX: 9.99,
+        stemLocalY: 8.88,
+        measurementDate: '2026-02-02',
+        measuredDBH: 12,
+        measuredHOM: 1.5,
+        description: 'new desc',
+        attributes: 'L;M'
+      };
+      const diff = buildEditableFieldsDiff(newRow, OLD_ROW);
+      expect(diff).toEqual({
+        SpeciesCode: 'PRLA',
+        TreeTag: 'T-2',
+        StemTag: 'S-2',
+        QuadratName: '0202',
+        StemLocalX: 9.99,
+        StemLocalY: 8.88,
+        MeasurementDate: '2026-02-02',
+        MeasuredDBH: 12,
+        MeasuredHOM: 1.5,
+        Description: 'new desc',
+        Attributes: 'L;M'
+      });
+    });
+  });
+
+  describe('Edit preview flow: rounded-no-op detection', () => {
+    const OLD_ROW = {
+      coreMeasurementID: 101,
+      speciesCode: 'ACRU',
+      treeTag: 'T-1',
+      stemTag: 'S-1',
+      quadratName: '0101',
+      stemLocalX: 1.23,
+      stemLocalY: 4.56,
+      measurementDate: '2026-01-01',
+      measuredDBH: 12.34,
+      measuredHOM: 1.5,
+      description: 'desc',
+      attributes: 'L'
+    };
+
+    it('treats a typed value that rounds to the existing value at server precision as a rounded no-op', () => {
+      // PER_COLUMN_DECIMAL_PRECISION.MeasuredDBH = 2 — typing 12.341 over
+      // 12.34 normalizes to "12.34" both ways, so the diff should not include
+      // MeasuredDBH and the field should appear in roundedNoOpFields.
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.341 }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({});
+      expect(result.roundedNoOpFields).toEqual(['MeasuredDBH']);
+    });
+
+    it('keeps real changes in the diff and reports rounded fields separately', () => {
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.342, measuredHOM: 2.0 }, OLD_ROW, 'measurementssummary');
+      // 2.0 vs 1.5 is a real change. 12.342 vs 12.34 both round to "12.34".
+      expect(result.diff).toEqual({ MeasuredHOM: 2.0 });
+      expect(result.roundedNoOpFields).toEqual(['MeasuredDBH']);
+    });
+
+    it('does not flag rounded-no-op when the typed value crosses the precision boundary', () => {
+      // 12.355 → "12.36" (V8 rounding); 12.34 stays "12.34". They differ, so
+      // this is a real change, not a rounded no-op.
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, measuredDBH: 12.355 }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({ MeasuredDBH: 12.355 });
+      expect(result.roundedNoOpFields).toEqual([]);
+    });
+
+    it('ignores non-numeric fields — they are never rounded no-ops', () => {
+      const result = buildEditableFieldsDiffWithMetaForSurface({ ...OLD_ROW, description: 'desc' }, OLD_ROW, 'measurementssummary');
+      expect(result.diff).toEqual({});
+      expect(result.roundedNoOpFields).toEqual([]);
     });
   });
 

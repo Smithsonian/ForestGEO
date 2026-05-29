@@ -166,6 +166,16 @@ const nextConfig = withBundleAnalyzer({
     ];
   },
   output: 'standalone',
+  // sqlscripting/*.sql is loaded at runtime by lib/provisioning/sql-runner.ts via
+  // path.join(process.cwd(), 'sqlscripting/...'). Next.js cannot statically detect
+  // these dynamic paths, so we must tell file-tracing to include the folder in the
+  // standalone bundle. Without this, provisioning fails on Azure with ENOENT.
+  // The orchestrator bootstrap runs from instrumentation as well as from the
+  // /api/admin/provision routes, so include the folder for both.
+  outputFileTracingIncludes: {
+    '/api/admin/provision/**/*': ['./sqlscripting/**/*'],
+    '/instrumentation': ['./sqlscripting/**/*']
+  },
   reactStrictMode: true,
   distDir: 'build'
   // SECURITY: Do NOT add environment variables here unless they need to be public

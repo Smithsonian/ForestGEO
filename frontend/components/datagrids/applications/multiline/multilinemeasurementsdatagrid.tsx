@@ -12,7 +12,7 @@ import { GridColDef } from '@mui/x-data-grid';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment';
 import CircularProgress from '@mui/joy/CircularProgress';
-import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
+import { getSelectableOptionsForField, loadSelectableOptions, selectableAutocomplete, selectableOptionKeyForField } from '@/components/client/clientmacros';
 import ailogger from '@/ailogger';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
@@ -36,10 +36,10 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
-    tag: [],
-    stemtag: [],
-    quadrat: [],
-    spcode: [],
+    treeTag: [],
+    stemTag: [],
+    quadratName: [],
+    speciesCode: [],
     codes: []
   });
 
@@ -53,7 +53,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
         return {
           ...column,
           renderEditCell: (params: any) => {
-            if (Object.keys(selectableOpts).includes(column.field)) {
+            if (Object.prototype.hasOwnProperty.call(selectableOpts, selectableOptionKeyForField(column.field))) {
               return (
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
                   {selectableAutocomplete(params, column, selectableOpts)}
@@ -94,7 +94,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   }, [selectableOpts]);
 
   return Object.keys(selectableOpts)
-    .filter(i => !['tag', 'stemtag'].includes(i))
+    .filter(i => !['treeTag', 'stemTag'].includes(i))
     .every(key => selectableOpts[key].length > 0) ? (
     <Box>
       {RenderFormExplanations(FormType.measurements)}

@@ -15,8 +15,10 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { useRouter } from 'next/navigation';
 import CensusStatsView from '@/components/dashboard/censusstatsview';
 import DataQualityCard from '@/components/dashboard/dataqualitycard';
+import PublishCensusButton from '@/components/dashboard/publishcensusbutton';
 import ailogger from '@/ailogger';
 import { useIsMounted } from '@/app/hooks/useismounted';
+import { useSession } from 'next-auth/react';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -47,6 +49,7 @@ export default function CensusOverviewPage() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const { isMountedRef } = useIsMounted();
+  const { data: session } = useSession();
   const metricsAbortControllerRef = useRef<AbortController | null>(null);
 
   const [countTrees, setCountTrees] = useState(0);
@@ -124,24 +127,38 @@ export default function CensusOverviewPage() {
 
   const startDate = currentCensus.dateRanges?.[0]?.startDate;
   const endDate = currentCensus.dateRanges?.[0]?.endDate;
+  const censusID = currentCensus.dateRanges?.[0]?.censusID;
+  const userStatus = session?.user?.userStatus;
+  const canReload = userStatus === 'global' || userStatus === 'db admin';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2}>
-        <Avatar alt="Census overview icon" sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg', width: 48, height: 48 }}>
-          <CalendarMonthIcon />
-        </Avatar>
-        <Box>
-          <Typography level="h3" sx={{ fontWeight: 600 }}>
-            Census {currentCensus.plotCensusNumber} Overview
-          </Typography>
-          <Typography level="body-md" color="neutral">
-            {currentPlot.plotName} &mdash; {currentSite.siteName}
-            {startDate && ` &mdash; ${new Date(startDate).toLocaleDateString()}`}
-            {endDate && ` to ${new Date(endDate).toLocaleDateString()}`}
-          </Typography>
-        </Box>
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ justifyContent: 'space-between' }}>
+        <Stack direction="row" alignItems="center" spacing={2}>
+          <Avatar alt="Census overview icon" sx={{ bgcolor: 'primary.softBg', color: 'primary.solidBg', width: 48, height: 48 }}>
+            <CalendarMonthIcon />
+          </Avatar>
+          <Box>
+            <Typography level="h3" sx={{ fontWeight: 600 }}>
+              Census {currentCensus.plotCensusNumber} Overview
+            </Typography>
+            <Typography level="body-md" color="neutral">
+              {currentPlot.plotName} &mdash; {currentSite.siteName}
+              {startDate && ` — ${new Date(startDate).toLocaleDateString()}`}
+              {endDate && ` to ${new Date(endDate).toLocaleDateString()}`}
+            </Typography>
+          </Box>
+        </Stack>
+        {currentSite.schemaName && currentPlot.plotID && censusID && (
+          <PublishCensusButton
+            schema={currentSite.schemaName}
+            appPlotId={currentPlot.plotID}
+            appCensusId={censusID}
+            plotCensusNumber={currentCensus.plotCensusNumber ?? ''}
+            canReload={canReload}
+          />
+        )}
       </Stack>
 
       {/* Census Stats */}

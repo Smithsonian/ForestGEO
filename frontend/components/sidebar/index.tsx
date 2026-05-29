@@ -17,9 +17,9 @@ import SidebarContainer from './sidebarcontainer';
 import SiteSelector from './siteselector';
 import PlotSelector from './plotselector';
 import CensusSelector from './censusselector';
-import { RainbowIcon } from '@/styles/rainbowicon';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import { PlotLogo, CensusLogo } from '@/components/icons';
+import { RainbowIcon } from '@/styles/rainbowicon';
 export default function NewSidebar() {
   const currentSite = useAppStore(state => state.currentSite);
   const currentPlot = useAppStore(state => state.currentPlot);

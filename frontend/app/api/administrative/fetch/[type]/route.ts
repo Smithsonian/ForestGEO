@@ -1,18 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
-import { getCookie } from '@/app/actions/cookiemanager';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
+import { auth } from '@/auth';
+import { requireAdmin } from '@/lib/auth-helpers';
+import { invalidatePermissions } from '@/lib/permissionscache';
 import { format } from 'mysql2/promise';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ type: string }> }) {
+function getEmailFromRow(row: unknown): string | undefined {
+  if (!row || typeof row !== 'object') return undefined;
+  const candidate = row as { email?: unknown; Email?: unknown };
+  const email = candidate.email ?? candidate.Email;
+  return typeof email === 'string' && email.trim() ? email : undefined;
+}
+
+function invalidateAdminPermissionsChange(type: string, oldRow?: unknown, newRow?: unknown): void {
+  if (type === 'users') {
+    const emails = new Set([getEmailFromRow(oldRow), getEmailFromRow(newRow)].filter((email): email is string => Boolean(email)));
+    if (emails.size === 0) {
+      invalidatePermissions();
+      return;
+    }
+    for (const email of emails) invalidatePermissions(email);
+    return;
+  }
+
+  if (type === 'sites' || type === 'usersiterelations') {
+    invalidatePermissions();
+  }
+}
+
+export async function GET(request: NextRequest, props: { params: Promise<{ type: string }> }) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const usePaginatedFormat = _request.nextUrl.searchParams.has('email');
+
+  // The ?email= query param is a UI/format flag, not auth. When present,
+  // the IsolatedDataGridCommons grid expects the paginated response shape
+  // { output, totalCount, finishedQuery }. Auth is enforced above via
+  // requireAdmin(await auth()).
+  const usePaginatedFormat = request.nextUrl.searchParams.has('email');
 
   try {
     let query = '';
@@ -35,8 +68,6 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
 
     const mappedData = MapperFactory.getMapper<any, any>(type).mapData(results);
 
-    // Return paginated format when email param is present (for IsolatedDataGridCommons)
-    // Otherwise return raw array for backward compatibility with admin pages
     if (usePaginatedFormat) {
       return new NextResponse(
         JSON.stringify({
@@ -54,10 +85,11 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
 }
 
 export async function POST(request: NextRequest, props: { params: Promise<{ type: string }> }) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
-  if (!email) throw new Error('no email found in cookies.');
 
   const { newRow } = await request.json();
   let transactionID: string | undefined;
@@ -66,6 +98,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
     const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`catalog.${type}`, newRow]);
     await connectionManager.executeQuery(insertQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, undefined, newRow);
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Insertion into catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
@@ -74,10 +107,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
 }
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ type: string }> }) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
-  if (!email) throw new Error('no email found in cookies.');
 
   const gridID = type === 'sites' ? 'SiteID' : 'UserID';
   const { oldRow, newRow } = await request.json();
@@ -96,16 +130,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
   try {
     transactionID = await connectionManager.beginTransaction();
     if (oldUserSites || newUserSites) {
-      // user assignment changes
-      // extract new set of sites assigned to the user
       const updatedSites = Array.from(new Set([...oldUserSites.map((s: any) => s.siteID!), ...newUserSites.map((s: any) => s.siteID!)])).map(i => [
         newRowRemaining.userID,
         i
       ]);
-      // remove the old connections
       const deleteQuery = format(`DELETE FROM ?? WHERE UserID = ?`, [`catalog.usersiterelations`, newRowRemaining.userID]);
       await connectionManager.executeQuery(deleteQuery);
-      // add new connections
       const insertQuery = format('INSERT INTO ?? (UserID, SiteID) VALUES ?', ['catalog.usersiterelations', updatedSites]);
       await connectionManager.executeQuery(insertQuery);
     }
@@ -113,6 +143,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
     const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`catalog.${type}`, remaining, gridID, mappedOldRow[gridID]]);
     await connectionManager.executeQuery(updateQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, oldRow, newRow);
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Update of catalog.${type} failed` }, { status: HTTPResponses.INVALID_REQUEST });
@@ -121,10 +152,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ typ
 }
 
 export async function DELETE(request: NextRequest, props: { params: Promise<{ type: string }> }) {
+  const authError = requireAdmin(await auth());
+  if (authError) return authError;
+
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = await getCookie('user');
-  if (!email) throw new Error('no email found in cookies.');
+
   const gridID = type === 'sites' ? 'SiteID' : type == 'users' ? 'UserID' : 'UserSiteRelationID';
   const { newRow } = await request.json();
 
@@ -135,6 +168,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`catalog.${type}`, gridID, newRow[gridID]]);
     await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID);
+    invalidateAdminPermissionsChange(type, newRow, undefined);
     return new NextResponse(JSON.stringify({ message: 'Successfully deleted' }), { status: HTTPResponses.OK });
   } catch {
     if (transactionID) await connectionManager.rollbackTransaction(transactionID);

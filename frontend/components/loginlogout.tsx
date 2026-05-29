@@ -19,6 +19,15 @@ export const LoginLogout = () => {
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
   const router = useRouter();
 
+  const userName = session?.user?.name;
+  const userInitials =
+    typeof userName === 'string'
+      ? (userName
+          .replace(/[^a-zA-Z- ]/g, '')
+          .match(/\b\w/g)
+          ?.join('') ?? '')
+      : '';
+
   const handleRetryLogin = () => {
     signIn('microsoft-entra-id', { redirectTo: '/dashboard' }).catch((error: any) => {
       ailogger.error('Login error:', error);
@@ -47,7 +56,7 @@ export const LoginLogout = () => {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <IconButton
-          aria-label={'user avatar icon button'}
+          aria-label={userInitials ? `${userInitials}, open user menu` : 'Open user menu'}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           onKeyDown={event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -57,15 +66,8 @@ export const LoginLogout = () => {
           }}
           size="sm"
         >
-          <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${session?.user?.name || 'current user'}`}>
-            <Skeleton loading={status == 'loading'}>
-              {typeof session?.user?.name == 'string'
-                ? session.user.name
-                    .replace(/[^a-zA-Z- ]/g, '')
-                    .match(/\b\w/g)
-                    ?.join('')
-                : ''}
-            </Skeleton>
+          <Avatar variant="outlined" size="sm" src="" alt={`Avatar for ${userName || 'current user'}`}>
+            <Skeleton loading={status == 'loading'}>{userInitials}</Skeleton>
           </Avatar>
         </IconButton>
         <Box sx={{ minWidth: 0, flex: 1 }}>
