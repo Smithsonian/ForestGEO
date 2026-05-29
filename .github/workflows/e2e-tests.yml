@@ -12,8 +12,23 @@ concurrency:
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
-    environment: development_temp
     timeout-minutes: 20
+
+    # E2E runs against a throwaway MySQL service container seeded by
+    # tests/setup/e2e-seed.ts — never an external/Azure database. This keeps the
+    # gate hermetic: no secrets, no firewall allow-lists, no shared-state flakes.
+    services:
+      mysql:
+        image: mysql:8.0.36
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - uses: actions/checkout@v4
@@ -26,15 +41,13 @@ jobs:
       - name: Create .env for E2E testing
         run: |
           cat > frontend/.env <<'ENVEOF'
-          AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+          AUTH_SECRET=e2e-ci-secret
           AUTH_URL=http://localhost:3000
-          AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }}
-          AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }}
-          AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }}
-          AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }}
-          AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }}
-          AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }}
-          AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }}
+          AZURE_SQL_USER=root
+          AZURE_SQL_PASSWORD=testpassword
+          AZURE_SQL_SERVER=127.0.0.1
+          AZURE_SQL_PORT=3306
+          AZURE_SQL_CATALOG_SCHEMA=catalog
           NEXT_PUBLIC_E2E_TESTING=true
           NODE_ENV=development
           PORT=3000
@@ -42,6 +55,16 @@ jobs:
 
       - name: Install dependencies
         run: cd frontend && npm install
+
+      # The mysql service `--health-cmd` gates steps until MySQL is healthy, and
+      # the seed's own connectWithRetry covers any residual TCP race.
+      - name: Seed E2E database
+        run: cd frontend && npm run db:seed:e2e
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: '3306'
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: testpassword
 
       - name: Install Cypress binary
         run: cd frontend && npx cypress install
