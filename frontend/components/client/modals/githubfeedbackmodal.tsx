@@ -164,8 +164,14 @@ ${pathname}
   return (
     <Modal open={open} sx={{ display: 'flex', flex: 1, flexDirection: 'row' }}>
       <ModalOverflow>
-        <ModalDialog role="alertdialog">
+        <ModalDialog role="dialog" aria-labelledby="github-feedback-title" aria-describedby="github-feedback-description">
           <ModalClose variant="outlined" onClick={handleCancel} />
+          <span id="github-feedback-title" className="sr-only">
+            GitHub Feedback Form
+          </span>
+          <span id="github-feedback-description" className="sr-only">
+            Report a bug or request a feature for the ForestGEO application.
+          </span>
           {!createdIssue && !isSubmitting && (
             <>
               <DialogTitle>GitHub Feedback Form</DialogTitle>
