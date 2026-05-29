@@ -213,4 +213,50 @@ describe('EditToolbar', () => {
     expect(screen.queryByRole('button', { name: 'Export as CSV' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument();
   });
+
+  it('MUST NOT render the More button when there are no extra actions', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[]}
+        validationMenu={null}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+  });
+
+  it('MUST render the More button when a dynamic action with a tooltip exists', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[{ label: 'Recalculate', tooltip: 'Recalculate values', onClick: vi.fn() }]}
+        validationMenu={null}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
+  });
 });

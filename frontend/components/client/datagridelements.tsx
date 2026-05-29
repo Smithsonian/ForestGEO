@@ -147,6 +147,9 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
 
   const hasAnyExport = typeof handleExport === 'function' || typeof handleExportAll === 'function' || typeof handleExportCSV === 'function';
 
+  const moreMenuButtons = dynamicButtons.filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload' && button.tooltip);
+  const hasMoreMenuItems = moreMenuButtons.length > 0 || Boolean(validationMenu);
+
   // only require add / refresh / quickFilter / model / columns
   if (
     typeof handleAddNewRow !== 'function' ||
@@ -528,50 +531,47 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                   </Tooltip>
                 )}
                 {/* Kebab menu for additional actions */}
-                <Dropdown>
-                  <Tooltip title="More actions" placement="top" arrow>
-                    <MenuButton
-                      slots={{ root: Button }}
-                      slotProps={{
-                        root: {
-                          variant: 'soft',
-                          color: 'primary',
-                          size: 'sm',
-                          'aria-label': 'More actions',
-                          startDecorator: <MoreVert />
-                        }
-                      }}
-                    >
-                      More
-                    </MenuButton>
-                  </Tooltip>
-                  <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
-                    {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
-                    {dynamicButtons
-                      .filter((button: any) => button.label !== 'Manual Entry Form' && button.label !== 'Upload')
-                      .map(
-                        (button: any, index: number) =>
-                          button.tooltip && (
-                            <MenuItem key={index} onClick={button.onClick}>
-                              <ListItemDecorator>{button.icon}</ListItemDecorator>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                                <Typography level="body-sm">{button.label}</Typography>
-                                <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
-                                  {button.tooltip}
-                                </Typography>
-                              </Box>
-                              {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
-                            </MenuItem>
-                          )
+                {hasMoreMenuItems && (
+                  <Dropdown>
+                    <Tooltip title="More actions" placement="top" arrow>
+                      <MenuButton
+                        slots={{ root: Button }}
+                        slotProps={{
+                          root: {
+                            variant: 'soft',
+                            color: 'primary',
+                            size: 'sm',
+                            'aria-label': 'More actions',
+                            startDecorator: <MoreVert />
+                          }
+                        }}
+                      >
+                        More
+                      </MenuButton>
+                    </Tooltip>
+                    <Menu placement="bottom-end" sx={{ minWidth: 240, zIndex: 9999 }}>
+                      {/* Other dynamic buttons (excluding Manual Entry Form and Upload) */}
+                      {moreMenuButtons.map((button: any, index: number) => (
+                        <MenuItem key={index} onClick={button.onClick}>
+                          <ListItemDecorator>{button.icon}</ListItemDecorator>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                            <Typography level="body-sm">{button.label}</Typography>
+                            <Typography level="body-xs" sx={{ color: 'neutral.500' }}>
+                              {button.tooltip}
+                            </Typography>
+                          </Box>
+                          {button.count !== undefined && button.count > 0 && <Badge badgeContent={button.count} size="sm" />}
+                        </MenuItem>
+                      ))}
+                      {validationMenu && (
+                        <Box>
+                          <Divider />
+                          {validationMenu}
+                        </Box>
                       )}
-                    {validationMenu && (
-                      <Box>
-                        <Divider />
-                        {validationMenu}
-                      </Box>
-                    )}
-                  </Menu>
-                </Dropdown>
+                    </Menu>
+                  </Dropdown>
+                )}
               </Stack>
             </>
           )}
