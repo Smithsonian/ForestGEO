@@ -1,6 +1,6 @@
 // loginlogout.tsx
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Avatar from '@mui/joy/Avatar';
 import Box from '@mui/joy/Box';
 import Typography from '@mui/joy/Typography';
@@ -18,6 +18,29 @@ export const LoginLogout = () => {
   const { data: session, status } = useSession();
   const [anchorSettings, setAnchorSettings] = useState<HTMLElement | null>(null);
   const router = useRouter();
+  // Joy Menu types its ref as HTMLDivElement even though it forwards to the listbox <ul>;
+  // we only need querySelector on it, so match the declared type to compile cleanly.
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuId = 'user-settings-menu';
+  const isMenuOpen = Boolean(anchorSettings);
+
+  useEffect(() => {
+    if (isMenuOpen) {
+      const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]');
+      firstItem?.focus();
+    }
+  }, [isMenuOpen]);
+
+  const closeMenu = () => {
+    // anchorSettings holds the trigger DOM node (set from event.currentTarget); it stays
+    // mounted when only the menu portal closes, so capture it before clearing state and
+    // refocus it to restore focus to the opener on Escape / click-away.
+    const trigger = anchorSettings;
+    setAnchorSettings(null);
+    trigger?.focus();
+  };
 
   const userName = session?.user?.name;
   const userInitials =
@@ -56,7 +79,11 @@ export const LoginLogout = () => {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <IconButton
+          ref={avatarButtonRef}
           aria-label={userInitials ? `${userInitials}, open user menu` : 'Open user menu'}
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen && anchorSettings === avatarButtonRef.current}
+          aria-controls={isMenuOpen && anchorSettings === avatarButtonRef.current ? menuId : undefined}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           onKeyDown={event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -86,9 +113,13 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton
+          ref={settingsButtonRef}
           disabled={!['global', 'db admin'].includes(session?.user?.userStatus ?? '')}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           aria-label="Settings menu"
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen && anchorSettings === settingsButtonRef.current}
+          aria-controls={isMenuOpen && anchorSettings === settingsButtonRef.current ? menuId : undefined}
           title="Settings menu"
           size="sm"
         >
@@ -100,40 +131,28 @@ export const LoginLogout = () => {
           {status == 'loading' ? <CircularProgress size={'lg'} aria-label="Loading user session" /> : <LogoutRoundedIcon />}
         </IconButton>
         <Menu
+          ref={menuRef}
+          id={menuId}
           anchorEl={anchorSettings}
-          open={Boolean(anchorSettings)}
-          onClose={() => setAnchorSettings(null)}
+          open={isMenuOpen}
+          onClose={closeMenu}
           placement={'top-end'}
           disablePortal
           sx={{ zIndex: 1500 }}
         >
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/users');
               setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/users');
-                setAnchorSettings(null);
-              }
             }}
           >
             User Settings
             <ManageAccountsRounded />
           </MenuItem>
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/sites');
               setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/sites');
-                setAnchorSettings(null);
-              }
             }}
           >
             Site Settings
@@ -141,16 +160,9 @@ export const LoginLogout = () => {
           </MenuItem>
 
           <MenuItem
-            tabIndex={0}
             onClick={() => {
               router.push('/admin/userstosites');
               setAnchorSettings(null);
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                router.push('/admin/userstosites');
-                setAnchorSettings(null);
-              }
             }}
           >
             User-Site Assignments

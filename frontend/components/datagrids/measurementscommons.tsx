@@ -75,6 +75,7 @@ import { useSession } from 'next-auth/react';
 import { useBackgroundValidationState } from '@/config/store/appstore';
 import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { formatHeader, InputChip } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
@@ -1582,6 +1583,7 @@ function MeasurementsCommonsInner(props: Readonly<MeasurementsCommonsProps>) {
           ) : (
             <>
               <StyledDataGrid
+                aria-label={getGridTypeLabel(gridType)}
                 apiRef={apiRef}
                 sx={{ width: '100%' }}
                 rows={gridRows}

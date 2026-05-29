@@ -11,7 +11,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
 vi.mock('@mui/x-data-grid', () => ({
   ColumnsPanelTrigger: ({ render }: any) => <>{render}</>,
   FilterPanelTrigger: ({ render }: any) => <>{render}</>,
-  QuickFilter: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+  QuickFilter: ({ children, defaultExpanded, expanded, onExpandedChange, ...props }: any) => <div {...props}>{children}</div>,
   QuickFilterControl: ({ slotProps, ...props }: any) => <input aria-label={slotProps?.input?.['aria-label']} {...props} />,
   QuickFilterClear: ({ children, ...props }: any) => (
     <button type="button" {...props}>
@@ -19,11 +19,14 @@ vi.mock('@mui/x-data-grid', () => ({
     </button>
   ),
   Toolbar: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-  ToolbarButton: ({ children, ...props }: any) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
+  ToolbarButton: ({ render, children, ...props }: any) =>
+    render ? (
+      render
+    ) : (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
   GridColDef: {},
   GridFilterModel: {},
   GridSlotProps: {},
@@ -85,6 +88,33 @@ describe('EditToolbar', () => {
     expect(screen.getByTestId('filter-errors')).toHaveAttribute('aria-label', 'Hide invalid measurements (3)');
   });
 
+  it('MUST render a zero-count status filter as disabled', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: false, toggle: vi.fn(), count: 0 }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    expect(screen.getByTestId('filter-errors')).toBeDisabled();
+  });
+
   it('uses the pending button as a pending-row filter toggle', async () => {
     const user = userEvent.setup();
     const togglePending = vi.fn();
@@ -119,6 +149,41 @@ describe('EditToolbar', () => {
     expect(screen.getByTestId('filter-pending')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('keeps the Refresh button operable when registered as a toolbar item', async () => {
+    const user = userEvent.setup();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={refresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: true, toggle: vi.fn(), count: 3 }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    const refreshButton = screen.getByTestId('refresh-button');
+    expect(refreshButton).toBeInTheDocument();
+
+    await user.click(refreshButton);
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('can hide the action buttons section for read-only pages', () => {
     render(
       <EditToolbar
@@ -147,5 +212,74 @@ describe('EditToolbar', () => {
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export as CSV' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument();
+  });
+
+  it('MUST NOT render the More button when there are no extra actions', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[]}
+        validationMenu={null}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+  });
+
+  it('MUST render the More button when a dynamic action with a tooltip exists', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[{ label: 'Recalculate', tooltip: 'Recalculate values', onClick: vi.fn() }]}
+        validationMenu={null}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
+  });
+
+  it('MUST render the More button when only a validation menu is present', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="attributes"
+        showToolbarActions
+        dynamicButtons={[]}
+        validationMenu={<div>validation</div>}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
   });
 });

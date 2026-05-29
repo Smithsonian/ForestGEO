@@ -243,6 +243,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         <>
           {validRows.length > 0 && (
             <StyledDataGrid
+              aria-label="Valid Uploaded Rows"
               sx={{ display: 'flex', flex: 1, width: '100%' }}
               rows={validRows}
               columns={columns}
@@ -268,6 +269,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                 <span style={{ color: 'lightblue' }}>Light blue text indicates values that were auto-filled or auto-corrected based on other fields.</span>
               </Typography>
               <StyledDataGrid
+                aria-label="Autocorrected Uploaded Rows"
                 sx={{ display: 'flex', flex: 1, width: '100%' }}
                 rows={invalidRows}
                 columns={columns}
@@ -288,6 +290,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         <>
           {correctedValidRows.length > 0 && (
             <StyledDataGrid
+              aria-label="Corrected Uploaded Rows"
               sx={{ display: 'flex', flex: 1, width: '100%' }}
               rows={correctedValidRows}
               columns={columns}

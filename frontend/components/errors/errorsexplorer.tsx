@@ -1159,6 +1159,7 @@ export default function ErrorsExplorer() {
       >
         <Sheet variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 'md', p: 1 }}>
           <StyledDataGrid
+            aria-label="Measurement Errors"
             apiRef={explorerApiRef}
             autoHeight={false}
             rows={(isInfiniteOn ? infinite.rows : results.rows) as any[]}

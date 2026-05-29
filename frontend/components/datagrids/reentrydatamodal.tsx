@@ -259,6 +259,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
               </Typography>
               <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
                 <DataGrid
+                  aria-label="Re-entered Row Options"
                   rows={rowsData}
                   columns={[
                     {
