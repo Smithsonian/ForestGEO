@@ -88,6 +88,33 @@ describe('EditToolbar', () => {
     expect(screen.getByTestId('filter-errors')).toHaveAttribute('aria-label', 'Hide invalid measurements (3)');
   });
 
+  it('MUST render a zero-count status filter as disabled', () => {
+    render(
+      <EditToolbar
+        handleAddNewRow={handleAddNewRow}
+        handleRefresh={handleRefresh}
+        handleQuickFilterChange={handleQuickFilterChange}
+        filterModel={{
+          items: [],
+          quickFilterValues: [],
+          visible: ['errors', 'valid', 'pending'],
+          tss: ['old tree', 'multi stem', 'new recruit']
+        }}
+        gridColumns={[{ field: 'coreMeasurementID', headerName: 'Measurement ID' }]}
+        gridType="measurements"
+        errorControls={{ show: false, toggle: vi.fn(), count: 0 }}
+        validControls={{ show: true, toggle: vi.fn(), count: 4 }}
+        pendingControls={{ show: true, toggle: vi.fn(), count: 2 }}
+        otControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        msControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        nrControls={{ show: true, toggle: vi.fn(), count: 1 }}
+        dynamicButtons={[]}
+      />
+    );
+
+    expect(screen.getByTestId('filter-errors')).toBeDisabled();
+  });
+
   it('uses the pending button as a pending-row filter toggle', async () => {
     const user = userEvent.setup();
     const togglePending = vi.fn();

@@ -332,6 +332,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`Invalid: ${errorControls.count} (rows with unresolved errors)`}>
                   <Badge badgeContent={errorControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!errorControls.count}
                       render={
                         <IconButton
                           disabled={!errorControls.count}
@@ -351,6 +352,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`Valid: (${validControls.count})`}>
                   <Badge badgeContent={validControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!validControls.count}
                       render={
                         <IconButton
                           variant="soft"
@@ -370,6 +372,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`Pending: (${pendingControls.count})`}>
                   <Badge badgeContent={pendingControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!pendingControls.count}
                       render={
                         <IconButton
                           variant="soft"
@@ -389,6 +392,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`Old Trees: ${otControls.count}`}>
                   <Badge badgeContent={otControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!otControls.count}
                       render={
                         <IconButton
                           variant="soft"
@@ -408,6 +412,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`Multi-Stems: ${msControls.count}`}>
                   <Badge badgeContent={msControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!msControls.count}
                       render={
                         <IconButton
                           variant="soft"
@@ -427,6 +432,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                 <Tooltip title={`New Recruits: ${nrControls.count}`}>
                   <Badge badgeContent={nrControls.count} size={'sm'}>
                     <ToolbarButton
+                      disabled={!nrControls.count}
                       render={
                         <IconButton
                           variant="soft"
