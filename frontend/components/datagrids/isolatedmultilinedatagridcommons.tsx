@@ -11,6 +11,7 @@ import { darken } from '@mui/system';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { Add } from '@mui/icons-material';
 import { getColumnVisibilityModel } from '@/config/datagridhelpers';
+import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
@@ -271,6 +272,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       </Box>
       <Box sx={{ display: 'flex', flex: 1, height: '100%', width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
         <StyledDataGrid
+          aria-label={getGridTypeLabel(gridType)}
           rows={rows}
           columns={columns}
           apiRef={apiRef}
