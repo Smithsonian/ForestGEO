@@ -30,7 +30,7 @@ describe('getGridTypeLabel', () => {
   it('MUST Title-Case an unknown machine name as a fallback', () => {
     expect(getGridTypeLabel('somefuture_view')).toBe('Somefuture View');
   });
-  it('MUST never return an empty string', () => {
-    expect(getGridTypeLabel('')).not.toBe('');
+  it("MUST fall back to a non-empty 'Data' label for an empty machine name", () => {
+    expect(getGridTypeLabel('')).toBe('Data');
   });
 });

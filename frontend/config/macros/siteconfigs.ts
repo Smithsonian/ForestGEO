@@ -171,6 +171,7 @@ export function getGridTypeLabel(gridType: string): string {
     .replace(/_/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/\b\w/g, character => character.toUpperCase())
+    .replace(/\s+/g, ' ')
     .trim();
   return titled || 'Data';
 }
