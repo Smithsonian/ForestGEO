@@ -47,6 +47,7 @@ import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { getGridTypeLabel } from '@/config/macros/siteconfigs';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
@@ -1350,6 +1351,7 @@ const IsolatedDataGridCommonsInner = forwardRef(function IsolatedDataGridCommons
           ) : (
             <>
               <StyledDataGrid
+                aria-label={getGridTypeLabel(gridType)}
                 apiRef={localApiRef}
                 sx={GRID_ROOT_SX}
                 rows={gridRows}

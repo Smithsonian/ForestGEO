@@ -30,6 +30,7 @@
     "test:e2e:demo": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"cypress run --e2e --headed --browser electron --spec 'cypress/e2e/demo/**/*.cy.ts' --env demoMode=true,demoDelayMs=1400\"",
     "test:e2e:demo:headless": "NEXT_PUBLIC_E2E_TESTING=true start-server-and-test 'NEXT_PUBLIC_E2E_TESTING=true next dev --turbo' http://localhost:3000 \"cypress run --e2e --headless --browser electron --spec 'cypress/e2e/demo/**/*.cy.ts' --env demoMode=true,demoDelayMs=400\"",
     "test:all": "npm run test:unit && npm run test:component && npm run test:e2e",
+    "db:seed:e2e": "npx tsx tests/setup/e2e-seed.ts",
     "deploy:validations": "npx tsx scripts/deploy-validations-to-all-schemas.ts",
     "docs": "npm run dev --prefix docs",
     "docs:build": "npm run build --prefix docs",
