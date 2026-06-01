@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getEndpointHeaderName, siteConfigNav } from './siteconfigs';
+import { getEndpointHeaderName, getGridTypeLabel, siteConfigNav } from './siteconfigs';
 
 describe('siteConfigNav', () => {
   it('orders Census Hub as Census Overview, View Data, View Errors', () => {
@@ -14,5 +14,23 @@ describe('siteConfigNav', () => {
 
   it('returns the expected header for the errors route', () => {
     expect(getEndpointHeaderName('/measurementshub/errors')).toBe('View Errors');
+  });
+});
+
+describe('getGridTypeLabel', () => {
+  it('MUST map attributes to the user-facing "Stem Codes" name', () => {
+    expect(getGridTypeLabel('attributes')).toBe('Stem Codes');
+  });
+  it('MUST map failedmeasurements to a spaced, capitalized label', () => {
+    expect(getGridTypeLabel('failedmeasurements')).toBe('Failed Measurements');
+  });
+  it('MUST map alltaxonomiesview to "Species List"', () => {
+    expect(getGridTypeLabel('alltaxonomiesview')).toBe('Species List');
+  });
+  it('MUST Title-Case an unknown machine name as a fallback', () => {
+    expect(getGridTypeLabel('somefuture_view')).toBe('Somefuture View');
+  });
+  it("MUST fall back to a non-empty 'Data' label for an empty machine name", () => {
+    expect(getGridTypeLabel('')).toBe('Data');
   });
 });

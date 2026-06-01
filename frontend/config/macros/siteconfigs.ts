@@ -144,6 +144,38 @@ export const siteConfigNav: SiteConfigProps[] = [
   }
 ];
 
+const GRID_TYPE_LABELS: Record<string, string> = {
+  attributes: 'Stem Codes',
+  personnel: 'Personnel',
+  quadrats: 'Quadrats',
+  subquadrats: 'Subquadrats',
+  species: 'Species',
+  alltaxonomiesview: 'Species List',
+  stemtaxonomiesview: 'Stem Taxonomies',
+  measurementssummary: 'Measurements Summary',
+  measurements: 'Measurements',
+  measurementssummary_staging: 'Staged Measurements',
+  failedmeasurements: 'Failed Measurements',
+  quadratpersonnel: 'Quadrat-Assigned Personnel',
+  roles: 'Roles',
+  unifiedchangelog: 'Change Log',
+  viewfulltable: 'All Historical Data',
+  users: 'User Management',
+  sites: 'Site Settings'
+};
+
+export function getGridTypeLabel(gridType: string): string {
+  const mapped = GRID_TYPE_LABELS[gridType];
+  if (mapped) return mapped;
+  const titled = gridType
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, character => character.toUpperCase())
+    .replace(/\s+/g, ' ')
+    .trim();
+  return titled || 'Data';
+}
+
 export function getEndpointHeaderName(endpoint: string): string {
   switch (endpoint) {
     case '/dashboard':
