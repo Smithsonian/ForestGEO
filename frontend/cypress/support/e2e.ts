@@ -16,7 +16,6 @@
 // Import commands.js using ES2015 syntax:
 import './commands';
 import './demo-commands';
-import './responsive-commands';
 import './test-data-helpers';
 
 Cypress.on('uncaught:exception', error => {

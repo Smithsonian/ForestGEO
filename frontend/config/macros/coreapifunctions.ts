@@ -70,11 +70,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             throw new Error('Incorrect view call');
         }
 
-        // NOTE (deferred): handleUpsertForSlices does not accept a transaction id
-        // and calls handleUpsert without threading one, so its writes run on
-        // autocommit pool connections OUTSIDE this transaction. Migrating that
-        // helper to a TxExecutor is out of scope for this fix; left as-is.
-        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig);
+        return await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig, tx.id);
       }
 
       const mapper = MapperFactory.getMapper<any, any>(dataType);

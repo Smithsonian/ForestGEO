@@ -179,4 +179,89 @@ describe('ConnectionManager.withTransaction — slot-timeout queue cleanup', () 
       }
     }
   });
+
+  it('releases a reserved start slot when a woken transaction cannot begin', async () => {
+    const { default: ConnectionManager } = await vi.importActual<typeof import('./connectionmanager')>('./connectionmanager');
+    const cm = ConnectionManager.getInstance();
+    const internals = cm as unknown as {
+      transactionSlotQueue: Array<() => void>;
+      MAX_CONCURRENT_TRANSACTIONS: number;
+      transactionConnections: Map<string, unknown>;
+      transactionMeta: Map<string, unknown>;
+      releaseTransactionSlot: () => void;
+    };
+
+    const cap = internals.MAX_CONCURRENT_TRANSACTIONS;
+    const sentinelIds: string[] = [];
+    for (let i = 0; i < cap; i++) {
+      const id = `__test_sentinel_${i}__`;
+      sentinelIds.push(id);
+      internals.transactionConnections.set(id, {} as unknown);
+    }
+
+    const txConnection = {
+      threadId: 777,
+      query: vi.fn().mockResolvedValue([[]]),
+      ping: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn()
+    };
+
+    const beginSpy = vi
+      .spyOn(cm, 'beginTransaction')
+      .mockRejectedValueOnce(new Error('startup unavailable'))
+      .mockRejectedValueOnce(new Error('startup unavailable'))
+      .mockRejectedValueOnce(new Error('startup unavailable'))
+      .mockImplementationOnce(async () => {
+        internals.transactionConnections.set('__test_live_tx__', txConnection as unknown);
+        return '__test_live_tx__';
+      });
+
+    try {
+      const first = cm
+        .withTransaction(async () => 'first should not run')
+        .then(
+          value => ({ ok: true as const, value }),
+          (err: Error) => ({ ok: false as const, err })
+        );
+      const second = cm
+        .withTransaction(async () => 'second ran')
+        .then(
+          value => ({ ok: true as const, value }),
+          (err: Error) => ({ ok: false as const, err })
+        );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(internals.transactionSlotQueue.length).toBe(2);
+
+      // Free exactly one active slot and wake the first queued transaction. It
+      // will fail all beginTransaction retries; the fix must release its
+      // reserved start slot so the second queued transaction can proceed.
+      internals.transactionConnections.delete(sentinelIds.pop()!);
+      internals.releaseTransactionSlot();
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      const firstOutcome = await first;
+      expect(firstOutcome.ok).toBe(false);
+      if (!firstOutcome.ok) {
+        expect(firstOutcome.err.message).toContain('Failed to start transaction after 3 retries');
+      }
+
+      await vi.advanceTimersByTimeAsync(0);
+      const secondOutcome = await second;
+      expect(secondOutcome).toEqual({ ok: true, value: 'second ran' });
+      expect(beginSpy).toHaveBeenCalledTimes(4);
+      expect(txConnection.commit).toHaveBeenCalledTimes(1);
+      expect(txConnection.release).toHaveBeenCalledTimes(1);
+    } finally {
+      beginSpy.mockRestore();
+      for (const id of sentinelIds) {
+        internals.transactionConnections.delete(id);
+      }
+      internals.transactionConnections.delete('__test_live_tx__');
+      internals.transactionMeta.delete('__test_live_tx__');
+    }
+  });
 });

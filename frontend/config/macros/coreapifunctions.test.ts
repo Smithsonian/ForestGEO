@@ -194,7 +194,7 @@ describe('CoreAPIFunctions', () => {
 
       const response = await PATCH(mockRequest, { params: Promise.resolve(mockParams) });
 
-      expect(handleUpsertForSlices).toHaveBeenCalled();
+      expect(handleUpsertForSlices).toHaveBeenCalledWith(mockConnectionManager, 'testSchema', { Family: 'Fabaceae' }, expect.any(Object), 'transaction-123');
       expect(response.status).toBe(200);
     });
 
