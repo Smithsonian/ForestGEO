@@ -113,6 +113,13 @@ describe('POST /api/query authorization', () => {
     expect(mocks.executeQuery).toHaveBeenCalledWith("SELECT * FROM forestgeo_testing.attributes WHERE Description = 'forestgeo_other.attributes'");
   });
 
+  it('does not reject executable-comment-looking text inside string literals', async () => {
+    const response = await POST(makeRequest("SELECT * FROM forestgeo_testing.attributes WHERE Description = '/*!50000 JOIN external_archive.users */'"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith("SELECT * FROM forestgeo_testing.attributes WHERE Description = '/*!50000 JOIN external_archive.users */'");
+  });
+
   it('still rejects multiple statements when a string literal contains comment syntax', async () => {
     const response = await POST(
       makeRequest("SELECT * FROM forestgeo_testing.attributes WHERE Description = '-- not a comment'; SELECT * FROM forestgeo_testing.attributes")
@@ -218,6 +225,13 @@ describe('POST /api/query authorization', () => {
 
   it('rejects non-admin reads that use MySQL STRAIGHT_JOIN to reach an external database', async () => {
     const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a STRAIGHT_JOIN external_archive.users u ON 1 = 1'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects MySQL executable comments that hide an external database join', async () => {
+    const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a /*!50000 JOIN external_archive.users u ON 1 = 1 */'));
 
     expect(response.status).toBe(403);
     expect(mocks.executeQuery).not.toHaveBeenCalled();

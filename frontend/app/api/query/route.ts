@@ -36,6 +36,10 @@ function sqlForAuthorization(query: string): string {
   return stripSqlComments(stripSqlStringLiterals(query));
 }
 
+function hasExecutableSqlComment(query: string): boolean {
+  return /\/\*!/.test(stripSqlStringLiterals(query));
+}
+
 function hasMultipleStatements(query: string): boolean {
   return sqlForAuthorization(query).trim().replace(/;+$/g, '').includes(';');
 }
@@ -168,6 +172,10 @@ function extractTableSchemas(query: string): string[] {
 }
 
 function authorizeQuery(session: Session, query: string): NextResponse | null {
+  if (hasExecutableSqlComment(query)) {
+    return NextResponse.json({ error: 'Executable SQL comments are not allowed' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
   if (hasMultipleStatements(query)) {
     return NextResponse.json({ error: 'Multiple SQL statements are not allowed' }, { status: HTTPResponses.FORBIDDEN });
   }
