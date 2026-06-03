@@ -25,11 +25,9 @@ import {
   runBulkIngestion,
   getValidationErrors,
   insertCrossCensusMeasurements,
-  insertDirectMeasurements,
   runValidationForTest,
   seedStatusAttributes,
   setupTwoCensusScenario,
-  createAdditionalCensus,
   type TestData
 } from '../setup/local-db-setup';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
@@ -580,11 +578,16 @@ describe('Validation API Integration Tests', () => {
       }
     });
 
-    it('should select one previous census row when multiple active rows share the prior PlotCensusNumber', async () => {
+    it('flags quadrat mismatch and coordinate drift against the single previous census', async () => {
+      // Migration 42 (UNIQUE(PlotID, PlotCensusNumber)) makes multiple active census
+      // rows sharing a PlotCensusNumber impossible, so the SP's MAX(CensusID)
+      // predecessor-disambiguation is now unreachable. Exercise the realistic
+      // single-predecessor case with BOTH location checks enabled: one stem changes
+      // quadrat (mismatch -> 17), a second drifts coordinates within its quadrat
+      // (drift -> 18). Both setups mirror the proven single-validation siblings above.
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName1 = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
       const quadratName2 = testData.quadrats[1]?.QuadratName || testData.quadrats[1]?.Quadrat;
-      const treeTag = 'API_DUP_PREV_SCOPE';
 
       if (!speciesCode || !quadratName1 || !quadratName2) {
         throw new Error('Test setup failed: missing species or quadrat data');
@@ -592,41 +595,34 @@ describe('Validation API Integration Tests', () => {
 
       await insertCrossCensusMeasurements(connection, testData, census1ID, census2ID, [
         {
-          treeTag,
+          treeTag: 'API_PREV_QUAD',
           stemTag: 'S001',
           speciesCode,
-          quadratName: quadratName2,
-          quadratName2: quadratName1,
-          x: 30,
-          y: 30,
-          x2: 10,
-          y2: 10,
+          quadratName: quadratName1,
+          quadratName2,
+          x: 7,
+          y: 7,
           census1DBH: 100,
           census2DBH: 110,
           hom: 1.3,
           census1Date: '2024-06-15',
           census2Date: '2025-06-15',
           codes: 'A'
-        }
-      ]);
-
-      const duplicatePrevious = await createAdditionalCensus(connection, testData, {
-        plotCensusNumber: 1,
-        startDate: '2024-07-01',
-        endDate: '2024-12-31'
-      });
-
-      await insertDirectMeasurements(connection, testData, duplicatePrevious.censusID, [
+        },
         {
-          treeTag,
+          treeTag: 'API_PREV_DRIFT',
           stemTag: 'S001',
           speciesCode,
           quadratName: quadratName1,
-          x: 10,
-          y: 10,
-          dbh: 105,
+          x: 8,
+          y: 8,
+          x2: 21,
+          y2: 8,
+          census1DBH: 100,
+          census2DBH: 110,
           hom: 1.3,
-          date: '2024-09-15',
+          census1Date: '2024-06-15',
+          census2Date: '2025-06-15',
           codes: 'A'
         }
       ]);
@@ -642,15 +638,15 @@ describe('Validation API Integration Tests', () => {
 
       const quadratMismatchErrors = await getValidationErrors(connection, {
         validationID: 17,
-        treeTag
+        treeTag: 'API_PREV_QUAD'
       });
       const coordinateDriftErrors = await getValidationErrors(connection, {
         validationID: 18,
-        treeTag
+        treeTag: 'API_PREV_DRIFT'
       });
 
-      expect(quadratMismatchErrors.length).toBe(0);
-      expect(coordinateDriftErrors.length).toBe(0);
+      expect(quadratMismatchErrors.length).toBe(1);
+      expect(coordinateDriftErrors.length).toBe(1);
     });
   });
 
