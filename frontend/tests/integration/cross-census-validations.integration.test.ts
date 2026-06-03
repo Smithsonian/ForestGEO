@@ -24,6 +24,7 @@ import {
   insertTestMeasurements,
   insertDirectMeasurements,
   runBulkIngestion,
+  runValidationForTest,
   getValidationErrors,
   getFailedMeasurements,
   getTreeState,
@@ -498,6 +499,12 @@ describe('Inline Validation Data Tests', () => {
 
   describe('Invalid Attribute Code (ValidationID: 14)', () => {
     it('should flag non-existent attribute code', async () => {
+      // ValidationID 14 is a soft, post-ingestion validation: bulkingestionprocess drops
+      // the unknown code (preserving it in coremeasurements.RawCodes) without flagging it
+      // inline; the runner produces the error by parsing RawCodes. Ingest, then validate.
+      // The code MUST be <= 10 chars: ValidationID 14 parses RawCodes via
+      // json_table(... code varchar(10) ...), so under STRICT_TRANS_TABLES a longer token
+      // is silently skipped (real attribute codes are <= 10 chars — attributes.Code).
       const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
       const quadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
 
@@ -517,11 +524,12 @@ describe('Inline Validation Data Tests', () => {
           dbh: 100.0,
           hom: 1.3,
           date: '2024-06-15',
-          codes: 'INVALIDCODE999' // Invalid attribute code
+          codes: 'NOSUCH' // invalid attribute code (<= 10 chars; see note above)
         }
       ]);
 
-      const result = await runBulkIngestion(connection, fileID, batchID);
+      await runBulkIngestion(connection, fileID, batchID);
+      await runValidationForTest(connection, 14);
 
       // Check for ValidationID 14 error (invalid attribute code)
       const errors = await getValidationErrors(connection, { validationID: 14 });
