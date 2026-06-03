@@ -45,7 +45,10 @@ function buildSharedRows() {
 
 function prepareDemoUser() {
   cy.viewport(1600, 1000);
-  cy.setupForestGEOUser('standardUser');
+  // The walkthrough edits a species code (a taxonomic-identity change), which the
+  // app restricts to global / db-admin roles — demo as a global admin so that
+  // step is exercisable.
+  cy.setupForestGEOUser('adminUser');
   cy.mockCoreDataValidity();
 }
 
@@ -128,7 +131,12 @@ describe('ForestGEO Product Showcase Demo', () => {
       cy.get('[aria-label="Save"]').click();
     });
 
-    cy.wait('@saveMeasurementHubRow');
+    cy.demoStep('Editing a species code is a taxonomic change, so the app asks for confirmation before applying it.', {
+      highlight: '[data-testid="edit-preview-apply"]'
+    });
+    cy.wait('@previewEdit');
+    cy.get('[data-testid="edit-preview-apply"]').click();
+    cy.wait('@applyEdit');
     cy.wait('@refreshMeasurementHubSummary');
     cy.wait('@fetchErrorsExplorerRows');
 
@@ -148,7 +156,7 @@ describe('ForestGEO Product Showcase Demo', () => {
     });
 
     cy.openCensusHubLink('View All Historical Data');
-    cy.contains('[role="row"]', 'TREE101').should('contain', 'ANOPKL');
+    cy.gridRowShouldContain('TREE101', 'ANOPKL');
 
     cy.demoStep('And the same corrected value carries through to the full historical table as well.', {
       highlight: '[role="grid"]'

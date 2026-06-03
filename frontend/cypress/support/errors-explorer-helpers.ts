@@ -9,6 +9,7 @@ import type {
   ErrorExplorerRow,
   RelatedContradictionRow
 } from '../../config/errorsexplorer';
+import { canonicalDiffToRowPatch, mockEditPlanFlow, type EditPlanApplyContext, type EditPlanApplyResponse } from './edit-plan-helpers';
 
 function getContradictionTypes(row: Pick<ErrorExplorerRow, 'contradictionTypes' | 'contradictionType'>): ContradictionType[] {
   if (row.contradictionTypes.length > 0) {
@@ -205,14 +206,10 @@ export interface MockErrorsExplorerApiOptions {
   facets?: ErrorExplorerFacetsResponse;
   queryHandler?: (request: ErrorExplorerQueryRequest, rows: ErrorExplorerRow[]) => ErrorExplorerQueryResponse;
   detailsByMeasurementID?: Record<number, ErrorExplorerDetailsResponse>;
-  patchHandler?: (
-    requestBody: { oldRow: Partial<ErrorExplorerRow>; newRow: Partial<ErrorExplorerRow> },
-    rows: ErrorExplorerRow[]
-  ) => {
-    statusCode?: number;
-    body?: Record<string, unknown>;
-    rows?: ErrorExplorerRow[];
-  };
+  // Invoked when the app POSTs /api/edits/apply (the edit-plan commit). Return a
+  // failure ({ statusCode, body }) to exercise the save-failure path, or omit for
+  // a default success. Returning `rows` replaces the mock's current row state.
+  applyHandler?: (context: EditPlanApplyContext, rows: ErrorExplorerRow[]) => (EditPlanApplyResponse & { rows?: ErrorExplorerRow[] }) | void;
   refreshResponse?: {
     statusCode: number;
     body: Record<string, unknown>;
@@ -224,7 +221,7 @@ export function mockErrorsExplorerApi({
   facets,
   queryHandler,
   detailsByMeasurementID = {},
-  patchHandler,
+  applyHandler,
   refreshResponse = { statusCode: 200, body: { message: 'Refresh successful' } }
 }: MockErrorsExplorerApiOptions) {
   let currentRows = rows.map(row => ({ ...row }));
@@ -257,35 +254,25 @@ export function mockErrorsExplorerApi({
     });
   }).as('fetchErrorDetails');
 
-  cy.intercept('PATCH', '**/api/fixeddata/measurementssummary/*/coreMeasurementID', req => {
-    const requestBody = req.body as { oldRow: Partial<ErrorExplorerRow>; newRow: Partial<ErrorExplorerRow> };
-
-    if (patchHandler) {
-      const response = patchHandler(requestBody, currentRows);
-      if (response?.rows) {
-        currentRows = response.rows.map(row => ({ ...row }));
-      }
-
-      req.reply({
-        statusCode: response?.statusCode ?? 200,
-        body: response?.body ?? {
-          message: 'Update successful',
-          updatedIDs: { measurementssummary: requestBody.newRow.coreMeasurementID }
+  // Edits commit through the edit-plan flow (POST /api/edits/preview then
+  // /api/edits/apply), not the legacy measurementssummary PATCH. A SpeciesCode
+  // change is `warn` severity, so the spec must confirm the PreviewDialog before
+  // @applyEdit fires.
+  mockEditPlanFlow({
+    onApply: context => {
+      if (applyHandler) {
+        const response = applyHandler(context, currentRows);
+        if (response?.rows) {
+          currentRows = response.rows.map(row => ({ ...row }));
         }
-      });
-      return;
-    }
-
-    currentRows = currentRows.map(row => (row.coreMeasurementID === requestBody.newRow.coreMeasurementID ? { ...row, ...requestBody.newRow } : row));
-
-    req.reply({
-      statusCode: 200,
-      body: {
-        message: 'Update successful',
-        updatedIDs: { measurementssummary: requestBody.newRow.coreMeasurementID }
+        return response ?? undefined;
       }
-    });
-  }).as('saveErrorRow');
+
+      const patch = canonicalDiffToRowPatch(context.newRow);
+      currentRows = currentRows.map(row => (row.coreMeasurementID === context.targetID ? { ...row, ...patch } : row));
+      return undefined;
+    }
+  });
 
   cy.intercept('POST', '**/api/refreshviews/measurementssummary/*', {
     statusCode: refreshResponse.statusCode,

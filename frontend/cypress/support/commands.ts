@@ -200,6 +200,29 @@ Cypress.Commands.add('loginViaCredentials', (email = 'e2e-admin@forestgeo.si.edu
   });
 });
 
+/**
+ * Asserts that a data-grid row identified by `rowText` is present (and, when
+ * `cellText` is given, that the row also contains `cellText`).
+ *
+ * Wide grids (e.g. View All Historical Data has 53 columns; treeTag is column
+ * #37, speciesCode #43) column-virtualize their far-right cells out of the DOM,
+ * so a plain `cy.contains('[role="row"]', 'TREE101')` finds nothing even though
+ * the grid is correctly populated. This command scrolls the visible grid fully
+ * right first so those identity columns render, then asserts.
+ *
+ * Use this ONLY for the wide grids where the asserted column is off-screen. For
+ * grids whose target column is visible by default (e.g. the measurements summary
+ * grid, treeTag #12), assert directly — scrolling right would virtualize it out.
+ */
+Cypress.Commands.add('gridRowShouldContain', (rowText: string, cellText?: string) => {
+  cy.get('.MuiDataGrid-virtualScroller:visible').first().scrollTo('right', { ensureScrollable: false });
+  if (cellText !== undefined) {
+    cy.contains('[role="row"]', rowText).should('contain', cellText);
+  } else {
+    cy.contains('[role="row"]', rowText).should('be.visible');
+  }
+});
+
 declare global {
   namespace Cypress {
     interface Chainable {
@@ -212,6 +235,11 @@ declare global {
        * Sets a real session cookie — no intercept mocking needed.
        */
       loginViaCredentials(email?: string, userStatus?: string): Chainable<void>;
+      /**
+       * Assert a wide-grid row is present (and optionally contains cellText),
+       * scrolling the grid right first so column-virtualized cells render.
+       */
+      gridRowShouldContain(rowText: string, cellText?: string): Chainable<void>;
     }
   }
 }

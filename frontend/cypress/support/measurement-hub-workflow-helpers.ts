@@ -1,6 +1,7 @@
 import type { ErrorExplorerQueryRequest, ErrorExplorerRow } from '../../config/errorsexplorer';
 import { buildErrorsExplorerDetails, buildErrorsExplorerQueryResponse } from './errors-explorer-helpers';
 import type { MeasurementValidationFailure } from './grid-api-helpers';
+import { canonicalDiffToRowPatch, mockEditPlanFlow } from './edit-plan-helpers';
 
 type GenericRow = Record<string, any>;
 
@@ -195,28 +196,18 @@ export function mockMeasurementHubWorkflowApi({
     });
   }).as('filterMeasurementHubFullRows');
 
-  cy.intercept('PATCH', `**/api/fixeddata/measurementssummary/${schema}/coreMeasurementID`, req => {
-    const newRow = (req.body?.newRow ?? {}) as Partial<GenericRow>;
-
-    state.summaryRows = applyRowUpdate(state.summaryRows, newRow);
-    state.viewFullTableRows = applyRowUpdate(state.viewFullTableRows, newRow);
-    state.errorRows = state.errorRows.map(row =>
-      Number(row.coreMeasurementID) === Number(newRow.coreMeasurementID)
-        ? {
-            ...row,
-            ...newRow
-          }
-        : row
-    );
-
-    req.reply({
-      statusCode: 200,
-      body: {
-        message: 'Update successful',
-        updatedIDs: { measurementssummary: newRow.coreMeasurementID }
-      }
-    });
-  }).as('saveMeasurementHubRow');
+  // Edits commit through the edit-plan flow (POST /api/edits/preview then
+  // /api/edits/apply). A SpeciesCode change is `warn` severity, so consuming specs
+  // must confirm the PreviewDialog before @applyEdit fires.
+  mockEditPlanFlow({
+    onApply: ({ targetID, newRow }) => {
+      const patchRow = { coreMeasurementID: targetID, ...canonicalDiffToRowPatch(newRow) } as Partial<GenericRow>;
+      state.summaryRows = applyRowUpdate(state.summaryRows, patchRow);
+      state.viewFullTableRows = applyRowUpdate(state.viewFullTableRows, patchRow);
+      state.errorRows = state.errorRows.map(row => (Number(row.coreMeasurementID) === Number(targetID) ? { ...row, ...patchRow } : row));
+      return undefined;
+    }
+  });
 
   cy.intercept('GET', '**/api/validations/validationerrordisplay?*', req => {
     req.reply({
