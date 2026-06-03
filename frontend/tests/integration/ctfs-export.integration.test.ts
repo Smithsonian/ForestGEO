@@ -644,19 +644,25 @@ describe('ctfs-export perf baseline', () => {
     // 1000 new stems + the one from the seed → 1001 DBH rows.
     expect(await countCtfsRows(ctfsConn, 'DBH', 'CensusID = 1')).toBe(ROW_COUNT + 1);
 
-    const fixtureDir = path.dirname(PERF_BASELINE_PATH);
-    if (!existsSync(fixtureDir)) mkdirSync(fixtureDir, { recursive: true });
+    // Record the wall-clock baseline only when explicitly refreshing it. The
+    // baseline is a git-tracked fixture; writing it on every run produced
+    // spurious diffs (and dropped the file's trailing newline). Refresh on
+    // purpose with UPDATE_PERF_BASELINE=1.
+    if (process.env.UPDATE_PERF_BASELINE) {
+      const fixtureDir = path.dirname(PERF_BASELINE_PATH);
+      if (!existsSync(fixtureDir)) mkdirSync(fixtureDir, { recursive: true });
 
-    const existing = existsSync(PERF_BASELINE_PATH) ? JSON.parse(readFileSync(PERF_BASELINE_PATH, 'utf8')) : {};
-    existing['1k-smoke'] = {
-      rows: ROW_COUNT,
-      buildMs,
-      executeMs: execMs,
-      totalMs,
-      artifactBytes,
-      recordedAt: new Date().toISOString()
-    };
-    writeFileSync(PERF_BASELINE_PATH, JSON.stringify(existing, null, 2));
+      const existing = existsSync(PERF_BASELINE_PATH) ? JSON.parse(readFileSync(PERF_BASELINE_PATH, 'utf8')) : {};
+      existing['1k-smoke'] = {
+        rows: ROW_COUNT,
+        buildMs,
+        executeMs: execMs,
+        totalMs,
+        artifactBytes,
+        recordedAt: new Date().toISOString()
+      };
+      writeFileSync(PERF_BASELINE_PATH, JSON.stringify(existing, null, 2) + '\n');
+    }
 
     // Sanity-only assertion: we recorded a positive duration. No budget.
     expect(totalMs).toBeGreaterThan(0);
