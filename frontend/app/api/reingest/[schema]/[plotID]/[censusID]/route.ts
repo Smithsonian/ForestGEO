@@ -3,9 +3,11 @@ import ConnectionManager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery, validatedSchema, validateSchemaOrThrow, type SchemaName } from '@/config/utils/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -57,7 +59,7 @@ async function validateAndExtractParams(
   schemaParam: string,
   plotIDParam: string,
   censusIDParam: string
-): Promise<{ schema: string; plotID: number; censusID: number } | NextResponse> {
+): Promise<{ schema: SchemaName; plotID: number; censusID: number } | NextResponse> {
   const validation = await validateContextualValues(request, {
     requireSchema: true,
     requirePlot: true,
@@ -66,24 +68,37 @@ async function validateAndExtractParams(
     fallbackMessage: 'Reingestion requires active site, plot, and census selections.'
   });
 
-  let plotID: number, censusID: number, schema: string;
+  let plotID: number, censusID: number, schema: SchemaName;
 
   if (!validation.success) {
     // Try to use URL parameters as fallback
     if (schemaParam && plotIDParam && censusIDParam) {
       plotID = parseInt(plotIDParam);
       censusID = parseInt(censusIDParam);
-      schema = schemaParam;
 
       if (isNaN(plotID) || isNaN(censusID)) {
         return NextResponse.json({ error: 'Invalid plotID or censusID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
+
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+
+      try {
+        schema = validatedSchema(schemaParam);
+      } catch {
+        return NextResponse.json({ error: 'Invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
     } else {
       return validation.response!;
     }
   } else {
     const values = validation.values!;
-    schema = values.schema!;
+    schema = validatedSchema(values.schema!);
     plotID = values.plotID!;
     censusID = values.censusID!;
   }
