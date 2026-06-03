@@ -371,6 +371,33 @@ class ConnectionManager {
     }
   }
 
+  /**
+   * Abort the statement currently executing on `threadId` by issuing
+   * `KILL QUERY` from a SEPARATE pooled connection. Used by withTransaction on
+   * timeout: the transaction's own connection is blocked behind the runaway
+   * statement, so the abort must come from a different connection. KILL QUERY
+   * stops only the active statement and leaves the connection/thread alive, so
+   * the queued ROLLBACK can then run and release the connection.
+   *
+   * KILL is not preparable in MySQL, so this uses the text protocol with a
+   * numeric thread id (never user input) rather than a bound parameter.
+   */
+  private async killRunningQuery(threadId: number): Promise<void> {
+    if (!Number.isInteger(threadId)) return;
+    let killConnection: PoolConnection | null = null;
+    try {
+      killConnection = await this.acquireConnectionInternal();
+      await killConnection.query(`KILL QUERY ${threadId}`);
+      ailogger.warn(chalk.yellow(`KILL QUERY issued for thread ${threadId} (transaction timeout)`));
+    } catch (killError: unknown) {
+      // The statement may have just finished (thread no longer running a query)
+      // — KILL then errors harmlessly. Log and proceed to rollback regardless.
+      ailogger.warn(`KILL QUERY for thread ${threadId} failed (may have already completed): ${getErrorMessage(killError)}`);
+    } finally {
+      killConnection?.release();
+    }
+  }
+
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
@@ -381,16 +408,20 @@ class ConnectionManager {
    * {@link TxExecutor}: `tx.query` binds to the transaction's dedicated
    * connection, `tx.id` is the migration bridge for legacy string-id helpers.
    *
-   * Timeout semantics — KNOWN LIMITATION: the timeout uses `Promise.race`
-   * against `fn(tx)`. When the timeout wins, this method rolls back and
-   * releases the connection, but it does NOT cancel the in-flight callback or
-   * any `tx.query` already submitted to MySQL — `Promise.race` cannot abort
-   * the loser. The orphan `fnPromise` rejection is silently consumed (see the
-   * inline comment near `fnPromise`) so the process does not crash with an
-   * unhandled rejection. Real cancellation requires threading an
-   * `AbortSignal` through `tx.query` → connection.query — tracked as a
-   * follow-up. Callers that need hard cancellation should not rely on
-   * timeoutMs alone.
+   * Timeout semantics: the timeout uses `Promise.race` against `fn(tx)`. When
+   * the timeout wins, the callback's statement may still be executing on the
+   * transaction's dedicated connection. Because mysql2 serializes commands per
+   * connection, a naive ROLLBACK would be queued BEHIND that statement and
+   * could not run until it finished on its own — which would defeat the timeout
+   * and pin the slot. To avoid that, on timeout this method issues
+   * `KILL QUERY <threadId>` from a SEPARATE connection (see {@link
+   * killRunningQuery}) to abort the running statement, so the queued ROLLBACK
+   * and connection release proceed promptly — returning control to the caller
+   * at ~timeoutMs and freeing the transaction slot. An `AbortSignal` cannot
+   * substitute for this: MySQL has no protocol-level statement abort, so the
+   * server keeps executing until the statement is KILLed. The orphan
+   * `fnPromise` rejection (the KILLed statement) is swallowed so it cannot
+   * surface as an unhandled rejection.
    */
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
@@ -467,8 +498,12 @@ class ConnectionManager {
       }, pingInterval);
     }
 
+    // Tracks whether the timeout (not an ordinary callback error) ended the
+    // race, so the catch block knows to KILL the still-running statement.
+    let timedOut = false;
     const timeoutPromise = new Promise<never>((_, reject) => {
       meta.timeoutHandle = setTimeout(() => {
+        timedOut = true;
         reject(new Error(`Transaction ${transactionId!} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
@@ -500,6 +535,14 @@ class ConnectionManager {
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
 
+      // The callback may still have a statement in flight (especially on
+      // timeout). Attach the swallow handler BEFORE the KILL/rollback below so
+      // the eventual rejection of that orphaned statement can never surface as
+      // an unhandled rejection in the window between abort and handler attach.
+      fnPromise.catch((fnErr: unknown) => {
+        ailogger.warn(`Orphaned callback error for transaction ${transactionId!} (expected after abort/rollback): ${getErrorMessage(fnErr)}`);
+      });
+
       // Enhanced error logging
       const errMessage = getErrorMessage(err);
       const errorType = err instanceof Error ? err.constructor.name : 'Unknown';
@@ -512,19 +555,22 @@ class ConnectionManager {
         isTimeoutError: this.isLockTimeoutError(err) || errMessage.includes('timed out')
       });
 
+      // On timeout the callback's statement is still running on the tx's
+      // dedicated connection; the ROLLBACK below would queue behind it. KILL it
+      // from a separate connection first so rollback/release proceed promptly.
+      if (timedOut) {
+        const txConnection = this.transactionConnections.get(transactionId!) as PoolConnectionWithThreadId | undefined;
+        const threadId = txConnection?.threadId;
+        if (typeof threadId === 'number') {
+          await this.killRunningQuery(threadId);
+        }
+      }
+
       try {
         await this.rollbackTransaction(transactionId!);
       } catch (rbErr: unknown) {
         ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
-
-      // After rollback, the fn callback may still be in-flight. Its subsequent
-      // executeQuery calls will fail with "No connection found" because the
-      // connection was released during rollback. Swallow that eventual rejection
-      // to prevent an unhandled promise rejection crash.
-      fnPromise.catch((fnErr: unknown) => {
-        ailogger.warn(`Post-rollback callback error for transaction ${transactionId!} (expected): ${getErrorMessage(fnErr)}`);
-      });
 
       this.transactionMeta.delete(transactionId!);
       throw err;
