@@ -122,6 +122,20 @@ describe('POST /api/query authorization', () => {
     expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects non-admin SELECT statements that read server-side files via LOAD_FILE()', async () => {
+    const response = await POST(makeRequest("SELECT LOAD_FILE('/etc/passwd') FROM forestgeo_testing.attributes LIMIT 1"));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin SELECT statements that acquire shared row locks via FOR SHARE', async () => {
+    const response = await POST(makeRequest('SELECT * FROM forestgeo_testing.attributes WHERE Code = 1 FOR SHARE'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
   it('allows administrators to execute formatted write SQL', async () => {
     mocks.auth.mockResolvedValueOnce({
       user: {

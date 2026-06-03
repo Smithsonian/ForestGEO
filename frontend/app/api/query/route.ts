@@ -45,7 +45,13 @@ function isReadOnlySelect(query: string): boolean {
 
 function hasUnsafeSelectModifier(query: string): boolean {
   const normalized = sqlForAuthorization(query).toLowerCase();
-  return /\binto\s+(?:out|dump)file\b/.test(normalized) || /\bfor\s+update\b/.test(normalized) || /\block\s+in\s+share\s+mode\b/.test(normalized);
+  return (
+    /\binto\s+(?:out|dump)file\b/.test(normalized) ||
+    /\bload_file\s*\(/.test(normalized) ||
+    /\bfor\s+update\b/.test(normalized) ||
+    /\bfor\s+share\b/.test(normalized) ||
+    /\block\s+in\s+share\s+mode\b/.test(normalized)
+  );
 }
 
 function extractTableSchemas(query: string): string[] {
