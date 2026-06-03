@@ -11,9 +11,25 @@ import {
   type TestData
 } from '../setup/local-db-setup';
 
+const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
+
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   batchCounter: 0
+}));
+
+// Grant a 'global' role so the route's auth() gate and assertSchemaAccess pass
+// without a live session. Mocking @/auth also keeps the real next-auth module
+// (whose lib/env.js imports the extensionless `next/server` subpath) from being
+// loaded by Node's native ESM resolver, which cannot resolve it.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: {
+      email: AUTH_USER_EMAIL,
+      userStatus: 'global',
+      sites: []
+    }
+  }))
 }));
 
 vi.mock('@/config/connectionmanager', () => {
