@@ -135,6 +135,7 @@ class ConnectionManager {
   // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
   private transactionSlotQueue: Array<() => void> = []; // Queue for waiting transactions
+  private startingTransactions = 0; // Reserved slots for transactions between queue wake-up and BEGIN registration
 
   // Private constructor
   private constructor() {
@@ -394,36 +395,8 @@ class ConnectionManager {
   public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
-    // Race condition fix: use promise-based queue instead of polling
-    if (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS) {
-      ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
-
-      // Wait for a slot to become available using a promise queue.
-      // wrappedResolve is the function actually pushed to the queue, so the
-      // timeout cleanup must look that up — NOT the bare resolve, which is
-      // never in the queue and whose indexOf always returned -1 (leaving the
-      // dead wrappedResolve stranded; releaseTransactionSlot would later
-      // shift+call it, silently consuming a slot release for a waiter that
-      // has already been rejected).
-      await new Promise<void>((resolve, reject) => {
-        let wrappedResolve: () => void;
-        const timeoutId = setTimeout(() => {
-          const index = this.transactionSlotQueue.indexOf(wrappedResolve);
-          if (index !== -1) {
-            this.transactionSlotQueue.splice(index, 1);
-          }
-          reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
-        }, 60000); // 1 minute max wait
-
-        wrappedResolve = () => {
-          clearTimeout(timeoutId);
-          resolve();
-        };
-        this.transactionSlotQueue.push(wrappedResolve);
-      });
-
-      ailogger.info('Transaction slot available, proceeding...');
-    }
+    await this.acquireTransactionSlot();
+    let startSlotReserved = true;
 
     let transactionId: string;
     let retryCount = 0;
@@ -433,10 +406,16 @@ class ConnectionManager {
     while (retryCount < maxRetries) {
       try {
         transactionId = await this.beginTransaction();
+        this.consumeTransactionStartSlot();
+        startSlotReserved = false;
         break;
       } catch (error: unknown) {
         retryCount++;
         if (retryCount >= maxRetries) {
+          if (startSlotReserved) {
+            this.releaseTransactionStartSlot();
+            startSlotReserved = false;
+          }
           throw new Error(`Failed to start transaction after ${maxRetries} retries: ${getErrorMessage(error)}`);
         }
         ailogger.warn(`Transaction start failed (attempt ${retryCount}/${maxRetries}), retrying...`);
@@ -446,6 +425,7 @@ class ConnectionManager {
 
     const connection = this.transactionConnections.get(transactionId!);
     if (!connection) {
+      this.releaseTransactionSlot();
       throw new Error(`Connection lost immediately after transaction start for ${transactionId!}`);
     }
 
@@ -678,9 +658,58 @@ class ConnectionManager {
     }
   }
 
+  private transactionSlotOccupancy(): number {
+    return this.transactionConnections.size + this.startingTransactions;
+  }
+
+  private async acquireTransactionSlot(): Promise<void> {
+    while (this.transactionSlotOccupancy() >= this.MAX_CONCURRENT_TRANSACTIONS) {
+      ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
+
+      // Wait for a slot to become available using a promise queue.
+      // wrappedResolve is the function actually pushed to the queue, so the
+      // timeout cleanup must look that up — NOT the bare resolve, which is
+      // never in the queue and whose indexOf always returned -1 (leaving the
+      // dead wrappedResolve stranded; releaseTransactionSlot would later
+      // shift+call it, silently consuming a slot release for a waiter that
+      // has already been rejected).
+      await new Promise<void>((resolve, reject) => {
+        let wrappedResolve!: () => void;
+        const timeoutId = setTimeout(() => {
+          const index = this.transactionSlotQueue.indexOf(wrappedResolve);
+          if (index !== -1) {
+            this.transactionSlotQueue.splice(index, 1);
+          }
+          reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
+        }, 60000); // 1 minute max wait
+
+        wrappedResolve = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        this.transactionSlotQueue.push(wrappedResolve);
+      });
+
+      ailogger.info('Transaction slot available, proceeding...');
+    }
+
+    this.startingTransactions++;
+  }
+
+  private consumeTransactionStartSlot(): void {
+    if (this.startingTransactions > 0) {
+      this.startingTransactions--;
+    }
+  }
+
+  private releaseTransactionStartSlot(): void {
+    this.consumeTransactionStartSlot();
+    this.releaseTransactionSlot();
+  }
+
   // Release a transaction slot from the queue (race condition fix)
   private releaseTransactionSlot(): void {
-    if (this.transactionSlotQueue.length > 0) {
+    if (this.transactionSlotQueue.length > 0 && this.transactionSlotOccupancy() < this.MAX_CONCURRENT_TRANSACTIONS) {
       const nextResolver = this.transactionSlotQueue.shift();
       if (nextResolver) {
         nextResolver();
