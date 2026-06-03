@@ -27,21 +27,38 @@ function stripSqlComments(query: string): string {
     .replace(/#[^\r\n]*/g, ' ');
 }
 
+function stripSqlStringLiterals(query: string): string {
+  return query.replace(/'(?:''|\\'|[^'])*'/g, ' ').replace(/"(?:\\"|[^"])*"/g, ' ');
+}
+
+function sqlForAuthorization(query: string): string {
+  return stripSqlComments(stripSqlStringLiterals(query));
+}
+
 function hasMultipleStatements(query: string): boolean {
-  return stripSqlComments(query).trim().replace(/;+$/g, '').includes(';');
+  return sqlForAuthorization(query).trim().replace(/;+$/g, '').includes(';');
 }
 
 function isReadOnlySelect(query: string): boolean {
-  return stripSqlComments(query).trimStart().toLowerCase().startsWith('select ');
+  return sqlForAuthorization(query).trimStart().toLowerCase().startsWith('select ');
+}
+
+function hasUnsafeSelectModifier(query: string): boolean {
+  const normalized = sqlForAuthorization(query).toLowerCase();
+  return /\binto\s+(?:out|dump)file\b/.test(normalized) || /\bfor\s+update\b/.test(normalized) || /\block\s+in\s+share\s+mode\b/.test(normalized);
 }
 
 function extractTableSchemas(query: string): string[] {
   const schemas = new Set<string>();
-  const tableReferencePattern = /\b(?:from|join)\s+(?:`([a-zA-Z0-9_]+)`|([a-zA-Z0-9_]+))\s*\./gi;
+  const tableReferencePattern = /(?:`([a-zA-Z0-9_]+)`|([a-zA-Z0-9_]+))\s*\.\s*(?:`[a-zA-Z0-9_]+`|[a-zA-Z0-9_]+)/g;
+  const inspectedSql = sqlForAuthorization(query);
   let match: RegExpExecArray | null;
 
-  while ((match = tableReferencePattern.exec(query)) !== null) {
-    schemas.add((match[1] ?? match[2]).toLowerCase());
+  while ((match = tableReferencePattern.exec(inspectedSql)) !== null) {
+    const schema = (match[1] ?? match[2]).toLowerCase();
+    if (schema.startsWith('forestgeo_') || SYSTEM_SCHEMAS.has(schema)) {
+      schemas.add(schema);
+    }
   }
 
   return [...schemas];
@@ -58,6 +75,10 @@ function authorizeQuery(session: Session, query: string): NextResponse | null {
 
   if (!isReadOnlySelect(query)) {
     return NextResponse.json({ error: 'Only administrators may execute write SQL' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
+  if (hasUnsafeSelectModifier(query)) {
+    return NextResponse.json({ error: 'Non-admin SELECT statements may not write files or acquire row locks' }, { status: HTTPResponses.FORBIDDEN });
   }
 
   const referencedSchemas = extractTableSchemas(query);

@@ -92,6 +92,36 @@ describe('POST /api/query authorization', () => {
     expect(mocks.executeQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects comma-join reads that reference an unassigned schema after an assigned one', async () => {
+    const response = await POST(makeRequest('SELECT t.Code, o.Code FROM forestgeo_testing.attributes t, forestgeo_other.attributes o WHERE t.Code = o.Code'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('does not treat schema-looking string literals as schema references', async () => {
+    const response = await POST(makeRequest("SELECT * FROM forestgeo_testing.attributes WHERE Description = 'forestgeo_other.attributes'"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith("SELECT * FROM forestgeo_testing.attributes WHERE Description = 'forestgeo_other.attributes'");
+  });
+
+  it('still rejects multiple statements when a string literal contains comment syntax', async () => {
+    const response = await POST(
+      makeRequest("SELECT * FROM forestgeo_testing.attributes WHERE Description = '-- not a comment'; SELECT * FROM forestgeo_testing.attributes")
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin SELECT statements that write server-side files', async () => {
+    const response = await POST(makeRequest("SELECT * FROM forestgeo_testing.attributes INTO OUTFILE '/tmp/attributes.csv'"));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
   it('allows administrators to execute formatted write SQL', async () => {
     mocks.auth.mockResolvedValueOnce({
       user: {
