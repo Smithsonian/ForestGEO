@@ -45,8 +45,12 @@ export default defineConfig({
     pool: 'forks',
     poolOptions: {
       forks: {
-        singleFork: true, // Run all tests in single process
-        isolate: false // Share database connection between tests
+        singleFork: true, // Run all integration files in a single process (one DB, sequential)
+        // isolate MUST stay true: each integration file mocks @/config/connectionmanager
+        // with its own vi.hoisted connection. A shared module registry (isolate: false)
+        // lets the first-loaded file's mock + already-torn-down connection leak into every
+        // later file, producing "Test DB connection not initialized" cross-file failures.
+        isolate: true
       }
     },
 
