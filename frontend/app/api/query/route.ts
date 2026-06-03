@@ -18,7 +18,8 @@ interface QueryRequest {
   format?: boolean; // Whether to format the query with parameters
 }
 
-const SYSTEM_SCHEMAS = new Set(['catalog', 'information_schema', 'mysql', 'performance_schema', 'sys']);
+const TABLE_REFERENCE_BOUNDARIES = new Set(['where', 'group', 'order', 'having', 'limit', 'union', 'except', 'intersect', 'window', 'for', 'lock']);
+const TABLE_REFERENCE_PREFIXES = new Set(['lateral']);
 
 function stripSqlComments(query: string): string {
   return query
@@ -67,20 +68,99 @@ function hasUnsafeSelectModifier(query: string): boolean {
   );
 }
 
+function tokenizeSqlForAuthorization(query: string): string[] {
+  return sqlForAuthorization(query).match(/`(?:``|[^`])*`|[a-zA-Z_][a-zA-Z0-9_]*|[().,]/g) ?? [];
+}
+
+function normalizeSqlIdentifier(token: string): string {
+  return token.startsWith('`') && token.endsWith('`') ? token.slice(1, -1).replace(/``/g, '`').toLowerCase() : token.toLowerCase();
+}
+
+function readTableReferenceSchema(tokens: string[], startIndex: number): { schema: string | null; nextIndex: number } | null {
+  let index = startIndex;
+  while (index < tokens.length && TABLE_REFERENCE_PREFIXES.has(normalizeSqlIdentifier(tokens[index]))) {
+    index++;
+  }
+
+  const first = tokens[index];
+  if (!first || first === '(' || first === ')' || first === ',' || first === '.') {
+    return null;
+  }
+
+  const second = tokens[index + 1];
+  const third = tokens[index + 2];
+  if (second === '.' && third && third !== '(' && third !== ')' && third !== ',' && third !== '.') {
+    return { schema: normalizeSqlIdentifier(first), nextIndex: index + 3 };
+  }
+
+  // Bare table or CTE reference. It has no schema to authorize here.
+  return { schema: null, nextIndex: index + 1 };
+}
+
 function extractTableSchemas(query: string): string[] {
   const schemas = new Set<string>();
-  const tableReferencePattern = /(?:`([a-zA-Z0-9_]+)`|([a-zA-Z0-9_]+))\s*\.\s*(?:`[a-zA-Z0-9_]+`|[a-zA-Z0-9_]+)/g;
-  const inspectedSql = sqlForAuthorization(query);
-  let match: RegExpExecArray | null;
+  const tokens = tokenizeSqlForAuthorization(query);
+  let depth = 0;
+  let inFromList = false;
+  let fromListDepth = -1;
+  let expectTableReference = false;
 
-  while ((match = tableReferencePattern.exec(inspectedSql)) !== null) {
-    const schema = (match[1] ?? match[2]).toLowerCase();
-    // Collect references in the ForestGEO namespace — both the per-site
-    // `forestgeo_*` schemas and the base `forestgeo` schema — plus system
-    // schemas, so the ownership check below sees them. Bare `alias.column`
-    // references are ignored because table aliases are never named `forestgeo*`.
-    if (schema.startsWith('forestgeo') || SYSTEM_SCHEMAS.has(schema)) {
-      schemas.add(schema);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const normalized = normalizeSqlIdentifier(token);
+
+    if (token === '(') {
+      depth++;
+      if (expectTableReference) {
+        expectTableReference = false;
+      }
+      continue;
+    }
+
+    if (token === ')') {
+      depth = Math.max(0, depth - 1);
+      if (inFromList && depth < fromListDepth) {
+        inFromList = false;
+        fromListDepth = -1;
+        expectTableReference = false;
+      }
+      continue;
+    }
+
+    if (inFromList && depth === fromListDepth && TABLE_REFERENCE_BOUNDARIES.has(normalized)) {
+      inFromList = false;
+      fromListDepth = -1;
+      expectTableReference = false;
+      continue;
+    }
+
+    if (normalized === 'from') {
+      inFromList = true;
+      fromListDepth = depth;
+      expectTableReference = true;
+      continue;
+    }
+
+    if (normalized === 'join' || normalized === 'straight_join') {
+      expectTableReference = true;
+      continue;
+    }
+
+    if (token === ',' && inFromList && depth === fromListDepth) {
+      expectTableReference = true;
+      continue;
+    }
+
+    if (expectTableReference) {
+      const tableReference = readTableReferenceSchema(tokens, i);
+      expectTableReference = false;
+      if (!tableReference) {
+        continue;
+      }
+      if (tableReference.schema) {
+        schemas.add(tableReference.schema);
+      }
+      i = tableReference.nextIndex - 1;
     }
   }
 
@@ -109,7 +189,7 @@ function authorizeQuery(session: Session, query: string): NextResponse | null {
     return NextResponse.json({ error: 'Non-admin SQL must reference an authorized site schema' }, { status: HTTPResponses.FORBIDDEN });
   }
 
-  if (referencedSchemas.some(schema => SYSTEM_SCHEMAS.has(schema) || !hasSchemaAccess(session, schema))) {
+  if (referencedSchemas.some(schema => !hasSchemaAccess(session, schema))) {
     return NextResponse.json({ error: 'SQL references a schema outside the authenticated user scope' }, { status: HTTPResponses.FORBIDDEN });
   }
 

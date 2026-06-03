@@ -72,6 +72,13 @@ describe('POST /api/query authorization', () => {
     expect(mocks.executeQuery).toHaveBeenCalledWith('SELECT * FROM forestgeo_testing.attributes');
   });
 
+  it('allows alias-qualified columns when the table reference is scoped to an assigned site schema', async () => {
+    const response = await POST(makeRequest('SELECT t.Code, t.Description FROM forestgeo_testing.attributes t WHERE t.Code = 1'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith('SELECT t.Code, t.Description FROM forestgeo_testing.attributes t WHERE t.Code = 1');
+  });
+
   it('rejects non-admin write SQL even when the schema is assigned', async () => {
     const response = await POST(
       makeRequest({
@@ -197,6 +204,20 @@ describe('POST /api/query authorization', () => {
   // base `forestgeo` schema) must still be subject to the ownership check.
   it('rejects non-admin reads that join an unowned non-prefixed schema (base forestgeo)', async () => {
     const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a JOIN forestgeo.users u ON 1 = 1'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin reads that join an arbitrary external database after an assigned schema', async () => {
+    const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a JOIN external_archive.users u ON 1 = 1'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin reads that use MySQL STRAIGHT_JOIN to reach an external database', async () => {
+    const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a STRAIGHT_JOIN external_archive.users u ON 1 = 1'));
 
     expect(response.status).toBe(403);
     expect(mocks.executeQuery).not.toHaveBeenCalled();
