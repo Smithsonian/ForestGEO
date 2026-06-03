@@ -13,7 +13,7 @@
 
 import { PoolConnection } from 'mysql2/promise';
 import { createHash } from 'node:crypto';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, runQuery } from '@/lib/db/primitives';
 import ailogger from '@/ailogger';
 import ConnectionManager from './connectionmanager';
 import { moveTemporaryBatchToFailedMeasurements } from '@/lib/batchfailuretransfer';

@@ -28,6 +28,13 @@ const VALID_SCHEMA_PATTERN = /^(forestgeo(_[a-z0-9_]+)?|catalog)$/;
 export type AllowedSchema = (typeof KNOWN_SCHEMAS)[number] | string;
 
 /**
+ * Branded type for a validated schema name.
+ * A value of this type can only be produced by passing through validatedSchema(),
+ * providing a compile-time signal that the schema has been checked before use.
+ */
+export type SchemaName = string & { readonly __brand: 'SchemaName' };
+
+/**
  * Validates if a schema name is valid for use in SQL queries
  * Accepts:
  * - Known static schemas (catalog, forestgeo, forestgeo_testing, etc.)
@@ -52,6 +59,15 @@ export function validateSchemaOrThrow(schema: string | null | undefined): assert
   if (!isValidSchema(schema)) {
     throw new Error(`Invalid or unauthorized schema: ${schema}`);
   }
+}
+
+/**
+ * Validates and returns a branded SchemaName. Prefer this in new code so a
+ * schema can only reach SQL after validation. Throws on invalid input.
+ */
+export function validatedSchema(schema: string | null | undefined): SchemaName {
+  validateSchemaOrThrow(schema);
+  return schema as SchemaName;
 }
 
 /**

@@ -3,9 +3,11 @@ import ConnectionManager from '@/config/connectionmanager';
 import { validateContextualValues } from '@/lib/contextvalidation';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
-import { safeFormatQuery, validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { safeFormatQuery, validatedSchema, validateSchemaOrThrow, type SchemaName } from '@/config/utils/sqlsecurity';
 import { generateShortBatchID } from '@/config/utils';
 import { INGESTION_ERROR_SOURCE } from '@/config/measurementerrors';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -57,7 +59,7 @@ async function validateAndExtractParams(
   schemaParam: string,
   plotIDParam: string,
   censusIDParam: string
-): Promise<{ schema: string; plotID: number; censusID: number } | NextResponse> {
+): Promise<{ schema: SchemaName; plotID: number; censusID: number } | NextResponse> {
   const validation = await validateContextualValues(request, {
     requireSchema: true,
     requirePlot: true,
@@ -66,24 +68,37 @@ async function validateAndExtractParams(
     fallbackMessage: 'Reingestion requires active site, plot, and census selections.'
   });
 
-  let plotID: number, censusID: number, schema: string;
+  let plotID: number, censusID: number, schema: SchemaName;
 
   if (!validation.success) {
     // Try to use URL parameters as fallback
     if (schemaParam && plotIDParam && censusIDParam) {
       plotID = parseInt(plotIDParam);
       censusID = parseInt(censusIDParam);
-      schema = schemaParam;
 
       if (isNaN(plotID) || isNaN(censusID)) {
         return NextResponse.json({ error: 'Invalid plotID or censusID parameters' }, { status: HTTPResponses.BAD_REQUEST });
       }
+
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+
+      try {
+        schema = validatedSchema(schemaParam);
+      } catch {
+        return NextResponse.json({ error: 'Invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.BAD_REQUEST });
+      }
+
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
     } else {
       return validation.response!;
     }
   } else {
     const values = validation.values!;
-    schema = values.schema!;
+    schema = validatedSchema(values.schema!);
     plotID = values.plotID!;
     censusID = values.censusID!;
   }
@@ -470,8 +485,8 @@ export async function POST(
   const connectionManager = ConnectionManager.getInstance();
   try {
     await connectionManager.cleanupStaleTransactions();
-    const { totalRows, fileID, batchID } = await connectionManager.withTransaction(async (transactionID: string) =>
-      moveFailedToTemporary(connectionManager, schema, plotID, censusID, transactionID)
+    const { totalRows, fileID, batchID } = await connectionManager.withTransaction(async tx =>
+      moveFailedToTemporary(connectionManager, schema, plotID, censusID, tx.id)
     );
 
     if (totalRows === 0) {
@@ -535,16 +550,16 @@ export async function GET(
     // if any step fails, everything rolls back and originals remain untouched.
     const lockKey = `reingest:${schema}:${plotID}:${censusID}`;
     const result = await connectionManager.withTransaction(
-      async (transactionID: string) => {
+      async tx => {
         // Acquire a distributed lock to prevent concurrent reingestion for the same plot/census.
         // Without this, two concurrent requests can corrupt each other's staging data.
-        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, transactionID, REINGESTION_TIMEOUT_MS);
+        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, REINGESTION_TIMEOUT_MS);
         if (!lockAcquired) {
           throw new Error(`Another reingestion is already in progress for ${schema} plot ${plotID} census ${censusID}`);
         }
 
         // Step 1: Stage failed rows to temporarymeasurements
-        const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(connectionManager, schema, plotID, censusID, transactionID);
+        const { totalRows, fileID, batchID, rowMappings } = await moveFailedToTemporary(connectionManager, schema, plotID, censusID, tx.id);
 
         if (totalRows === 0) {
           return { totalRows: 0, successfulReingestions: 0, remainingFailures: 0 };
@@ -552,18 +567,11 @@ export async function GET(
 
         // Step 2: Run bulkingestionprocess within the same transaction
         const bulkProcessSQL = safeFormatQuery(schema, 'CALL ??.bulkingestionprocess(?, ?)');
-        const procedureResult = await connectionManager.executeQuery(bulkProcessSQL, [fileID, batchID], transactionID);
+        const procedureResult = await tx.query(bulkProcessSQL, [fileID, batchID]);
         const ingestionStatus = parseBulkIngestionStatus(procedureResult);
 
         // Step 3: Reconcile processed rows back onto original CoreMeasurementIDs
-        const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(
-          connectionManager,
-          schema,
-          fileID,
-          batchID,
-          rowMappings,
-          transactionID
-        );
+        const { successfulReingestions, remainingFailures } = await reconcileReingestionRows(connectionManager, schema, fileID, batchID, rowMappings, tx.id);
 
         if (ingestionStatus.batchFailed) {
           ailogger.warn(`Reingestion batch ${batchID} failed internally: ${ingestionStatus.message ?? 'Unknown failure'}`);

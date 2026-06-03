@@ -5,6 +5,7 @@ import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { auth } from '@/auth';
 import { requireSession } from '@/lib/auth-helpers';
+import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 import type { Session } from 'next-auth';
 
 // Force Node.js runtime for database and Azure SDK compatibility
@@ -17,12 +18,8 @@ interface QueryRequest {
   format?: boolean; // Whether to format the query with parameters
 }
 
-const ADMIN_ROLES = new Set(['global', 'db admin']);
-const SYSTEM_SCHEMAS = new Set(['catalog', 'information_schema', 'mysql', 'performance_schema', 'sys']);
-
-function isAdminSession(session: Session): boolean {
-  return ADMIN_ROLES.has(session.user.userStatus ?? '');
-}
+const TABLE_REFERENCE_BOUNDARIES = new Set(['where', 'group', 'order', 'having', 'limit', 'union', 'except', 'intersect', 'window', 'for', 'lock']);
+const TABLE_REFERENCE_PREFIXES = new Set(['lateral']);
 
 function stripSqlComments(query: string): string {
   return query
@@ -31,28 +28,143 @@ function stripSqlComments(query: string): string {
     .replace(/#[^\r\n]*/g, ' ');
 }
 
+function stripSqlStringLiterals(query: string): string {
+  return query.replace(/'(?:''|\\'|[^'])*'/g, ' ').replace(/"(?:\\"|[^"])*"/g, ' ');
+}
+
+function sqlForAuthorization(query: string): string {
+  return stripSqlComments(stripSqlStringLiterals(query));
+}
+
 function hasMultipleStatements(query: string): boolean {
-  return stripSqlComments(query).trim().replace(/;+$/g, '').includes(';');
+  return sqlForAuthorization(query).trim().replace(/;+$/g, '').includes(';');
 }
 
 function isReadOnlySelect(query: string): boolean {
-  return stripSqlComments(query).trimStart().toLowerCase().startsWith('select ');
+  // Strip leading whitespace and opening parens so newline-/tab-formatted and
+  // parenthesised reads ("(SELECT ...)") are still recognised as SELECTs.
+  const normalized = sqlForAuthorization(query)
+    .toLowerCase()
+    .replace(/^[\s(]+/, '');
+  if (/^select\b/.test(normalized)) {
+    return true;
+  }
+  // A CTE (WITH ...) may resolve to a SELECT (read) or to an UPDATE/DELETE/INSERT
+  // (write). Allow it only when no write verb is present; fail closed otherwise.
+  if (/^with\b/.test(normalized)) {
+    return !/\b(?:insert|update|delete|replace)\b/.test(normalized);
+  }
+  return false;
+}
+
+function hasUnsafeSelectModifier(query: string): boolean {
+  const normalized = sqlForAuthorization(query).toLowerCase();
+  return (
+    /\binto\s+(?:out|dump)file\b/.test(normalized) ||
+    /\bload_file\s*\(/.test(normalized) ||
+    /\bfor\s+update\b/.test(normalized) ||
+    /\bfor\s+share\b/.test(normalized) ||
+    /\block\s+in\s+share\s+mode\b/.test(normalized)
+  );
+}
+
+function tokenizeSqlForAuthorization(query: string): string[] {
+  return sqlForAuthorization(query).match(/`(?:``|[^`])*`|[a-zA-Z_][a-zA-Z0-9_]*|[().,]/g) ?? [];
+}
+
+function normalizeSqlIdentifier(token: string): string {
+  return token.startsWith('`') && token.endsWith('`') ? token.slice(1, -1).replace(/``/g, '`').toLowerCase() : token.toLowerCase();
+}
+
+function readTableReferenceSchema(tokens: string[], startIndex: number): { schema: string | null; nextIndex: number } | null {
+  let index = startIndex;
+  while (index < tokens.length && TABLE_REFERENCE_PREFIXES.has(normalizeSqlIdentifier(tokens[index]))) {
+    index++;
+  }
+
+  const first = tokens[index];
+  if (!first || first === '(' || first === ')' || first === ',' || first === '.') {
+    return null;
+  }
+
+  const second = tokens[index + 1];
+  const third = tokens[index + 2];
+  if (second === '.' && third && third !== '(' && third !== ')' && third !== ',' && third !== '.') {
+    return { schema: normalizeSqlIdentifier(first), nextIndex: index + 3 };
+  }
+
+  // Bare table or CTE reference. It has no schema to authorize here.
+  return { schema: null, nextIndex: index + 1 };
 }
 
 function extractTableSchemas(query: string): string[] {
   const schemas = new Set<string>();
-  const tableReferencePattern = /\b(?:from|join)\s+(?:`([a-zA-Z0-9_]+)`|([a-zA-Z0-9_]+))\s*\./gi;
-  let match: RegExpExecArray | null;
+  const tokens = tokenizeSqlForAuthorization(query);
+  let depth = 0;
+  let inFromList = false;
+  let fromListDepth = -1;
+  let expectTableReference = false;
 
-  while ((match = tableReferencePattern.exec(query)) !== null) {
-    schemas.add((match[1] ?? match[2]).toLowerCase());
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const normalized = normalizeSqlIdentifier(token);
+
+    if (token === '(') {
+      depth++;
+      if (expectTableReference) {
+        expectTableReference = false;
+      }
+      continue;
+    }
+
+    if (token === ')') {
+      depth = Math.max(0, depth - 1);
+      if (inFromList && depth < fromListDepth) {
+        inFromList = false;
+        fromListDepth = -1;
+        expectTableReference = false;
+      }
+      continue;
+    }
+
+    if (inFromList && depth === fromListDepth && TABLE_REFERENCE_BOUNDARIES.has(normalized)) {
+      inFromList = false;
+      fromListDepth = -1;
+      expectTableReference = false;
+      continue;
+    }
+
+    if (normalized === 'from') {
+      inFromList = true;
+      fromListDepth = depth;
+      expectTableReference = true;
+      continue;
+    }
+
+    if (normalized === 'join' || normalized === 'straight_join') {
+      expectTableReference = true;
+      continue;
+    }
+
+    if (token === ',' && inFromList && depth === fromListDepth) {
+      expectTableReference = true;
+      continue;
+    }
+
+    if (expectTableReference) {
+      const tableReference = readTableReferenceSchema(tokens, i);
+      expectTableReference = false;
+      if (!tableReference) {
+        continue;
+      }
+      if (tableReference.schema) {
+        schemas.add(tableReference.schema);
+      }
+      i = tableReference.nextIndex - 1;
+    }
   }
 
   return [...schemas];
-}
-
-function hasSchemaAccess(session: Session, schema: string): boolean {
-  return (session.user.sites ?? []).some(site => site.schemaName?.toLowerCase() === schema.toLowerCase());
 }
 
 function authorizeQuery(session: Session, query: string): NextResponse | null {
@@ -68,12 +180,16 @@ function authorizeQuery(session: Session, query: string): NextResponse | null {
     return NextResponse.json({ error: 'Only administrators may execute write SQL' }, { status: HTTPResponses.FORBIDDEN });
   }
 
+  if (hasUnsafeSelectModifier(query)) {
+    return NextResponse.json({ error: 'Non-admin SELECT statements may not write files or acquire row locks' }, { status: HTTPResponses.FORBIDDEN });
+  }
+
   const referencedSchemas = extractTableSchemas(query);
   if (referencedSchemas.length === 0) {
     return NextResponse.json({ error: 'Non-admin SQL must reference an authorized site schema' }, { status: HTTPResponses.FORBIDDEN });
   }
 
-  if (referencedSchemas.some(schema => SYSTEM_SCHEMAS.has(schema) || !hasSchemaAccess(session, schema))) {
+  if (referencedSchemas.some(schema => !hasSchemaAccess(session, schema))) {
     return NextResponse.json({ error: 'SQL references a schema outside the authenticated user scope' }, { status: HTTPResponses.FORBIDDEN });
   }
 

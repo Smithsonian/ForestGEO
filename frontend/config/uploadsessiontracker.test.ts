@@ -28,7 +28,7 @@ vi.mock('@/lib/batchfailuretransfer', () => ({
   moveTemporaryBatchToFailedMeasurements: mocks.moveTemporaryBatchToFailedMeasurements
 }));
 
-vi.mock('@/components/processors/processormacros', () => ({
+vi.mock('@/lib/db/primitives', () => ({
   getConn: mocks.getConn,
   runQuery: mocks.runQuery
 }));

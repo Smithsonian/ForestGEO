@@ -2,7 +2,7 @@
 import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, runQuery } from '@/lib/db/primitives';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager, flushTransactionChangelog, discardTransactionChangelog } from '@/lib/connectionlogger';
 import ailogger from '@/ailogger';
@@ -15,6 +15,24 @@ interface MySQLError extends Error {
   errno?: number;
   sqlState?: string;
   sqlMessage?: string;
+}
+
+/**
+ * Scoped query executor handed to `ConnectionManager.withTransaction` callbacks.
+ *
+ * `query` runs a statement on the transaction's dedicated connection — callers
+ * no longer need to thread the raw transaction-id string into every
+ * `executeQuery` call. New code should use `tx.query(...)`.
+ */
+export interface TxExecutor {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query<T = any>(sql: string, params?: unknown[]): Promise<T>;
+  /**
+   * Migration bridge ONLY: pass to acquireApplicationLock / legacy string-id
+   * helpers not yet migrated to accept a TxExecutor. New code should use
+   * tx.query, not tx.id.
+   */
+  readonly id: string;
 }
 
 interface QueryTimingDetails {
@@ -117,6 +135,7 @@ class ConnectionManager {
   // Removed in-memory applicationLocks Map - now using MySQL GET_LOCK/RELEASE_LOCK for distributed locking
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000; // Reduced from 5 to 2 minutes for application locks
   private transactionSlotQueue: Array<() => void> = []; // Queue for waiting transactions
+  private startingTransactions = 0; // Reserved slots for transactions between queue wake-up and BEGIN registration
 
   // Private constructor
   private constructor() {
@@ -352,39 +371,63 @@ class ConnectionManager {
     }
   }
 
+  /**
+   * Abort the statement currently executing on `threadId` by issuing
+   * `KILL QUERY` from a SEPARATE pooled connection. Used by withTransaction on
+   * timeout: the transaction's own connection is blocked behind the runaway
+   * statement, so the abort must come from a different connection. KILL QUERY
+   * stops only the active statement and leaves the connection/thread alive, so
+   * the queued ROLLBACK can then run and release the connection.
+   *
+   * KILL is not preparable in MySQL, so this uses the text protocol with a
+   * numeric thread id (never user input) rather than a bound parameter.
+   */
+  private async killRunningQuery(threadId: number): Promise<void> {
+    if (!Number.isInteger(threadId)) return;
+    let killConnection: PoolConnection | null = null;
+    try {
+      killConnection = await this.acquireConnectionInternal();
+      await killConnection.query(`KILL QUERY ${threadId}`);
+      ailogger.warn(chalk.yellow(`KILL QUERY issued for thread ${threadId} (transaction timeout)`));
+    } catch (killError: unknown) {
+      // The statement may have just finished (thread no longer running a query)
+      // — KILL then errors harmlessly. Log and proceed to rollback regardless.
+      ailogger.warn(`KILL QUERY for thread ${threadId} failed (may have already completed): ${getErrorMessage(killError)}`);
+    } finally {
+      killConnection?.release();
+    }
+  }
+
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
   }
 
-  public async withTransaction<T>(fn: (transactionId: string) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
+  /**
+   * Run `fn` inside a managed MySQL transaction. The callback receives a scoped
+   * {@link TxExecutor}: `tx.query` binds to the transaction's dedicated
+   * connection, `tx.id` is the migration bridge for legacy string-id helpers.
+   *
+   * Timeout semantics: the timeout uses `Promise.race` against `fn(tx)`. When
+   * the timeout wins, the callback's statement may still be executing on the
+   * transaction's dedicated connection. Because mysql2 serializes commands per
+   * connection, a naive ROLLBACK would be queued BEHIND that statement and
+   * could not run until it finished on its own — which would defeat the timeout
+   * and pin the slot. To avoid that, on timeout this method issues
+   * `KILL QUERY <threadId>` from a SEPARATE connection (see {@link
+   * killRunningQuery}) to abort the running statement, so the queued ROLLBACK
+   * and connection release proceed promptly — returning control to the caller
+   * at ~timeoutMs and freeing the transaction slot. An `AbortSignal` cannot
+   * substitute for this: MySQL has no protocol-level statement abort, so the
+   * server keeps executing until the statement is KILLed. The orphan
+   * `fnPromise` rejection (the KILLed statement) is swallowed so it cannot
+   * surface as an unhandled rejection.
+   */
+  public async withTransaction<T>(fn: (tx: TxExecutor) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
     const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
 
-    // Race condition fix: use promise-based queue instead of polling
-    if (this.transactionConnections.size >= this.MAX_CONCURRENT_TRANSACTIONS) {
-      ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
-
-      // Wait for a slot to become available using a promise queue
-      await new Promise<void>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          // Remove from queue if still waiting
-          const index = this.transactionSlotQueue.indexOf(resolve);
-          if (index !== -1) {
-            this.transactionSlotQueue.splice(index, 1);
-          }
-          reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
-        }, 60000); // 1 minute max wait
-
-        // Add to queue with cleanup
-        const wrappedResolve = () => {
-          clearTimeout(timeoutId);
-          resolve();
-        };
-        this.transactionSlotQueue.push(wrappedResolve);
-      });
-
-      ailogger.info('Transaction slot available, proceeding...');
-    }
+    await this.acquireTransactionSlot();
+    let startSlotReserved = true;
 
     let transactionId: string;
     let retryCount = 0;
@@ -394,10 +437,16 @@ class ConnectionManager {
     while (retryCount < maxRetries) {
       try {
         transactionId = await this.beginTransaction();
+        this.consumeTransactionStartSlot();
+        startSlotReserved = false;
         break;
       } catch (error: unknown) {
         retryCount++;
         if (retryCount >= maxRetries) {
+          if (startSlotReserved) {
+            this.releaseTransactionStartSlot();
+            startSlotReserved = false;
+          }
           throw new Error(`Failed to start transaction after ${maxRetries} retries: ${getErrorMessage(error)}`);
         }
         ailogger.warn(`Transaction start failed (attempt ${retryCount}/${maxRetries}), retrying...`);
@@ -407,6 +456,7 @@ class ConnectionManager {
 
     const connection = this.transactionConnections.get(transactionId!);
     if (!connection) {
+      this.releaseTransactionSlot();
       throw new Error(`Connection lost immediately after transaction start for ${transactionId!}`);
     }
 
@@ -448,17 +498,29 @@ class ConnectionManager {
       }, pingInterval);
     }
 
+    // Tracks whether the timeout (not an ordinary callback error) ended the
+    // race, so the catch block knows to KILL the still-running statement.
+    let timedOut = false;
     const timeoutPromise = new Promise<never>((_, reject) => {
       meta.timeoutHandle = setTimeout(() => {
+        timedOut = true;
         reject(new Error(`Transaction ${transactionId!} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
+
+    // Scoped executor: binds executeQuery to this transaction's connection so
+    // callbacks call tx.query(...) instead of threading the id string. tx.id is
+    // the migration bridge for legacy helpers still typed against a string id.
+    const tx: TxExecutor = {
+      query: (sql, params) => this.executeQuery(sql, params, transactionId!),
+      id: transactionId!
+    };
 
     // Capture the fn promise so we can handle its rejection if a timeout fires.
     // Without this, the orphaned fn promise produces an unhandled rejection that
     // can crash the Node.js process when it eventually fails (e.g. "No connection
     // found for transaction" after the connection was released by rollback).
-    const fnPromise = fn(transactionId!);
+    const fnPromise = fn(tx);
 
     try {
       const result = (await Promise.race([fnPromise, timeoutPromise])) as T;
@@ -473,6 +535,14 @@ class ConnectionManager {
       if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
       if (meta.keepAliveHandle) clearInterval(meta.keepAliveHandle);
 
+      // The callback may still have a statement in flight (especially on
+      // timeout). Attach the swallow handler BEFORE the KILL/rollback below so
+      // the eventual rejection of that orphaned statement can never surface as
+      // an unhandled rejection in the window between abort and handler attach.
+      fnPromise.catch((fnErr: unknown) => {
+        ailogger.warn(`Orphaned callback error for transaction ${transactionId!} (expected after abort/rollback): ${getErrorMessage(fnErr)}`);
+      });
+
       // Enhanced error logging
       const errMessage = getErrorMessage(err);
       const errorType = err instanceof Error ? err.constructor.name : 'Unknown';
@@ -485,19 +555,22 @@ class ConnectionManager {
         isTimeoutError: this.isLockTimeoutError(err) || errMessage.includes('timed out')
       });
 
+      // On timeout the callback's statement is still running on the tx's
+      // dedicated connection; the ROLLBACK below would queue behind it. KILL it
+      // from a separate connection first so rollback/release proceed promptly.
+      if (timedOut) {
+        const txConnection = this.transactionConnections.get(transactionId!) as PoolConnectionWithThreadId | undefined;
+        const threadId = txConnection?.threadId;
+        if (typeof threadId === 'number') {
+          await this.killRunningQuery(threadId);
+        }
+      }
+
       try {
         await this.rollbackTransaction(transactionId!);
       } catch (rbErr: unknown) {
         ailogger.error(`Rollback failed for transaction ${transactionId!}: ${getErrorMessage(rbErr)}`);
       }
-
-      // After rollback, the fn callback may still be in-flight. Its subsequent
-      // executeQuery calls will fail with "No connection found" because the
-      // connection was released during rollback. Swallow that eventual rejection
-      // to prevent an unhandled promise rejection crash.
-      fnPromise.catch((fnErr: unknown) => {
-        ailogger.warn(`Post-rollback callback error for transaction ${transactionId!} (expected): ${getErrorMessage(fnErr)}`);
-      });
 
       this.transactionMeta.delete(transactionId!);
       throw err;
@@ -631,9 +704,58 @@ class ConnectionManager {
     }
   }
 
+  private transactionSlotOccupancy(): number {
+    return this.transactionConnections.size + this.startingTransactions;
+  }
+
+  private async acquireTransactionSlot(): Promise<void> {
+    while (this.transactionSlotOccupancy() >= this.MAX_CONCURRENT_TRANSACTIONS) {
+      ailogger.warn(`Transaction limit reached (${this.MAX_CONCURRENT_TRANSACTIONS}), waiting for available slot...`);
+
+      // Wait for a slot to become available using a promise queue.
+      // wrappedResolve is the function actually pushed to the queue, so the
+      // timeout cleanup must look that up — NOT the bare resolve, which is
+      // never in the queue and whose indexOf always returned -1 (leaving the
+      // dead wrappedResolve stranded; releaseTransactionSlot would later
+      // shift+call it, silently consuming a slot release for a waiter that
+      // has already been rejected).
+      await new Promise<void>((resolve, reject) => {
+        let wrappedResolve!: () => void;
+        const timeoutId = setTimeout(() => {
+          const index = this.transactionSlotQueue.indexOf(wrappedResolve);
+          if (index !== -1) {
+            this.transactionSlotQueue.splice(index, 1);
+          }
+          reject(new Error('Transaction slot wait timeout - too many concurrent transactions'));
+        }, 60000); // 1 minute max wait
+
+        wrappedResolve = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        this.transactionSlotQueue.push(wrappedResolve);
+      });
+
+      ailogger.info('Transaction slot available, proceeding...');
+    }
+
+    this.startingTransactions++;
+  }
+
+  private consumeTransactionStartSlot(): void {
+    if (this.startingTransactions > 0) {
+      this.startingTransactions--;
+    }
+  }
+
+  private releaseTransactionStartSlot(): void {
+    this.consumeTransactionStartSlot();
+    this.releaseTransactionSlot();
+  }
+
   // Release a transaction slot from the queue (race condition fix)
   private releaseTransactionSlot(): void {
-    if (this.transactionSlotQueue.length > 0) {
+    if (this.transactionSlotQueue.length > 0 && this.transactionSlotOccupancy() < this.MAX_CONCURRENT_TRANSACTIONS) {
       const nextResolver = this.transactionSlotQueue.shift();
       if (nextResolver) {
         nextResolver();

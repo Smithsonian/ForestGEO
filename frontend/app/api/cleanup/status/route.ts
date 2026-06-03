@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { runGlobalCleanup, startPeriodicCleanup, stopPeriodicCleanup, getCleanupStatus } from '@/config/startupcleanup';
+import { auth } from '@/auth';
+import { requireAdmin } from '@/lib/auth-helpers';
 
 export const runtime = 'nodejs';
 
@@ -18,6 +20,10 @@ export const runtime = 'nodejs';
  * GET - Get cleanup status
  */
 export async function GET(): Promise<NextResponse> {
+  const session = await auth();
+  const adminError = requireAdmin(session);
+  if (adminError) return adminError;
+
   try {
     const status = getCleanupStatus();
     return new NextResponse(JSON.stringify({ status }), {
@@ -39,6 +45,10 @@ export async function GET(): Promise<NextResponse> {
  * }
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const session = await auth();
+  const adminError = requireAdmin(session);
+  if (adminError) return adminError;
+
   try {
     const body = await request.json();
     const { action } = body;

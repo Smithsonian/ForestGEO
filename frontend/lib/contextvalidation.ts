@@ -3,6 +3,8 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import { HTTPResponses } from '@/config/macros';
 import ailogger from '@/ailogger';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
+import { hasSchemaAccess, isAdminSession } from '@/lib/authz';
 
 export interface ContextValues {
   siteID?: number;
@@ -54,6 +56,12 @@ export interface ValidationOptions {
   requireQuadrat?: boolean;
   allowFallback?: boolean;
   fallbackMessage?: string;
+  /**
+   * When true (the default), the resolved schema is authorized against the
+   * authenticated user's site membership (session.user.sites). Set to false
+   * only for routes that legitimately operate outside a single-site scope.
+   */
+  requireSchemaAccess?: boolean;
 }
 
 /**
@@ -75,7 +83,8 @@ export async function validateContextualValues(
     requireSchema = false,
     requireQuadrat = false,
     allowFallback = true,
-    fallbackMessage = 'Please ensure all required selections are made before proceeding.'
+    fallbackMessage = 'Please ensure all required selections are made before proceeding.',
+    requireSchemaAccess = true
   } = options;
 
   try {
@@ -108,6 +117,41 @@ export async function validateContextualValues(
           };
         }
         values.schema = schemaCookie;
+      }
+    }
+
+    // SECURITY: a pattern-valid schema name still must belong to the authenticated
+    // user's site membership. Only authorize when a schema actually resolved —
+    // routes that operate without a schema have nothing to scope against.
+    if (requireSchemaAccess && values.schema) {
+      const session = await auth();
+      if (!session?.user) {
+        return {
+          success: false,
+          response: NextResponse.json(
+            { error: 'Authentication required to access this schema', code: 'UNAUTHENTICATED' },
+            { status: HTTPResponses.UNAUTHORIZED }
+          )
+        };
+      }
+      // The session exists but its permissions lookup failed upstream — treat
+      // as infra outage (retryable) rather than user denial. Mirrors
+      // lib/auth-helpers.ts:requireSession and lib/authz.ts:assertSchemaAccess.
+      if (session.user.permissionsUnavailable) {
+        return {
+          success: false,
+          response: NextResponse.json({ error: 'permissions unavailable', code: 'PERMISSIONS_UNAVAILABLE' }, { status: HTTPResponses.SERVICE_UNAVAILABLE })
+        };
+      }
+      if (!isAdminSession(session) && !hasSchemaAccess(session, values.schema)) {
+        ailogger.warn(`[contextvalidation] Schema access denied for schema: ${values.schema}`);
+        return {
+          success: false,
+          response: NextResponse.json(
+            { error: 'You are not authorized to access this site schema', code: 'SCHEMA_ACCESS_DENIED' },
+            { status: HTTPResponses.FORBIDDEN }
+          )
+        };
       }
     }
 

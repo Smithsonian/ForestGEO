@@ -1014,86 +1014,28 @@ describe('Post-Ingestion Validation Tests', () => {
   });
 
   describe('ValidationID 4: Duplicate Quadrat Names', () => {
-    it('should flag measurements in quadrats with duplicate names', async () => {
-      const speciesCode = testData.species[0]?.SpeciesCode || testData.species[0]?.Mnemonic;
-
-      if (!speciesCode) {
-        throw new Error('Test setup failed: missing species data');
-      }
-
-      // Get the original quadrat
+    it('rejects a second active quadrat with a duplicate name (uq_quadrats_active_name supersedes ValidationID 4)', async () => {
+      // ValidationID 4 (AMBIGUOUS_QUADRAT) was written to flag a quadrat name that
+      // resolves to multiple ACTIVE quadrats in one plot. Migration 47 added
+      // UNIQUE(PlotID, QuadratName, IsActive), so that state can no longer exist in
+      // the table — the invariant is now enforced by the DB, not the post-ingestion
+      // validation. Verify the constraint rejects the duplicate row the validation
+      // used to detect (the app-level validation can never fire on active quadrats).
       const duplicateQuadratName = testData.quadrats[0]?.QuadratName || testData.quadrats[0]?.Quadrat;
-      const [origQuadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ?', [
+
+      const [activeRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE QuadratName = ? AND PlotID = ? AND IsActive = 1', [
         duplicateQuadratName,
         plotID
       ]);
-      const origQuadratID = origQuadratRows[0].QuadratID;
+      expect(activeRows.length).toBe(1);
 
-      // Create a SECOND quadrat with the SAME name but different ID
-      await connection.query(
-        `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive)
-         VALUES (?, ?, 100, 100, 20, 20, 400, 'square', 1)`,
-        [plotID, duplicateQuadratName]
-      );
-      const [newQuadratRows] = await connection.query<RowDataPacket[]>('SELECT QuadratID FROM quadrats WHERE PlotID = ? AND StartX = 100 AND StartY = 100', [
-        plotID
-      ]);
-      const newQuadratID = newQuadratRows[0].QuadratID;
-
-      const [speciesRows] = await connection.query<RowDataPacket[]>('SELECT SpeciesID FROM species WHERE SpeciesCode = ?', [speciesCode]);
-      const speciesID = speciesRows[0].SpeciesID;
-
-      // Create measurement in ORIGINAL quadrat (needed for validation to detect duplicate names)
-      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPQUAD01', speciesID, census1.censusID]);
-      const [tree1Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
-      const tree1ID = tree1Rows[0].TreeID;
-
-      await connection.query(
-        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
-         VALUES (?, ?, ?, 'S001', 5.0, 5.0, 1)`,
-        [tree1ID, origQuadratID, census1.censusID]
-      );
-      const [stem1Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
-      await connection.query(
-        `INSERT INTO coremeasurements (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
-         VALUES (?, ?, 100, 1.3, '2024-06-15', NULL, 1)`,
-        [stem1Rows[0].StemGUID, census1.censusID]
-      );
-
-      // Create measurement in DUPLICATE quadrat (same name, different QuadratID)
-      await connection.query('INSERT INTO trees (TreeTag, SpeciesID, CensusID, IsActive) VALUES (?, ?, ?, 1)', ['DUPQUAD02', speciesID, census1.censusID]);
-      const [tree2Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as TreeID');
-      const tree2ID = tree2Rows[0].TreeID;
-
-      await connection.query(
-        `INSERT INTO stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY, IsActive)
-         VALUES (?, ?, ?, 'S001', 5.0, 5.0, 1)`,
-        [tree2ID, newQuadratID, census1.censusID]
-      );
-      const [stem2Rows] = await connection.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() as StemGUID');
-      await connection.query(
-        `INSERT INTO coremeasurements (StemGUID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate, IsValidated, IsActive)
-         VALUES (?, ?, 110, 1.3, '2024-06-15', NULL, 1)`,
-        [stem2Rows[0].StemGUID, census1.censusID]
-      );
-
-      const validationRan = await runValidationForTest(connection, VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES, {
-        censusID: census1.censusID,
-        plotID
-      });
-
-      expect(validationRan).toBe(true);
-
-      const errors = await getValidationErrors(connection, {
-        validationID: VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES
-      });
-
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].ValidationErrorID).toBe(VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES);
-
-      log.debug(
-        `ValidationID ${VALIDATION_IDS.DUPLICATE_QUADRAT_NAMES}: Detected duplicate quadrat name '${duplicateQuadratName}' (QuadratIDs: ${origQuadratID}, ${newQuadratID})`
-      );
+      await expect(
+        connection.query(
+          `INSERT INTO quadrats (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, QuadratShape, IsActive)
+           VALUES (?, ?, 100, 100, 20, 20, 400, 'square', 1)`,
+          [plotID, duplicateQuadratName]
+        )
+      ).rejects.toThrow(/uq_quadrats_active_name|Duplicate entry/);
     });
 
     it('should NOT flag measurements when all quadrat names are unique', async () => {

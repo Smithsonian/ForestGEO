@@ -167,14 +167,24 @@ vi.mock('@/config/connectionmanager', () => {
       await sharedState.connection.rollback();
       sharedState.activeTransactionID = null;
     },
-    withTransaction: async <T>(fn: (transactionID: string) => Promise<T>) => {
+    withTransaction: async <T>(fn: (tx: { query: <R = unknown>(sql: string, params?: unknown[]) => Promise<R>; id: string }) => Promise<T>) => {
       if (!sharedState.connection) throw new Error('Test DB connection not initialized');
       await sharedState.connection.beginTransaction();
       sharedState.transactionCounter += 1;
       const txID = `${TRANSACTION_ID_PREFIX}${sharedState.transactionCounter}`;
       sharedState.activeTransactionID = txID;
+      // Mirror the real TxExecutor: tx.query runs on the active transaction
+      // connection; tx.id is the migration-bridge string id the route still
+      // threads into legacy helpers.
+      const tx = {
+        query: async <R = unknown>(sql: string, params?: unknown[]): Promise<R> => {
+          const [rows] = await sharedState.connection!.query(sql, (params as unknown[]) ?? []);
+          return rows as R;
+        },
+        id: txID
+      };
       try {
-        const result = await fn(txID);
+        const result = await fn(tx);
         await sharedState.connection.commit();
         sharedState.activeTransactionID = null;
         return result;

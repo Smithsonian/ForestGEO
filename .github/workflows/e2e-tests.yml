@@ -56,6 +56,14 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm install
 
+      - name: Dependency-cycle gate
+        run: node scripts/check-cycles.mjs
+        working-directory: frontend
+
+      - name: Any-escape count gate
+        run: node scripts/check-any-count.mjs
+        working-directory: frontend
+
       # The mysql service `--health-cmd` gates steps until MySQL is healthy, and
       # the seed's own connectWithRetry covers any residual TCP race.
       - name: Seed E2E database
@@ -78,7 +86,12 @@ jobs:
           wait-on-timeout: 120
           browser: chrome
           headed: false
-          spec: cypress/e2e/census-creation.cy.ts
+          # census-creation drives the REAL app against the seeded MySQL service
+          # (above). The remaining specs are self-contained: setupForestGEOUser
+          # mocks the NextAuth session + site/plot/census + grid/error APIs via
+          # cy.intercept, and their mock helpers are stateful (edits/clears mutate
+          # the mock store), so they assert real UI behaviour without the DB.
+          spec: cypress/e2e/census-creation.cy.ts,cypress/e2e/validation-invalid-codes.cy.ts,cypress/e2e/data-viewing-comprehensive.cy.ts,cypress/e2e/cross-feature-integration.cy.ts,cypress/e2e/errors-explorer.cy.ts
         env:
           NEXT_PUBLIC_E2E_TESTING: 'true'
 

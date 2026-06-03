@@ -4,10 +4,13 @@ import { GET } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 
 // ===== hoisted spies/fixtures used by mocks =====
-const { loggerInfo, loggerError } = vi.hoisted(() => {
+const { loggerInfo, loggerError, mockAuth, mockAssertSchemaAccess } = vi.hoisted(() => {
   return {
     loggerInfo: vi.fn(),
-    loggerError: vi.fn()
+    loggerError: vi.fn(),
+    mockAuth: vi.fn(),
+    // typed to accept NextResponse | null so mockReturnValue(deniedResponse) is valid
+    mockAssertSchemaAccess: vi.fn() as import('vitest').MockInstance<(session: any, schema: any) => import('next/server').NextResponse | null>
   };
 });
 
@@ -54,6 +57,18 @@ vi.mock('@/config/utils/sqlsecurity', () => ({
   })
 }));
 
+// Auth — default: authenticated user
+vi.mock('@/auth', () => ({
+  auth: mockAuth
+}));
+
+// Authorization guard — default: access permitted
+vi.mock('@/lib/authz', () => ({
+  assertSchemaAccess: mockAssertSchemaAccess,
+  isAdminSession: vi.fn(() => false),
+  hasSchemaAccess: vi.fn(() => true)
+}));
+
 // ===== helpers =====
 function makeRequest() {
   const url = new URL('http://localhost/api');
@@ -70,9 +85,23 @@ async function callGET(schema: string, plotID: string, censusID: string) {
   return GET(req, props);
 }
 
+// ===== authorizedSession: a session whose user is a member of 'testschema' =====
+const authorizedSession = {
+  user: {
+    userStatus: 'user',
+    sites: [{ schemaName: 'testschema' }]
+  }
+};
+
 describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: auth returns an authorized session
+    mockAuth.mockResolvedValue(authorizedSession);
+
+    // Default: schema access is permitted
+    mockAssertSchemaAccess.mockReturnValue(null);
   });
 
   describe('parameter validation', () => {
@@ -404,6 +433,66 @@ describe('GET /api/dashboardmetrics/all/[schema]/[plotID]/[censusID]', () => {
 
       expect(fastPathCall).toBeDefined();
       expect(String(fastPathCall![0])).not.toMatch(/WITH measured_stems AS.*previous_stems/is);
+    });
+  });
+
+  // ===== Authorization security tests =====
+  // The aggregated "all" endpoint passes the raw URL schema directly to SQL.
+  // These tests confirm that auth + schema-access are enforced before any DB call.
+  describe('authorization enforcement', () => {
+    it('returns 401 when there is no authenticated session', async () => {
+      mockAuth.mockResolvedValue(null); // no session
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      const res = await callGET('testschema', '1', '1');
+
+      expect(res.status).toBe(HTTPResponses.UNAUTHORIZED);
+      const body = await res.json();
+      expect(body.code).toBe('UNAUTHENTICATED');
+
+      // The database must not be queried — the request is blocked before any SQL executes
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the authenticated user does not have access to the requested schema, and the DB is never queried', async () => {
+      const { NextResponse } = await import('next/server');
+      const deniedResponse = NextResponse.json(
+        { error: 'SQL references a schema outside the authenticated user scope', code: 'SCHEMA_ACCESS_DENIED' },
+        { status: 403 }
+      );
+      mockAssertSchemaAccess.mockReturnValue(deniedResponse);
+
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // User is authenticated but NOT a member of this schema
+      const res = await callGET('testschema', '1', '1');
+
+      expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+
+      // CRITICAL: no DB queries must run when the schema is unauthorized
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('proceeds to executeQuery when schema is valid and user is authorized', async () => {
+      const cm = (ConnectionManager as any).getInstance();
+      const exec = vi.spyOn(cm, 'executeQuery');
+
+      // All queries succeed
+      exec.mockResolvedValueOnce([{ PrevCensusID: null }]);
+      exec.mockResolvedValueOnce([{ total_quadrats: 5, populated_quadrats: 3, populated_pct: 60, unpopulated_quadrats: 'Q4;Q5' }]);
+      exec.mockResolvedValueOnce([{ PersonnelCount: 2 }]);
+      exec.mockResolvedValueOnce([{ CountTrees: 50 }]);
+      exec.mockResolvedValueOnce([{ CountStems: 80 }]);
+      exec.mockResolvedValueOnce([{ CountNewRecruits: 80 }]);
+
+      const res = await callGET('testschema', '2', '3');
+
+      expect(res.status).toBe(HTTPResponses.OK);
+      // At least one executeQuery call confirms the DB was reached
+      expect(exec).toHaveBeenCalled();
     });
   });
 });

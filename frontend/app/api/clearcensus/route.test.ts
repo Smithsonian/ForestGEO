@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
-// ---- Import handler AFTER mocks ----
-import { GET } from './route';
-import ConnectionManager from '@/config/connectionmanager'; // ---- Helpers ----
+
+const { authMock } = vi.hoisted(() => ({ authMock: vi.fn() }));
+
+vi.mock('@/auth', () => ({ auth: authMock }));
 
 // ---- Mock SQL security utilities ----
 vi.mock('@/config/utils/sqlsecurity', () => ({
@@ -74,9 +75,36 @@ function makeRequest(url: string) {
   return req as any;
 }
 
+// ---- Import handler AFTER mocks ----
+import { GET } from './route';
+import ConnectionManager from '@/config/connectionmanager';
+
 describe('GET /api/clearcensus', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authMock.mockResolvedValue({ user: { id: 'admin-user', userStatus: 'global' } });
+  });
+
+  it('401 when no session and does not call ConnectionManager', async () => {
+    authMock.mockResolvedValueOnce(null);
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction');
+
+    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
+
+    expect(res.status).toBe(HTTPResponses.UNAUTHORIZED);
+    expect(begin).not.toHaveBeenCalled();
+  });
+
+  it('403 when non-admin session and does not call ConnectionManager', async () => {
+    authMock.mockResolvedValueOnce({ user: { id: 'user', userStatus: 'field crew' } });
+    const cm = (ConnectionManager as any).getInstance();
+    const begin = vi.spyOn(cm, 'beginTransaction');
+
+    const res = await GET(makeRequest('http://localhost/api/clearcensus?schema=myschema&censusID=12&type=msmts'));
+
+    expect(res.status).toBe(HTTPResponses.FORBIDDEN);
+    expect(begin).not.toHaveBeenCalled();
   });
 
   it('400 when schema, censusID, or type is missing', async () => {

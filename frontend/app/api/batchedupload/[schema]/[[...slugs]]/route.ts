@@ -6,7 +6,9 @@ import { validateContextualValues } from '@/lib/contextvalidation';
 import ailogger from '@/ailogger';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 import { generateShortBatchID } from '@/config/utils';
-import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { validatedSchema, type SchemaName } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -30,33 +32,45 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     fallbackMessage: 'Batch upload requires active site, plot, and census selections.'
   });
 
-  let plotID: number, censusID: number, schema: string;
+  let plotID: number, censusID: number, schema: SchemaName;
 
   if (!validation.success) {
-    // Try to use URL parameters as fallback
+    // Fallback to URL parameters — but authenticate and authorize before accepting
+    // the raw URL schema. Previously this branch took schemaParam after only a
+    // pattern check (validateSchemaOrThrow), allowing any authed-or-unauthed
+    // caller to act on any schema matching the pattern.
     if (schemaParam && slugs && slugs.length === 2) {
       const [plotIDParam, censusIDParam] = slugs;
       plotID = parseInt(plotIDParam);
       censusID = parseInt(censusIDParam);
-      schema = schemaParam;
 
       if (isNaN(plotID) || isNaN(censusID)) {
         return new NextResponse(JSON.stringify({ message: 'Invalid plotID or censusID in URL parameters!' }), { status: HTTPResponses.INVALID_REQUEST });
       }
+
+      const session = await auth();
+      if (!session?.user) {
+        return NextResponse.json({ error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+      }
+
+      try {
+        schema = validatedSchema(schemaParam);
+      } catch {
+        return NextResponse.json({ error: 'Invalid schema', code: 'INVALID_SCHEMA' }, { status: HTTPResponses.INVALID_REQUEST });
+      }
+
+      const denied = assertSchemaAccess(session, schema);
+      if (denied) return denied;
     } else {
       return validation.response!;
     }
   } else {
     const values = validation.values!;
-    schema = values.schema!;
+    // validateContextualValues has already authed and authorized schema membership;
+    // brand the schema to keep the variable's type uniform with the fallback branch.
+    schema = validatedSchema(values.schema!);
     plotID = values.plotID!;
     censusID = values.censusID!;
-  }
-
-  try {
-    validateSchemaOrThrow(schema);
-  } catch (error: any) {
-    return new NextResponse(JSON.stringify({ message: error.message }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
   // Add plotID and censusID to each row

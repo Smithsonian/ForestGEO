@@ -437,7 +437,7 @@ export async function GET(
 
   try {
     const setupResult = await connectionManager.withTransaction(
-      async (transactionID: string) => {
+      async tx => {
         const lockTimeoutMs = 2 * 60 * 1000;
 
         // Get plot/census and row count
@@ -445,7 +445,7 @@ export async function GET(
           schema,
           'SELECT PlotID, CensusID, COUNT(*) AS rowCount FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ? GROUP BY PlotID, CensusID LIMIT 1'
         );
-        const infoRows = await connectionManager.executeQuery(infoSQL, [fileID, batchID], transactionID);
+        const infoRows = await tx.query(infoSQL, [fileID, batchID]);
 
         if (!infoRows || infoRows.length === 0) {
           return { plotID: null, censusID: null, totalRows: 0, subBatchIDs: [] as string[] };
@@ -466,20 +466,20 @@ export async function GET(
 
         // Acquire lock for setup phase
         const lockKey = `upload:file:${fileID}:plot:${currentPlotID}:census:${currentCensusID}`;
-        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, transactionID, lockTimeoutMs);
+        const lockAcquired = await connectionManager.acquireApplicationLock(lockKey, tx.id, lockTimeoutMs);
         if (!lockAcquired) {
           throw new Error(`Failed to acquire application lock for file ${fileID}. Another upload may be in progress.`);
         }
 
         // Recovery check (uses original batchID before any splitting)
-        await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, transactionID);
+        await recoverFailedInitialCensusIfNeeded(connectionManager, schema, fileID, batchID, currentPlotID, currentCensusID, tx.id);
 
         // If the same census is re-uploaded under a new filename, remove any old
         // unresolved ingestion rows that exactly match the currently staged rows.
-        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, transactionID);
+        await cleanupMatchedUnresolvedIngestionFailuresForBatch(connectionManager, schema, fileID, batchID, currentCensusID, tx.id);
 
         // Split into sub-batches if needed (UPDATE within same transaction)
-        const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, transactionID);
+        const ids = await splitIntoSubBatches(connectionManager, schema, fileID, batchID, totalRows, tx.id);
 
         ailogger.info(`Setup complete for ${fileID}: ${totalRows} rows → ${ids.length} batch(es), plot=${currentPlotID}, census=${currentCensusID}`);
 

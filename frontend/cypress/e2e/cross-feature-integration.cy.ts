@@ -50,7 +50,10 @@ function buildSharedRows() {
 describe('Cross-Feature Integration', () => {
   beforeEach(() => {
     cy.viewport(1600, 1000);
-    cy.setupForestGEOUser('standardUser');
+    // One test edits a species code (a taxonomic-identity change), which the app
+    // restricts to global / db-admin roles. Use a global admin so that edit path
+    // is exercisable.
+    cy.setupForestGEOUser('adminUser');
     cy.mockCoreDataValidity();
   });
 
@@ -81,7 +84,7 @@ describe('Cross-Feature Integration', () => {
     cy.contains('.MuiDataGrid-row', 'Invalid species reference').should('contain', 'TREE101');
 
     cy.openCensusHubLink('View All Historical Data');
-    cy.contains('[role="row"]', 'TREE101').should('contain', 'RUBI04');
+    cy.gridRowShouldContain('TREE101', 'RUBI04');
     cy.get('[data-testid="selected-site-name"]').should('contain', 'Luquillo');
     cy.get('[data-testid="selected-plot-name"]').should('contain', 'Luquillo Main Plot');
     cy.get('[data-testid="selected-census-plotcensusnumber"]').should('contain', 'Census: 5');
@@ -118,7 +121,10 @@ describe('Cross-Feature Integration', () => {
       cy.get('[aria-label="Save"]').click();
     });
 
-    cy.wait('@saveMeasurementHubRow').its('request.body.newRow.speciesCode').should('eq', 'ANOPKL');
+    // The SpeciesCode edit is `warn` severity → confirm the PreviewDialog to apply.
+    cy.wait('@previewEdit');
+    cy.get('[data-testid="edit-preview-apply"]').click();
+    cy.wait('@applyEdit').its('request.body.newRow.SpeciesCode').should('eq', 'ANOPKL');
     cy.wait('@refreshMeasurementHubSummary');
     cy.wait('@fetchErrorsExplorerRows');
     cy.contains('.MuiDataGrid-row', 'Invalid species reference').should('contain', 'ANOPKL');
@@ -127,7 +133,7 @@ describe('Cross-Feature Integration', () => {
     cy.contains('[role="row"]', 'TREE101').should('contain', 'ANOPKL');
 
     cy.openCensusHubLink('View All Historical Data');
-    cy.contains('[role="row"]', 'TREE101').should('contain', 'ANOPKL');
+    cy.gridRowShouldContain('TREE101', 'ANOPKL');
   });
 
   it('removes a cleared validation error from View Errors after clearing it in View Data', () => {

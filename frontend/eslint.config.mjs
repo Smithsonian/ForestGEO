@@ -117,7 +117,7 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       ...prettierPlugin.configs?.rules,
       'import/order': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/member-ordering': 'off',
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
@@ -146,7 +146,7 @@ export default [
       'react/no-unescaped-entities': 'off',
       '@next/next/no-page-custom-font': 'off',
       // Retaining custom rules that are relevant to Next.js projects
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/member-ordering': 'off',
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
@@ -200,6 +200,57 @@ export default [
               message: 'Analyzer and rule modules must not import writers. Preview must stay read-only.'
             }
           ]
+        }
+      ]
+    }
+  },
+
+  // Architectural boundary: UI components must not reach into the DB layer directly.
+  {
+    files: ['components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'warn',
+        {
+          patterns: [
+            {
+              group: ['@/config/connectionmanager', '@/lib/db/*', '@/lib/db'],
+              message: 'UI must not import the DB layer. Call a feature server module instead.'
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  // Architectural boundary: config/lib must not depend on UI components.
+  {
+    files: ['config/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'warn',
+        { patterns: [{ group: ['@/components/*', '@/components/**'], message: 'config/lib must not depend on components (inverts dependency direction).' }] }
+      ]
+    }
+  },
+
+  // SQL injection guard: flag raw ${schema} / ${schemaParam} interpolation in route handlers.
+  // These identifiers must pass through safeFormatQuery() or validatedSchema() before reaching SQL.
+  // This is a warning so pre-existing instances (~228) do NOT fail the build; new code gets flagged.
+  {
+    files: ['app/api/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "TemplateLiteral > Identifier[name='schema']",
+          message:
+            "Raw '${schema}' interpolation in a route handler is a SQL injection risk. Use safeFormatQuery(schema, ...) or validatedSchema(schema) instead."
+        },
+        {
+          selector: "TemplateLiteral > Identifier[name='schemaParam']",
+          message:
+            "Raw '${schemaParam}' interpolation in a route handler is a SQL injection risk. Use safeFormatQuery(schemaParam, ...) or validatedSchema(schemaParam) instead."
         }
       ]
     }

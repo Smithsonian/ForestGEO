@@ -14,6 +14,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
 import { validateSchemaOrThrow } from '@/config/utils/sqlsecurity';
+import { auth } from '@/auth';
+import { assertSchemaAccess } from '@/lib/authz';
 import ailogger from '@/ailogger';
 
 // Force Node.js runtime for database compatibility
@@ -63,6 +65,14 @@ export async function GET(
     ailogger.error(`Invalid schema in aggregated dashboard metrics: ${schema}`, error);
     return NextResponse.json({ error: error.message }, { status: HTTPResponses.INVALID_REQUEST });
   }
+
+  // Authorize: ensure the authenticated user has access to this schema
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthenticated', code: 'UNAUTHENTICATED' }, { status: HTTPResponses.UNAUTHORIZED });
+  }
+  const denied = assertSchemaAccess(session, schema);
+  if (denied) return denied;
 
   const plotID = parseInt(plotIDParam);
   const censusID = parseInt(censusIDParam);

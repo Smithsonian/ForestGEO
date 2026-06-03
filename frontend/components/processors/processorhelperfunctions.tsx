@@ -70,7 +70,8 @@ export async function handleUpsertForSlices<Result>(
   connectionManager: ConnectionManager,
   schema: string,
   newRow: Partial<Result>,
-  config: UpdateQueryConfig
+  config: UpdateQueryConfig,
+  transactionID?: string
 ): Promise<Record<string, number>> {
   const insertedIds: Record<string, number> = {};
 
@@ -106,7 +107,7 @@ export async function handleUpsertForSlices<Result>(
     ailogger.info('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
-    insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
+    insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result, transactionID)).id;
   }
 
   return insertedIds;

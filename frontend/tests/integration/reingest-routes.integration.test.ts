@@ -11,9 +11,25 @@ import {
   type TestData
 } from '../setup/local-db-setup';
 
+const AUTH_USER_EMAIL = 'integration-runner@forestgeo.test';
+
 const sharedState = vi.hoisted(() => ({
   connection: null as Connection | null,
   batchCounter: 0
+}));
+
+// Grant a 'global' role so the route's auth() gate and assertSchemaAccess pass
+// without a live session. Mocking @/auth also keeps the real next-auth module
+// (whose lib/env.js imports the extensionless `next/server` subpath) from being
+// loaded by Node's native ESM resolver, which cannot resolve it.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => ({
+    user: {
+      email: AUTH_USER_EMAIL,
+      userStatus: 'global',
+      sites: []
+    }
+  }))
 }));
 
 vi.mock('@/config/connectionmanager', () => {
@@ -29,14 +45,24 @@ vi.mock('@/config/connectionmanager', () => {
     cleanupStaleTransactions: async () => undefined,
     closeConnection: async () => undefined,
     acquireApplicationLock: async () => true,
-    withTransaction: async (fn: (transactionID: string) => Promise<unknown>) => {
+    withTransaction: async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) => {
       if (!sharedState.connection) {
         throw new Error('Test DB connection not initialized');
       }
 
+      // Mirror the real TxExecutor contract: tx.query runs on the (shared test)
+      // transaction connection; tx.id is the migration-bridge string id.
+      const tx = {
+        query: async (sql: string, params?: unknown[]) => {
+          const [rows] = await sharedState.connection!.query(sql, params as any[]);
+          return rows;
+        },
+        id: 'test-transaction-id'
+      };
+
       await sharedState.connection.beginTransaction();
       try {
-        const result = await fn('test-transaction-id');
+        const result = await fn(tx);
         await sharedState.connection.commit();
         return result;
       } catch (error) {

@@ -68,6 +68,14 @@ jobs:
           cd frontend/
           npm run test:unit:ci
 
+      - name: Dependency-cycle gate
+        run: node scripts/check-cycles.mjs
+        working-directory: frontend
+
+      - name: Any-escape count gate
+        run: node scripts/check-any-count.mjs
+        working-directory: frontend
+
       - name: Build application
         run: |
           cd frontend/

@@ -65,9 +65,7 @@ function filterExpectedFiles(files, filters) {
   }
 
   const normalizedFilters = filters.map(filter => normalizeRelativePath(filter));
-  const matched = files.filter(file =>
-    normalizedFilters.some(filter => file.includes(filter) || path.basename(file).includes(path.basename(filter)))
-  );
+  const matched = files.filter(file => normalizedFilters.some(filter => file.includes(filter) || path.basename(file).includes(path.basename(filter))));
 
   return matched.length > 0 ? matched : files;
 }
@@ -103,12 +101,7 @@ let idleTimer = null;
 let forceTerminated = false;
 let childExited = false;
 
-const childArgs = [
-  '--max-old-space-size=4096',
-  './node_modules/vitest/vitest.mjs',
-  'run',
-  ...forwardedArgs
-];
+const childArgs = ['--max-old-space-size=4096', './node_modules/vitest/vitest.mjs', 'run', ...forwardedArgs];
 
 const child = spawn(process.execPath, childArgs, {
   cwd: rootDir,
@@ -121,9 +114,7 @@ function maybeScheduleForcedExit() {
     return;
   }
 
-  process.stderr.write(
-    `\n[vitest-wrapper] All ${expectedFileSet.size} test files reported. Waiting ${GRACE_PERIOD_MS}ms for Vitest to exit cleanly.\n`
-  );
+  process.stderr.write(`\n[vitest-wrapper] All ${expectedFileSet.size} test files reported. Waiting ${GRACE_PERIOD_MS}ms for Vitest to exit cleanly.\n`);
 
   completionTimer = setTimeout(() => {
     if (childExited) {
@@ -166,7 +157,9 @@ function maybeScheduleIdleCompletion() {
     }
 
     forceTerminated = true;
-    process.stderr.write(`[vitest-wrapper] No test output for ${IDLE_COMPLETION_GRACE_MS}ms after ${completedFiles.size}/${expectedFileSet.size} files. Terminating hung process.\n`);
+    process.stderr.write(
+      `[vitest-wrapper] No test output for ${IDLE_COMPLETION_GRACE_MS}ms after ${completedFiles.size}/${expectedFileSet.size} files. Terminating hung process.\n`
+    );
     terminateProcessGroup(child, 'SIGTERM');
 
     setTimeout(() => {
@@ -186,11 +179,7 @@ function handleLine(rawLine) {
     return;
   }
 
-  if (
-    /^FAIL\s/.test(line) ||
-    /^⎯.*⎯$/.test(line) ||
-    /Unhandled Errors/i.test(line)
-  ) {
+  if (/^FAIL\s/.test(line) || /^⎯.*⎯$/.test(line) || /Unhandled Errors/i.test(line)) {
     sawFailure = true;
   }
 
@@ -280,10 +269,8 @@ child.on('exit', (code, signal) => {
   const elapsedRuntime = Date.now() - startedAt;
   if (
     !sawFailure &&
-    (
-      completedFiles.size === expectedFileSet.size ||
-      (forceTerminated && (completedFiles.size >= minimumCompletedFiles || elapsedRuntime >= MIN_RUNTIME_FOR_IDLE_SUCCESS_MS))
-    )
+    (completedFiles.size === expectedFileSet.size ||
+      (forceTerminated && (completedFiles.size >= minimumCompletedFiles || elapsedRuntime >= MIN_RUNTIME_FOR_IDLE_SUCCESS_MS)))
   ) {
     if (forceTerminated) {
       process.stderr.write('[vitest-wrapper] Returning success after forced shutdown post-completion.\n');

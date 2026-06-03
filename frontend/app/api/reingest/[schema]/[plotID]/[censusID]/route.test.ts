@@ -1,14 +1,30 @@
 // app/api/reingest/[schema]/[plotID]/[censusID]/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextResponse } from 'next/server';
 import { GET, POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
+
+const { authMock, assertSchemaAccessMock } = vi.hoisted(() => ({
+  authMock: vi.fn(),
+  assertSchemaAccessMock: vi.fn()
+}));
+
+vi.mock('@/auth', () => ({
+  auth: authMock
+}));
+
+vi.mock('@/lib/authz', () => ({
+  assertSchemaAccess: assertSchemaAccessMock
+}));
 
 vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
   const closeConnection = vi.fn();
   const cleanupStaleTransactions = vi.fn();
   const acquireApplicationLock = vi.fn();
-  const withTransaction = vi.fn(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+  const withTransaction = vi.fn(async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+    fn({ query: (sql: string, params?: unknown[]) => executeQuery(sql, params), id: 'test-transaction-id' })
+  );
   const instance = {
     executeQuery,
     closeConnection,
@@ -85,7 +101,14 @@ describe('reingest API routes', () => {
     mockConnectionManager.cleanupStaleTransactions.mockResolvedValue(undefined);
     mockConnectionManager.acquireApplicationLock.mockResolvedValue(true);
     mockConnectionManager.closeConnection.mockResolvedValue(undefined);
-    mockConnectionManager.withTransaction.mockImplementation(async (fn: (transactionID: string) => Promise<unknown>) => fn('test-transaction-id'));
+    mockConnectionManager.withTransaction.mockImplementation(
+      async (fn: (tx: { query: (sql: string, params?: unknown[]) => Promise<unknown>; id: string }) => Promise<unknown>) =>
+        fn({ query: (sql: string, params?: unknown[]) => mockConnectionManager.executeQuery(sql, params), id: 'test-transaction-id' })
+    );
+    authMock.mockResolvedValue({
+      user: { id: 'site-user', userStatus: 'field crew', sites: [{ schemaName: 'forestgeo_testing' }] }
+    });
+    assertSchemaAccessMock.mockReturnValue(null);
 
     const { validateContextualValues } = await import('@/lib/contextvalidation');
     mockValidateContextualValues = validateContextualValues as any;
@@ -135,6 +158,52 @@ describe('reingest API routes', () => {
       const body = await res.json();
       expect(body.rowsMoved).toBe(0);
       expect(body.responseMessage).toMatch(/No failed measurement rows/i);
+    });
+  });
+
+  describe('URL fallback authorization', () => {
+    beforeEach(() => {
+      mockValidateContextualValues.mockResolvedValue({
+        success: false,
+        response: NextResponse.json({ error: 'context missing' }, { status: 400 })
+      });
+    });
+
+    it('returns 401 when context validation fails and the URL fallback has no session', async () => {
+      authMock.mockResolvedValueOnce(null);
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.code).toBe('UNAUTHENTICATED');
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('returns the schema-access denial before staging any rows', async () => {
+      assertSchemaAccessMock.mockReturnValueOnce(NextResponse.json({ error: 'denied' }, { status: 403 }));
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(403);
+      expect(assertSchemaAccessMock).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
+      expect(mockConnectionManager.withTransaction).not.toHaveBeenCalled();
+      expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    });
+
+    it('uses the authorized URL schema fallback when context cookies are missing', async () => {
+      mockConnectionManager.executeQuery
+        .mockResolvedValueOnce(mockUnresolvedRows(1))
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ affectedRows: 1, insertId: 1 });
+
+      const res = await POST(makeRequest('POST'), makeParams());
+
+      expect(res.status).toBe(200);
+      expect(authMock).toHaveBeenCalled();
+      expect(assertSchemaAccessMock).toHaveBeenCalledWith(expect.any(Object), 'forestgeo_testing');
+      expect(mockConnectionManager.withTransaction).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -82,10 +82,7 @@ function parseStoredProceduresSQL(raw: string): string[] {
   return statements;
 }
 
-async function checkMigrationStatus(
-  conn: mysql.Connection,
-  schema: string
-): Promise<{ migrated: boolean; missingTables: string[] }> {
+async function checkMigrationStatus(conn: mysql.Connection, schema: string): Promise<{ migrated: boolean; missingTables: string[] }> {
   const [rows] = await conn.query<mysql.RowDataPacket[]>(
     `SELECT TABLE_NAME as table_name
      FROM INFORMATION_SCHEMA.TABLES
@@ -99,10 +96,7 @@ async function checkMigrationStatus(
   return { migrated: missingTables.length === 0, missingTables };
 }
 
-async function deployStoredProcedures(
-  conn: mysql.Connection,
-  statements: string[]
-): Promise<void> {
+async function deployStoredProcedures(conn: mysql.Connection, statements: string[]): Promise<void> {
   for (const stmt of statements) {
     await conn.query(stmt);
   }
@@ -111,8 +105,7 @@ async function deployStoredProcedures(
 function countEnabledValidations(validations: mysql.RowDataPacket[]): number {
   return validations.filter((v: any) => {
     const enabled = v.IsEnabled;
-    return enabled === 1 || enabled === true ||
-           (Buffer.isBuffer(enabled) && enabled[0] === 1);
+    return enabled === 1 || enabled === true || (Buffer.isBuffer(enabled) && enabled[0] === 1);
   }).length;
 }
 
@@ -225,7 +218,6 @@ async function deployValidationsToAllSchemas() {
         const detail = `${validations.length} validations (${enabledCount} enabled), stored procedures updated`;
         console.log(`  OK - ${detail}`);
         results.push({ schema, status: 'deployed', detail });
-
       } catch (error: any) {
         console.log(`  FAILED: ${error.message}`);
         results.push({ schema, status: 'failed', detail: error.message });
@@ -281,7 +273,6 @@ async function deployValidationsToAllSchemas() {
     if (failed.length === 0 && skipped.length === 0) {
       console.log('All schemas updated successfully!');
     }
-
   } catch (error: any) {
     console.error('Fatal error:', error.message);
     throw error;
@@ -295,7 +286,7 @@ deployValidationsToAllSchemas()
     console.log('\nDeployment complete!');
     process.exit(0);
   })
-  .catch((error) => {
+  .catch(error => {
     console.error('\nDeployment failed:', error);
     process.exit(1);
   });

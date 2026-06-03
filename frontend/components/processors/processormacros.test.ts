@@ -21,7 +21,7 @@ vi.mock('@/ailogger', () => ({
   default: loggerMock
 }));
 
-describe('processormacros connection acquisition', () => {
+describe('db primitives connection acquisition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getPoolMonitorInstanceMock.mockReturnValue(poolMonitorMock);
@@ -34,7 +34,7 @@ describe('processormacros connection acquisition', () => {
     };
     poolMonitorMock.getConnection.mockResolvedValueOnce(connection);
 
-    const { getConn } = await import('./processormacros');
+    const { getConn } = await import('@/lib/db/primitives');
     const result = await getConn();
 
     expect(result).toBe(connection);

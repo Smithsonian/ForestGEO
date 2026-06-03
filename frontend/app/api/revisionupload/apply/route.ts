@@ -735,7 +735,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       plotID: normalizedPlotID,
       censusID: normalizedCensusID
     });
-    const result = await connectionManager.withTransaction(async (transactionID: string) => {
+    const result = await connectionManager.withTransaction(async tx => {
+      // Migration bridge: this callback drives legacy helpers still typed against
+      // the transaction-id string. Bind it once here rather than touching every call.
+      const transactionID = tx.id;
       ailogger.info(`${logPrefix} transaction callback entered in ${Date.now() - transactionStartedAt}ms (tx=${transactionID})`);
       await assertNoConflictingApplyActivity(connectionManager, schema, normalizedPlotID, normalizedCensusID, transactionID);
 
