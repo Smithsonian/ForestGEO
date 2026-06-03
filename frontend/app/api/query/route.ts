@@ -40,7 +40,20 @@ function hasMultipleStatements(query: string): boolean {
 }
 
 function isReadOnlySelect(query: string): boolean {
-  return sqlForAuthorization(query).trimStart().toLowerCase().startsWith('select ');
+  // Strip leading whitespace and opening parens so newline-/tab-formatted and
+  // parenthesised reads ("(SELECT ...)") are still recognised as SELECTs.
+  const normalized = sqlForAuthorization(query)
+    .toLowerCase()
+    .replace(/^[\s(]+/, '');
+  if (/^select\b/.test(normalized)) {
+    return true;
+  }
+  // A CTE (WITH ...) may resolve to a SELECT (read) or to an UPDATE/DELETE/INSERT
+  // (write). Allow it only when no write verb is present; fail closed otherwise.
+  if (/^with\b/.test(normalized)) {
+    return !/\b(?:insert|update|delete|replace)\b/.test(normalized);
+  }
+  return false;
 }
 
 function hasUnsafeSelectModifier(query: string): boolean {
@@ -62,7 +75,11 @@ function extractTableSchemas(query: string): string[] {
 
   while ((match = tableReferencePattern.exec(inspectedSql)) !== null) {
     const schema = (match[1] ?? match[2]).toLowerCase();
-    if (schema.startsWith('forestgeo_') || SYSTEM_SCHEMAS.has(schema)) {
+    // Collect references in the ForestGEO namespace — both the per-site
+    // `forestgeo_*` schemas and the base `forestgeo` schema — plus system
+    // schemas, so the ownership check below sees them. Bare `alias.column`
+    // references are ignored because table aliases are never named `forestgeo*`.
+    if (schema.startsWith('forestgeo') || SYSTEM_SCHEMAS.has(schema)) {
       schemas.add(schema);
     }
   }

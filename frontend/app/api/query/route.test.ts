@@ -157,4 +157,48 @@ describe('POST /api/query authorization', () => {
     expect(response.status).toBe(200);
     expect(mocks.executeQuery).toHaveBeenCalledWith('DELETE FROM `forestgeo_testing`.temporarymeasurements WHERE PlotID = 1');
   });
+
+  // Regression: a non-admin read-only SELECT must not be rejected merely because
+  // it is newline-formatted, parenthesised, or expressed as a CTE.
+  it('allows non-admin newline-formatted read-only SELECT scoped to an assigned schema', async () => {
+    const response = await POST(makeRequest('SELECT\n  *\nFROM forestgeo_testing.attributes'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledWith('SELECT\n  *\nFROM forestgeo_testing.attributes');
+  });
+
+  it('allows non-admin parenthesised read-only SELECT scoped to an assigned schema', async () => {
+    const response = await POST(makeRequest('(SELECT * FROM forestgeo_testing.attributes)'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows non-admin CTE (WITH ... SELECT) reads scoped to an assigned schema', async () => {
+    const response = await POST(makeRequest('WITH recent AS (SELECT * FROM forestgeo_testing.coremeasurements) SELECT * FROM recent'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeQuery).toHaveBeenCalledTimes(1);
+  });
+
+  // Guard: broadening the read check must NOT let a CTE that resolves to a write through.
+  it('rejects a non-admin CTE that resolves to a write (WITH ... DELETE)', async () => {
+    const response = await POST(
+      makeRequest(
+        'WITH doomed AS (SELECT CoreMeasurementID FROM forestgeo_testing.coremeasurements) DELETE FROM forestgeo_testing.coremeasurements WHERE CoreMeasurementID IN (SELECT CoreMeasurementID FROM doomed)'
+      )
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
+
+  // Regression: schema-qualified references outside the `forestgeo_*` prefix (the
+  // base `forestgeo` schema) must still be subject to the ownership check.
+  it('rejects non-admin reads that join an unowned non-prefixed schema (base forestgeo)', async () => {
+    const response = await POST(makeRequest('SELECT a.Code, u.Email FROM forestgeo_testing.attributes a JOIN forestgeo.users u ON 1 = 1'));
+
+    expect(response.status).toBe(403);
+    expect(mocks.executeQuery).not.toHaveBeenCalled();
+  });
 });
