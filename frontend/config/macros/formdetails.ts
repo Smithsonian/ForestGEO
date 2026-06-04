@@ -1,21 +1,8 @@
 import { Dispatch, SetStateAction } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
 
-const arcgisHeaders: { label: string; explanation?: string; category?: 'required' | 'optional' }[] = [
-  { label: 'GlobalID', explanation: 'ArcGIS global identifier for the tree (trees sheet) or stem (stems sheet).', category: 'required' },
-  { label: 'ParentGlobalID', explanation: 'Stems sheet only: links a stem to its parent tree GlobalID.', category: 'optional' },
-  { label: 'quadrat', explanation: 'Quadrat label as recorded by the field crew (e.g. "A25"); matched by name downstream.', category: 'required' },
-  { label: 'tag', explanation: 'Tree tag; unique within a plot. Stems inherit their parent tree tag.', category: 'required' },
-  { label: 'StemTag', explanation: 'Stem tag for the row.', category: 'optional' },
-  { label: 'spcode', explanation: 'Species code.', category: 'required' },
-  { label: 'DBH_CURRENT', explanation: 'Current diameter at breast height (units passed through).', category: 'optional' },
-  { label: 'HOM', explanation: 'Height of measurement (units passed through).', category: 'optional' },
-  { label: 'lx', explanation: 'Researcher-supplied quadrat-local X coordinate (read verbatim; trees sheet only).', category: 'required' },
-  { label: 'ly', explanation: 'Researcher-supplied quadrat-local Y coordinate (read verbatim; trees sheet only).', category: 'required' },
-  { label: 'Date_measured', explanation: 'Measurement date as an Excel serial number.', category: 'required' },
-  { label: 'notes', explanation: 'Free-text comments for the row.', category: 'optional' },
-  { label: 'COD_*', explanation: 'One column per attribute code (COD_M, COD_P, …); non-"NA" values are joined with ";".', category: 'optional' }
-];
+const arcgisHeaders = arcgisHelpHeaders();
 
 export enum FormType {
   attributes = 'attributes',

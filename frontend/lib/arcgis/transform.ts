@@ -1,6 +1,6 @@
 import type { FileRow } from '@/config/macros/formdetails';
 import { excelSerialToISODate } from './excel-date';
-import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN } from './columns';
+import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN, resolveColumn } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformWarning } from './types';
 
 function cellToString(value: ArcgisCell): string | null {
@@ -62,39 +62,41 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
   let orphanStemsDropped = 0;
   let stemsJoined = 0;
 
+  const field = (row: ArcgisRow, name: string): ArcgisCell => resolveColumn(row, name) as ArcgisCell;
+
   const treeIndex = new Map<string, ArcgisRow>();
   for (const tree of trees) {
-    const globalId = cellToString(tree.GlobalID);
+    const globalId = cellToString(field(tree, 'GlobalID'));
     if (globalId) treeIndex.set(globalId, tree);
   }
 
   for (const tree of trees) {
-    const globalId = cellToString(tree.GlobalID);
-    const quadrat = cellToString(tree.quadrat);
+    const globalId = cellToString(field(tree, 'GlobalID'));
+    const quadrat = cellToString(field(tree, 'quadrat'));
     if (quadrat === null) {
       blankQuadratCount += 1;
       warnings.push({ type: 'BLANK_QUADRAT', message: `Tree ${globalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`, globalId });
     }
     rows.push(
       toFileRow({
-        tag: cellToString(tree.tag),
-        stemtag: cellToString(tree.StemTag),
-        spcode: cellToString(tree.spcode),
+        tag: cellToString(field(tree, 'tag')),
+        stemtag: cellToString(field(tree, 'StemTag')),
+        spcode: cellToString(field(tree, 'spcode')),
         quadrat,
-        lx: cellToString(tree.lx),
-        ly: cellToString(tree.ly),
-        dbh: cellToString(tree.DBH_CURRENT),
-        hom: cellToString(tree.HOM),
-        date: dateToIso(tree.Date_measured),
+        lx: cellToString(field(tree, 'lx')),
+        ly: cellToString(field(tree, 'ly')),
+        dbh: cellToString(field(tree, 'DBH_CURRENT')),
+        hom: cellToString(field(tree, 'HOM')),
+        date: dateToIso(field(tree, 'Date_measured')),
         codes: joinCodes(tree),
-        comments: cellToString(tree.notes)
+        comments: cellToString(field(tree, 'notes'))
       })
     );
   }
 
   for (const stem of stems) {
-    const stemGlobalId = cellToString(stem.GlobalID);
-    const parentGlobalId = cellToString(stem.ParentGlobalID);
+    const stemGlobalId = cellToString(field(stem, 'GlobalID'));
+    const parentGlobalId = cellToString(field(stem, 'ParentGlobalID'));
     const parent = parentGlobalId ? treeIndex.get(parentGlobalId) : undefined;
 
     if (!parent) {
@@ -108,8 +110,8 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
     }
 
     stemsJoined += 1;
-    const parentTag = cellToString(parent.tag);
-    const stemOwnTag = cellToString(stem.tag);
+    const parentTag = cellToString(field(parent, 'tag'));
+    const stemOwnTag = cellToString(field(stem, 'tag'));
     if (stemOwnTag && parentTag && stemOwnTag !== parentTag) {
       tagMismatchCount += 1;
       warnings.push({
@@ -119,7 +121,7 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       });
     }
 
-    const quadrat = cellToString(parent.quadrat);
+    const quadrat = cellToString(field(parent, 'quadrat'));
     if (quadrat === null) {
       blankQuadratCount += 1;
       warnings.push({
@@ -132,16 +134,16 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
     rows.push(
       toFileRow({
         tag: parentTag,
-        stemtag: cellToString(stem.StemTag),
-        spcode: cellToString(stem.spcode),
+        stemtag: cellToString(field(stem, 'StemTag')),
+        spcode: cellToString(field(stem, 'spcode')),
         quadrat,
-        lx: cellToString(parent.lx),
-        ly: cellToString(parent.ly),
-        dbh: cellToString(stem.DBH_CURRENT),
-        hom: cellToString(stem.HOM),
-        date: dateToIso(stem.Date_measured),
+        lx: cellToString(field(parent, 'lx')),
+        ly: cellToString(field(parent, 'ly')),
+        dbh: cellToString(field(stem, 'DBH_CURRENT')),
+        hom: cellToString(field(stem, 'HOM')),
+        date: dateToIso(field(stem, 'Date_measured')),
         codes: joinCodes(stem),
-        comments: cellToString(stem.notes)
+        comments: cellToString(field(stem, 'notes'))
       })
     );
   }

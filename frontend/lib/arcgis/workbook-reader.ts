@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { MissingColumnError, MissingSheetError } from './errors';
-import { STEM_SIGNATURE_COLUMN, TREE_REQUIRED_COLUMNS } from './columns';
+import { STEM_SIGNATURE_COLUMN, fieldAliases, requiredTreeColumns } from './schema';
 import type { ArcgisRow, ArcgisWorkbook } from './types';
 
 interface ParsedSheet {
@@ -24,8 +24,8 @@ function parseSheet(sheet: XLSX.WorkSheet, name: string): ParsedSheet {
   return { name, columns, rows };
 }
 
-function sheetHasAll(sheet: ParsedSheet, required: readonly string[]): boolean {
-  return required.every(col => sheet.columns.includes(col));
+function sheetHasField(sheet: ParsedSheet, field: string): boolean {
+  return fieldAliases(field).some(alias => sheet.columns.includes(alias));
 }
 
 export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
@@ -44,8 +44,9 @@ export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
     throw new MissingSheetError('No trees sheet found: the workbook must contain a separate trees sheet alongside the stems sheet.');
   }
 
-  if (!sheetHasAll(treesSheet, TREE_REQUIRED_COLUMNS)) {
-    const missing = TREE_REQUIRED_COLUMNS.filter(col => !treesSheet.columns.includes(col));
+  const required = requiredTreeColumns();
+  const missing = required.filter(field => !sheetHasField(treesSheet, field));
+  if (missing.length > 0) {
     throw new MissingColumnError(
       `Trees sheet "${treesSheet.name}" is missing required column(s): ${missing.join(', ')}. Add researcher-supplied "lx"/"ly" columns before upload.`
     );
