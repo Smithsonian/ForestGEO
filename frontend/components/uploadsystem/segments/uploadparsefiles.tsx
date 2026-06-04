@@ -267,6 +267,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 selectedDelimiters={selectedDelimiters}
                 onRemoveFile={handleRemoveFile}
                 onValidationStatusChange={handleValidationStatusChange}
+                isArcgisWorkbook={sourceFormat === SourceFormat.arcgis_xlsx}
               />
             </Box>
           </Box>

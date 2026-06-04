@@ -11,6 +11,7 @@ interface FilePreviewCompactProps {
   initialDelimiter?: string;
   showPreview?: boolean;
   onValidationStatusChange?: (isValid: boolean, issues: string[]) => void;
+  isArcgisWorkbook?: boolean;
 }
 
 export default function FilePreviewCompact({
@@ -20,13 +21,15 @@ export default function FilePreviewCompact({
   onDelimiterChange,
   initialDelimiter,
   showPreview = false,
-  onValidationStatusChange
+  onValidationStatusChange,
+  isArcgisWorkbook
 }: FilePreviewCompactProps) {
   const { selectedDelimiter, detectionResult, validationResult, isAnalyzing, previewData, handleDelimiterChange } = useFilePreviewAnalysis({
     file,
     expectedHeaders: validationHeaders,
     onDelimiterChange,
-    initialDelimiter
+    initialDelimiter,
+    isArcgisWorkbook
   });
 
   // Track last reported validation to prevent infinite loops

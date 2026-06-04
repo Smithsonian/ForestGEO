@@ -13,6 +13,7 @@ export interface UseFilePreviewAnalysisProps {
   expectedHeaders?: string[];
   onDelimiterChange: (delimiter: string) => void;
   initialDelimiter?: string;
+  isArcgisWorkbook?: boolean;
 }
 
 export interface UseFilePreviewAnalysisResult {
@@ -40,7 +41,8 @@ export function useFilePreviewAnalysis({
   file,
   expectedHeaders,
   onDelimiterChange,
-  initialDelimiter
+  initialDelimiter,
+  isArcgisWorkbook = false
 }: UseFilePreviewAnalysisProps): UseFilePreviewAnalysisResult {
   const [selectedDelimiter, setSelectedDelimiter] = useState<string>(initialDelimiter || ',');
   const [detectionResult, setDetectionResult] = useState<DelimiterDetectionResult | null>(null);
@@ -54,8 +56,10 @@ export function useFilePreviewAnalysis({
     const analyzeFile = async () => {
       // ArcGIS .xlsx uploads are binary workbooks; CSV delimiter/header validation
       // does not apply. Report a valid result so the flow can reach pre-flight,
-      // where readArcgisWorkbook performs the real validation.
-      if (/\.xlsx$/i.test(file.name)) {
+      // where readArcgisWorkbook performs the real validation. This bypass is
+      // scoped to ArcGIS uploads only: a non-ArcGIS .xlsx must still fail CSV
+      // validation since the downstream Papa parser cannot read a binary workbook.
+      if (isArcgisWorkbook && /\.xlsx$/i.test(file.name)) {
         setDetectionResult(null);
         setValidationResult({ isValid: true, delimiter: selectedDelimiter, issues: [], preview: [] });
         setPreviewData([]);
@@ -90,7 +94,7 @@ export function useFilePreviewAnalysis({
 
     analyzeFile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, initialDelimiter]);
+  }, [file, initialDelimiter, isArcgisWorkbook]);
 
   // Revalidate when delimiter changes (but not on initial mount)
   useEffect(() => {
