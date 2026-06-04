@@ -52,6 +52,16 @@ export function useFilePreviewAnalysis({
   // Auto-detect delimiter on component mount
   useEffect(() => {
     const analyzeFile = async () => {
+      // ArcGIS .xlsx uploads are binary workbooks; CSV delimiter/header validation
+      // does not apply. Report a valid result so the flow can reach pre-flight,
+      // where readArcgisWorkbook performs the real validation.
+      if (/\.xlsx$/i.test(file.name)) {
+        setDetectionResult(null);
+        setValidationResult({ isValid: true, delimiter: selectedDelimiter, issues: [], preview: [] });
+        setPreviewData([]);
+        setIsAnalyzing(false);
+        return;
+      }
       setIsAnalyzing(true);
       try {
         const detection = await detectDelimiter(file);
