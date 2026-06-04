@@ -82,15 +82,24 @@ describe('transformArcgisWorkbook', () => {
     expect(summary.tagMismatchCount).toBe(1);
   });
 
-  it('drops orphan stems and reports them', () => {
+  it('emits orphan stems with their own tag/quadrat and null coordinates instead of dropping them', () => {
     const { rows, warnings, summary } = transformArcgisWorkbook({
       trees: [tree({ GlobalID: 'G1' })],
-      stems: [stem({ ParentGlobalID: 'GHOST', GlobalID: 'S9' })]
+      stems: [stem({ ParentGlobalID: 'GHOST', GlobalID: 'S9', tag: '777', quadrat: 'B12', StemTag: '777-1' })]
     });
-    expect(rows).toHaveLength(1);
-    expect(warnings.some(w => w.type === 'ORPHAN_STEM' && w.globalId === 'S9')).toBe(true);
-    expect(summary.orphanStemsDropped).toBe(1);
+    // one tree row + the emitted orphan stem row
+    expect(rows).toHaveLength(2);
+    const orphanRow = rows.find(r => r.stemtag === '777-1')!;
+    expect(orphanRow.tag).toBe('777');
+    expect(orphanRow.quadrat).toBe('B12');
+    expect(orphanRow.lx).toBeNull();
+    expect(orphanRow.ly).toBeNull();
+    expect(warnings.some(w => w.type === 'ORPHAN_STEM' && w.globalId === 'S9' && w.value === 'GHOST')).toBe(true);
+    expect(summary.orphanStemsEmitted).toBe(1);
     expect(summary.stemsJoined).toBe(0);
+    // orphan has null lx/ly, so the missing-required preview should flag both coordinates
+    const orphanMissing = warnings.filter(w => w.type === 'MISSING_REQUIRED' && w.sheet === 'stems' && w.globalId === 'S9').map(w => w.value);
+    expect(orphanMissing.sort()).toEqual(['lx', 'ly']);
   });
 
   it('passes a blank quadrat through as null and flags it', () => {
@@ -150,6 +159,25 @@ describe('transformArcgisWorkbook', () => {
     expect(missing.map(w => w.value).sort()).toEqual(['spcode', 'tag']);
     missing.forEach(w => expect(w).toMatchObject({ sheet: 'trees', rowIndex: 0, globalId: 'G1' }));
     expect(summary.missingRequired).toBe(2);
+  });
+
+  it('flags blank lx/ly/date on a tree as missing-required but still emits the row', () => {
+    const { rows, warnings, summary } = transformArcgisWorkbook({
+      trees: [tree({ GlobalID: 'G1', lx: null, ly: null, Date_measured: null })],
+      stems: []
+    });
+    expect(rows).toHaveLength(1);
+    const missing = warnings.filter(w => w.type === 'MISSING_REQUIRED');
+    expect(missing.map(w => w.value).sort()).toEqual(['date', 'lx', 'ly']);
+    missing.forEach(w => expect(w).toMatchObject({ sheet: 'trees', rowIndex: 0, globalId: 'G1' }));
+    expect(summary.missingRequired).toBe(3);
+  });
+
+  it('does not fold a blank quadrat into missing-required (covered only by BLANK_QUADRAT)', () => {
+    const { warnings, summary } = transformArcgisWorkbook({ trees: [tree({ GlobalID: 'G1', quadrat: null })], stems: [] });
+    expect(warnings.some(w => w.type === 'BLANK_QUADRAT')).toBe(true);
+    expect(warnings.some(w => w.type === 'MISSING_REQUIRED' && w.value === 'quadrat')).toBe(false);
+    expect(summary.missingRequired).toBe(0);
   });
 
   it('flags a blank required spcode on a stem but does not flag an inherited blank stem tag', () => {

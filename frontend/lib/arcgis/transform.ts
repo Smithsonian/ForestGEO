@@ -38,6 +38,13 @@ interface CanonicalInput {
   comments: string | null;
 }
 
+// Canonical fields the bulkingestionprocess stored procedure treats as required (recording a
+// failure when null/blank): tree/stem tags, species code, measurement date, and quadrat-local
+// coordinates (the null-coordinate rule added in a sibling SP task). `quadrat` is intentionally
+// EXCLUDED here: blank quadrats are already surfaced via the BLANK_QUADRAT warning/count, so
+// folding them into missing-required too would double-count the same row.
+const SP_REQUIRED_FIELDS = ['tag', 'stemtag', 'spcode', 'date', 'lx', 'ly'] as const;
+
 function toFileRow(input: CanonicalInput): FileRow {
   return {
     tag: input.tag,
@@ -59,13 +66,33 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
   const warnings: TransformWarning[] = [];
   let blankQuadratCount = 0;
   let tagMismatchCount = 0;
-  let orphanStemsDropped = 0;
+  let orphanStemsEmitted = 0;
   let stemsJoined = 0;
   let duplicateTreeTags = 0;
   let duplicateGlobalIds = 0;
   let missingRequired = 0;
 
   const field = (row: ArcgisRow, name: string): ArcgisCell => resolveColumn(row, name) as ArcgisCell;
+
+  // Forecast the SP's missing-required failures on the EMITTED canonical row (post-inheritance),
+  // pushing one MISSING_REQUIRED warning per blank required field and bumping the shared count.
+  // This is a PREVIEW only: the row is still emitted; the SP records it as the actual failure.
+  const collectMissingRequired = (row: FileRow, sheet: 'trees' | 'stems', rowIndex: number, globalId: string | null) => {
+    for (const key of SP_REQUIRED_FIELDS) {
+      const value = row[key];
+      if (value === null || value === '') {
+        missingRequired += 1;
+        warnings.push({
+          type: 'MISSING_REQUIRED',
+          message: `${sheet === 'trees' ? 'Tree' : 'Stem'} ${globalId ?? '(no GlobalID)'} is missing a required ${key}; row still emitted for downstream validation.`,
+          globalId,
+          sheet,
+          rowIndex,
+          value: key
+        });
+      }
+    }
+  };
 
   // Build the GlobalID -> tree index; first occurrence wins (Map.set on a later dup would overwrite,
   // so we skip already-seen ids) and any repeat GlobalID is reported as a duplicate.
@@ -108,17 +135,7 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       });
     }
 
-    if (tag === null) {
-      missingRequired += 1;
-      warnings.push({
-        type: 'MISSING_REQUIRED',
-        message: `Tree ${globalId ?? '(no GlobalID)'} is missing a required tag; row still emitted for downstream validation.`,
-        globalId,
-        sheet: 'trees',
-        rowIndex,
-        value: 'tag'
-      });
-    } else {
+    if (tag !== null) {
       if (seenTreeTags.has(tag)) {
         duplicateTreeTags += 1;
         warnings.push({
@@ -133,33 +150,21 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       seenTreeTags.add(tag);
     }
 
-    if (spcode === null) {
-      missingRequired += 1;
-      warnings.push({
-        type: 'MISSING_REQUIRED',
-        message: `Tree ${globalId ?? '(no GlobalID)'} is missing a required spcode; row still emitted for downstream validation.`,
-        globalId,
-        sheet: 'trees',
-        rowIndex,
-        value: 'spcode'
-      });
-    }
-
-    rows.push(
-      toFileRow({
-        tag,
-        stemtag: cellToString(field(tree, 'StemTag')),
-        spcode,
-        quadrat,
-        lx: cellToString(field(tree, 'lx')),
-        ly: cellToString(field(tree, 'ly')),
-        dbh: cellToString(field(tree, 'DBH_CURRENT')),
-        hom: cellToString(field(tree, 'HOM')),
-        date: dateToIso(field(tree, 'Date_measured')),
-        codes: joinCodes(tree),
-        comments: cellToString(field(tree, 'notes'))
-      })
-    );
+    const row = toFileRow({
+      tag,
+      stemtag: cellToString(field(tree, 'StemTag')),
+      spcode,
+      quadrat,
+      lx: cellToString(field(tree, 'lx')),
+      ly: cellToString(field(tree, 'ly')),
+      dbh: cellToString(field(tree, 'DBH_CURRENT')),
+      hom: cellToString(field(tree, 'HOM')),
+      date: dateToIso(field(tree, 'Date_measured')),
+      codes: joinCodes(tree),
+      comments: cellToString(field(tree, 'notes'))
+    });
+    collectMissingRequired(row, 'trees', rowIndex, globalId);
+    rows.push(row);
   });
 
   stems.forEach((stem, rowIndex) => {
@@ -168,15 +173,47 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
     const parent = parentGlobalId ? treeIndex.get(parentGlobalId) : undefined;
 
     if (!parent) {
-      orphanStemsDropped += 1;
+      // Orphan by GlobalID: emit a canonical row from the stem's OWN values (no parent to inherit
+      // from, so no coordinates). The SP resolves stems to trees by TreeTag, so this may still
+      // resolve by tag; if not, it is recorded as a failure downstream. We never silently drop it.
+      orphanStemsEmitted += 1;
       warnings.push({
         type: 'ORPHAN_STEM',
-        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} references parent ${parentGlobalId ?? '(none)'} with no matching tree; dropped.`,
+        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} references parent ${parentGlobalId ?? '(none)'} with no matching tree row; emitted with its own tag/quadrat and no coordinates — will be resolved by tag or recorded as a failure downstream.`,
         globalId: stemGlobalId,
         sheet: 'stems',
         rowIndex,
         value: parentGlobalId
       });
+
+      const orphanQuadrat = cellToString(field(stem, 'quadrat'));
+      if (orphanQuadrat === null) {
+        blankQuadratCount += 1;
+        warnings.push({
+          type: 'BLANK_QUADRAT',
+          message: `Stem ${stemGlobalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`,
+          globalId: stemGlobalId,
+          sheet: 'stems',
+          rowIndex,
+          value: null
+        });
+      }
+
+      const orphanRow = toFileRow({
+        tag: cellToString(field(stem, 'tag')),
+        stemtag: cellToString(field(stem, 'StemTag')),
+        spcode: cellToString(field(stem, 'spcode')),
+        quadrat: orphanQuadrat,
+        lx: null,
+        ly: null,
+        dbh: cellToString(field(stem, 'DBH_CURRENT')),
+        hom: cellToString(field(stem, 'HOM')),
+        date: dateToIso(field(stem, 'Date_measured')),
+        codes: joinCodes(stem),
+        comments: cellToString(field(stem, 'notes'))
+      });
+      collectMissingRequired(orphanRow, 'stems', rowIndex, stemGlobalId);
+      rows.push(orphanRow);
       return;
     }
 
@@ -209,33 +246,22 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
     }
 
     const spcode = cellToString(field(stem, 'spcode'));
-    if (spcode === null) {
-      missingRequired += 1;
-      warnings.push({
-        type: 'MISSING_REQUIRED',
-        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} is missing a required spcode; row still emitted for downstream validation.`,
-        globalId: stemGlobalId,
-        sheet: 'stems',
-        rowIndex,
-        value: 'spcode'
-      });
-    }
 
-    rows.push(
-      toFileRow({
-        tag: parentTag,
-        stemtag: cellToString(field(stem, 'StemTag')),
-        spcode,
-        quadrat,
-        lx: cellToString(field(parent, 'lx')),
-        ly: cellToString(field(parent, 'ly')),
-        dbh: cellToString(field(stem, 'DBH_CURRENT')),
-        hom: cellToString(field(stem, 'HOM')),
-        date: dateToIso(field(stem, 'Date_measured')),
-        codes: joinCodes(stem),
-        comments: cellToString(field(stem, 'notes'))
-      })
-    );
+    const row = toFileRow({
+      tag: parentTag,
+      stemtag: cellToString(field(stem, 'StemTag')),
+      spcode,
+      quadrat,
+      lx: cellToString(field(parent, 'lx')),
+      ly: cellToString(field(parent, 'ly')),
+      dbh: cellToString(field(stem, 'DBH_CURRENT')),
+      hom: cellToString(field(stem, 'HOM')),
+      date: dateToIso(field(stem, 'Date_measured')),
+      codes: joinCodes(stem),
+      comments: cellToString(field(stem, 'notes'))
+    });
+    collectMissingRequired(row, 'stems', rowIndex, stemGlobalId);
+    rows.push(row);
   });
 
   return {
@@ -246,7 +272,7 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       stemsJoined,
       blankQuadratCount,
       tagMismatchCount,
-      orphanStemsDropped,
+      orphanStemsEmitted,
       duplicateTreeTags,
       duplicateGlobalIds,
       missingRequired,

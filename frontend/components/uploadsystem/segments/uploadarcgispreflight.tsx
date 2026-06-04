@@ -83,10 +83,10 @@ const SUMMARY_FIELDS: { key: keyof TransformSummary; label: string }[] = [
   { key: 'stemsJoined', label: 'Stems joined to a parent' },
   { key: 'blankQuadratCount', label: 'Blank quadrat labels (passed through)' },
   { key: 'tagMismatchCount', label: 'Stem/parent tag mismatches (parent wins)' },
-  { key: 'orphanStemsDropped', label: 'Orphan stems dropped' },
+  { key: 'orphanStemsEmitted', label: 'Stems with no matching parent (emitted)' },
   { key: 'duplicateTreeTags', label: 'Duplicate tree tags' },
   { key: 'duplicateGlobalIds', label: 'Duplicate GlobalIDs' },
-  { key: 'missingRequired', label: 'Missing-required values' }
+  { key: 'missingRequired', label: 'Rows missing a required field (will fail validation)' }
 ];
 
 export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summary: TransformSummary; warnings: TransformWarning[]; onProceed: () => void }) {

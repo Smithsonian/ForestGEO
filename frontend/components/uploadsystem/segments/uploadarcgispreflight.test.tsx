@@ -8,7 +8,7 @@ const summary: TransformSummary = {
   stemsJoined: 1223,
   blankQuadratCount: 199,
   tagMismatchCount: 8,
-  orphanStemsDropped: 8,
+  orphanStemsEmitted: 8,
   duplicateTreeTags: 4,
   duplicateGlobalIds: 2,
   missingRequired: 5,
@@ -33,7 +33,8 @@ describe('ArcgisPreflightSummary', () => {
     expect(screen.getByText(/parent tag used/)).toBeInTheDocument();
     expect(screen.getByText(/Duplicate tree tags/)).toBeInTheDocument();
     expect(screen.getByText(/Duplicate GlobalIDs/)).toBeInTheDocument();
-    expect(screen.getByText(/Missing-required values/)).toBeInTheDocument();
+    expect(screen.getByText(/Rows missing a required field/)).toBeInTheDocument();
+    expect(screen.getByText(/Stems with no matching parent \(emitted\)/)).toBeInTheDocument();
   });
 
   it('fires onProceed when the confirm button is clicked', () => {

@@ -24,7 +24,8 @@ export interface TransformSummary {
   stemsJoined: number;
   blankQuadratCount: number;
   tagMismatchCount: number;
-  orphanStemsDropped: number;
+  /** Stems whose ParentGlobalID matched no tree row; emitted with their own tag/quadrat and null coordinates (not joined). */
+  orphanStemsEmitted: number;
   duplicateTreeTags: number;
   duplicateGlobalIds: number;
   missingRequired: number;
