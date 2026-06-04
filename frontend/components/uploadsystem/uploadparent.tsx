@@ -258,7 +258,10 @@ function UploadParentInner(props: UploadParentProps) {
   }
 
   async function handleInitialSubmit() {
-    if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
+    if (uploadState.state.sourceFormat === SourceFormat.arcgis_xlsx) {
+      setArcgisPreparedRows(null);
+      uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
+    } else if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
       try {
         const stagedParsedData = await parseRevisionFiles();
         setParsedData(stagedParsedData);
@@ -298,9 +301,6 @@ function UploadParentInner(props: UploadParentProps) {
         errorHandling.setError(errorObj);
         uploadState.setReviewState(ReviewStates.ERRORS);
       }
-    } else if (uploadState.state.uploadForm === FormType.arcgis_xlsx) {
-      setArcgisPreparedRows(null);
-      uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
     } else {
       uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
     }
@@ -390,6 +390,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadParseFiles
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             acceptedFiles={fileManagement.files}
             dataViewActive={uploadState.state.dataViewActive}
             setDataViewActive={uploadState.setDataViewActive}
@@ -432,6 +433,7 @@ function UploadParentInner(props: UploadParentProps) {
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
+            sourceFormat={uploadState.state.sourceFormat}
             parsedData={parsedData}
             preparedRowSet={arcgisPreparedRows}
             setReviewState={uploadState.setReviewState}

@@ -469,10 +469,6 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
   return TableHeadersByFormType[formType];
 }
 
-export function isMeasurementUpload(formType: FormType | undefined): boolean {
-  return formType === FormType.measurements || formType === FormType.arcgis_xlsx;
-}
-
 export function getGridHeaders(gridType: DatagridType): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {
   return HeadersByDatagridType[gridType];
 }

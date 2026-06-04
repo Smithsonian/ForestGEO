@@ -8,8 +8,8 @@ import {
   FileRowSet,
   FormType,
   getTableHeaders,
-  isMeasurementUpload,
-  RequiredTableHeadersByFormType
+  RequiredTableHeadersByFormType,
+  SourceFormat
 } from '@/config/macros/formdetails';
 import { chunkFileRowSet } from '@/lib/arcgis/chunk-rowset';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
@@ -89,6 +89,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   acceptedFiles,
   uploadForm,
   uploadMode,
+  sourceFormat,
   setIsDataUnsaved,
   schema,
   setUploadError,
@@ -432,7 +433,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   // Calculate overall progress percentage (0-100) for unified progress bar and ETA calculation
   const calculateOverallProgressValue = useCallback((): number => {
-    if (!isMeasurementUpload(uploadForm)) {
+    if (uploadForm !== 'measurements') {
       return totalOperations > 0 ? (completedOperations / totalOperations) * 100 : 0;
     }
 
@@ -488,7 +489,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   // the reference whenever any of its 12 deps change, triggering this effect, which calls setUnifiedETA,
   // which re-renders, which may recreate the callback again.
   useEffect(() => {
-    if (isMeasurementUpload(uploadForm) && !processed) {
+    if (uploadForm === 'measurements' && !processed) {
       const currentProgress = calculateOverallProgressValue();
 
       if (currentProgress > 0 && currentProgress < 100) {
@@ -536,7 +537,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               },
               body: JSON.stringify({
                 schema,
-                formType: isMeasurementUpload(uploadForm) ? FormType.measurements : uploadForm,
+                formType: uploadForm,
                 uploadMode,
                 fileName,
                 plot: currentPlot,
@@ -688,7 +689,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const parseFileInChunks = useCallback(
     async (file: File, delimiter: string, estimatedChunkCount: number, fileBatchID?: string) => {
       queue.clear();
-      if (uploadForm === FormType.arcgis_xlsx) {
+      if (sourceFormat === SourceFormat.arcgis_xlsx) {
         await submitPreparedRows(file, fileBatchID);
         return;
       }
@@ -1157,6 +1158,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     },
     [
       uploadForm,
+      sourceFormat,
       currentPlot?.usesSubquadrats,
       setReviewState,
       queue,
@@ -1274,7 +1276,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         // Calculate total operations for the UI.
         const totalOps = acceptedFiles.length;
-        setTotalOperations(isMeasurementUpload(uploadForm) ? totalOps * 2 : totalOps);
+        setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
 
         // Detect delimiters first so the real parser uses the expected format.
         const fileDelimiters: Map<string, string> = new Map();
@@ -1317,7 +1319,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // the total if PapaParse produces a different number of chunks.
         for (const file of acceptedFiles) {
           let estimatedCount: number;
-          if (uploadForm === FormType.arcgis_xlsx) {
+          if (sourceFormat === SourceFormat.arcgis_xlsx) {
             const preparedCount = Object.keys(preparedRowSet?.[file.name] ?? {}).length;
             estimatedCount = Math.max(1, Math.ceil(preparedCount / ARCGIS_SUBMIT_CHUNK_SIZE));
             ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${preparedCount} prepared row(s)`);
@@ -1336,7 +1338,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         for (const file of acceptedFiles) {
           const delimiter = fileDelimiters.get(file.name)!;
           const estimatedCount = estimatedChunkCounts.get(file.name) ?? 1;
-          const fileBatchID = isMeasurementUpload(uploadForm) ? generateShortBatchID() : undefined;
+          const fileBatchID = uploadForm === FormType.measurements ? generateShortBatchID() : undefined;
           if (fileBatchID) {
             measurementBatchIDs.current.set(file.name, fileBatchID);
             ailogger.info(`File ${file.name}: Using consolidated BatchID ${fileBatchID} for all chunks`);
@@ -1364,7 +1366,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         // Only applies to measurements — fixed-data uploads (attributes, quadrats, species, personnel)
         // go directly to their target tables, not through temporarymeasurements.
         try {
-          if (isMeasurementUpload(uploadForm)) {
+          if (uploadForm === 'measurements') {
             if (isMountedRef.current) {
               setVerificationStatus('Verifying uploaded data integrity...');
             }
@@ -1521,6 +1523,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     uploadAttemptKey,
     uploaded,
     uploadForm,
+    sourceFormat,
     waitForAllOperationsToComplete
   ]);
 
@@ -1530,7 +1533,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     // we had actual data to upload (prevents false triggers on initial mount).
     // The completedChunks === totalChunks check is maintained as a safety measure.
     const shouldProcess =
-      isMeasurementUpload(uploadForm) && uploaded && !processed && totalChunks > 0 && completedChunks === totalChunks && !batchProcessingStartedRef.current;
+      uploadForm === FormType.measurements &&
+      uploaded &&
+      !processed &&
+      totalChunks > 0 &&
+      completedChunks === totalChunks &&
+      !batchProcessingStartedRef.current;
 
     ailogger.info('Processing useEffect triggered', {
       uploadForm,
@@ -2050,7 +2058,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     // Use async IIFE to properly await completeSession before state transition
     // This prevents race condition where unmount cleanup fires before session is marked complete
     const handleUploadComplete = async () => {
-      if (isMeasurementUpload(uploadForm)) {
+      if (uploadForm === FormType.measurements) {
         if (uploaded && processed) {
           // Check mount state before proceeding
           if (!isMountedRef.current) {

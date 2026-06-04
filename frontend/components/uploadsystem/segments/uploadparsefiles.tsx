@@ -21,7 +21,7 @@ import { DropzoneCompact } from '@/components/uploadsystemhelpers/dropzonecompac
 import { FileListEnhanced } from '@/components/uploadsystemhelpers/filelistenhanced';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FormType, RequiredTableHeadersByFormType, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { RequiredTableHeadersByFormType, SourceFormat, TableHeadersByFormType } from '@/config/macros/formdetails';
 import InfoIcon from '@mui/icons-material/Info';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -37,6 +37,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   const {
     uploadForm,
     uploadMode,
+    sourceFormat,
     acceptedFiles,
     dataViewActive,
     setDataViewActive,
@@ -84,13 +85,13 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   const allFilesValid = useMemo(() => {
     if (acceptedFiles.length === 0) return false;
     // ArcGIS .xlsx uploads bypass CSV header validation; the workbook is validated at pre-flight.
-    if (uploadForm === FormType.arcgis_xlsx) return true;
+    if (sourceFormat === SourceFormat.arcgis_xlsx) return true;
     // All files must have validation status and all must be valid
     return acceptedFiles.every(file => {
       const status = fileValidationStatuses[file.name];
       return status && status.isValid;
     });
-  }, [acceptedFiles, fileValidationStatuses, uploadForm]);
+  }, [acceptedFiles, fileValidationStatuses, sourceFormat]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
@@ -111,21 +112,21 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   const headerGuideHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
-    if (uploadForm === FormType.arcgis_xlsx) return undefined;
+    if (sourceFormat === SourceFormat.arcgis_xlsx) return undefined;
     if (uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS) {
       return TableHeadersByFormType.measurements.filter(header => header.label !== 'errors').map(header => header.label);
     }
     return RequiredTableHeadersByFormType[uploadForm]?.map(header => header.label);
-  }, [uploadForm, uploadMode]);
+  }, [uploadForm, uploadMode, sourceFormat]);
 
   const validationHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
-    if (uploadForm === FormType.arcgis_xlsx) return undefined;
+    if (sourceFormat === SourceFormat.arcgis_xlsx) return undefined;
     if (uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS) {
       return undefined;
     }
     return RequiredTableHeadersByFormType[uploadForm]?.map(header => header.label);
-  }, [uploadForm, uploadMode]);
+  }, [uploadForm, uploadMode, sourceFormat]);
 
   const headerGuideLabel =
     uploadForm === 'measurements' && uploadMode === UploadMode.REVISIONS

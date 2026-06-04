@@ -8,16 +8,7 @@ vi.mock('@/config/sqlrdsdefinitions/core', async importOriginal => {
   return actual;
 });
 
-import { FormType, isMeasurementUpload, TableHeadersByFormType, RequiredTableHeadersByFormType } from './formdetails';
-
-describe('isMeasurementUpload', () => {
-  it('is true for measurements and arcgis_xlsx only', () => {
-    expect(isMeasurementUpload(FormType.measurements)).toBe(true);
-    expect(isMeasurementUpload(FormType.arcgis_xlsx)).toBe(true);
-    expect(isMeasurementUpload(FormType.species)).toBe(false);
-    expect(isMeasurementUpload(undefined)).toBe(false);
-  });
-});
+import { FormType, TableHeadersByFormType, RequiredTableHeadersByFormType } from './formdetails';
 
 describe('arcgis_xlsx headers', () => {
   it('exposes the real workbook columns including lx/ly and ParentGlobalID', () => {

@@ -1,7 +1,7 @@
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 
 // File upload constraints
@@ -34,6 +34,7 @@ export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   dataViewActive: number;
   selectedDelimiters: Record<string, string>;
@@ -83,6 +84,7 @@ export interface UploadFireProps {
   // state vars
   uploadForm: FormType | undefined;
   uploadMode: UploadMode | undefined;
+  sourceFormat?: SourceFormat;
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
