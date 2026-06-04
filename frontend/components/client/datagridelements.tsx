@@ -248,9 +248,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
   gridType === 'alltaxonomiesview'
     ? (formHeaders = getTableHeaders(FormType.species).map(header => header.label))
     : gridType !== 'unifiedchangelog'
-      ? (formHeaders = getTableHeaders(Object.values(FormType).includes(gridType as FormType) ? (gridType as FormType) : FormType.arcgis_xlsx).map(
-          header => header.label
-        ))
+      ? (formHeaders = Object.values(FormType).includes(gridType as FormType) ? getTableHeaders(gridType as FormType).map(header => header.label) : [])
       : (formHeaders = []);
 
   return (

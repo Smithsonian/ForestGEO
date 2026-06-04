@@ -1,16 +1,12 @@
 import { Dispatch, SetStateAction } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
-import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
-
-const arcgisHeaders = arcgisHelpHeaders();
 
 export enum FormType {
   attributes = 'attributes',
   personnel = 'personnel',
   species = 'species',
   quadrats = 'quadrats',
-  measurements = 'measurements',
-  arcgis_xlsx = 'arcgis_xlsx'
+  measurements = 'measurements'
 }
 
 export enum SourceFormat {
@@ -105,8 +101,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' },
     { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' }, // optional - users should be able to submit comments if needed
     { label: 'errors', explanation: 'Validation errors detected for this measurement', category: 'optional' }
-  ],
-  [FormType.arcgis_xlsx]: arcgisHeaders
+  ]
 };
 
 export enum DatagridType {
@@ -286,8 +281,8 @@ export function getFormHeaderForGridHeader(
   return TableHeadersByFormType[formType].find(h => h.label === formField);
 }
 
-export function getFormForDataGrid(grid: DatagridType): FormType {
-  return DatagridToFormTypeMap[grid] ?? FormType.arcgis_xlsx;
+export function getFormForDataGrid(grid: DatagridType): FormType | undefined {
+  return DatagridToFormTypeMap[grid];
 }
 
 export function getDataGridForForm(form: FormType): DatagridType | undefined {
@@ -465,15 +460,13 @@ export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[
   [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),
   [FormType.species]: TableHeadersByFormType[FormType.species].filter(header => header.category === 'required'),
   [FormType.quadrats]: TableHeadersByFormType[FormType.quadrats].filter(header => header.category === 'required'),
-  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required'),
-  [FormType.arcgis_xlsx]: TableHeadersByFormType[FormType.arcgis_xlsx].filter(header => header.category === 'required')
+  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required')
 };
 
 export const DBInputForms: FormType[] = [FormType.attributes, FormType.personnel, FormType.species, FormType.quadrats, FormType.measurements];
 
 export const FormGroups: Record<string, string[]> = {
-  'Database Forms': DBInputForms,
-  'ArcGIS Forms': [FormType.arcgis_xlsx]
+  'Database Forms': DBInputForms
 };
 
 /**

@@ -31,9 +31,10 @@ export default function RenderGridFormExplanations({ datagridType }: { datagridT
     .trim();
 
   const mappedForm = getFormForDataGrid(datagridType);
+  const mappedFormHeaders = mappedForm ? TableHeadersByFormType[mappedForm] : [];
 
-  const formMatches = TableHeadersByFormType[mappedForm].find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
-  const formCleanedString = TableHeadersByFormType[mappedForm]
+  const formMatches = mappedFormHeaders.find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
+  const formCleanedString = mappedFormHeaders
     .find(obj => obj.label === 'status')
     ?.explanation?.replace(categoryRegex, '')
     .replace(/\s*,\s*/g, '')

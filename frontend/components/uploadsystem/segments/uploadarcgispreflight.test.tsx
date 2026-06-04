@@ -43,6 +43,13 @@ describe('ArcgisPreflightSummary', () => {
     expect(onProceed).toHaveBeenCalledTimes(1);
   });
 
+  it('lists the expected workbook columns from the schema help headers', () => {
+    render(<ArcgisPreflightSummary summary={summary} warnings={warnings} onProceed={() => {}} />);
+    expect(screen.getByText(/Expected columns/)).toBeInTheDocument();
+    expect(screen.getByText('GlobalID')).toBeInTheDocument();
+    expect(screen.getByText('lx')).toBeInTheDocument();
+  });
+
   it('offers a CSV download control only when there are warnings', () => {
     const createObjectURL = vi.fn(() => 'blob:diagnostics');
     const revokeObjectURL = vi.fn();

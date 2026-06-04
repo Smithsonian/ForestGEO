@@ -21,7 +21,7 @@ describe('Upload File Management', () => {
       files: [
         buildUploadedFile({ name: 'measurements-2024-06-15.csv', user: 'Field Crew', formType: 'measurements' }),
         buildUploadedFile({ name: 'species-update-2024-06-16.csv', user: 'Lead Tech', formType: 'species' }),
-        buildUploadedFile({ name: 'arcgis-review.xlsx', user: 'GIS Analyst', formType: 'arcgis_xlsx' })
+        buildUploadedFile({ name: 'arcgis-review.xlsx', user: 'GIS Analyst', formType: 'measurements' })
       ]
     });
 

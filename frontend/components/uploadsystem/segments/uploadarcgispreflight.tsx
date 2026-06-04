@@ -1,12 +1,60 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { Alert, Box, Button, Card, CardContent, CircularProgress, List, ListItem, Stack, Typography } from '@mui/joy';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionGroup,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  List,
+  ListItem,
+  Stack,
+  Typography
+} from '@mui/joy';
 import type { FileWithPath } from 'react-dropzone';
 import type { FileCollectionRowSet, FileRowSet } from '@/config/macros/formdetails';
 import type { TransformResult, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
 import { MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
 import { warningsToCsv } from '@/lib/arcgis/diagnostics-csv';
+import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
 import ailogger from '@/ailogger';
+
+const EXPECTED_COLUMNS = arcgisHelpHeaders();
+
+function ExpectedColumns() {
+  return (
+    <AccordionGroup sx={{ mt: 2 }}>
+      <Accordion>
+        <AccordionSummary>
+          <Typography level="title-sm">Expected columns ({EXPECTED_COLUMNS.length})</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <List size="sm">
+            {EXPECTED_COLUMNS.map(column => (
+              <ListItem key={column.label}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip size="sm" variant="soft" color={column.category === 'required' ? 'primary' : 'neutral'}>
+                    {column.category === 'required' ? 'required' : 'optional'}
+                  </Chip>
+                  <Typography level="body-sm">
+                    <strong>{column.label}</strong>
+                    {column.explanation ? ` — ${column.explanation}` : ''}
+                  </Typography>
+                </Stack>
+              </ListItem>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
+    </AccordionGroup>
+  );
+}
 
 const DIAGNOSTICS_FILENAME = 'arcgis-diagnostics.csv';
 
@@ -71,6 +119,7 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
             {warnings.length > 200 && <Typography level="body-xs">…and {warnings.length - 200} more.</Typography>}
           </Box>
         )}
+        <ExpectedColumns />
         <Box sx={{ mt: 2 }}>
           <Button onClick={onProceed}>Proceed with import</Button>
         </Box>
