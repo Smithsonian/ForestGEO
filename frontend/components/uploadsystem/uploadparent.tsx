@@ -19,6 +19,7 @@ import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
 import UploadReingestion from '@/components/uploadsystem/segments/uploadreingestion';
 import UploadRevisionMatch from '@/components/uploadsystem/segments/uploadrevisionmatch';
 import UploadRevisionApply from '@/components/uploadsystem/segments/uploadrevisionapply';
+import UploadArcgisPreflight from '@/components/uploadsystem/segments/uploadarcgispreflight';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import ailogger from '@/ailogger';
 import { useFileManagement } from '@/app/hooks/usefilemanagement';
@@ -127,6 +128,7 @@ function UploadParentInner(props: UploadParentProps) {
   // revisionRolePolicy and block. Surface this at the parse step so the user
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
+  const [arcgisPreparedRows, setArcgisPreparedRows] = useState<FileCollectionRowSet | null>(null);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -295,6 +297,9 @@ function UploadParentInner(props: UploadParentProps) {
         errorHandling.setError(errorObj);
         uploadState.setReviewState(ReviewStates.ERRORS);
       }
+    } else if (uploadState.state.uploadForm === FormType.arcgis_xlsx) {
+      setArcgisPreparedRows(null);
+      uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
     } else {
       uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
     }
@@ -395,6 +400,20 @@ function UploadParentInner(props: UploadParentProps) {
             setSelectedDelimiters={setSelectedDelimiters}
           />
         );
+      case ReviewStates.ARCGIS_PREFLIGHT:
+        return (
+          <UploadArcgisPreflight
+            acceptedFiles={fileManagement.files}
+            onProceed={rows => {
+              setArcgisPreparedRows(rows);
+              uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
+            }}
+            onError={error => {
+              errorHandling.setError(error);
+              uploadState.setReviewState(ReviewStates.ERRORS);
+            }}
+          />
+        );
       case ReviewStates.UPLOAD_SQL:
         // If in reingestion mode, use reingestion component
         if (isReingestionMode) {
@@ -413,6 +432,7 @@ function UploadParentInner(props: UploadParentProps) {
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
             parsedData={parsedData}
+            preparedRowSet={arcgisPreparedRows}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}
