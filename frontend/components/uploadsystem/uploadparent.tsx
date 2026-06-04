@@ -377,6 +377,7 @@ function UploadParentInner(props: UploadParentProps) {
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
             setUploadForm={uploadState.setUploadForm}
+            setSourceFormat={uploadState.setSourceFormat}
             setUploadMode={uploadState.setUploadMode}
             setExpectedHeaders={() => {}} // Deprecated - no longer needed
             setReviewState={uploadState.setReviewState}

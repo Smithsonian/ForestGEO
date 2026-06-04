@@ -26,6 +26,11 @@ export enum FormType {
   arcgis_xlsx = 'arcgis_xlsx'
 }
 
+export enum SourceFormat {
+  csv = 'csv',
+  arcgis_xlsx = 'arcgis_xlsx'
+}
+
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
 export const TableHeadersByFormType: Record<FormType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
   [FormType.attributes]: [

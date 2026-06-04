@@ -4,10 +4,25 @@ import { ReviewStates, UploadStartProps } from '@/config/macros/uploadsystemmacr
 import { Box, Stack, Typography } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
 import FinalizeSelectionsButton from '../../client/modals/finalizeselectionsbutton';
+import SelectFormType from '../../uploadsystemhelpers/groupedformselection';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
-  const { uploadForm, uploadMode, setReviewState } = props;
+  const { uploadForm, uploadMode, setUploadForm, setSourceFormat, setExpectedHeaders, setReviewState } = props;
   const [finish, setFinish] = useState<boolean>(false);
+
+  // The picker emits a FormType string. ArcGIS resolves to the measurements
+  // upload form while remaining distinguishable via the orthogonal sourceFormat
+  // axis; every other choice is a plain CSV upload of that form.
+  const handleFormSelection = (chosenValue: string) => {
+    if (chosenValue === FormType.arcgis_xlsx) {
+      setUploadForm(FormType.measurements);
+      setSourceFormat(SourceFormat.arcgis_xlsx);
+    } else {
+      setUploadForm(chosenValue as FormType);
+      setSourceFormat(SourceFormat.csv);
+    }
+  };
 
   // When finish is triggered, advance to upload files state
   useEffect(() => {
@@ -61,6 +76,18 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           minWidth: '400px'
         }}
       >
+        {uploadForm === undefined && !finish && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, animation: 'slideIn 0.5s ease-out' }}>
+            <Typography level="title-md" sx={{ fontWeight: 700, textAlign: 'center' }}>
+              Choose a form to upload
+            </Typography>
+            <SelectFormType
+              externalState={uploadForm ?? ''}
+              updateExternalState={value => handleFormSelection(value as string)}
+              updateExternalHeaders={setExpectedHeaders}
+            />
+          </Box>
+        )}
         {uploadForm !== undefined && !finish && (
           <>
             <Typography

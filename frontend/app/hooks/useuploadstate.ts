@@ -13,11 +13,12 @@
 
 import React, { useCallback, useReducer, Dispatch } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 
 export interface UploadStateType {
   uploadForm?: FormType;
+  sourceFormat: SourceFormat;
   uploadMode?: UploadMode;
   reviewState: ReviewStates;
   personnelRecording: string;
@@ -29,6 +30,7 @@ export interface UploadStateType {
 // Action types for state reducer
 type UploadStateAction =
   | { type: 'SET_UPLOAD_FORM'; payload: FormType | undefined }
+  | { type: 'SET_SOURCE_FORMAT'; payload: SourceFormat }
   | { type: 'SET_UPLOAD_MODE'; payload: UploadMode | undefined }
   | { type: 'SET_REVIEW_STATE'; payload: ReviewStates }
   | { type: 'SET_PERSONNEL'; payload: string }
@@ -41,6 +43,7 @@ type UploadStateAction =
 // Initial state
 const initialState: UploadStateType = {
   uploadForm: undefined,
+  sourceFormat: SourceFormat.csv,
   uploadMode: undefined,
   reviewState: ReviewStates.START,
   personnelRecording: '',
@@ -54,6 +57,9 @@ function uploadStateReducer(state: UploadStateType, action: UploadStateAction): 
   switch (action.type) {
     case 'SET_UPLOAD_FORM':
       return { ...state, uploadForm: action.payload };
+
+    case 'SET_SOURCE_FORMAT':
+      return { ...state, sourceFormat: action.payload };
 
     case 'SET_UPLOAD_MODE':
       return { ...state, uploadMode: action.payload };
@@ -77,6 +83,7 @@ function uploadStateReducer(state: UploadStateType, action: UploadStateAction): 
       return {
         ...initialState,
         uploadForm: undefined,
+        sourceFormat: SourceFormat.csv,
         reviewState: ReviewStates.START
       };
 
@@ -100,6 +107,7 @@ export interface UseUploadStateReturn {
 
   // Convenience setters (compatible with React.Dispatch<SetStateAction<T>>)
   setUploadForm: Dispatch<React.SetStateAction<FormType | undefined>>;
+  setSourceFormat: Dispatch<React.SetStateAction<SourceFormat>>;
   setUploadMode: Dispatch<React.SetStateAction<UploadMode | undefined>>;
   setReviewState: Dispatch<React.SetStateAction<ReviewStates>>;
   setPersonnelRecording: Dispatch<React.SetStateAction<string>>;
@@ -173,6 +181,11 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
     dispatch({ type: 'SET_UPLOAD_FORM', payload: form });
   }, []);
 
+  const setSourceFormat = useCallback((value: React.SetStateAction<SourceFormat>) => {
+    const sourceFormat = typeof value === 'function' ? value(stateRef.current.sourceFormat) : value;
+    dispatch({ type: 'SET_SOURCE_FORMAT', payload: sourceFormat });
+  }, []);
+
   const setUploadMode = useCallback((value: React.SetStateAction<UploadMode | undefined>) => {
     const uploadMode = typeof value === 'function' ? value(stateRef.current.uploadMode) : value;
     dispatch({ type: 'SET_UPLOAD_MODE', payload: uploadMode });
@@ -226,6 +239,7 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
 
     // Convenience setters
     setUploadForm,
+    setSourceFormat,
     setUploadMode,
     setReviewState,
     setPersonnelRecording,
