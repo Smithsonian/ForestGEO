@@ -131,11 +131,6 @@ export function requiredTreeColumns(): string[] {
   return ARCGIS_SCHEMA.filter(def => def.required && scopeMatches(def.scope, 'trees') && def.aliases.length > 0).map(def => def.field);
 }
 
-/** All aliases of a field, used for alias-aware presence checks against a sheet's headers. */
-export function fieldAliases(field: string): string[] {
-  return ARCGIS_SCHEMA.find(def => def.field === field)?.aliases ?? [];
-}
-
 export function arcgisHelpHeaders(): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {
   return ARCGIS_SCHEMA.filter(def => def.help !== undefined).map(def => ({ label: def.field, explanation: def.help, category: def.category }));
 }
