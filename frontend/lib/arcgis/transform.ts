@@ -1,6 +1,6 @@
 import type { FileRow } from '@/config/macros/formdetails';
 import { excelSerialToISODate } from './excel-date';
-import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN, resolveColumn } from './schema';
+import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN, normalizeHeader, resolveColumn } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformWarning } from './types';
 
 function cellToString(value: ArcgisCell): string | null {
@@ -14,10 +14,12 @@ function dateToIso(value: ArcgisCell): string | null {
   return isBlank ? null : excelSerialToISODate(value);
 }
 
+const NORMALIZED_CODE_PREFIX = normalizeHeader(CODE_COLUMN_PREFIX);
+
 function joinCodes(row: ArcgisRow): string {
   const codes: string[] = [];
   for (const [key, value] of Object.entries(row)) {
-    if (!key.startsWith(CODE_COLUMN_PREFIX)) continue;
+    if (!normalizeHeader(key).startsWith(NORMALIZED_CODE_PREFIX)) continue;
     const text = cellToString(value);
     if (text && text.toUpperCase() !== NULL_CODE_TOKEN) codes.push(text);
   }

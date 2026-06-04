@@ -60,6 +60,11 @@ describe('transformArcgisWorkbook', () => {
     expect(summary.totalRows).toBe(1);
   });
 
+  it('resolves a lowercase cod_ code column into codes (case-insensitive code matching)', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ COD_M: 'NA', cod_m: 'M', COD_P: 'NA' })], stems: [] });
+    expect(rows[0].codes).toBe('M');
+  });
+
   it('joins multiple codes in column order and yields empty string when all NA', () => {
     const { rows } = transformArcgisWorkbook({ trees: [tree({ COD_M: 'M', COD_P: 'P' })], stems: [] });
     expect(rows[0].codes).toBe('M;P');

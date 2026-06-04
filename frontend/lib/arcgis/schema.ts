@@ -3,7 +3,7 @@ export type ArcgisSheetScope = 'trees' | 'stems' | 'both';
 export interface ArcgisFieldDef {
   /** canonical FileRow key, or identity field name */
   field: string;
-  /** source column names, first present match wins (case-sensitive match against sheet headers) */
+  /** source column names; matched against headers after normalization (case/whitespace/`_`/`-` insensitive) */
   aliases: string[];
   scope: ArcgisSheetScope;
   required: boolean;
@@ -64,7 +64,7 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
   { field: 'HOM', aliases: ['HOM'], scope: 'both', required: false, help: 'Height of measurement (units passed through).', category: 'optional' },
   {
     field: 'lx',
-    aliases: ['lx', 'Lx', 'LocalX'],
+    aliases: ['lx', 'LocalX'],
     scope: 'trees',
     required: true,
     help: 'Researcher-supplied quadrat-local X coordinate (read verbatim; trees sheet only).',
@@ -72,7 +72,7 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
   },
   {
     field: 'ly',
-    aliases: ['ly', 'Ly', 'LocalY'],
+    aliases: ['ly', 'LocalY'],
     scope: 'trees',
     required: true,
     help: 'Researcher-supplied quadrat-local Y coordinate (read verbatim; trees sheet only).',
@@ -101,17 +101,29 @@ function scopeMatches(entryScope: ArcgisSheetScope, wanted: 'trees' | 'stems'): 
   return entryScope === 'both' || entryScope === wanted;
 }
 
-/**
- * Returns the cell value for the first alias of `field` that is present as a KEY in `row`
- * (row keys come from the sheet headers). Returns null if the field is unknown or no alias is present.
- */
-export function resolveColumn(row: Record<string, unknown>, field: string): unknown {
-  const entry = ARCGIS_SCHEMA.find(def => def.field === field);
-  if (!entry) return null;
-  for (const alias of entry.aliases) {
-    if (alias in row) return row[alias];
+/** Folds case, surrounding whitespace, and `_`/`-`/space separators so header variants compare equal. */
+export function normalizeHeader(header: string): string {
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, '');
+}
+
+/** Canonical schema field whose any alias normalizes-equal to the header; else null. */
+export function canonicalFieldFor(header: string): string | null {
+  const norm = normalizeHeader(header);
+  for (const def of ARCGIS_SCHEMA) {
+    if (def.aliases.some(alias => normalizeHeader(alias) === norm)) return def.field;
   }
   return null;
+}
+
+/**
+ * Returns the cell value for `field` from a CANONICAL-keyed row (headers were canonicalized at read
+ * time). Returns null if the field is absent, preserving the null-vs-undefined distinction.
+ */
+export function resolveColumn(row: Record<string, unknown>, field: string): unknown {
+  return field in row ? row[field] : null;
 }
 
 /** Canonical field key of every required schema entry whose scope includes the trees sheet. */
