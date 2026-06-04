@@ -1,17 +1,21 @@
 import { Dispatch, SetStateAction } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
-const arcgisHeaderString =
-  'OBJECTID Q20 P5 Lx Ly Px Py SPP TAG STEMTAG DBH Viejo HOM Viejo Códigos Viejos Tallo Principal DBH HOM Tipo Arbol Estado Censo STEMTAG GlobalID Códigos D - Dead N - Tag and tree missing L - Leaning CYL - Trunk cylindrical for B trees R - Resprout B - Buttressed tree Q - Broken above 1.3 m M - Multiple-stemmed P - Problem A - Needs checking Ss - Dead stem still standing Cs - Dead stem fallen Ns - Stemtag and stem missing Ts - Stemtag found, stem missing Ascender DBH a 1.30 DOS - Dos placas EM - Error de medida ID - Problema identificación MED - Problema medida NC - No califica NUM - Número Equivocado PP - Placa Perdida Placa Repuesta POSIBLE - Placa/Planta dudosa VIVO - Posiblemente muerto MAP - Problema mapeo Problemas Comentarios Censado Por UTM X (m) UTM Y (m) Fecha Captura Mensaje DBH Equipo x y';
-const arcgisHeaderArr: string[] = arcgisHeaderString.split(/\s+/);
-
-interface HeaderObject {
-  label: string;
-}
-
-const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
-  label: header
-}));
+const arcgisHeaders: { label: string; explanation?: string; category?: 'required' | 'optional' }[] = [
+  { label: 'GlobalID', explanation: 'ArcGIS global identifier for the tree (trees sheet) or stem (stems sheet).', category: 'required' },
+  { label: 'ParentGlobalID', explanation: 'Stems sheet only: links a stem to its parent tree GlobalID.', category: 'optional' },
+  { label: 'quadrat', explanation: 'Quadrat label as recorded by the field crew (e.g. "A25"); matched by name downstream.', category: 'required' },
+  { label: 'tag', explanation: 'Tree tag; unique within a plot. Stems inherit their parent tree tag.', category: 'required' },
+  { label: 'StemTag', explanation: 'Stem tag for the row.', category: 'optional' },
+  { label: 'spcode', explanation: 'Species code.', category: 'required' },
+  { label: 'DBH_CURRENT', explanation: 'Current diameter at breast height (units passed through).', category: 'optional' },
+  { label: 'HOM', explanation: 'Height of measurement (units passed through).', category: 'optional' },
+  { label: 'lx', explanation: 'Researcher-supplied quadrat-local X coordinate (read verbatim; trees sheet only).', category: 'required' },
+  { label: 'ly', explanation: 'Researcher-supplied quadrat-local Y coordinate (read verbatim; trees sheet only).', category: 'required' },
+  { label: 'Date_measured', explanation: 'Measurement date as an Excel serial number.', category: 'required' },
+  { label: 'notes', explanation: 'Free-text comments for the row.', category: 'optional' },
+  { label: 'COD_*', explanation: 'One column per attribute code (COD_M, COD_P, …); non-"NA" values are joined with ";".', category: 'optional' }
+];
 
 export enum FormType {
   attributes = 'attributes',
@@ -460,6 +464,10 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
   return TableHeadersByFormType[formType];
 }
 
+export function isMeasurementUpload(formType: FormType | undefined): boolean {
+  return formType === FormType.measurements || formType === FormType.arcgis_xlsx;
+}
+
 export function getGridHeaders(gridType: DatagridType): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {
   return HeadersByDatagridType[gridType];
 }
@@ -470,7 +478,7 @@ export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[
   [FormType.species]: TableHeadersByFormType[FormType.species].filter(header => header.category === 'required'),
   [FormType.quadrats]: TableHeadersByFormType[FormType.quadrats].filter(header => header.category === 'required'),
   [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required'),
-  [FormType.arcgis_xlsx]: []
+  [FormType.arcgis_xlsx]: TableHeadersByFormType[FormType.arcgis_xlsx].filter(header => header.category === 'required')
 };
 
 export const DBInputForms: FormType[] = [FormType.attributes, FormType.personnel, FormType.species, FormType.quadrats, FormType.measurements];
