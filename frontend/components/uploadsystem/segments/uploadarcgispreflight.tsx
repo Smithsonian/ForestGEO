@@ -5,7 +5,23 @@ import type { FileWithPath } from 'react-dropzone';
 import type { FileCollectionRowSet, FileRowSet } from '@/config/macros/formdetails';
 import type { TransformResult, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
 import { MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
+import { warningsToCsv } from '@/lib/arcgis/diagnostics-csv';
 import ailogger from '@/ailogger';
+
+const DIAGNOSTICS_FILENAME = 'arcgis-diagnostics.csv';
+
+function downloadWarningsCsv(warnings: TransformWarning[]) {
+  const csv = warningsToCsv(warnings);
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = DIAGNOSTICS_FILENAME;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 
 interface UploadArcgisPreflightProps {
   acceptedFiles: FileWithPath[];
@@ -19,7 +35,10 @@ const SUMMARY_FIELDS: { key: keyof TransformSummary; label: string }[] = [
   { key: 'stemsJoined', label: 'Stems joined to a parent' },
   { key: 'blankQuadratCount', label: 'Blank quadrat labels (passed through)' },
   { key: 'tagMismatchCount', label: 'Stem/parent tag mismatches (parent wins)' },
-  { key: 'orphanStemsDropped', label: 'Orphan stems dropped' }
+  { key: 'orphanStemsDropped', label: 'Orphan stems dropped' },
+  { key: 'duplicateTreeTags', label: 'Duplicate tree tags' },
+  { key: 'duplicateGlobalIds', label: 'Duplicate GlobalIDs' },
+  { key: 'missingRequired', label: 'Missing-required values' }
 ];
 
 export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summary: TransformSummary; warnings: TransformWarning[]; onProceed: () => void }) {
@@ -36,7 +55,12 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
         </Stack>
         {warnings.length > 0 && (
           <Box sx={{ mt: 2 }}>
-            <Typography level="title-sm">Warnings ({warnings.length})</Typography>
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+              <Typography level="title-sm">Warnings ({warnings.length})</Typography>
+              <Button size="sm" variant="outlined" onClick={() => downloadWarningsCsv(warnings)}>
+                Download diagnostics (CSV)
+              </Button>
+            </Stack>
             <List size="sm" sx={{ maxHeight: 240, overflow: 'auto' }}>
               {warnings.slice(0, 200).map((w, i) => (
                 <ListItem key={`${w.type}-${w.globalId ?? i}`}>

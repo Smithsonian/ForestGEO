@@ -105,4 +105,61 @@ describe('transformArcgisWorkbook', () => {
     expect(blank.rows[0].date).toBeNull();
     expect(() => transformArcgisWorkbook({ trees: [tree({ Date_measured: 'garbage' })], stems: [] })).toThrow(UnparseableDateError);
   });
+
+  it('tags every warning with its source sheet and row index', () => {
+    const { warnings } = transformArcgisWorkbook({
+      trees: [tree({ GlobalID: 'G1', quadrat: null })],
+      stems: [stem({ ParentGlobalID: 'G1', GlobalID: 'S1', tag: '999' })]
+    });
+    const blank = warnings.find(w => w.type === 'BLANK_QUADRAT')!;
+    expect(blank.sheet).toBe('trees');
+    expect(blank.rowIndex).toBe(0);
+    const mismatch = warnings.find(w => w.type === 'TAG_MISMATCH')!;
+    expect(mismatch.sheet).toBe('stems');
+    expect(mismatch.rowIndex).toBe(0);
+    expect(mismatch.value).toBe('999');
+  });
+
+  it('reports duplicate tree tags for the second and later occurrences but still emits all rows', () => {
+    const { rows, warnings, summary } = transformArcgisWorkbook({
+      trees: [tree({ GlobalID: 'G1', tag: '100' }), tree({ GlobalID: 'G2', tag: '100' })],
+      stems: []
+    });
+    expect(rows).toHaveLength(2);
+    const dups = warnings.filter(w => w.type === 'DUPLICATE_TREE_TAG');
+    expect(dups).toHaveLength(1);
+    expect(dups[0]).toMatchObject({ sheet: 'trees', rowIndex: 1, value: '100', globalId: 'G2' });
+    expect(summary.duplicateTreeTags).toBe(1);
+  });
+
+  it('reports duplicate GlobalIDs and keeps the first occurrence for joins', () => {
+    const { warnings, summary } = transformArcgisWorkbook({
+      trees: [tree({ GlobalID: 'G1', tag: '100' }), tree({ GlobalID: 'G1', tag: '200' })],
+      stems: []
+    });
+    const dups = warnings.filter(w => w.type === 'DUPLICATE_GLOBAL_ID');
+    expect(dups).toHaveLength(1);
+    expect(dups[0]).toMatchObject({ sheet: 'trees', rowIndex: 1, value: 'G1', globalId: 'G1' });
+    expect(summary.duplicateGlobalIds).toBe(1);
+  });
+
+  it('flags a blank required tag and spcode on a tree but still emits the row', () => {
+    const { rows, warnings, summary } = transformArcgisWorkbook({ trees: [tree({ GlobalID: 'G1', tag: null, spcode: null })], stems: [] });
+    expect(rows).toHaveLength(1);
+    const missing = warnings.filter(w => w.type === 'MISSING_REQUIRED');
+    expect(missing.map(w => w.value).sort()).toEqual(['spcode', 'tag']);
+    missing.forEach(w => expect(w).toMatchObject({ sheet: 'trees', rowIndex: 0, globalId: 'G1' }));
+    expect(summary.missingRequired).toBe(2);
+  });
+
+  it('flags a blank required spcode on a stem but does not flag an inherited blank stem tag', () => {
+    const { warnings, summary } = transformArcgisWorkbook({
+      trees: [tree({ GlobalID: 'G1', tag: '100' })],
+      stems: [stem({ ParentGlobalID: 'G1', GlobalID: 'S1', tag: null, spcode: null })]
+    });
+    const missing = warnings.filter(w => w.type === 'MISSING_REQUIRED');
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toMatchObject({ sheet: 'stems', rowIndex: 0, value: 'spcode', globalId: 'S1' });
+    expect(summary.missingRequired).toBe(1);
+  });
 });

@@ -61,27 +61,95 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
   let tagMismatchCount = 0;
   let orphanStemsDropped = 0;
   let stemsJoined = 0;
+  let duplicateTreeTags = 0;
+  let duplicateGlobalIds = 0;
+  let missingRequired = 0;
 
   const field = (row: ArcgisRow, name: string): ArcgisCell => resolveColumn(row, name) as ArcgisCell;
 
+  // Build the GlobalID -> tree index; first occurrence wins (Map.set on a later dup would overwrite,
+  // so we skip already-seen ids) and any repeat GlobalID is reported as a duplicate.
   const treeIndex = new Map<string, ArcgisRow>();
-  for (const tree of trees) {
+  trees.forEach((tree, rowIndex) => {
     const globalId = cellToString(field(tree, 'GlobalID'));
-    if (globalId) treeIndex.set(globalId, tree);
-  }
+    if (!globalId) return;
+    if (treeIndex.has(globalId)) {
+      duplicateGlobalIds += 1;
+      warnings.push({
+        type: 'DUPLICATE_GLOBAL_ID',
+        message: `Tree GlobalID ${globalId} appears more than once; the first occurrence wins for stem joins.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: globalId
+      });
+      return;
+    }
+    treeIndex.set(globalId, tree);
+  });
 
-  for (const tree of trees) {
+  const seenTreeTags = new Set<string>();
+
+  trees.forEach((tree, rowIndex) => {
     const globalId = cellToString(field(tree, 'GlobalID'));
     const quadrat = cellToString(field(tree, 'quadrat'));
+    const tag = cellToString(field(tree, 'tag'));
+    const spcode = cellToString(field(tree, 'spcode'));
+
     if (quadrat === null) {
       blankQuadratCount += 1;
-      warnings.push({ type: 'BLANK_QUADRAT', message: `Tree ${globalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`, globalId });
+      warnings.push({
+        type: 'BLANK_QUADRAT',
+        message: `Tree ${globalId ?? '(no GlobalID)'} has a blank quadrat label; passed through blank.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: null
+      });
     }
+
+    if (tag === null) {
+      missingRequired += 1;
+      warnings.push({
+        type: 'MISSING_REQUIRED',
+        message: `Tree ${globalId ?? '(no GlobalID)'} is missing a required tag; row still emitted for downstream validation.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: 'tag'
+      });
+    } else {
+      if (seenTreeTags.has(tag)) {
+        duplicateTreeTags += 1;
+        warnings.push({
+          type: 'DUPLICATE_TREE_TAG',
+          message: `Tree tag ${tag} appears more than once across tree rows.`,
+          globalId,
+          sheet: 'trees',
+          rowIndex,
+          value: tag
+        });
+      }
+      seenTreeTags.add(tag);
+    }
+
+    if (spcode === null) {
+      missingRequired += 1;
+      warnings.push({
+        type: 'MISSING_REQUIRED',
+        message: `Tree ${globalId ?? '(no GlobalID)'} is missing a required spcode; row still emitted for downstream validation.`,
+        globalId,
+        sheet: 'trees',
+        rowIndex,
+        value: 'spcode'
+      });
+    }
+
     rows.push(
       toFileRow({
-        tag: cellToString(field(tree, 'tag')),
+        tag,
         stemtag: cellToString(field(tree, 'StemTag')),
-        spcode: cellToString(field(tree, 'spcode')),
+        spcode,
         quadrat,
         lx: cellToString(field(tree, 'lx')),
         ly: cellToString(field(tree, 'ly')),
@@ -92,9 +160,9 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
         comments: cellToString(field(tree, 'notes'))
       })
     );
-  }
+  });
 
-  for (const stem of stems) {
+  stems.forEach((stem, rowIndex) => {
     const stemGlobalId = cellToString(field(stem, 'GlobalID'));
     const parentGlobalId = cellToString(field(stem, 'ParentGlobalID'));
     const parent = parentGlobalId ? treeIndex.get(parentGlobalId) : undefined;
@@ -104,9 +172,12 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       warnings.push({
         type: 'ORPHAN_STEM',
         message: `Stem ${stemGlobalId ?? '(no GlobalID)'} references parent ${parentGlobalId ?? '(none)'} with no matching tree; dropped.`,
-        globalId: stemGlobalId
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: parentGlobalId
       });
-      continue;
+      return;
     }
 
     stemsJoined += 1;
@@ -117,7 +188,10 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       warnings.push({
         type: 'TAG_MISMATCH',
         message: `Stem ${stemGlobalId ?? '(no GlobalID)'} tag ${stemOwnTag} differs from parent tree tag ${parentTag}; parent tag used.`,
-        globalId: stemGlobalId
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: stemOwnTag
       });
     }
 
@@ -127,7 +201,23 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       warnings.push({
         type: 'BLANK_QUADRAT',
         message: `Stem ${stemGlobalId ?? '(no GlobalID)'} inherits a blank quadrat from its parent tree.`,
-        globalId: stemGlobalId
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: null
+      });
+    }
+
+    const spcode = cellToString(field(stem, 'spcode'));
+    if (spcode === null) {
+      missingRequired += 1;
+      warnings.push({
+        type: 'MISSING_REQUIRED',
+        message: `Stem ${stemGlobalId ?? '(no GlobalID)'} is missing a required spcode; row still emitted for downstream validation.`,
+        globalId: stemGlobalId,
+        sheet: 'stems',
+        rowIndex,
+        value: 'spcode'
       });
     }
 
@@ -135,7 +225,7 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       toFileRow({
         tag: parentTag,
         stemtag: cellToString(field(stem, 'StemTag')),
-        spcode: cellToString(field(stem, 'spcode')),
+        spcode,
         quadrat,
         lx: cellToString(field(parent, 'lx')),
         ly: cellToString(field(parent, 'ly')),
@@ -146,7 +236,7 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
         comments: cellToString(field(stem, 'notes'))
       })
     );
-  }
+  });
 
   return {
     rows,
@@ -157,6 +247,9 @@ export function transformArcgisWorkbook({ trees, stems }: ArcgisWorkbook): Trans
       blankQuadratCount,
       tagMismatchCount,
       orphanStemsDropped,
+      duplicateTreeTags,
+      duplicateGlobalIds,
+      missingRequired,
       totalRows: rows.length
     }
   };
