@@ -118,7 +118,9 @@ export default function UploadParentModal(props: UPMProps) {
           ) : (
             <Stack spacing={2} sx={{ py: 3, px: 1 }}>
               <Typography level="h3">Choose Upload Mode</Typography>
-              <Typography level="body-sm">Select how this {formType} CSV should be applied.</Typography>
+              <Typography level="body-sm">
+                {isArcgisMode ? 'Select how this ArcGIS workbook should be applied.' : `Select how this ${formType} CSV should be applied.`}
+              </Typography>
               <Card variant="outlined">
                 <CardContent>
                   <Stack spacing={1}>
@@ -128,7 +130,11 @@ export default function UploadParentModal(props: UPMProps) {
                         Destructive
                       </Chip>
                     </Box>
-                    <Typography level="body-sm">Deletes all existing {formType} data, then inserts the uploaded file as the new source of truth.</Typography>
+                    <Typography level="body-sm">
+                      {isArcgisMode
+                        ? 'Deletes all existing ArcGIS measurements data, then inserts the uploaded workbook as the new source of truth.'
+                        : `Deletes all existing ${formType} data, then inserts the uploaded file as the new source of truth.`}
+                    </Typography>
                   </Stack>
                 </CardContent>
                 <CardActions sx={{ justifyContent: 'flex-start' }}>

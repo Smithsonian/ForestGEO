@@ -18,5 +18,5 @@ export function warningsToCsv(warnings: TransformWarning[]): string {
       escapeCsvField(w.message)
     ].join(',')
   );
-  return [CSV_HEADER, ...rows].join('\n');
+  return [CSV_HEADER, ...rows].join('\r\n');
 }

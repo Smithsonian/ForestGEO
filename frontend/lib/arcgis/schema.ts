@@ -114,9 +114,9 @@ export function resolveColumn(row: Record<string, unknown>, field: string): unkn
   return null;
 }
 
-/** Primary alias of every required schema entry whose scope includes the trees sheet. */
+/** Canonical field key of every required schema entry whose scope includes the trees sheet. */
 export function requiredTreeColumns(): string[] {
-  return ARCGIS_SCHEMA.filter(def => def.required && scopeMatches(def.scope, 'trees') && def.aliases.length > 0).map(def => def.aliases[0]);
+  return ARCGIS_SCHEMA.filter(def => def.required && scopeMatches(def.scope, 'trees') && def.aliases.length > 0).map(def => def.field);
 }
 
 /** All aliases of a field, used for alias-aware presence checks against a sheet's headers. */
