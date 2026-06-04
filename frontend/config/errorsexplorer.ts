@@ -209,6 +209,8 @@ export const INGESTION_ERROR_FIELD_MAP: Record<string, string[]> = {
   MISSING_FIELD_SPECIESCODE: ['speciesCode'],
   MISSING_FIELD_QUADRATNAME: ['quadratName'],
   MISSING_FIELD_DATE: ['measurementDate'],
+  MISSING_FIELD_LOCALX: ['stemLocalX'],
+  MISSING_FIELD_LOCALY: ['stemLocalY'],
   INVALID_QUADRAT: ['quadratName'],
   INVALID_SPECIES: ['speciesCode'],
   QUADRAT_MISMATCH: ['quadratName'],

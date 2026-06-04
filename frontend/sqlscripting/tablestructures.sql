@@ -834,6 +834,8 @@ values ('ingestion', 'MISSING_FIELD_TREETAG', 'Missing required field: TreeTag')
        ('ingestion', 'MISSING_FIELD_SPECIESCODE', 'Missing required field: SpeciesCode'),
        ('ingestion', 'MISSING_FIELD_QUADRATNAME', 'Missing required field: QuadratName'),
        ('ingestion', 'MISSING_FIELD_DATE', 'Missing required field: MeasurementDate'),
+       ('ingestion', 'MISSING_FIELD_LOCALX', 'Missing required field: LocalX'),
+       ('ingestion', 'MISSING_FIELD_LOCALY', 'Missing required field: LocalY'),
        ('ingestion', 'INVALID_QUADRAT', 'Invalid quadrat reference'),
        ('ingestion', 'INVALID_SPECIES', 'Invalid species reference'),
        ('ingestion', 'AMBIGUOUS_QUADRAT', 'Quadrat name resolves to multiple active quadrats in the same plot'),

@@ -31,6 +31,8 @@ const INGESTION_ERROR_MESSAGES: Record<string, string> = {
   MISSING_FIELD_SPECIESCODE: 'Missing required field: SpeciesCode',
   MISSING_FIELD_QUADRATNAME: 'Missing required field: QuadratName',
   MISSING_FIELD_DATE: 'Missing required field: MeasurementDate',
+  MISSING_FIELD_LOCALX: 'Missing required field: LocalX',
+  MISSING_FIELD_LOCALY: 'Missing required field: LocalY',
   AMBIGUOUS_QUADRAT: 'Quadrat name resolves to multiple active quadrats in the same plot',
   AMBIGUOUS_SPECIES: 'Species code resolves to multiple active species records',
   INVALID_QUADRAT: 'Invalid quadrat reference',
@@ -73,6 +75,8 @@ export function inferAllIngestionErrorCodes(reason?: string | null): string[] {
   if (text.includes('invalid dbh') || text.includes('negative dbh')) codes.push('NEGATIVE_DBH');
   if (text.includes('invalid hom') || text.includes('negative hom')) codes.push('NEGATIVE_HOM');
   if (text.includes('missing required fields: lx') || text.includes('missing required fields: ly')) codes.push('MISSING_FIELD_COORDINATES');
+  if (text.includes('missing required field: localx')) codes.push('MISSING_FIELD_LOCALX');
+  if (text.includes('missing required field: localy')) codes.push('MISSING_FIELD_LOCALY');
   if (text.includes('invalid localx') || text.includes('invalid localy') || text.includes('invalid local')) codes.push('INVALID_COORDINATE');
   if (text.includes('exceeds maximum length') || text.includes('field too long')) codes.push('FIELD_TOO_LONG');
   if (text.includes('missing measurement data')) codes.push('MISSING_MEASUREMENT_DATA');
