@@ -57,6 +57,7 @@ interface FileOperationParams {
   census?: string;
   user?: string;
   formType?: string;
+  sourceFormat?: string;
 }
 
 interface AuthorizedFileScope {
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     return new NextResponse(JSON.stringify({ error: 'File is required' }), { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const { fileName, formType } = params;
+  const { fileName, formType, sourceFormat } = params;
   const file = formData.get(fileName ?? 'file') as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(formData.get('fileRowErrors') as string) : [];
 
@@ -221,7 +222,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     const containerClient = await getContainerClient(scope.primaryContainer);
 
     // uploadValidFileAsBuffer now always returns a response or throws
-    const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, scope.userId, formType, fileRowErrors, sanitizedFileName);
+    const uploadResponse = await uploadValidFileAsBuffer(
+      containerClient,
+      file,
+      scope.userId,
+      formType,
+      fileRowErrors,
+      sanitizedFileName,
+      sourceFormat ?? 'csv'
+    );
 
     // Verify the response status
     if (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300) {
@@ -306,7 +315,8 @@ function extractParams(request: NextRequest): FileOperationParams & { fileName?:
     plot: searchParams.get('plot')?.trim() || undefined,
     census: searchParams.get('census')?.trim() || undefined,
     user: searchParams.get('user')?.trim() || undefined,
-    formType: searchParams.get('formType')?.trim() || undefined
+    formType: searchParams.get('formType')?.trim() || undefined,
+    sourceFormat: searchParams.get('sourceFormat')?.trim() || undefined
   };
 }
 

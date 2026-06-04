@@ -105,6 +105,7 @@ export interface UploadFireAzureProps {
   user: string;
   // state vars
   uploadForm: FormType | undefined;
+  sourceFormat?: SourceFormat;
   acceptedFiles: FileWithStream[];
   allRowToCMID: DetailedCMIDRow[];
   // state setters

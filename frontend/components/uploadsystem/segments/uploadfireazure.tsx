@@ -13,6 +13,7 @@ import { useAnimationCacheContext } from '@/app/contexts/animationcacheprovider'
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
   uploadForm,
+  sourceFormat,
   setIsDataUnsaved,
   setUploadError,
   setErrorComponent,
@@ -59,7 +60,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           plotID: currentPlot.plotID.toString(),
           plotName: currentPlot.plotName.trim(),
           census: censusNumber.toString(),
-          formType: uploadForm
+          formType: uploadForm,
+          sourceFormat: sourceFormat ?? 'csv'
         });
 
         const response = await fetch(`/api/files/upload?${params.toString()}`, {
@@ -87,7 +89,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       setErrorComponent,
       setReviewState,
       setUploadError,
-      uploadForm
+      uploadForm,
+      sourceFormat
     ]
   );
 

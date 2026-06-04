@@ -499,6 +499,7 @@ function UploadParentInner(props: UploadParentProps) {
           <UploadFireAzure
             acceptedFiles={fileManagement.files}
             uploadForm={uploadState.state.uploadForm}
+            sourceFormat={uploadState.state.sourceFormat}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             setUploadError={(error: any) => errorHandling.setError(error)}
