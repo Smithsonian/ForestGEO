@@ -1,7 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, Card, CardContent, CircularProgress, List, ListItem, Stack, Typography } from '@mui/joy';
-import { v4 } from 'uuid';
 import type { FileWithPath } from 'react-dropzone';
 import type { FileCollectionRowSet, FileRowSet } from '@/config/macros/formdetails';
 import type { TransformResult, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
@@ -58,7 +57,9 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
 
 function rowsToRowSet(result: TransformResult): FileRowSet {
   const set: FileRowSet = {};
-  for (const row of result.rows) set[`row-${v4()}`] = row;
+  result.rows.forEach((row, index) => {
+    set[`row-${index}`] = row;
+  });
   return set;
 }
 
