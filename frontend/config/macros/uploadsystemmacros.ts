@@ -86,6 +86,7 @@ export interface UploadFireProps {
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
+  preparedRowSet?: FileCollectionRowSet | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // state setters
@@ -166,6 +167,7 @@ export interface UploadErrorProps {
 export enum ReviewStates {
   START = 'start',
   UPLOAD_FILES = 'upload_files',
+  ARCGIS_PREFLIGHT = 'arcgis_preflight',
   REVIEW = 'review',
   UPLOAD_SQL = 'upload_sql',
   REVISION_MATCH = 'revision_match',
@@ -190,7 +192,8 @@ export enum ReviewProgress {
   VALIDATE_ERRORS_FOUND = 8,
   UPDATE = 9,
   UPLOAD_AZURE = 10,
-  COMPLETE = 11
+  COMPLETE = 11,
+  ARCGIS_PREFLIGHT = 12
 }
 
 // for validation error display ONLY
