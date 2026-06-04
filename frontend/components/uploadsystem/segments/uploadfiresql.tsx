@@ -662,6 +662,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       if (!rowSet) {
         throw new Error(`ArcGIS submit failed: no prepared rows found for ${file.name}. Re-run the pre-flight step.`);
       }
+      // Seed expected-row-count maps so the post-upload verification block and session
+      // reconciliation cover ArcGIS uploads the same way they cover Papa-parsed CSV uploads.
+      // Every prepared row is intended to reach temporarymeasurements (orphan stems were
+      // already dropped during transform), so total and valid counts are identical here.
+      const preparedRowCount = Object.keys(rowSet).length;
+      expectedRowCounts.current.set(file.name, preparedRowCount);
+      expectedTemporaryRowCounts.current.set(file.name, preparedRowCount);
       const chunks = chunkFileRowSet(rowSet, ARCGIS_SUBMIT_CHUNK_SIZE);
       for (const chunk of chunks) {
         queue.add(async () => {

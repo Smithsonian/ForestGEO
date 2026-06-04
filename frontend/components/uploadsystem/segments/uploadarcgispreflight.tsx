@@ -74,6 +74,10 @@ export default function UploadArcgisPreflight({ acceptedFiles, onProceed, onErro
         setErrorMessage('No file provided for the ArcGIS import.');
         return;
       }
+      if (acceptedFiles.length > 1) {
+        setErrorMessage(`ArcGIS import accepts exactly one workbook, but ${acceptedFiles.length} files were provided. Remove the extra file(s) and try again.`);
+        return;
+      }
       try {
         const [{ readArcgisWorkbook }, { transformArcgisWorkbook }] = await Promise.all([
           import('@/lib/arcgis/workbook-reader'),
