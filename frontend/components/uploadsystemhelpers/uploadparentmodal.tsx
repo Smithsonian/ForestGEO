@@ -117,9 +117,9 @@ export default function UploadParentModal(props: UPMProps) {
             </Box>
           ) : (
             <Stack spacing={2} sx={{ py: 3, px: 1 }}>
-              <Typography level="h3">Choose Upload Mode</Typography>
+              <Typography level="h3">{isArcgisMode ? 'Confirm Import Mode' : 'Choose Upload Mode'}</Typography>
               <Typography level="body-sm">
-                {isArcgisMode ? 'Select how this ArcGIS workbook should be applied.' : `Select how this ${formType} CSV should be applied.`}
+                {isArcgisMode ? 'ArcGIS workbooks are imported as a clean re-upload.' : `Select how this ${formType} CSV should be applied.`}
               </Typography>
               <Card variant="outlined">
                 <CardContent>
@@ -143,26 +143,28 @@ export default function UploadParentModal(props: UPMProps) {
                   </Button>
                 </CardActions>
               </Card>
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack spacing={1}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
-                      <Chip color="success" size="sm">
-                        Recommended
-                      </Chip>
-                    </Box>
-                    <Typography level="body-sm">
-                      Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
-                    </Typography>
-                  </Stack>
-                </CardContent>
-                <CardActions sx={{ justifyContent: 'flex-start' }}>
-                  <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
-                    Use Revisions Upload
-                  </Button>
-                </CardActions>
-              </Card>
+              {!isArcgisMode && (
+                <Card variant="outlined">
+                  <CardContent>
+                    <Stack spacing={1}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography level="title-md">{UploadModeLabels[UploadMode.REVISIONS]}</Typography>
+                        <Chip color="success" size="sm">
+                          Recommended
+                        </Chip>
+                      </Box>
+                      <Typography level="body-sm">
+                        Updates existing records matched by {revisionMatchLabel} (case-insensitive) and adds any new rows from the file.
+                      </Typography>
+                    </Stack>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'flex-start' }}>
+                    <Button variant="outlined" onClick={() => setUploadMode(UploadMode.REVISIONS)}>
+                      Use Revisions Upload
+                    </Button>
+                  </CardActions>
+                </Card>
+              )}
             </Stack>
           )}
         </ModalDialog>
