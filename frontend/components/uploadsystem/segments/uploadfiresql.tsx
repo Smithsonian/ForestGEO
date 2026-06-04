@@ -538,6 +538,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               body: JSON.stringify({
                 schema,
                 formType: uploadForm,
+                sourceFormat: sourceFormat ?? SourceFormat.csv,
                 uploadMode,
                 fileName,
                 plot: currentPlot,

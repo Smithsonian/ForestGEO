@@ -1039,6 +1039,7 @@ export async function POST(request: NextRequest) {
     );
   }
   const formType: string = body.formType;
+  const sourceFormat: string = body.sourceFormat ?? 'csv';
   const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
@@ -1310,6 +1311,7 @@ export async function POST(request: NextRequest) {
             const uploadMetadata = JSON.stringify({
               fileName,
               formType,
+              sourceFormat,
               uploadMode,
               rowCount: actualInsertedCount,
               droppedCount: droppedRowCount,
@@ -1330,6 +1332,7 @@ export async function POST(request: NextRequest) {
             // Subsequent batch - update the existing entry with accumulated count
             // Handle both string and already-parsed object (MySQL driver may auto-parse JSON columns)
             const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
+            metadata.sourceFormat = sourceFormat;
             metadata.uploadMode = uploadMode;
             metadata.rowCount = (metadata.rowCount || 0) + actualInsertedCount;
             metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
