@@ -5,13 +5,14 @@ import CloseIcon from '@mui/icons-material/Close';
 import { useEffect, useState } from 'react';
 
 import UploadParent from '../uploadsystem/uploadparent';
-import { FormType } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode, UploadModeLabels } from '@/config/uploadmodes';
 
 interface UPMProps {
   isUploadModalOpen: boolean;
   handleCloseUploadModal: () => void;
   formType: FormType;
+  sourceFormat?: SourceFormat;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
@@ -34,7 +35,9 @@ function getRevisionMatchLabel(formType: FormType): string {
 }
 
 export default function UploadParentModal(props: UPMProps) {
-  const { formType, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
+  const { formType, sourceFormat = SourceFormat.csv, handleCloseUploadModal, isUploadModalOpen, skipToProcessing, onUploadComplete } = props;
+  const isArcgisMode = sourceFormat === SourceFormat.arcgis_xlsx;
+  const overrideUploadForm = isArcgisMode ? FormType.measurements : formType;
   const requiresModeSelection = !skipToProcessing;
   const revisionMatchLabel = getRevisionMatchLabel(formType);
   const [uploadMode, setUploadMode] = useState<UploadMode | undefined>(requiresModeSelection ? undefined : UploadMode.CLEAN_REUPLOAD);
@@ -68,7 +71,7 @@ export default function UploadParentModal(props: UPMProps) {
           aria-describedby="upload-dialog-description"
         >
           <IconButton
-            aria-label={`Close ${formType} upload dialog`}
+            aria-label={isArcgisMode ? 'Close ArcGIS workbook upload dialog' : `Close ${formType} upload dialog`}
             onClick={handleCloseUploadModal}
             sx={{ position: 'absolute', top: 8, right: 8 }}
             onKeyDown={event => {
@@ -81,10 +84,12 @@ export default function UploadParentModal(props: UPMProps) {
             <CloseIcon />
           </IconButton>
           <div id="upload-dialog-title" className="sr-only">
-            {formType.charAt(0).toUpperCase() + formType.slice(1)} File Upload Dialog
+            {isArcgisMode ? 'Upload an ArcGIS workbook (.xlsx)' : `${formType.charAt(0).toUpperCase() + formType.slice(1)} File Upload Dialog`}
           </div>
           <div id="upload-dialog-description" className="sr-only">
-            Upload {formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.
+            {isArcgisMode
+              ? 'Upload an ArcGIS Field Maps .xlsx workbook to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.'
+              : `Upload ${formType} data files to the ForestGEO database system. Navigate using Tab key, activate buttons with Enter or Space.`}
           </div>
           {uploadMode ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -103,8 +108,9 @@ export default function UploadParentModal(props: UPMProps) {
               )}
               <UploadParent
                 onReset={handleCloseUploadModal}
-                overrideUploadForm={formType}
+                overrideUploadForm={overrideUploadForm}
                 overrideUploadMode={uploadMode}
+                overrideSourceFormat={sourceFormat}
                 skipToProcessing={skipToProcessing}
                 onUploadComplete={onUploadComplete}
               />

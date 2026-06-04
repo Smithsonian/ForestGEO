@@ -130,6 +130,8 @@ export interface UseUploadStateReturn {
  *
  * @param overrideUploadForm - Optional initial upload form type
  * @param skipToProcessing - Whether to skip directly to processing
+ * @param overrideUploadMode - Optional initial upload mode
+ * @param overrideSourceFormat - Optional initial source format (e.g. ArcGIS workbook)
  *
  * @example
  * const {
@@ -151,7 +153,12 @@ export interface UseUploadStateReturn {
  *   // Handle completion
  * }
  */
-export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?: boolean, overrideUploadMode?: UploadMode): UseUploadStateReturn {
+export function useUploadState(
+  overrideUploadForm?: FormType,
+  skipToProcessing?: boolean,
+  overrideUploadMode?: UploadMode,
+  overrideSourceFormat?: SourceFormat
+): UseUploadStateReturn {
   // Determine initial review state:
   // 1. If skipToProcessing is true, go directly to UPLOAD_SQL (reingestion mode)
   // 2. If form type is pre-determined (overrideUploadForm), skip START and go to UPLOAD_FILES
@@ -166,6 +173,7 @@ export function useUploadState(overrideUploadForm?: FormType, skipToProcessing?:
   const [state, dispatch] = useReducer(uploadStateReducer, {
     ...initialState,
     uploadForm: overrideUploadForm,
+    sourceFormat: overrideSourceFormat ?? SourceFormat.csv,
     uploadMode: overrideUploadMode,
     reviewState: getInitialReviewState()
   });

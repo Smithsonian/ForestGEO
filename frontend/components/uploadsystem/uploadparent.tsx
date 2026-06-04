@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType, SourceFormat } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/compat-hooks';
 import { useSession } from 'next-auth/react';
@@ -103,16 +103,17 @@ interface UploadParentProps {
   onReset: () => void;
   overrideUploadForm?: FormType;
   overrideUploadMode?: UploadMode;
+  overrideSourceFormat?: SourceFormat;
   skipToProcessing?: boolean;
   onUploadComplete?: () => void;
 }
 
 function UploadParentInner(props: UploadParentProps) {
-  const { onReset, overrideUploadForm, overrideUploadMode, skipToProcessing, onUploadComplete } = props;
+  const { onReset, overrideUploadForm, overrideUploadMode, overrideSourceFormat, skipToProcessing, onUploadComplete } = props;
 
   // Custom hooks for state management
   const fileManagement = useFileManagement();
-  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode);
+  const uploadState = useUploadState(overrideUploadForm, skipToProcessing, overrideUploadMode, overrideSourceFormat);
   const errorHandling = useErrorHandling();
 
   // Remaining local state (not managed by custom hooks)
@@ -377,7 +378,6 @@ function UploadParentInner(props: UploadParentProps) {
             uploadForm={uploadState.state.uploadForm}
             uploadMode={uploadState.state.uploadMode}
             setUploadForm={uploadState.setUploadForm}
-            setSourceFormat={uploadState.setSourceFormat}
             setUploadMode={uploadState.setUploadMode}
             setExpectedHeaders={() => {}} // Deprecated - no longer needed
             setReviewState={uploadState.setReviewState}
