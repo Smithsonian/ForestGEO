@@ -81,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const connectionManager = ConnectionManager.getInstance();
     await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
 
-    const workbook = readArcgisWorkbook(await file.arrayBuffer());
+    const workbook = await readArcgisWorkbook(await file.arrayBuffer());
     const result = transformArcgisWorkbook(workbook);
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'ArcGIS workbook did not produce any measurement rows' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });

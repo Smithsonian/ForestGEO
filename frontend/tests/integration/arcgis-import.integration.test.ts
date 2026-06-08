@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Connection, RowDataPacket } from 'mysql2/promise';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   setupTestDatabase,
   teardownTestDatabase,
@@ -21,12 +21,13 @@ import {
 import { readArcgisWorkbook } from '../../lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '../../lib/arcgis/transform';
 
-function buildWorkbook(sheets: Record<string, unknown[][]>): ArrayBuffer {
-  const wb = XLSX.utils.book_new();
+async function buildWorkbook(sheets: Record<string, unknown[][]>): Promise<ArrayBuffer> {
+  const wb = new ExcelJS.Workbook();
   for (const [name, aoa] of Object.entries(sheets)) {
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
+    const ws = wb.addWorksheet(name);
+    aoa.forEach(row => ws.addRow(row));
   }
-  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
 describe('ArcGIS xlsx import (end-to-end)', () => {
@@ -58,12 +59,12 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     const TREE_HEADER = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured', 'lx', 'ly', 'COD_M', 'COD_R'];
     const STEM_HEADER = ['ParentGlobalID', 'GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured', 'COD_A'];
 
-    const buffer = buildWorkbook({
+    const buffer = await buildWorkbook({
       trees: [TREE_HEADER, ['G1', quadratName, 'T100', 'T100', speciesCode, 12.3, 1.3, 'primary', dateSerial, 5.123456, 6.234567, 'M', 'R']],
       stems: [STEM_HEADER, ['G1', 'S1', quadratName, 'T100', 'T100-2', speciesCode, 4.4, 1.3, '', dateSerial, 'A']]
     });
 
-    const result = transformArcgisWorkbook(readArcgisWorkbook(buffer));
+    const result = transformArcgisWorkbook(await readArcgisWorkbook(buffer));
     expect(result.rows).toHaveLength(2);
 
     const measurements = result.rows.map(r => ({

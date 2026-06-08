@@ -1,12 +1,29 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError } from './errors';
 import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, requiredColumnsForSheet } from './schema';
-import type { ArcgisRow, ArcgisWorkbook } from './types';
+import type { ArcgisCell, ArcgisRow, ArcgisWorkbook } from './types';
 
 interface ParsedSheet {
   name: string;
   columns: string[];
   rows: ArcgisRow[];
+}
+
+// exceljs cell values are a union: primitive | Date | {formula,result} | {richText} | {text,hyperlink} | {error}.
+// Collapse each to the same ArcgisCell shape the xlsx reader produced (string | number | Date | null).
+function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'boolean') return String(value);
+  if (typeof value === 'object') {
+    if ('error' in value) return null;
+    if ('richText' in value) return value.richText.map(part => part.text).join('');
+    if ('hyperlink' in value) return value.text ?? null;
+    if ('formula' in value || 'sharedFormula' in value) return normalizeCellValue(value.result ?? null);
+  }
+  return null;
 }
 
 /**
@@ -29,27 +46,42 @@ function buildHeaderMap(rawHeaders: string[]): { keys: string[]; keyByRawHeader:
   return { keys, keyByRawHeader };
 }
 
-function parseSheet(sheet: XLSX.WorkSheet, name: string): ParsedSheet {
-  const headerMatrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
-  const rawHeaders = ((headerMatrix[0] as unknown[]) ?? []).map(cell => String(cell ?? ''));
+function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
+  const columnCount = worksheet.columnCount;
+  const headerRow = worksheet.getRow(1);
+  const rawHeaders: string[] = [];
+  for (let column = 1; column <= columnCount; column++) {
+    const value = normalizeCellValue(headerRow.getCell(column).value);
+    rawHeaders.push(value === null ? '' : String(value));
+  }
+
   const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders);
-  const rawRows = XLSX.utils.sheet_to_json<ArcgisRow>(sheet, { defval: null, raw: true });
-  const rows = rawRows.map(row => {
+
+  const rows: ArcgisRow[] = [];
+  for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+    const sheetRow = worksheet.getRow(rowNumber);
     const normalized: ArcgisRow = {};
-    for (const raw of rawHeaders) {
-      const key = keyByRawHeader.get(raw);
+    let hasValue = false;
+    for (let column = 1; column <= columnCount; column++) {
+      const key = keyByRawHeader.get(rawHeaders[column - 1]);
       if (key === undefined || key in normalized) continue;
-      const value = row[raw];
+      const value = normalizeCellValue(sheetRow.getCell(column).value);
+      if (value !== null && value !== '') hasValue = true;
       normalized[key] = value === undefined || value === '' ? null : value;
     }
-    return normalized;
-  });
-  return { name, columns: keys, rows };
+    if (hasValue) rows.push(normalized); // matches xlsx blankrows:false — drop fully empty rows
+  }
+
+  return { name: worksheet.name, columns: keys, rows };
 }
 
-export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
-  const workbook = XLSX.read(buffer, { type: 'array' });
-  const sheets = workbook.SheetNames.map(name => parseSheet(workbook.Sheets[name], name));
+export async function readArcgisWorkbook(buffer: ArrayBuffer): Promise<ArcgisWorkbook> {
+  const workbook = new ExcelJS.Workbook();
+  // exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
+  // diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
+  // its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
+  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet));
 
   const stemsCandidates = sheets.filter(s => s.columns.includes(STEM_SIGNATURE_COLUMN));
   if (stemsCandidates.length === 0) {
