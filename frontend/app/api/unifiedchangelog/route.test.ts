@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from '@/lib/ingestion/temporary-measurements';
 
 /**
  * Unified Changelog Tracking System Tests
@@ -158,6 +159,9 @@ function mockMeasurementUploadQueries(
   exec
     .mockResolvedValueOnce([{ PlotID: 1 }])
     .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+    // ensureTemporaryMeasurementsSourceFormatColumn: information_schema column existence check
+    // (count > 0 means the SourceFormat column already exists, so no ALTER TABLE runs).
+    .mockResolvedValueOnce([{ count: 1 }])
     .mockResolvedValueOnce([{ count: preInsertCount }])
     .mockResolvedValueOnce({})
     .mockResolvedValueOnce([{ count: postInsertCount }]);
@@ -174,6 +178,7 @@ function mockMeasurementUploadQueries(
 describe('Unified Changelog Tracking System', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
   });
 
   describe('1. Single-Row UPDATE via EditToolbar', () => {
@@ -538,6 +543,9 @@ describe('Unified Changelog Tracking System', () => {
       expect(res1!.status).toBe(HTTPResponses.OK);
 
       vi.clearAllMocks();
+      // The SourceFormat column check caches per schema; reset so the second upload
+      // re-issues it and consumes the mock response queued by mockMeasurementUploadQueries.
+      resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
 
       // Second file upload
       _begin = vi.spyOn(cm, 'beginTransaction').mockResolvedValueOnce('tx-9b');
