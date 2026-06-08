@@ -35,8 +35,6 @@ import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedPar
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 
-const ARCGIS_SUBMIT_CHUNK_SIZE = 1000;
-
 interface SqlUploadOptions {
   arcgisImportSessionId?: string;
   arcgisRowOffset?: number;
@@ -701,24 +699,40 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       expectedRowCounts.current.set(file.name, stagedRowCount);
       expectedTemporaryRowCounts.current.set(file.name, stagedRowCount);
 
-      for (let offset = 0; offset < stagedRowCount; offset += ARCGIS_SUBMIT_CHUNK_SIZE) {
-        const rowLimit = Math.min(ARCGIS_SUBMIT_CHUNK_SIZE, stagedRowCount - offset);
-        queue.add(async () => {
-          if (!isMountedRef.current || fatalUploadErrorRef.current) return;
-          try {
-            await uploadToSql({}, file.name, batchID, 0, {
-              arcgisImportSessionId: arcgisImportSession.importSessionId,
-              arcgisRowOffset: offset,
-              arcgisRowLimit: rowLimit
-            });
-          } finally {
-            if (isMountedRef.current) setCompletedChunks(prev => prev + 1);
-          }
-        });
+      const response = await fetchWithTimeout(
+        `/api/arcgis/commit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-upload-session-id': getRequiredUploadSessionId() },
+          body: JSON.stringify({
+            schema,
+            plotID: currentPlot?.plotID,
+            censusID: currentCensus?.dateRanges?.[0]?.censusID,
+            importSessionId: arcgisImportSession.importSessionId,
+            fileName: file.name,
+            batchID,
+            uploadMode
+          })
+        },
+        300000
+      );
+      if (!response.ok) {
+        throw await buildClientResponseError(response, `committing ArcGIS import for ${file.name}`);
       }
-      await queue.onEmpty();
+      if (isMountedRef.current) setCompletedChunks(prev => prev + 1);
     },
-    [arcgisImportSession, queue, uploadToSql, isMountedRef, fatalUploadErrorRef, setCompletedChunks]
+    [
+      arcgisImportSession,
+      schema,
+      currentPlot,
+      currentCensus,
+      uploadMode,
+      fetchWithTimeout,
+      getRequiredUploadSessionId,
+      buildClientResponseError,
+      isMountedRef,
+      setCompletedChunks
+    ]
   );
 
   const parseFileInChunks = useCallback(
@@ -1361,8 +1375,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             if (!arcgisImportSession || arcgisImportSession.fileName !== file.name || arcgisImportSession.rowCount <= 0) {
               throw new Error(`ArcGIS upload is missing a valid pre-flight import session for ${file.name}`);
             }
-            estimatedCount = Math.max(1, Math.ceil(arcgisImportSession.rowCount / ARCGIS_SUBMIT_CHUNK_SIZE));
-            ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${arcgisImportSession.rowCount} staged ArcGIS row(s)`);
+            estimatedCount = 1;
+            ailogger.info(`File ${file.name}: Estimated ${estimatedCount} commit step from ${arcgisImportSession.rowCount} staged ArcGIS row(s)`);
           } else {
             estimatedCount = estimateChunkCount(file as File);
             ailogger.info(`File ${file.name}: Estimated ${estimatedCount} chunk(s) from ${file.size} bytes`);
