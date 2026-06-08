@@ -43,8 +43,41 @@ export interface LoadedArcgisImportRows {
   warnings: TransformWarning[];
 }
 
+interface ArcgisSessionScope {
+  userId: string;
+  plotID: number;
+  censusID: number;
+  fileName: string;
+}
+
+interface ArcgisSessionRow {
+  user_id: string;
+  plot_id: number;
+  census_id: number;
+  file_id: string;
+  state: string;
+}
+
 const STAGED_ROW_BATCH_SIZE = 1000;
 const verifiedArcgisImportSchemas = new Set<string>();
+
+export function assertUploadableArcgisSession(session: ArcgisSessionRow | null, scope: ArcgisSessionScope): void {
+  if (!session) {
+    throw new ArcgisImportSessionError('ArcGIS import session was not found. Re-run the workbook pre-flight step.', HTTPResponses.NOT_FOUND);
+  }
+  if (session.user_id !== scope.userId) {
+    throw new ArcgisImportSessionError('ArcGIS import session does not belong to the authenticated user.', HTTPResponses.FORBIDDEN);
+  }
+  if (Number(session.plot_id) !== scope.plotID || Number(session.census_id) !== scope.censusID) {
+    throw new ArcgisImportSessionError('ArcGIS import session scope does not match the requested plot/census.', HTTPResponses.CONFLICT);
+  }
+  if (session.file_id !== scope.fileName) {
+    throw new ArcgisImportSessionError('ArcGIS import session file does not match the requested file.', HTTPResponses.CONFLICT);
+  }
+  if (!['preflight', 'committing'].includes(String(session.state))) {
+    throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
+  }
+}
 
 function parseJsonColumn<T>(value: unknown, fallback: T): T {
   if (value === null || value === undefined) return fallback;
@@ -163,22 +196,12 @@ export async function loadArcgisImportRows(input: LoadArcgisImportRowsInput): Pr
   const sessionRows = await connectionManager.executeQuery(sessionSQL, [input.importSessionId]);
   const session = Array.isArray(sessionRows) ? sessionRows[0] : null;
 
-  if (!session) {
-    throw new ArcgisImportSessionError('ArcGIS import session was not found. Re-run the workbook pre-flight step.', HTTPResponses.NOT_FOUND);
-  }
-
-  if (session.user_id !== input.userId) {
-    throw new ArcgisImportSessionError('ArcGIS import session does not belong to the authenticated user.', HTTPResponses.FORBIDDEN);
-  }
-  if (Number(session.plot_id) !== input.plotID || Number(session.census_id) !== input.censusID) {
-    throw new ArcgisImportSessionError('ArcGIS import session scope does not match the requested plot/census.', HTTPResponses.CONFLICT);
-  }
-  if (session.file_id !== input.fileName) {
-    throw new ArcgisImportSessionError('ArcGIS import session file does not match the requested file.', HTTPResponses.CONFLICT);
-  }
-  if (!['preflight', 'committing'].includes(String(session.state))) {
-    throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
-  }
+  assertUploadableArcgisSession(session, {
+    userId: input.userId,
+    plotID: input.plotID,
+    censusID: input.censusID,
+    fileName: input.fileName
+  });
 
   const rowsSQL = format(
     `SELECT row_json
@@ -190,6 +213,54 @@ export async function loadArcgisImportRows(input: LoadArcgisImportRowsInput): Pr
     [input.schema]
   );
   const rowRecords = await connectionManager.executeQuery(rowsSQL, [input.importSessionId, input.offset, input.limit]);
+  const rows = (Array.isArray(rowRecords) ? rowRecords : []).map((row: { row_json: unknown }) => parseJsonColumn<FileRow>(row.row_json, {} as FileRow));
+
+  return {
+    rows,
+    rowCount: Number(session.row_count),
+    fileName: session.file_id,
+    summary: parseJsonColumn<TransformSummary>(session.summary_json, {
+      treesTransformed: 0,
+      stemsJoined: 0,
+      blankQuadratCount: 0,
+      tagMismatchCount: 0,
+      orphanStemsEmitted: 0,
+      duplicateTreeTags: 0,
+      duplicateGlobalIds: 0,
+      missingRequired: 0,
+      totalRows: Number(session.row_count) || 0
+    }),
+    warnings: parseJsonColumn<TransformWarning[]>(session.warnings_json, [])
+  };
+}
+
+export async function loadStagedArcgisSession(input: {
+  schema: string;
+  importSessionId: string;
+  plotID: number;
+  censusID: number;
+  userId: string;
+  fileName: string;
+}): Promise<{ rows: FileRow[]; rowCount: number; fileName: string; summary: TransformSummary; warnings: TransformWarning[] }> {
+  await ensureArcgisImportTables(input.schema);
+  const connectionManager = ConnectionManager.getInstance();
+
+  const sessionSQL = format(
+    `SELECT import_session_id, plot_id, census_id, user_id, file_id, row_count, summary_json, warnings_json, state
+     FROM ??.arcgis_import_sessions WHERE import_session_id = ? LIMIT 1`,
+    [input.schema]
+  );
+  const sessionRows = await connectionManager.executeQuery(sessionSQL, [input.importSessionId]);
+  const session = Array.isArray(sessionRows) ? sessionRows[0] : null;
+  assertUploadableArcgisSession(session, {
+    userId: input.userId,
+    plotID: input.plotID,
+    censusID: input.censusID,
+    fileName: input.fileName
+  });
+
+  const rowsSQL = format(`SELECT row_json FROM ??.arcgis_import_rows WHERE import_session_id = ? ORDER BY row_index ASC`, [input.schema]);
+  const rowRecords = await connectionManager.executeQuery(rowsSQL, [input.importSessionId]);
   const rows = (Array.isArray(rowRecords) ? rowRecords : []).map((row: { row_json: unknown }) => parseJsonColumn<FileRow>(row.row_json, {} as FileRow));
 
   return {
