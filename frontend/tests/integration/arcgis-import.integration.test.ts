@@ -20,6 +20,7 @@ import {
 } from '../setup/local-db-setup';
 import { readArcgisWorkbook } from '../../lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '../../lib/arcgis/transform';
+import type { TransformResult } from '../../lib/arcgis/types';
 
 // Identity the auth mock authenticates as. getSessionUserId() returns the
 // email first, so staged ArcGIS sessions are seeded with this as user_id.
@@ -338,5 +339,217 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     expect(metadata.rowCount).toBe(stagedRowCount);
     expect(metadata.droppedCount).toBe(0);
     expect(metadata.batchCount).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Negative-path coverage for the attacker-facing commit endpoint.
+  //
+  // Each test seeds a REAL staged session via createArcgisImportSession, drives
+  // the real commit POST handler with a deliberately-bad request, and asserts:
+  //   (a) the handler returns the correct rejection status, AND
+  //   (b) NOTHING was staged into temporarymeasurements for that FileID/BatchID.
+  // Property (b) is the key safety guarantee: a rejected commit must perform no
+  // partial side effects on the staging table.
+  // -------------------------------------------------------------------------
+  async function seedValidStagedSession(overrides?: { userId?: string; fileName?: string }): Promise<{
+    importSessionId: string;
+    fileName: string;
+    plotID: number;
+    censusID: number;
+    schema: string;
+    stagedRowCount: number;
+  }> {
+    const schema = config.database;
+    const plotID = testData.plots[0].plotID;
+    const censusID = testData.census[0].censusID;
+    const speciesCode = testData.species[0].SpeciesCode;
+    const quadratName = testData.quadrats[0].QuadratName;
+    const dateSerial = 46036;
+
+    const TREE_HEADER = ['GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured', 'lx', 'ly', 'COD_M'];
+    const STEM_HEADER = ['ParentGlobalID', 'GlobalID', 'quadrat', 'tag', 'StemTag', 'spcode', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured', 'COD_A'];
+    const buffer = await buildWorkbook({
+      trees: [TREE_HEADER, ['GN1', quadratName, 'N300', 'N300', speciesCode, 11.1, 1.3, 'primary', dateSerial, 1.111111, 2.222222, 'M']],
+      stems: [STEM_HEADER, ['GN1', 'SN1', quadratName, 'N300', 'N300-2', speciesCode, 3.3, 1.3, '', dateSerial, 'A']]
+    });
+    const result = transformArcgisWorkbook(await readArcgisWorkbook(buffer));
+    expect(result.rows.length).toBeGreaterThan(0);
+
+    const fileName = overrides?.fileName ?? `arcgis-negative-${Date.now()}-${Math.random().toString(36).slice(2)}.xlsx`;
+    const importReference = await createArcgisImportSession({
+      schema,
+      plotID,
+      censusID,
+      userId: overrides?.userId ?? AUTH_USER_EMAIL,
+      fileName,
+      result
+    });
+
+    return { importSessionId: importReference.importSessionId, fileName, plotID, censusID, schema, stagedRowCount: result.rows.length };
+  }
+
+  async function countStagedRows(fileName: string, batchID: string): Promise<number> {
+    const [rows] = await connection.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [
+      fileName,
+      batchID
+    ]);
+    return Number(rows[0].total);
+  }
+
+  it('rejects a commit when the staged session belongs to a DIFFERENT user (403 FORBIDDEN) and stages no rows', async () => {
+    // The auth mock authenticates as AUTH_USER_EMAIL, so the resolved scope.userId
+    // is AUTH_USER_EMAIL. Seed the session under a foreign owner so
+    // assertUploadableArcgisSession's `session.user_id !== scope.userId` check trips.
+    const foreignOwner = 'someone-else@example.com';
+    const seeded = await seedValidStagedSession({ userId: foreignOwner });
+    const batchID = `arcgis_neg_wronguser_${Date.now()}`;
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-neg-wronguser'
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.FORBIDDEN);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain('does not belong to the authenticated user');
+
+    // Safety property: a rejected ownership check must NOT have staged anything.
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+  });
+
+  it('rejects a commit when the body plot/census scope does NOT match the staged session (409 CONFLICT) and stages no rows', async () => {
+    const seeded = await seedValidStagedSession();
+    const batchID = `arcgis_neg_scope_${Date.now()}`;
+
+    // The scope guard (assertCanEditMeasurementScope) runs BEFORE the staged-session
+    // scope check and rejects a non-existent census with 403, so to reach the
+    // ArcgisImportSessionError "scope does not match" (409) path the body must name
+    // a census that genuinely EXISTS and is editable, yet differs from the one the
+    // session was staged against. Create a second active census on the same plot.
+    // beforeEach's cleanupTestMeasurements deletes any census beyond testData (1),
+    // so this extra census is torn down before the next test.
+    await connection.query(`INSERT INTO census (PlotID, PlotCensusNumber, StartDate, EndDate) VALUES (?, 2, '2025-01-01', '2025-12-31')`, [seeded.plotID]);
+    const [secondCensusRows] = await connection.query<RowDataPacket[]>('SELECT CensusID FROM census WHERE PlotID = ? AND PlotCensusNumber = 2', [
+      seeded.plotID
+    ]);
+    const mismatchedCensusID = Number(secondCensusRows[0].CensusID);
+    expect(mismatchedCensusID).not.toBe(seeded.censusID);
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: mismatchedCensusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-neg-scope'
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.CONFLICT);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain('scope does not match');
+
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+  });
+
+  it('rejects a commit when the body fileName does NOT match the staged session file (409 CONFLICT) and stages no rows', async () => {
+    const seeded = await seedValidStagedSession();
+    const batchID = `arcgis_neg_file_${Date.now()}`;
+    const mismatchedFileName = `not-the-staged-file-${Date.now()}.xlsx`;
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: mismatchedFileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-neg-file'
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.CONFLICT);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain('file does not match');
+
+    // Nothing staged under EITHER the staged file or the mismatched body file.
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+    expect(await countStagedRows(mismatchedFileName, batchID)).toBe(0);
+  });
+
+  it('rejects a commit for a session with ZERO staged rows (422 UNPROCESSABLE_ENTITY) and stages no rows', async () => {
+    const schema = config.database;
+    const plotID = testData.plots[0].plotID;
+    const censusID = testData.census[0].censusID;
+    const fileName = `arcgis-empty-${Date.now()}.xlsx`;
+
+    // Seed a session with NO staged rows. createArcgisImportSession simply skips
+    // its row-insert loop when result.rows is empty, producing a row_count=0
+    // session — the exact 0-row state the commit route must reject with 422.
+    const emptyResult: TransformResult = {
+      rows: [],
+      warnings: [],
+      summary: {
+        treesTransformed: 0,
+        stemsJoined: 0,
+        blankQuadratCount: 0,
+        tagMismatchCount: 0,
+        orphanStemsEmitted: 0,
+        duplicateTreeTags: 0,
+        duplicateGlobalIds: 0,
+        missingRequired: 0,
+        totalRows: 0
+      }
+    };
+    const importReference = await createArcgisImportSession({
+      schema,
+      plotID,
+      censusID,
+      userId: AUTH_USER_EMAIL,
+      fileName,
+      result: emptyResult
+    });
+    expect(importReference.rowCount).toBe(0);
+
+    const batchID = `arcgis_neg_empty_${Date.now()}`;
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema,
+          plotID,
+          censusID,
+          importSessionId: importReference.importSessionId,
+          fileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-neg-empty'
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.UNPROCESSABLE_ENTITY);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain('contains no rows');
+
+    expect(await countStagedRows(fileName, batchID)).toBe(0);
   });
 });
