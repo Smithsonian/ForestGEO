@@ -60,7 +60,13 @@ function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
   const rows: ArcgisRow[] = [];
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
     const sheetRow = worksheet.getRow(rowNumber);
-    const normalized: ArcgisRow = {};
+    // Build with a null prototype: header keys come from an attacker-controllable .xlsx, and a header
+    // literally named `__proto__` would otherwise fire the Object.prototype `__proto__` setter on the
+    // assignment below, replacing this row's prototype and corrupting later `key in row`/Object.entries
+    // consumers. With no prototype the setter doesn't exist, so `__proto__` becomes an ordinary own key.
+    // All consumers (parseSheet `in`, transform.ts Object.entries, schema.ts resolveColumn) use only
+    // own-key operations, so dropping the prototype is safe and preserves normal parsing unchanged.
+    const normalized: ArcgisRow = Object.create(null) as ArcgisRow;
     let hasValue = false;
     for (let column = 1; column <= columnCount; column++) {
       const key = keyByRawHeader.get(rawHeaders[column - 1]);

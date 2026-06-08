@@ -199,6 +199,53 @@ describe('readArcgisWorkbook', () => {
     expect(stems[0].ParentGlobalID).toBe('G1');
   });
 
+  it('hardens against a malicious __proto__ header: the row keeps a null prototype, the __proto__ column is a harmless own key, normal columns still parse, and global Object.prototype is not polluted', async () => {
+    // A header literally named "__proto__" canonicalizes to null (no alias normalizes to "proto"),
+    // so it is used VERBATIM as the row's object key. On a plain {} the assignment normalized['__proto__']
+    // = value would fire the Object.prototype __proto__ setter and replace the row's prototype, breaking
+    // every later `key in row` / Object.entries consumer. The reader builds rows with Object.create(null),
+    // so the setter does not exist and __proto__ becomes an ordinary own data key. This test fails if a
+    // future refactor reverts to a plain object literal.
+    const sentinelProtoValue = 'PWNED_PROTO_VALUE';
+    const treeHeaderWithProto = [...TREE_HEADER, '__proto__'];
+    const treeDataRow = ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA', sentinelProtoValue];
+    const buffer = await buildWorkbook({
+      trees: [treeHeaderWithProto, treeDataRow],
+      stems: [STEM_HEADER, ['G1', 'S1', 'A25', '100', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
+    });
+
+    // (a) Reading must not throw despite the dangerous header.
+    const { trees } = await readArcgisWorkbook(buffer);
+    expect(trees).toHaveLength(1);
+    const row = trees[0];
+
+    // The row object was NOT corrupted: its prototype is null (Object.create(null)), proving the
+    // __proto__ setter never fired to swap the prototype to something else.
+    expect(Object.getPrototypeOf(row)).toBeNull();
+
+    // The __proto__ column survives as an ordinary OWN key holding the cell value verbatim (Option A
+    // preserves the data instead of dropping the column).
+    expect(Object.prototype.hasOwnProperty.call(row, '__proto__')).toBe(true);
+    expect((row as Record<string, unknown>).__proto__).toBe(sentinelProtoValue);
+
+    // The normal canonical columns parse exactly as they would without the malicious header.
+    expect(row.GlobalID).toBe('G1');
+    expect(row.quadrat).toBe('A25');
+    expect(row.lx).toBe('5.1');
+    expect(row.ly).toBe('6.2');
+    expect(row.Date_measured).toBe(46036);
+
+    // (b) Global Object.prototype was not polluted by parsing the crafted value.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).__proto__).toBe(Object.prototype);
+
+    // The hardened row still feeds the transform without error and yields the expected canonical row.
+    const { rows } = transformArcgisWorkbook({ trees, stems: [] });
+    expect(rows[0].lx).toBe('5.1');
+    expect(rows[0].ly).toBe('6.2');
+    expect(rows[0].quadrat).toBe('A25');
+  });
+
   it('reads a date-formatted cell as the same ISO date the old reader produced', async () => {
     const wb = new ExcelJS.Workbook();
     const trees = wb.addWorksheet('trees');
