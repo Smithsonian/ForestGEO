@@ -88,6 +88,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contextLabel: `arcgis commit for session ${importSessionId}`
     });
 
+    // This endpoint intentionally does not transition arcgis_import_sessions.state to committed: the import-session state
+    // machine (committing/committed/abandoned) is a separately-scoped follow-up, and createArcgisImportSession already
+    // garbage-collects stale preflight sessions on the next preflight, so the absence of a state write here is deliberate.
     const staged = await loadStagedArcgisSession({ schema, importSessionId, plotID, censusID, userId, fileName: requestedFileName });
     const fileName = staged.fileName;
     if (staged.rows.length === 0) {
@@ -157,6 +160,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
 
         if (droppedRows.length > 0) {
+          // Unlike the CSV sqlpacketload path, which wraps failure-row persistence in a retry-once-then-uploadintegrityalerts
+          // best-effort fallback, this endpoint deliberately persists dropped rows inside the same transaction as the staging
+          // insert so the commit is all-or-nothing: if failure-row persistence throws, the entire commit rolls back rather than
+          // leaving a half-committed batch. Do not "restore parity" with a best-effort fallback here — that would weaken atomicity.
           await insertIngestionFailureRows(
             connectionManager,
             schema,
