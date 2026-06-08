@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRow, FileRowSet, FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -727,20 +727,11 @@ export async function POST(request: NextRequest) {
   }
   const formType: string = body.formType;
   const sourceFormat = normalizeSourceFormat(body.sourceFormat ?? SourceFormat.csv);
-  if (!sourceFormat) {
+  if (sourceFormat !== SourceFormat.csv) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Invalid source format',
-        error: 'sourceFormat must be csv or arcgis_xlsx'
-      }),
-      { status: HTTPResponses.INVALID_REQUEST }
-    );
-  }
-  if (sourceFormat === SourceFormat.arcgis_xlsx && formType !== FormType.measurements) {
-    return new NextResponse(
-      JSON.stringify({
-        responseMessage: 'Invalid source format for form type',
-        error: 'arcgis_xlsx sourceFormat is only valid for measurements uploads'
+        error: `sourceFormat must be ${SourceFormat.csv}`
       }),
       { status: HTTPResponses.INVALID_REQUEST }
     );

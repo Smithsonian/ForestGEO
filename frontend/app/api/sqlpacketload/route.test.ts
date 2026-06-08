@@ -195,7 +195,18 @@ describe('sqlpacketload measurement scope validation', () => {
 
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
-      error: 'sourceFormat must be csv or arcgis_xlsx'
+      error: 'sourceFormat must be csv'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects arcgis_xlsx sourceFormat for measurement uploads (route is csv-only)', async () => {
+    const res = (await POST(makeMeasurementRequest({ sourceFormat: 'arcgis_xlsx' })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'sourceFormat must be csv'
     });
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
     expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
@@ -599,7 +610,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
   });
 
-  it('rejects arcgis_xlsx sourceFormat for fixed-data uploads', async () => {
+  it('rejects arcgis_xlsx sourceFormat for fixed-data uploads (route is csv-only)', async () => {
     const res = await POST(
       makeFixedDataRequest(
         'attributes',
@@ -612,7 +623,7 @@ describe('sqlpacketload fixed-data upload modes', () => {
 
     expect(res?.status).toBe(400);
     await expect(res?.json()).resolves.toMatchObject({
-      error: 'arcgis_xlsx sourceFormat is only valid for measurements uploads'
+      error: 'sourceFormat must be csv'
     });
     expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
