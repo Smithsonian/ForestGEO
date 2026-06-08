@@ -311,5 +311,32 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
       batchID
     ]);
     expect(Number(totalRows[0].total)).toBe(stagedRowCount);
+
+    // Audit-trail parity with the CSV measurements path: the commit must write a
+    // single file_upload row into unifiedchangelog so the upload appears in the
+    // upload-history UI, carrying arcgis_xlsx provenance and the inserted rowCount.
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT ChangedBy, PlotID, CensusID, NewRowState
+         FROM unifiedchangelog
+        WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
+      [fileName, censusID]
+    );
+    expect(changelogRows).toHaveLength(1);
+
+    const changelogRow = changelogRows[0];
+    expect(changelogRow.ChangedBy).toBe(AUTH_USER_EMAIL);
+    expect(Number(changelogRow.PlotID)).toBe(plotID);
+    expect(Number(changelogRow.CensusID)).toBe(censusID);
+
+    // NewRowState is the JSON metadata blob; the mysql2 driver may auto-parse the
+    // JSON column, so tolerate either a string or an already-parsed object.
+    const metadata = typeof changelogRow.NewRowState === 'string' ? JSON.parse(changelogRow.NewRowState) : changelogRow.NewRowState;
+    expect(metadata.fileName).toBe(fileName);
+    expect(metadata.formType).toBe('measurements');
+    expect(metadata.sourceFormat).toBe('arcgis_xlsx');
+    expect(metadata.uploadMode).toBe(UploadMode.REVISIONS);
+    expect(metadata.rowCount).toBe(stagedRowCount);
+    expect(metadata.droppedCount).toBe(0);
+    expect(metadata.batchCount).toBe(1);
   });
 });

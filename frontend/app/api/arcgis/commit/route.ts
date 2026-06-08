@@ -5,7 +5,7 @@ import { auth } from '@/auth';
 import ailogger from '@/ailogger';
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses } from '@/config/macros';
-import { SourceFormat } from '@/config/macros/formdetails';
+import { FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
 import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editplan/scopeguard';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
@@ -190,6 +190,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           );
           ailogger.info(`Persisted ${droppedRows.length} dropped ArcGIS rows as unresolved ingestion errors for ${fileName}-${batchID}`);
         }
+      }
+
+      // Mirror the CSV measurements path (POST /api/sqlpacketload): record a single
+      // file_upload row in unifiedchangelog so the ArcGIS commit surfaces in the
+      // upload-history UI with the same provenance shape (sourceFormat tags it as
+      // arcgis_xlsx). Unlike the CSV path, this write stays inside the commit
+      // transaction with no best-effort try/catch fallback: the commit is
+      // all-or-nothing, so if changelog tracking fails the staging insert rolls
+      // back too rather than leaving an upload invisible in history.
+      const existingEntrySQL = format(
+        `SELECT ChangeID, NewRowState FROM ??.unifiedchangelog
+         WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?
+         ORDER BY ChangeID DESC LIMIT 1`,
+        [schema]
+      );
+      const existingEntry = await connectionManager.executeQuery(existingEntrySQL, [fileName, censusID], transactionID);
+
+      if (existingEntry.length === 0) {
+        const uploadMetadata = JSON.stringify({
+          fileName,
+          formType: FormType.measurements,
+          sourceFormat: SourceFormat.arcgis_xlsx,
+          uploadMode,
+          rowCount: insertedCount,
+          droppedCount: droppedRowCount,
+          batchCount: 1
+        });
+        const insertChangelogSQL = format(
+          `INSERT INTO ??.unifiedchangelog
+          (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID, CensusID)
+          VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
+          [schema]
+        );
+        await connectionManager.executeQuery(insertChangelogSQL, ['file_upload', fileName, 'INSERT', uploadMetadata, userId, plotID, censusID], transactionID);
+      } else {
+        const metadata = typeof existingEntry[0].NewRowState === 'string' ? JSON.parse(existingEntry[0].NewRowState) : existingEntry[0].NewRowState;
+        metadata.sourceFormat = SourceFormat.arcgis_xlsx;
+        metadata.uploadMode = uploadMode;
+        metadata.rowCount = (metadata.rowCount || 0) + insertedCount;
+        metadata.droppedCount = (metadata.droppedCount || 0) + droppedRowCount;
+        metadata.batchCount = (metadata.batchCount || 1) + 1;
+        const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
+        await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
       }
     });
 
