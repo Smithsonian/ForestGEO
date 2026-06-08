@@ -18,9 +18,7 @@ import {
   Typography
 } from '@mui/joy';
 import type { FileWithPath } from 'react-dropzone';
-import type { FileCollectionRowSet, FileRowSet } from '@/config/macros/formdetails';
-import type { TransformResult, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
-import { MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
+import type { ArcgisImportReference, ArcgisPreflightResponse, TransformSummary, TransformWarning } from '@/lib/arcgis/types';
 import { warningsToCsv } from '@/lib/arcgis/diagnostics-csv';
 import { arcgisHelpHeaders } from '@/lib/arcgis/schema';
 import ailogger from '@/ailogger';
@@ -73,7 +71,11 @@ function downloadWarningsCsv(warnings: TransformWarning[]) {
 
 interface UploadArcgisPreflightProps {
   acceptedFiles: FileWithPath[];
-  onProceed: (rows: FileCollectionRowSet) => void;
+  schema: string;
+  plotID: number;
+  censusID: number;
+  onProceed: (importSession: ArcgisImportReference) => void;
+  onBack: () => void;
   onError: (error: Error) => void;
 }
 
@@ -111,7 +113,7 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
             </Stack>
             <List size="sm" sx={{ maxHeight: 240, overflow: 'auto' }}>
               {warnings.slice(0, 200).map((w, i) => (
-                <ListItem key={`${w.type}-${w.globalId ?? i}`}>
+                <ListItem key={`${w.type}-${w.globalId ?? 'none'}-${i}`}>
                   <Typography level="body-xs">{w.message}</Typography>
                 </ListItem>
               ))}
@@ -128,21 +130,15 @@ export function ArcgisPreflightSummary({ summary, warnings, onProceed }: { summa
   );
 }
 
-function rowsToRowSet(result: TransformResult): FileRowSet {
-  const set: FileRowSet = {};
-  result.rows.forEach((row, index) => {
-    set[`row-${index}`] = row;
-  });
-  return set;
-}
-
-export default function UploadArcgisPreflight({ acceptedFiles, onProceed, onError }: Readonly<UploadArcgisPreflightProps>) {
-  const [result, setResult] = useState<TransformResult | null>(null);
+export default function UploadArcgisPreflight({ acceptedFiles, schema, plotID, censusID, onProceed, onBack, onError }: Readonly<UploadArcgisPreflightProps>) {
+  const [result, setResult] = useState<ArcgisPreflightResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function run() {
+      setResult(null);
+      setErrorMessage(null);
       const file = acceptedFiles[0];
       if (!file) {
         setErrorMessage('No file provided for the ArcGIS import.');
@@ -152,36 +148,67 @@ export default function UploadArcgisPreflight({ acceptedFiles, onProceed, onErro
         setErrorMessage(`ArcGIS import accepts exactly one workbook, but ${acceptedFiles.length} files were provided. Remove the extra file(s) and try again.`);
         return;
       }
+      if (!file.name.toLowerCase().endsWith('.xlsx')) {
+        setErrorMessage('ArcGIS import requires a single .xlsx workbook.');
+        return;
+      }
+      if (!schema || !plotID || !censusID) {
+        setErrorMessage('ArcGIS import requires an active site, plot, and census selection.');
+        return;
+      }
+
       try {
-        const [{ readArcgisWorkbook }, { transformArcgisWorkbook }] = await Promise.all([
-          import('@/lib/arcgis/workbook-reader'),
-          import('@/lib/arcgis/transform')
-        ]);
-        const buffer = await (file as File).arrayBuffer();
-        const workbook = readArcgisWorkbook(buffer);
-        const transformed = transformArcgisWorkbook(workbook);
-        if (!cancelled) setResult(transformed);
+        const formData = new FormData();
+        formData.append('file', file as File);
+        formData.append('schema', schema);
+        formData.append('plotID', String(plotID));
+        formData.append('censusID', String(censusID));
+
+        const response = await fetch('/api/arcgis/preflight', {
+          method: 'POST',
+          body: formData
+        });
+        const payload = (await response.json().catch(() => ({}))) as Partial<ArcgisPreflightResponse> & { error?: string };
+        if (cancelled) return;
+
+        if (!response.ok) {
+          const message = payload.error || `ArcGIS pre-flight failed with HTTP ${response.status}`;
+          if ([400, 413, 422].includes(response.status)) {
+            setErrorMessage(message);
+            return;
+          }
+          throw new Error(message);
+        }
+
+        if (!payload.importSessionId || !payload.fileName || typeof payload.rowCount !== 'number' || !payload.summary || !Array.isArray(payload.warnings)) {
+          throw new Error('ArcGIS pre-flight returned an incomplete import session response.');
+        }
+
+        if (!cancelled) setResult(payload as ArcgisPreflightResponse);
       } catch (error: unknown) {
         if (cancelled) return;
-        if (error instanceof MissingSheetError || error instanceof MissingColumnError || error instanceof UnparseableDateError) {
-          setErrorMessage(error.message);
-        } else {
-          const wrapped = error instanceof Error ? error : new Error(String(error));
-          ailogger.error('ArcGIS pre-flight failed:', wrapped);
-          onError(wrapped);
-        }
+        const wrapped = error instanceof Error ? error : new Error(String(error));
+        ailogger.error('ArcGIS pre-flight failed:', wrapped);
+        onError(wrapped);
       }
     }
     void run();
     return () => {
       cancelled = true;
     };
-  }, [acceptedFiles, onError]);
+  }, [acceptedFiles, schema, plotID, censusID, onError]);
 
   if (errorMessage) {
     return (
-      <Alert color="danger" variant="soft">
-        {errorMessage}
+      <Alert color="danger" variant="soft" sx={{ width: '100%' }}>
+        <Stack spacing={1}>
+          <Typography level="body-sm">{errorMessage}</Typography>
+          <Box>
+            <Button size="sm" variant="outlined" color="danger" onClick={onBack}>
+              Back to file selection
+            </Button>
+          </Box>
+        </Stack>
       </Alert>
     );
   }
@@ -189,10 +216,15 @@ export default function UploadArcgisPreflight({ acceptedFiles, onProceed, onErro
     return (
       <Stack direction="row" spacing={1} alignItems="center">
         <CircularProgress size="sm" />
-        <Typography level="body-sm">Reading and transforming the ArcGIS workbook…</Typography>
+        <Typography level="body-sm">Preparing the ArcGIS workbook pre-flight…</Typography>
       </Stack>
     );
   }
-  const file = acceptedFiles[0] as File;
-  return <ArcgisPreflightSummary summary={result.summary} warnings={result.warnings} onProceed={() => onProceed({ [file.name]: rowsToRowSet(result) })} />;
+  return (
+    <ArcgisPreflightSummary
+      summary={result.summary}
+      warnings={result.warnings}
+      onProceed={() => onProceed({ importSessionId: result.importSessionId, fileName: result.fileName, rowCount: result.rowCount })}
+    />
+  );
 }

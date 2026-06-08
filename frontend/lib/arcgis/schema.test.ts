@@ -13,6 +13,6 @@ describe('arcgisHelpHeaders', () => {
     const stemTag = headers.find(header => header.label === 'StemTag');
     expect(lx?.category).toBe('required');
     expect(lx?.explanation).toBeTruthy();
-    expect(stemTag?.category).toBe('optional');
+    expect(stemTag?.category).toBe('required');
   });
 });

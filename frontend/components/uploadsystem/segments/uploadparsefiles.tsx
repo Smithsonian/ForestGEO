@@ -81,17 +81,34 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     }));
   }, []);
 
+  const arcgisValidationIssues = useMemo(() => {
+    if (sourceFormat !== SourceFormat.arcgis_xlsx) return [];
+    const issues: { fileName: string; issues: string[] }[] = [];
+    if (acceptedFiles.length !== 1) {
+      issues.push({
+        fileName: 'ArcGIS workbook',
+        issues: [`ArcGIS import accepts exactly one .xlsx workbook. ${acceptedFiles.length} files are selected.`]
+      });
+    }
+    acceptedFiles.forEach(file => {
+      if (!file.name.toLowerCase().endsWith('.xlsx')) {
+        issues.push({ fileName: file.name, issues: ['ArcGIS import requires a .xlsx workbook.'] });
+      }
+    });
+    return issues;
+  }, [acceptedFiles, sourceFormat]);
+
   // Check if all files have been validated and are valid
   const allFilesValid = useMemo(() => {
     if (acceptedFiles.length === 0) return false;
-    // ArcGIS .xlsx uploads bypass CSV header validation; the workbook is validated at pre-flight.
-    if (sourceFormat === SourceFormat.arcgis_xlsx) return true;
+    // ArcGIS .xlsx uploads bypass CSV header validation; the workbook contents are validated at pre-flight.
+    if (sourceFormat === SourceFormat.arcgis_xlsx) return arcgisValidationIssues.length === 0;
     // All files must have validation status and all must be valid
     return acceptedFiles.every(file => {
       const status = fileValidationStatuses[file.name];
       return status && status.isValid;
     });
-  }, [acceptedFiles, fileValidationStatuses, sourceFormat]);
+  }, [acceptedFiles, arcgisValidationIssues.length, fileValidationStatuses, sourceFormat]);
 
   // Get all validation issues across all files
   const allValidationIssues = useMemo(() => {
@@ -102,13 +119,14 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         issues.push({ fileName: file.name, issues: status.issues });
       }
     });
-    return issues;
-  }, [acceptedFiles, fileValidationStatuses]);
+    return sourceFormat === SourceFormat.arcgis_xlsx ? [...arcgisValidationIssues, ...issues] : issues;
+  }, [acceptedFiles, arcgisValidationIssues, fileValidationStatuses, sourceFormat]);
 
   // Check if any file is still being analyzed (no validation status yet)
   const isAnalyzing = useMemo(() => {
+    if (sourceFormat === SourceFormat.arcgis_xlsx) return false;
     return acceptedFiles.some(file => !fileValidationStatuses[file.name]);
-  }, [acceptedFiles, fileValidationStatuses]);
+  }, [acceptedFiles, fileValidationStatuses, sourceFormat]);
 
   const headerGuideHeaders = useMemo(() => {
     if (!uploadForm) return undefined;
@@ -227,7 +245,9 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                       {isAnalyzing
                         ? 'Analyzing files...'
                         : allFilesValid
-                          ? `Continue Upload (${acceptedFiles.length} ${acceptedFiles.length === 1 ? 'file' : 'files'})`
+                          ? sourceFormat === SourceFormat.arcgis_xlsx
+                            ? 'Continue to pre-flight'
+                            : `Continue Upload (${acceptedFiles.length} ${acceptedFiles.length === 1 ? 'file' : 'files'})`
                           : 'Fix validation errors to continue'}
                     </JoyButton>
                   </Box>
@@ -240,9 +260,19 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                     💡 Upload Tips:
                   </Typography>
                   <Stack spacing={0.5}>
-                    <Typography level="body-xs">• CSV, TSV, TXT, and Excel files supported</Typography>
-                    <Typography level="body-xs">• Delimiter detection happens automatically</Typography>
-                    <Typography level="body-xs">• Preview your data before uploading</Typography>
+                    {sourceFormat === SourceFormat.arcgis_xlsx ? (
+                      <>
+                        <Typography level="body-xs">• Select one ArcGIS Field Maps .xlsx workbook</Typography>
+                        <Typography level="body-xs">• Workbook columns are checked during pre-flight</Typography>
+                        <Typography level="body-xs">• Diagnostics can be downloaded before import</Typography>
+                      </>
+                    ) : (
+                      <>
+                        <Typography level="body-xs">• CSV, TSV, TXT, and Excel files supported</Typography>
+                        <Typography level="body-xs">• Delimiter detection happens automatically</Typography>
+                        <Typography level="body-xs">• Preview your data before uploading</Typography>
+                      </>
+                    )}
                   </Stack>
                 </CardContent>
               </Card>

@@ -623,6 +623,7 @@ create table if not exists temporarymeasurements
     FileID          varchar(36)                         null,
     BatchID         varchar(36)                         not null,
     SessionID       varchar(64)                         null,
+    SourceFormat    varchar(32) default 'csv'           not null,
     PlotID          int                                 null,
     CensusID        int                                 null,
     TreeTag         varchar(20)                         null,

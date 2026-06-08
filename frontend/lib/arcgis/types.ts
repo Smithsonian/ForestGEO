@@ -1,6 +1,6 @@
 import type { FileRow } from '@/config/macros/formdetails';
 
-export type ArcgisCell = string | number | null;
+export type ArcgisCell = string | number | Date | null;
 export type ArcgisRow = Record<string, ArcgisCell>;
 
 export interface ArcgisWorkbook {
@@ -36,4 +36,15 @@ export interface TransformResult {
   rows: FileRow[];
   warnings: TransformWarning[];
   summary: TransformSummary;
+}
+
+export interface ArcgisImportReference {
+  importSessionId: string;
+  fileName: string;
+  rowCount: number;
+}
+
+export interface ArcgisPreflightResponse extends ArcgisImportReference {
+  summary: TransformSummary;
+  warnings: TransformWarning[];
 }

@@ -33,13 +33,13 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
     scope: 'stems',
     required: true,
     help: 'Stems sheet only: links a stem to its parent tree GlobalID.',
-    category: 'optional'
+    category: 'required'
   },
   {
     field: 'quadrat',
     aliases: ['quadrat'],
     scope: 'both',
-    required: false,
+    required: true,
     help: 'Quadrat label as recorded by the field crew (e.g. "A25"); matched by name downstream.',
     category: 'required'
   },
@@ -47,12 +47,12 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
     field: 'tag',
     aliases: ['tag'],
     scope: 'both',
-    required: false,
+    required: true,
     help: 'Tree tag; unique within a plot. Stems inherit their parent tree tag.',
     category: 'required'
   },
-  { field: 'StemTag', aliases: ['StemTag'], scope: 'both', required: false, help: 'Stem tag for the row.', category: 'optional' },
-  { field: 'spcode', aliases: ['spcode'], scope: 'both', required: false, help: 'Species code.', category: 'required' },
+  { field: 'StemTag', aliases: ['StemTag'], scope: 'both', required: true, help: 'Stem tag for the row.', category: 'required' },
+  { field: 'spcode', aliases: ['spcode'], scope: 'both', required: true, help: 'Species code.', category: 'required' },
   {
     field: 'DBH_CURRENT',
     aliases: ['DBH_CURRENT'],
@@ -82,8 +82,8 @@ export const ARCGIS_SCHEMA: ArcgisFieldDef[] = [
     field: 'Date_measured',
     aliases: ['Date_measured'],
     scope: 'both',
-    required: false,
-    help: 'Measurement date as an Excel serial number.',
+    required: true,
+    help: 'Measurement date as an Excel serial number or date value.',
     category: 'required'
   },
   { field: 'notes', aliases: ['notes'], scope: 'both', required: false, help: 'Free-text comments for the row.', category: 'optional' },
@@ -128,7 +128,12 @@ export function resolveColumn(row: Record<string, unknown>, field: string): unkn
 
 /** Canonical field key of every required schema entry whose scope includes the trees sheet. */
 export function requiredTreeColumns(): string[] {
-  return ARCGIS_SCHEMA.filter(def => def.required && scopeMatches(def.scope, 'trees') && def.aliases.length > 0).map(def => def.field);
+  return requiredColumnsForSheet('trees');
+}
+
+/** Canonical field key of every required schema entry whose scope includes the requested sheet. */
+export function requiredColumnsForSheet(sheet: 'trees' | 'stems'): string[] {
+  return ARCGIS_SCHEMA.filter(def => def.required && scopeMatches(def.scope, sheet) && def.aliases.length > 0).map(def => def.field);
 }
 
 export function arcgisHelpHeaders(): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {

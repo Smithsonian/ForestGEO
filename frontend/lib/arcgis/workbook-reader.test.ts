@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as XLSX from 'xlsx';
 import { readArcgisWorkbook } from './workbook-reader';
 import { transformArcgisWorkbook } from './transform';
-import { MissingSheetError, MissingColumnError } from './errors';
+import { AmbiguousSheetError, MissingSheetError, MissingColumnError } from './errors';
 
 function buildWorkbook(sheets: Record<string, unknown[][]>): ArrayBuffer {
   const wb = XLSX.utils.book_new();
@@ -46,6 +46,33 @@ describe('readArcgisWorkbook', () => {
   it('throws MissingSheetError when no stems sheet exists', () => {
     const buffer = buildWorkbook({ trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', '', 46036, '5.1', '6.2', 'M', '']] });
     expect(() => readArcgisWorkbook(buffer)).toThrow(MissingSheetError);
+  });
+
+  it('throws AmbiguousSheetError when multiple stems sheet candidates exist', () => {
+    const buffer = buildWorkbook({
+      trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      stems_a: [STEM_HEADER, ['G1', 'S1', 'A25', '100', '100-1', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']],
+      stems_b: [STEM_HEADER, ['G1', 'S2', 'A25', '100', '100-2', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
+    });
+    expect(() => readArcgisWorkbook(buffer)).toThrow(AmbiguousSheetError);
+  });
+
+  it('throws AmbiguousSheetError when multiple trees sheet candidates exist', () => {
+    const buffer = buildWorkbook({
+      trees_a: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      trees_b: [TREE_HEADER, ['G2', 'A25', '101', '101', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      stems: [STEM_HEADER, ['G1', 'S1', 'A25', '100', '100-1', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
+    });
+    expect(() => readArcgisWorkbook(buffer)).toThrow(AmbiguousSheetError);
+  });
+
+  it('throws MissingColumnError when the stems sheet lacks required columns', () => {
+    const stemHeaderMissing = ['ParentGlobalID', 'GlobalID', 'quadrat', 'tag', 'StemTag', 'DBH_CURRENT', 'HOM', 'notes', 'Date_measured'];
+    const buffer = buildWorkbook({
+      trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      stems: [stemHeaderMissing, ['G1', 'S1', 'A25', '100', '100-1', '4.4', '1.3', '', 46036]]
+    });
+    expect(() => readArcgisWorkbook(buffer)).toThrow(MissingColumnError);
   });
 
   it('accepts capitalized Lx/Ly aliases and resolves them through the transform', () => {

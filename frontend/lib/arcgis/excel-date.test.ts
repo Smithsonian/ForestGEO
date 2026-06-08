@@ -19,7 +19,15 @@ describe('excelSerialToISODate', () => {
     expect(excelSerialToISODate('46036')).toBe('2026-01-14');
   });
 
-  it.each([null, undefined, '', 'NA', 'not-a-number'])('throws UnparseableDateError on %p', input => {
+  it('accepts Date objects', () => {
+    expect(excelSerialToISODate(new Date(Date.UTC(2026, 0, 14, 18, 30)))).toBe('2026-01-14');
+  });
+
+  it('accepts ISO date strings', () => {
+    expect(excelSerialToISODate('2026-01-14T18:30:00.000Z')).toBe('2026-01-14');
+  });
+
+  it.each([null, undefined, '', 'NA', 'not-a-number', Number.POSITIVE_INFINITY])('throws UnparseableDateError on %p', input => {
     expect(() => excelSerialToISODate(input as unknown)).toThrow(UnparseableDateError);
   });
 });

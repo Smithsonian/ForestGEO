@@ -3,6 +3,7 @@ import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { FileCollectionRowSet, FormType, SourceFormat } from '@/config/macros/formdetails';
 import { UploadMode } from '@/config/uploadmodes';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
 
 // File upload constraints
 export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500MB per file
@@ -88,7 +89,7 @@ export interface UploadFireProps {
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
-  preparedRowSet?: FileCollectionRowSet | null;
+  arcgisImportSession?: ArcgisImportReference | null;
   uploadCompleteMessage: string;
   selectedDelimiters: Record<string, string>;
   // state setters

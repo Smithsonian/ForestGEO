@@ -5,7 +5,7 @@ import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformW
 
 function cellToString(value: ArcgisCell): string | null {
   if (value === null || value === undefined) return null;
-  const text = typeof value === 'number' ? String(value) : value.trim();
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? String(value) : value.trim();
   return text === '' ? null : text;
 }
 

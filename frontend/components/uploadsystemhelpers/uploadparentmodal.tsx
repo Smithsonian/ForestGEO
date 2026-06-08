@@ -132,7 +132,7 @@ export default function UploadParentModal(props: UPMProps) {
                     </Box>
                     <Typography level="body-sm">
                       {isArcgisMode
-                        ? 'Deletes all existing ArcGIS measurements data, then inserts the uploaded workbook as the new source of truth.'
+                        ? 'Deletes all existing measurements for the selected census, then inserts the uploaded workbook as the new source of truth.'
                         : `Deletes all existing ${formType} data, then inserts the uploaded file as the new source of truth.`}
                     </Typography>
                   </Stack>

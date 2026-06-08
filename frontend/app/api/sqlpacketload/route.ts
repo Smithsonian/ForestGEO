@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet, FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -18,7 +18,8 @@ import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessi
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
-import { requireSession } from '@/lib/auth-helpers';
+import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
+import { ArcgisImportSessionError, loadArcgisImportRows } from '@/lib/arcgis/import-session';
 
 /**
  * Generate idempotency key for a batch of data
@@ -69,11 +70,25 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
+const MAX_ARCGIS_IMPORT_CHUNK_SIZE = 5000;
+const verifiedTemporaryMeasurementSourceFormatSchemas = new Set<string>();
+
+export function resetTemporaryMeasurementsSourceFormatColumnCacheForTests(): void {
+  if (process.env.NODE_ENV === 'test') {
+    verifiedTemporaryMeasurementSourceFormatSchemas.clear();
+  }
+}
 
 function toPositiveInteger(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toNonNegativeInteger(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: string, details: Record<string, unknown>): NextResponse {
@@ -85,6 +100,27 @@ function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: stri
     }),
     { status }
   );
+}
+
+async function ensureTemporaryMeasurementsSourceFormatColumn(connectionManager: ConnectionManager, schema: string): Promise<void> {
+  if (verifiedTemporaryMeasurementSourceFormatSchemas.has(schema)) return;
+
+  const columnCheckSQL = `
+    SELECT COUNT(*) AS count
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = ?
+      AND TABLE_NAME = 'temporarymeasurements'
+      AND COLUMN_NAME = 'SourceFormat'
+  `;
+  const columnCheck = await connectionManager.executeQuery(columnCheckSQL, [schema]);
+  const hasColumn = Number(columnCheck?.[0]?.count ?? 0) > 0;
+
+  if (!hasColumn) {
+    const alterSQL = format(`ALTER TABLE ??.temporarymeasurements ADD COLUMN SourceFormat VARCHAR(32) NOT NULL DEFAULT 'csv' AFTER SessionID`, [schema]);
+    await connectionManager.executeQuery(alterSQL);
+  }
+
+  verifiedTemporaryMeasurementSourceFormatSchemas.add(schema);
 }
 
 interface FixedDataProcessingResult {
@@ -731,6 +767,7 @@ function buildTemporaryMeasurementInsertParams(
   fileName: string,
   batchID: string,
   sessionId: string | null,
+  sourceFormat: SourceFormat,
   plotID: number,
   censusID: number
 ): (string | number | null)[] {
@@ -743,6 +780,7 @@ function buildTemporaryMeasurementInsertParams(
     fileName,
     batchID,
     sessionId,
+    sourceFormat,
     plotID,
     censusID,
     tag ?? null,
@@ -766,21 +804,22 @@ async function insertTemporaryMeasurementsInBatches(
   fileName: string,
   batchID: string,
   sessionId: string | null,
+  sourceFormat: SourceFormat,
   plotID: number,
   censusID: number,
   transactionID: string
 ): Promise<void> {
   const insertSQLPrefix = format(
     `INSERT IGNORE INTO ??.temporarymeasurements
-      (FileID, BatchID, SessionID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
+      (FileID, BatchID, SessionID, SourceFormat, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments)
       VALUES `,
     [schema]
   );
 
   for (let start = 0; start < rows.length; start += TEMP_MEASUREMENT_INSERT_BATCH_SIZE) {
     const slice = rows.slice(start, start + TEMP_MEASUREMENT_INSERT_BATCH_SIZE);
-    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, plotID, censusID));
+    const placeholders = slice.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+    const values = slice.flatMap(row => buildTemporaryMeasurementInsertParams(row, fileName, batchID, sessionId, sourceFormat, plotID, censusID));
     await connectionManager.executeQuery(`${insertSQLPrefix}${placeholders}`, values, transactionID);
   }
 }
@@ -1039,12 +1078,30 @@ export async function POST(request: NextRequest) {
     );
   }
   const formType: string = body.formType;
-  const sourceFormat: string = body.sourceFormat ?? 'csv';
+  const sourceFormat = normalizeSourceFormat(body.sourceFormat ?? SourceFormat.csv);
+  if (!sourceFormat) {
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: 'Invalid source format',
+        error: 'sourceFormat must be csv or arcgis_xlsx'
+      }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
+  if (sourceFormat === SourceFormat.arcgis_xlsx && formType !== FormType.measurements) {
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: 'Invalid source format for form type',
+        error: 'arcgis_xlsx sourceFormat is only valid for measurements uploads'
+      }),
+      { status: HTTPResponses.INVALID_REQUEST }
+    );
+  }
   const uploadMode = normalizeUploadMode(body.uploadMode);
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const user: string = body.user;
-  const fileRowSet: FileRowSet = body.fileRowSet;
+  let fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
@@ -1052,8 +1109,7 @@ export async function POST(request: NextRequest) {
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
-    const chunkRows = Object.values(fileRowSet ?? {});
-    const rowCount = chunkRows.length;
+    let chunkRows = Object.values(fileRowSet ?? {});
     const batchID = body.batchID || generateShortBatchID();
     const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
@@ -1101,8 +1157,74 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    if (sourceFormat === SourceFormat.arcgis_xlsx) {
+      const authenticatedUserId = getSessionUserId(session!);
+      const importSessionId =
+        typeof body.arcgisImportSessionId === 'string' && body.arcgisImportSessionId.trim() !== '' ? body.arcgisImportSessionId.trim() : null;
+      const arcgisRowOffset = toNonNegativeInteger(body.arcgisRowOffset);
+      const arcgisRowLimit = toPositiveInteger(body.arcgisRowLimit);
+
+      if (!authenticatedUserId) {
+        return new NextResponse(JSON.stringify({ responseMessage: 'Missing authenticated user identifier' }), { status: HTTPResponses.UNAUTHORIZED });
+      }
+      if (!importSessionId || arcgisRowOffset === null || arcgisRowLimit === null || arcgisRowLimit > MAX_ARCGIS_IMPORT_CHUNK_SIZE) {
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: 'Invalid ArcGIS import chunk request',
+            error: `ArcGIS uploads require importSessionId, non-negative row offset, and row limit <= ${MAX_ARCGIS_IMPORT_CHUNK_SIZE}`
+          }),
+          { status: HTTPResponses.INVALID_REQUEST }
+        );
+      }
+
+      try {
+        const loadedImportRows = await loadArcgisImportRows({
+          schema,
+          importSessionId,
+          plotID: resolvedPlotID,
+          censusID: resolvedCensusID,
+          userId: authenticatedUserId,
+          fileName,
+          offset: arcgisRowOffset,
+          limit: arcgisRowLimit
+        });
+        chunkRows = loadedImportRows.rows;
+        fileRowSet = {};
+        chunkRows.forEach((row, index) => {
+          fileRowSet[`row-${arcgisRowOffset + index}`] = row;
+        });
+      } catch (error: unknown) {
+        if (error instanceof ArcgisImportSessionError) {
+          return new NextResponse(
+            JSON.stringify({
+              responseMessage: 'Invalid ArcGIS import session',
+              error: error.message,
+              fileName,
+              batchID
+            }),
+            { status: error.status }
+          );
+        }
+        throw error;
+      }
+
+      if (chunkRows.length === 0) {
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: 'ArcGIS import chunk is empty',
+            error: 'Requested ArcGIS import row range produced no rows',
+            fileName,
+            batchID
+          }),
+          { status: HTTPResponses.INVALID_REQUEST }
+        );
+      }
+    }
+
+    const rowCount = chunkRows.length;
     const contentHash = hashChunkContent(fileRowSet);
     const idempotencyKey = generateIdempotencyKey(fileName, resolvedPlotID, resolvedCensusID, rowCount, contentHash);
+    await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
     // NOTE:
     // Sample-row duplicate short-circuit checks were removed because they could
@@ -1140,6 +1262,7 @@ export async function POST(request: NextRequest) {
           fileName,
           batchID,
           sessionId,
+          sourceFormat,
           resolvedPlotID,
           resolvedCensusID,
           transactionID

@@ -9,6 +9,7 @@ import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import path from 'path';
 import type { Session } from 'next-auth';
+import { FormType, normalizeSourceFormat, SourceFormat } from '@/config/macros/formdetails';
 
 // Force Node.js runtime for database and Azure SDK compatibility
 // mysql2 and @azure/storage-* are not compatible with Edge Runtime
@@ -182,6 +183,19 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
     });
   }
 
+  const normalizedSourceFormat = normalizeSourceFormat(sourceFormat ?? SourceFormat.csv);
+  if (!normalizedSourceFormat) {
+    return new NextResponse(JSON.stringify({ error: 'Invalid sourceFormat' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+  if (normalizedSourceFormat === SourceFormat.arcgis_xlsx && formType !== FormType.measurements) {
+    return new NextResponse(JSON.stringify({ error: 'ArcGIS .xlsx sourceFormat is only valid for measurements uploads' }), {
+      status: HTTPResponses.INVALID_REQUEST
+    });
+  }
+  if (normalizedSourceFormat === SourceFormat.arcgis_xlsx && !fileName.toLowerCase().endsWith('.xlsx')) {
+    return new NextResponse(JSON.stringify({ error: 'ArcGIS uploads must use a .xlsx workbook' }), { status: HTTPResponses.INVALID_REQUEST });
+  }
+
   // Security validations
   // 1. File size check
   if (file.size > MAX_FILE_SIZE) {
@@ -229,7 +243,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ oper
       formType,
       fileRowErrors,
       sanitizedFileName,
-      sourceFormat ?? 'csv'
+      normalizedSourceFormat
     );
 
     // Verify the response status

@@ -268,4 +268,40 @@ describe('/api/files/[operation]', () => {
       'arcgis_xlsx'
     );
   });
+
+  it('rejects an unknown sourceFormat before storing provenance', async () => {
+    const formData = new FormData();
+    const file = new File(['TreeTag\n1'], 'measurements.csv', { type: 'text/csv' });
+    formData.append('measurements.csv', file);
+
+    const request = makeRequest(
+      'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=measurements.csv&formType=measurements&sourceFormat=pretend_arcgis',
+      { method: 'POST' }
+    ) as any;
+    request.formData = vi.fn(async () => formData);
+
+    const response = await POST(request, props('upload'));
+
+    expect(response.status).toBe(400);
+    expect(mocks.uploadValidFileAsBuffer).not.toHaveBeenCalled();
+  });
+
+  it('rejects arcgis_xlsx provenance for non-measurement uploads', async () => {
+    const formData = new FormData();
+    const file = new File(['code,description\nA,Attr'], 'attributes.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    formData.append('attributes.xlsx', file);
+
+    const request = makeRequest(
+      'http://localhost/api/files/upload?schema=forestgeo_testing&plotID=1&plotName=BCI&census=2&fileName=attributes.xlsx&formType=attributes&sourceFormat=arcgis_xlsx',
+      { method: 'POST' }
+    ) as any;
+    request.formData = vi.fn(async () => formData);
+
+    const response = await POST(request, props('upload'));
+
+    expect(response.status).toBe(400);
+    expect(mocks.uploadValidFileAsBuffer).not.toHaveBeenCalled();
+  });
 });

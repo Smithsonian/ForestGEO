@@ -12,6 +12,13 @@ export class MissingColumnError extends Error {
   }
 }
 
+export class AmbiguousSheetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AmbiguousSheetError';
+  }
+}
+
 export class UnparseableDateError extends Error {
   constructor(message: string) {
     super(message);

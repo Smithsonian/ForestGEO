@@ -30,6 +30,7 @@ import { UploadMode } from '@/config/uploadmodes';
 import { canonicalizeRevisionRow, normalizeRevisionHeader } from '@/components/uploadsystemhelpers/revisionfileparse';
 import { EMPTY_REVISION_MATCH_COUNTS, RevisionInvalidRow, RevisionMatchedRow, RevisionUploadResponse } from '@/config/revisionuploadtypes';
 import { BulkEditPlan } from '@/config/editplan/types';
+import type { ArcgisImportReference } from '@/lib/arcgis/types';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -129,7 +130,7 @@ function UploadParentInner(props: UploadParentProps) {
   // revisionRolePolicy and block. Surface this at the parse step so the user
   // doesn't reach the match review only to fail at Apply.
   const [revisionRolePreflightWarning, setRevisionRolePreflightWarning] = useState<string | null>(null);
-  const [arcgisPreparedRows, setArcgisPreparedRows] = useState<FileCollectionRowSet | null>(null);
+  const [arcgisImportSession, setArcgisImportSession] = useState<ArcgisImportReference | null>(null);
 
   // Track if we've already initialized reingestion to prevent re-triggering
   const reingestionInitializedRef = useRef(false);
@@ -180,6 +181,7 @@ function UploadParentInner(props: UploadParentProps) {
       setIsReingestionMode(false);
       setRevisionMatchResult(null);
       setRevisionConfirmNewRows(false);
+      setArcgisImportSession(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadState.state.uploadForm, uploadState.state.reviewState]);
@@ -208,6 +210,7 @@ function UploadParentInner(props: UploadParentProps) {
     setIsReingestionMode(false);
     setRevisionMatchResult(null);
     setRevisionConfirmNewRows(false);
+    setArcgisImportSession(null);
   }
 
   async function resetError() {
@@ -216,14 +219,17 @@ function UploadParentInner(props: UploadParentProps) {
 
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
+    setArcgisImportSession(null);
     fileManagement.addFile(newFile);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
+    setArcgisImportSession(null);
     fileManagement.removeFile(fileIndex);
   };
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
+    setArcgisImportSession(null);
     fileManagement.replaceFile(fileIndex, newFile);
   };
 
@@ -259,7 +265,7 @@ function UploadParentInner(props: UploadParentProps) {
 
   async function handleInitialSubmit() {
     if (uploadState.state.sourceFormat === SourceFormat.arcgis_xlsx) {
-      setArcgisPreparedRows(null);
+      setArcgisImportSession(null);
       uploadState.setReviewState(ReviewStates.ARCGIS_PREFLIGHT);
     } else if (uploadState.state.uploadMode === UploadMode.REVISIONS && uploadState.state.uploadForm === FormType.measurements) {
       try {
@@ -406,10 +412,14 @@ function UploadParentInner(props: UploadParentProps) {
         return (
           <UploadArcgisPreflight
             acceptedFiles={fileManagement.files}
-            onProceed={rows => {
-              setArcgisPreparedRows(rows);
+            schema={currentSite?.schemaName || ''}
+            plotID={currentPlotID ?? 0}
+            censusID={currentCensusID ?? 0}
+            onProceed={importSession => {
+              setArcgisImportSession(importSession);
               uploadState.setReviewState(ReviewStates.UPLOAD_SQL);
             }}
+            onBack={() => uploadState.setReviewState(ReviewStates.UPLOAD_FILES)}
             onError={error => {
               errorHandling.setError(error);
               uploadState.setReviewState(ReviewStates.ERRORS);
@@ -435,7 +445,7 @@ function UploadParentInner(props: UploadParentProps) {
             uploadMode={uploadState.state.uploadMode}
             sourceFormat={uploadState.state.sourceFormat}
             parsedData={parsedData}
-            preparedRowSet={arcgisPreparedRows}
+            arcgisImportSession={arcgisImportSession}
             setReviewState={uploadState.setReviewState}
             setIsDataUnsaved={uploadState.setIsDataUnsaved}
             schema={currentSite?.schemaName || ''}

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST } from './route';
+import { POST, resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
 
@@ -22,6 +22,22 @@ const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = v
   return {
     requireUploadSessionOwnershipMock: vi.fn(),
     MockUploadSessionOwnershipError
+  };
+});
+
+const { loadArcgisImportRowsMock, MockArcgisImportSessionError } = vi.hoisted(() => {
+  class MockArcgisImportSessionError extends Error {
+    status: number;
+
+    constructor(message: string, status: number = 400) {
+      super(message);
+      this.status = status;
+    }
+  }
+
+  return {
+    loadArcgisImportRowsMock: vi.fn(),
+    MockArcgisImportSessionError
   };
 });
 
@@ -68,6 +84,11 @@ vi.mock('@/config/uploadsessiontracker', () => ({
   }
 }));
 
+vi.mock('@/lib/arcgis/import-session', () => ({
+  loadArcgisImportRows: loadArcgisImportRowsMock,
+  ArcgisImportSessionError: MockArcgisImportSessionError
+}));
+
 vi.mock('@/config/measurementerrors', () => ({
   insertIngestionFailureRows: vi.fn().mockResolvedValue([])
 }));
@@ -98,7 +119,7 @@ vi.mock('mysql2/promise', () => ({
 const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through Comments) */
-const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 16;
+const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 17;
 
 const TEST_SESSION_ID = 'session-1';
 const TEST_PLOT_ID = 22;
@@ -186,9 +207,42 @@ describe('sqlpacketload measurement scope validation', () => {
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
+    loadArcgisImportRowsMock.mockResolvedValue({
+      rows: [
+        {
+          tag: 'ARCGIS-100',
+          stemtag: '1',
+          spcode: 'QURU',
+          quadrat: 'A1',
+          lx: '10',
+          ly: '20',
+          dbh: '5',
+          hom: '1.3',
+          date: '2026-01-14',
+          codes: '',
+          comments: ''
+        }
+      ],
+      rowCount: 1,
+      fileName: 'arcgis-export.xlsx',
+      summary: { totalRows: 1 },
+      warnings: []
+    });
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
+  });
+
+  it('rejects invalid sourceFormat before touching measurement scope data', async () => {
+    const res = (await POST(makeMeasurementRequest({ sourceFormat: 'spoofed_arcgis' })))!;
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'sourceFormat must be csv or arcgis_xlsx'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
+    expect(requireUploadSessionOwnershipMock).not.toHaveBeenCalled();
   });
 
   it('prefers request body over mismatched cookies', async () => {
@@ -201,6 +255,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -218,7 +273,7 @@ describe('sqlpacketload measurement scope validation', () => {
     const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
-    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
   });
 
   it('rejects when census does not belong to the provided plot', async () => {
@@ -249,6 +304,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -267,7 +323,63 @@ describe('sqlpacketload measurement scope validation', () => {
       String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
     );
     expect(insertCall).toBeDefined();
-    expect(insertCall[1].slice(0, 5)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
+  });
+
+  it('hydrates ArcGIS measurement rows from the server import session instead of trusting fileRowSet', async () => {
+    mockConnectionManager.executeQuery
+      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
+      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([{ count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ affectedRows: 0 })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([{ count: 1 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
+
+    const res = (await POST(
+      makeMeasurementRequest({
+        sourceFormat: 'arcgis_xlsx',
+        fileName: 'arcgis-export.xlsx',
+        arcgisImportSessionId: 'arcgis-session-1',
+        arcgisRowOffset: 0,
+        arcgisRowLimit: 1000,
+        fileRowSet: {
+          'row-1': {
+            tag: 'CLIENT-SPOOF',
+            stemtag: '9',
+            spcode: 'FAKE',
+            quadrat: 'ZZZ',
+            lx: '999',
+            ly: '999',
+            date: '1900-01-01'
+          }
+        }
+      })
+    ))!;
+
+    expect(res.status).toBe(200);
+    expect(loadArcgisImportRowsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importSessionId: 'arcgis-session-1',
+        plotID: TEST_PLOT_ID,
+        censusID: TEST_CENSUS_ID,
+        userId: 'user-1',
+        fileName: 'arcgis-export.xlsx',
+        offset: 0,
+        limit: 1000
+      })
+    );
+
+    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall[1].slice(0, 6)).toEqual(['arcgis-export.xlsx', TEST_BATCH_ID, TEST_SESSION_ID, 'arcgis_xlsx', TEST_PLOT_ID, TEST_CENSUS_ID]);
+    expect(insertCall[1]).toContain('ARCGIS-100');
+    expect(insertCall[1]).not.toContain('CLIENT-SPOOF');
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {
@@ -310,6 +422,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -337,6 +450,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 10605 })
@@ -362,6 +476,8 @@ describe('sqlpacketload measurement scope validation', () => {
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       // batch scope check
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      // SourceFormat column exists
+      .mockResolvedValueOnce([{ count: 1 }])
       // pre-insert count
       .mockResolvedValueOnce([{ count: 0 }])
       // cleanupPreviousFileUploads: find old batches
@@ -426,6 +542,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce({ affectedRows: 0 })
       .mockResolvedValueOnce(undefined)
@@ -463,6 +580,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([{ batchID: 'completed-batch-1' }])
       .mockRejectedValueOnce(missingError)
@@ -524,6 +642,7 @@ describe('sqlpacketload measurement scope validation', () => {
     mockConnectionManager.executeQuery
       .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
       .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
+      .mockResolvedValueOnce([{ count: 1 }])
       .mockResolvedValueOnce([{ count: 0 }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ affectedRows: 0 })
@@ -573,10 +692,29 @@ describe('sqlpacketload fixed-data upload modes', () => {
     vi.clearAllMocks();
     mockConnectionManager = ConnectionManager.getInstance();
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-fixed');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
     handleUpsertMock.mockResolvedValue({ id: 1, operation: 'inserted' });
+  });
+
+  it('rejects arcgis_xlsx sourceFormat for fixed-data uploads', async () => {
+    const res = await POST(
+      makeFixedDataRequest(
+        'attributes',
+        {
+          'row-1': { code: 'alive', description: 'Alive', status: 'alive' }
+        },
+        { sourceFormat: 'arcgis_xlsx' }
+      )
+    );
+
+    expect(res?.status).toBe(400);
+    await expect(res?.json()).resolves.toMatchObject({
+      error: 'arcgis_xlsx sourceFormat is only valid for measurements uploads'
+    });
+    expect(mockConnectionManager.executeQuery).not.toHaveBeenCalled();
   });
 
   it('updates existing attributes and inserts new codes in revisions mode', async () => {

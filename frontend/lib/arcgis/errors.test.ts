@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { MissingSheetError, MissingColumnError, UnparseableDateError } from './errors';
+import { AmbiguousSheetError, MissingSheetError, MissingColumnError, UnparseableDateError } from './errors';
 
 describe('arcgis typed errors', () => {
   it.each([
     ['MissingSheetError', MissingSheetError],
     ['MissingColumnError', MissingColumnError],
+    ['AmbiguousSheetError', AmbiguousSheetError],
     ['UnparseableDateError', UnparseableDateError]
   ])('%s is an Error with a stable name and message', (expectedName, Ctor) => {
     const err = new Ctor('boom');

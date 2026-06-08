@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { ArcgisPreflightSummary } from './uploadarcgispreflight';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import UploadArcgisPreflight, { ArcgisPreflightSummary } from './uploadarcgispreflight';
 import type { TransformSummary, TransformWarning } from '@/lib/arcgis/types';
 
 const summary: TransformSummary = {
@@ -24,6 +24,10 @@ const warnings: TransformWarning[] = [
     value: '999'
   }
 ];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('ArcgisPreflightSummary', () => {
   it('renders the summary counts and warnings', () => {
@@ -65,5 +69,76 @@ describe('ArcgisPreflightSummary', () => {
 
     rerender(<ArcgisPreflightSummary summary={summary} warnings={[]} onProceed={() => {}} />);
     expect(screen.queryByRole('button', { name: /download diagnostics/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('UploadArcgisPreflight', () => {
+  it('creates a server pre-flight session and passes only the import reference forward', async () => {
+    const onProceed = vi.fn();
+    const onError = vi.fn();
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          importSessionId: 'arcgis-session-1',
+          fileName: 'arcgis-export.xlsx',
+          rowCount: 11181,
+          summary,
+          warnings
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File(['workbook'], 'arcgis-export.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+
+    render(
+      <UploadArcgisPreflight
+        acceptedFiles={[file]}
+        schema="forestgeo_testing"
+        plotID={1}
+        censusID={2}
+        onProceed={onProceed}
+        onBack={() => {}}
+        onError={onError}
+      />
+    );
+
+    expect(await screen.findByText(/11181/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/arcgis/preflight', expect.objectContaining({ method: 'POST', body: expect.any(FormData) }));
+
+    fireEvent.click(screen.getByRole('button', { name: /proceed/i }));
+
+    expect(onProceed).toHaveBeenCalledWith({
+      importSessionId: 'arcgis-session-1',
+      fileName: 'arcgis-export.xlsx',
+      rowCount: 11181
+    });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('shows a recoverable file-selection error for multiple workbooks', async () => {
+    const onBack = vi.fn();
+    const onError = vi.fn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const files = [
+      new File(['one'], 'one.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      new File(['two'], 'two.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    ];
+
+    render(
+      <UploadArcgisPreflight acceptedFiles={files} schema="forestgeo_testing" plotID={1} censusID={2} onProceed={() => {}} onBack={onBack} onError={onError} />
+    );
+
+    expect(await screen.findByText(/accepts exactly one workbook/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /back to file selection/i }));
+
+    await waitFor(() => expect(onBack).toHaveBeenCalledTimes(1));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 });

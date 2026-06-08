@@ -14,6 +14,16 @@ export enum SourceFormat {
   arcgis_xlsx = 'arcgis_xlsx'
 }
 
+export function normalizeSourceFormat(value: unknown): SourceFormat | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return Object.values(SourceFormat).includes(trimmed as SourceFormat) ? (trimmed as SourceFormat) : null;
+}
+
+export function isSourceFormat(value: unknown): value is SourceFormat {
+  return normalizeSourceFormat(value) !== null;
+}
+
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
 export const TableHeadersByFormType: Record<FormType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
   [FormType.attributes]: [

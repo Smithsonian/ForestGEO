@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
-import { MissingColumnError, MissingSheetError } from './errors';
-import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, requiredTreeColumns } from './schema';
+import { AmbiguousSheetError, MissingColumnError, MissingSheetError } from './errors';
+import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, requiredColumnsForSheet } from './schema';
 import type { ArcgisRow, ArcgisWorkbook } from './types';
 
 interface ParsedSheet {
@@ -51,14 +51,24 @@ export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
   const workbook = XLSX.read(buffer, { type: 'array' });
   const sheets = workbook.SheetNames.map(name => parseSheet(workbook.Sheets[name], name));
 
-  const stemsSheet = sheets.find(s => s.columns.includes(STEM_SIGNATURE_COLUMN));
-  if (!stemsSheet) {
+  const stemsCandidates = sheets.filter(s => s.columns.includes(STEM_SIGNATURE_COLUMN));
+  if (stemsCandidates.length === 0) {
     throw new MissingSheetError(
       `No stems sheet found: expected a sheet containing the "${STEM_SIGNATURE_COLUMN}" column. Sheets seen: ${sheets.map(s => s.name).join(', ')}`
     );
   }
+  if (stemsCandidates.length > 1) {
+    throw new AmbiguousSheetError(`Multiple stems sheet candidates found: ${stemsCandidates.map(s => `"${s.name}"`).join(', ')}.`);
+  }
+  const stemsSheet = stemsCandidates[0];
 
-  const required = requiredTreeColumns();
+  const requiredStems = requiredColumnsForSheet('stems');
+  const missingStems = requiredStems.filter(field => !stemsSheet.columns.includes(field));
+  if (missingStems.length > 0) {
+    throw new MissingColumnError(`Stems sheet "${stemsSheet.name}" is missing required column(s): ${missingStems.join(', ')}.`);
+  }
+
+  const required = requiredColumnsForSheet('trees');
   const candidates = sheets.filter(s => s !== stemsSheet);
   if (candidates.length === 0) {
     throw new MissingSheetError('No trees sheet found: the workbook must contain a separate trees sheet alongside the stems sheet.');
@@ -66,8 +76,8 @@ export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
 
   // Trees sheet is detected by SIGNATURE — the sheet (in any position, ignoring extra/junk sheets)
   // whose canonical columns include every required tree field.
-  const treesSheet = candidates.find(s => required.every(field => s.columns.includes(field)));
-  if (!treesSheet) {
+  const treeCandidates = candidates.filter(s => required.every(field => s.columns.includes(field)));
+  if (treeCandidates.length === 0) {
     const best = candidates.reduce((a, b) => {
       const aMissing = required.filter(f => !a.columns.includes(f)).length;
       const bMissing = required.filter(f => !b.columns.includes(f)).length;
@@ -79,6 +89,10 @@ export function readArcgisWorkbook(buffer: ArrayBuffer): ArcgisWorkbook {
         `Add researcher-supplied "lx"/"ly" columns before upload.`
     );
   }
+  if (treeCandidates.length > 1) {
+    throw new AmbiguousSheetError(`Multiple trees sheet candidates found: ${treeCandidates.map(s => `"${s.name}"`).join(', ')}.`);
+  }
 
+  const treesSheet = treeCandidates[0];
   return { trees: treesSheet.rows, stems: stemsSheet.rows };
 }
