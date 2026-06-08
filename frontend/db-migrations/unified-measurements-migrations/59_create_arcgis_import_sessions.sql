@@ -8,7 +8,7 @@
 --   The committed_* columns make each staged import single-use: repeated commit calls
 --   for the same BatchID can return idempotently, while a second BatchID is rejected.
 --
---   Idempotent via CREATE TABLE IF NOT EXISTS plus conditional ALTER/INDEX statements.
+--   Idempotent via CREATE TABLE IF NOT EXISTS.
 -- =====================================================================================
 
 CREATE TABLE IF NOT EXISTS arcgis_import_sessions (
@@ -33,90 +33,6 @@ CREATE TABLE IF NOT EXISTS arcgis_import_sessions (
     KEY idx_arcgis_import_committed_batch (committed_batch_id),
     KEY idx_arcgis_import_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME = 'committed_file_id'
-);
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE arcgis_import_sessions ADD COLUMN committed_file_id VARCHAR(255) NULL AFTER state',
-    'SELECT ''arcgis_import_sessions.committed_file_id already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME = 'committed_batch_id'
-);
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE arcgis_import_sessions ADD COLUMN committed_batch_id VARCHAR(64) NULL AFTER committed_file_id',
-    'SELECT ''arcgis_import_sessions.committed_batch_id already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME = 'committed_upload_session_id'
-);
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE arcgis_import_sessions ADD COLUMN committed_upload_session_id VARCHAR(64) NULL AFTER committed_batch_id',
-    'SELECT ''arcgis_import_sessions.committed_upload_session_id already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME = 'committed_row_count'
-);
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE arcgis_import_sessions ADD COLUMN committed_row_count INT NULL AFTER committed_upload_session_id',
-    'SELECT ''arcgis_import_sessions.committed_row_count already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @col_exists := (
-    SELECT COUNT(*) FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME = 'committed_at'
-);
-SET @ddl := IF(@col_exists = 0,
-    'ALTER TABLE arcgis_import_sessions ADD COLUMN committed_at TIMESTAMP NULL AFTER committed_row_count',
-    'SELECT ''arcgis_import_sessions.committed_at already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @idx_exists := (
-    SELECT COUNT(*) FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND INDEX_NAME = 'idx_arcgis_import_committed_batch'
-);
-SET @ddl := IF(@idx_exists = 0,
-    'CREATE INDEX idx_arcgis_import_committed_batch ON arcgis_import_sessions (committed_batch_id)',
-    'SELECT ''idx_arcgis_import_committed_batch already exists'' AS Status'
-);
-PREPARE stmt FROM @ddl;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS arcgis_import_rows (
     import_session_id VARCHAR(64) NOT NULL,

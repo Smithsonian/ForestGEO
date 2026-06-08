@@ -94,53 +94,6 @@ function parseJsonColumn<T>(value: unknown, fallback: T): T {
   return value as T;
 }
 
-async function ensureArcgisImportSessionColumns(connectionManager: ConnectionManager, schema: string): Promise<void> {
-  const columnCheckSQL = `
-    SELECT COLUMN_NAME
-    FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = ?
-      AND TABLE_NAME = 'arcgis_import_sessions'
-      AND COLUMN_NAME IN (
-        'committed_file_id',
-        'committed_batch_id',
-        'committed_upload_session_id',
-        'committed_row_count',
-        'committed_at'
-      )
-  `;
-  const rows = await connectionManager.executeQuery(columnCheckSQL, [schema]);
-  const existing = new Set((Array.isArray(rows) ? rows : []).map((row: { COLUMN_NAME?: string }) => row.COLUMN_NAME));
-
-  const additions: Array<{ name: string; sql: string }> = [
-    {
-      name: 'committed_file_id',
-      sql: format(`ALTER TABLE ??.arcgis_import_sessions ADD COLUMN committed_file_id VARCHAR(255) NULL AFTER state`, [schema])
-    },
-    {
-      name: 'committed_batch_id',
-      sql: format(`ALTER TABLE ??.arcgis_import_sessions ADD COLUMN committed_batch_id VARCHAR(64) NULL AFTER committed_file_id`, [schema])
-    },
-    {
-      name: 'committed_upload_session_id',
-      sql: format(`ALTER TABLE ??.arcgis_import_sessions ADD COLUMN committed_upload_session_id VARCHAR(64) NULL AFTER committed_batch_id`, [schema])
-    },
-    {
-      name: 'committed_row_count',
-      sql: format(`ALTER TABLE ??.arcgis_import_sessions ADD COLUMN committed_row_count INT NULL AFTER committed_upload_session_id`, [schema])
-    },
-    {
-      name: 'committed_at',
-      sql: format(`ALTER TABLE ??.arcgis_import_sessions ADD COLUMN committed_at TIMESTAMP NULL AFTER committed_row_count`, [schema])
-    }
-  ];
-
-  for (const addition of additions) {
-    if (!existing.has(addition.name)) {
-      await connectionManager.executeQuery(addition.sql);
-    }
-  }
-}
-
 export async function ensureArcgisImportTables(schema: string): Promise<void> {
   if (verifiedArcgisImportSchemas.has(schema)) return;
 
@@ -189,7 +142,6 @@ export async function ensureArcgisImportTables(schema: string): Promise<void> {
     )
   );
 
-  await ensureArcgisImportSessionColumns(connectionManager, schema);
   verifiedArcgisImportSchemas.add(schema);
 }
 
