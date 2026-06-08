@@ -43,6 +43,27 @@ describe('readArcgisWorkbook', () => {
     expect(trees[0].notes).toBeNull();
   });
 
+  it('drops an all-empty-string data row so it never becomes a spurious all-null failure downstream (exceljs reader is intentionally stricter than the old xlsx object-mode, which would have kept it as an all-null row)', async () => {
+    // Trees sheet: a valid header, one populated row, then one row whose every cell is an explicit
+    // empty string. The old xlsx sheet_to_json({defval:null, raw:true}) object-mode would have emitted
+    // the empty-string row as an all-null object; the exceljs reader must DROP it. This contract exists
+    // so a future refactor cannot silently flip back to manufacturing a phantom all-null failure row.
+    const populatedTreeRow = ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA'];
+    const allEmptyStringTreeRow = TREE_HEADER.map(() => '');
+    const buffer = await buildWorkbook({
+      trees: [TREE_HEADER, populatedTreeRow, allEmptyStringTreeRow],
+      stems: [STEM_HEADER, ['G1', 'S1', 'A25', '100', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
+    });
+
+    const { trees } = await readArcgisWorkbook(buffer);
+
+    // Only the populated row survives; the all-empty-string row is dropped (not emitted as all-null).
+    expect(trees).toHaveLength(1);
+    expect(trees[0].GlobalID).toBe('G1');
+    expect(trees[0].lx).toBe('5.1');
+    expect(trees[0].ly).toBe('6.2');
+  });
+
   it('throws MissingSheetError when no stems sheet exists', async () => {
     const buffer = await buildWorkbook({ trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', '', 46036, '5.1', '6.2', 'M', '']] });
     await expect(readArcgisWorkbook(buffer)).rejects.toThrow(MissingSheetError);

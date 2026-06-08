@@ -69,7 +69,11 @@ function parseSheet(worksheet: ExcelJS.Worksheet): ParsedSheet {
       if (value !== null && value !== '') hasValue = true;
       normalized[key] = value === undefined || value === '' ? null : value;
     }
-    if (hasValue) rows.push(normalized); // matches xlsx blankrows:false — drop fully empty rows
+    // Intentionally drop rows whose every mapped cell is null/empty-string. This is STRICTER than the
+    // old xlsx sheet_to_json({defval:null, raw:true}) object-mode, which kept a row of explicit
+    // empty-string cells and emitted it as an all-null row; we drop that too so it never becomes a
+    // spurious all-null failure row downstream.
+    if (hasValue) rows.push(normalized);
   }
 
   return { name: worksheet.name, columns: keys, rows };
