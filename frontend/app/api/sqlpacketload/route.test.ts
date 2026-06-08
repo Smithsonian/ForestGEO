@@ -26,22 +26,6 @@ const { requireUploadSessionOwnershipMock, MockUploadSessionOwnershipError } = v
   };
 });
 
-const { loadArcgisImportRowsMock, MockArcgisImportSessionError } = vi.hoisted(() => {
-  class MockArcgisImportSessionError extends Error {
-    status: number;
-
-    constructor(message: string, status: number = 400) {
-      super(message);
-      this.status = status;
-    }
-  }
-
-  return {
-    loadArcgisImportRowsMock: vi.fn(),
-    MockArcgisImportSessionError
-  };
-});
-
 vi.mock('@/config/connectionmanager', () => {
   const executeQuery = vi.fn();
   const beginTransaction = vi.fn().mockResolvedValue('tx-test');
@@ -83,11 +67,6 @@ vi.mock('@/config/uploadsessiontracker', () => ({
     INITIALIZED: 'initialized',
     UPLOADING: 'uploading'
   }
-}));
-
-vi.mock('@/lib/arcgis/import-session', () => ({
-  loadArcgisImportRows: loadArcgisImportRowsMock,
-  ArcgisImportSessionError: MockArcgisImportSessionError
 }));
 
 vi.mock('@/config/measurementerrors', () => ({
@@ -206,27 +185,6 @@ describe('sqlpacketload measurement scope validation', () => {
     getCookieMock.mockResolvedValue(undefined);
     requireUploadSessionOwnershipMock.mockResolvedValue(undefined);
     resetTemporaryMeasurementsSourceFormatColumnCacheForTests();
-    loadArcgisImportRowsMock.mockResolvedValue({
-      rows: [
-        {
-          tag: 'ARCGIS-100',
-          stemtag: '1',
-          spcode: 'QURU',
-          quadrat: 'A1',
-          lx: '10',
-          ly: '20',
-          dbh: '5',
-          hom: '1.3',
-          date: '2026-01-14',
-          codes: '',
-          comments: ''
-        }
-      ],
-      rowCount: 1,
-      fileName: 'arcgis-export.xlsx',
-      summary: { totalRows: 1 },
-      warnings: []
-    });
     mockConnectionManager.beginTransaction.mockResolvedValue('tx-test');
     mockConnectionManager.commitTransaction.mockResolvedValue(undefined);
     mockConnectionManager.rollbackTransaction.mockResolvedValue(undefined);
@@ -322,62 +280,6 @@ describe('sqlpacketload measurement scope validation', () => {
     );
     expect(insertCall).toBeDefined();
     expect(insertCall[1].slice(0, 6)).toEqual([TEST_FILE_NAME, TEST_BATCH_ID, TEST_SESSION_ID, 'csv', TEST_PLOT_ID, TEST_CENSUS_ID]);
-  });
-
-  it('hydrates ArcGIS measurement rows from the server import session instead of trusting fileRowSet', async () => {
-    mockConnectionManager.executeQuery
-      .mockResolvedValueOnce([{ PlotID: TEST_PLOT_ID }])
-      .mockResolvedValueOnce([{ distinctPlotCount: 0, distinctCensusCount: 0, plotID: null, censusID: null }])
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ count: 0 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce({ affectedRows: 0 })
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(undefined);
-
-    const res = (await POST(
-      makeMeasurementRequest({
-        sourceFormat: 'arcgis_xlsx',
-        fileName: 'arcgis-export.xlsx',
-        arcgisImportSessionId: 'arcgis-session-1',
-        arcgisRowOffset: 0,
-        arcgisRowLimit: 1000,
-        fileRowSet: {
-          'row-1': {
-            tag: 'CLIENT-SPOOF',
-            stemtag: '9',
-            spcode: 'FAKE',
-            quadrat: 'ZZZ',
-            lx: '999',
-            ly: '999',
-            date: '1900-01-01'
-          }
-        }
-      })
-    ))!;
-
-    expect(res.status).toBe(200);
-    expect(loadArcgisImportRowsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        importSessionId: 'arcgis-session-1',
-        plotID: TEST_PLOT_ID,
-        censusID: TEST_CENSUS_ID,
-        userId: 'user-1',
-        fileName: 'arcgis-export.xlsx',
-        offset: 0,
-        limit: 1000
-      })
-    );
-
-    const insertCall = mockConnectionManager.executeQuery.mock.calls.find((call: any[]) =>
-      String(call[0]).includes('INSERT IGNORE INTO forestgeo_testing.temporarymeasurements')
-    );
-    expect(insertCall).toBeDefined();
-    expect(insertCall[1].slice(0, 6)).toEqual(['arcgis-export.xlsx', TEST_BATCH_ID, TEST_SESSION_ID, 'arcgis_xlsx', TEST_PLOT_ID, TEST_CENSUS_ID]);
-    expect(insertCall[1]).toContain('ARCGIS-100');
-    expect(insertCall[1]).not.toContain('CLIENT-SPOOF');
   });
 
   it('rejects measurement uploads when the upload session does not own the scope', async () => {

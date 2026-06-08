@@ -18,8 +18,7 @@ import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessi
 import { normalizeUploadMode, UploadMode } from '@/config/uploadmodes';
 import { FamilyResult, GenusResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { RoleResult } from '@/config/sqlrdsdefinitions/personnel';
-import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
-import { ArcgisImportSessionError, loadArcgisImportRows } from '@/lib/arcgis/import-session';
+import { requireSession } from '@/lib/auth-helpers';
 import {
   buildDroppedMeasurementFailureReason,
   cleanupPreviousFileUploads,
@@ -68,18 +67,10 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-const MAX_ARCGIS_IMPORT_CHUNK_SIZE = 5000;
-
 function toPositiveInteger(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function toNonNegativeInteger(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function buildMeasurementScopeErrorResponse(status: HTTPResponses, message: string, details: Record<string, unknown>): NextResponse {
@@ -758,7 +749,7 @@ export async function POST(request: NextRequest) {
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const user: string = body.user;
-  let fileRowSet: FileRowSet = body.fileRowSet ?? {};
+  const fileRowSet: FileRowSet = body.fileRowSet ?? {};
   const fileName: string = body.fileName;
   let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
@@ -766,7 +757,7 @@ export async function POST(request: NextRequest) {
   const maxRetries = 3;
   let retryCount = 0;
   if (formType === 'measurements') {
-    let chunkRows = Object.values(fileRowSet ?? {});
+    const chunkRows = Object.values(fileRowSet ?? {});
     const batchID = body.batchID || generateShortBatchID();
     const sessionId = request.headers.get('x-upload-session-id');
     let scopeValidation: Awaited<ReturnType<typeof validateMeasurementUploadScope>>;
@@ -812,70 +803,6 @@ export async function POST(request: NextRequest) {
         );
       }
       throw error;
-    }
-
-    if (sourceFormat === SourceFormat.arcgis_xlsx) {
-      const authenticatedUserId = getSessionUserId(session!);
-      const importSessionId =
-        typeof body.arcgisImportSessionId === 'string' && body.arcgisImportSessionId.trim() !== '' ? body.arcgisImportSessionId.trim() : null;
-      const arcgisRowOffset = toNonNegativeInteger(body.arcgisRowOffset);
-      const arcgisRowLimit = toPositiveInteger(body.arcgisRowLimit);
-
-      if (!authenticatedUserId) {
-        return new NextResponse(JSON.stringify({ responseMessage: 'Missing authenticated user identifier' }), { status: HTTPResponses.UNAUTHORIZED });
-      }
-      if (!importSessionId || arcgisRowOffset === null || arcgisRowLimit === null || arcgisRowLimit > MAX_ARCGIS_IMPORT_CHUNK_SIZE) {
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: 'Invalid ArcGIS import chunk request',
-            error: `ArcGIS uploads require importSessionId, non-negative row offset, and row limit <= ${MAX_ARCGIS_IMPORT_CHUNK_SIZE}`
-          }),
-          { status: HTTPResponses.INVALID_REQUEST }
-        );
-      }
-
-      try {
-        const loadedImportRows = await loadArcgisImportRows({
-          schema,
-          importSessionId,
-          plotID: resolvedPlotID,
-          censusID: resolvedCensusID,
-          userId: authenticatedUserId,
-          fileName,
-          offset: arcgisRowOffset,
-          limit: arcgisRowLimit
-        });
-        chunkRows = loadedImportRows.rows;
-        fileRowSet = {};
-        chunkRows.forEach((row, index) => {
-          fileRowSet[`row-${arcgisRowOffset + index}`] = row;
-        });
-      } catch (error: unknown) {
-        if (error instanceof ArcgisImportSessionError) {
-          return new NextResponse(
-            JSON.stringify({
-              responseMessage: 'Invalid ArcGIS import session',
-              error: error.message,
-              fileName,
-              batchID
-            }),
-            { status: error.status }
-          );
-        }
-        throw error;
-      }
-
-      if (chunkRows.length === 0) {
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: 'ArcGIS import chunk is empty',
-            error: 'Requested ArcGIS import row range produced no rows',
-            fileName,
-            batchID
-          }),
-          { status: HTTPResponses.INVALID_REQUEST }
-        );
-      }
     }
 
     const rowCount = chunkRows.length;

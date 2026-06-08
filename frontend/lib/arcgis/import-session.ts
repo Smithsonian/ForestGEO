@@ -24,25 +24,6 @@ interface CreateArcgisImportSessionInput {
   result: TransformResult;
 }
 
-interface LoadArcgisImportRowsInput {
-  schema: string;
-  importSessionId: string;
-  plotID: number;
-  censusID: number;
-  userId: string;
-  fileName: string;
-  offset: number;
-  limit: number;
-}
-
-export interface LoadedArcgisImportRows {
-  rows: FileRow[];
-  rowCount: number;
-  fileName: string;
-  summary: TransformSummary;
-  warnings: TransformWarning[];
-}
-
 interface ArcgisSessionScope {
   userId: string;
   plotID: number;
@@ -180,58 +161,6 @@ export async function createArcgisImportSession(input: CreateArcgisImportSession
   });
 
   return { importSessionId, fileName: input.fileName, rowCount };
-}
-
-export async function loadArcgisImportRows(input: LoadArcgisImportRowsInput): Promise<LoadedArcgisImportRows> {
-  await ensureArcgisImportTables(input.schema);
-
-  const connectionManager = ConnectionManager.getInstance();
-  const sessionSQL = format(
-    `SELECT import_session_id, plot_id, census_id, user_id, file_id, row_count, summary_json, warnings_json, state
-     FROM ??.arcgis_import_sessions
-     WHERE import_session_id = ?
-     LIMIT 1`,
-    [input.schema]
-  );
-  const sessionRows = await connectionManager.executeQuery(sessionSQL, [input.importSessionId]);
-  const session = Array.isArray(sessionRows) ? sessionRows[0] : null;
-
-  assertUploadableArcgisSession(session, {
-    userId: input.userId,
-    plotID: input.plotID,
-    censusID: input.censusID,
-    fileName: input.fileName
-  });
-
-  const rowsSQL = format(
-    `SELECT row_json
-     FROM ??.arcgis_import_rows
-     WHERE import_session_id = ?
-       AND row_index >= ?
-     ORDER BY row_index ASC
-     LIMIT ?`,
-    [input.schema]
-  );
-  const rowRecords = await connectionManager.executeQuery(rowsSQL, [input.importSessionId, input.offset, input.limit]);
-  const rows = (Array.isArray(rowRecords) ? rowRecords : []).map((row: { row_json: unknown }) => parseJsonColumn<FileRow>(row.row_json, {} as FileRow));
-
-  return {
-    rows,
-    rowCount: Number(session.row_count),
-    fileName: session.file_id,
-    summary: parseJsonColumn<TransformSummary>(session.summary_json, {
-      treesTransformed: 0,
-      stemsJoined: 0,
-      blankQuadratCount: 0,
-      tagMismatchCount: 0,
-      orphanStemsEmitted: 0,
-      duplicateTreeTags: 0,
-      duplicateGlobalIds: 0,
-      missingRequired: 0,
-      totalRows: Number(session.row_count) || 0
-    }),
-    warnings: parseJsonColumn<TransformWarning[]>(session.warnings_json, [])
-  };
 }
 
 export async function loadStagedArcgisSession(input: {

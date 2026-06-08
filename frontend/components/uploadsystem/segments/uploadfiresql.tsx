@@ -35,12 +35,6 @@ import { abortChunkProcessingAfterPermanentUploadFailure, shouldTimeoutPausedPar
 import { generateShortBatchID } from '@/config/utils';
 import { useBackgroundValidation } from '@/app/hooks/usebackgroundvalidation';
 
-interface SqlUploadOptions {
-  arcgisImportSessionId?: string;
-  arcgisRowOffset?: number;
-  arcgisRowLimit?: number;
-}
-
 function createAbortError(message: string): Error {
   const error = new Error(message);
   error.name = 'AbortError';
@@ -512,7 +506,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, processed, completedChunks, processedChunks, verificationStep, uploaded, totalChunks, totalBatches, isVerifying, totalVerificationSteps]);
 
   const uploadToSql = useCallback(
-    async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0, options: SqlUploadOptions = {}) => {
+    async (fileData: FileCollectionRowSet, fileName: string, batchID?: string, _retryCount = 0) => {
       if (!isMountedRef.current) {
         throw createAbortError(`Upload cancelled before starting ${fileName}`);
       }
@@ -550,13 +544,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 census: currentCensus,
                 user: session?.user?.name ?? null,
                 fileRowSet: fileData[fileName] ?? {},
-                ...(options.arcgisImportSessionId
-                  ? {
-                      arcgisImportSessionId: options.arcgisImportSessionId,
-                      arcgisRowOffset: options.arcgisRowOffset,
-                      arcgisRowLimit: options.arcgisRowLimit
-                    }
-                  : {}),
                 ...(batchID ? { batchID } : {})
               })
             },
