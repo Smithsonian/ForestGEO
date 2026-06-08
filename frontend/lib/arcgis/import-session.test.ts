@@ -21,6 +21,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.NOT_FOUND);
+      expect((e as ArcgisImportSessionError).message).toContain('not found');
     }
   });
 
@@ -31,6 +32,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.FORBIDDEN);
+      expect((e as ArcgisImportSessionError).message).toContain('belong');
     }
   });
 
@@ -41,6 +43,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.CONFLICT);
+      expect((e as ArcgisImportSessionError).message).toContain('scope');
     }
   });
 
@@ -51,6 +54,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.CONFLICT);
+      expect((e as ArcgisImportSessionError).message).toContain('scope');
     }
   });
 
@@ -61,6 +65,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.CONFLICT);
+      expect((e as ArcgisImportSessionError).message).toContain('file');
     }
   });
 
@@ -71,6 +76,7 @@ describe('assertUploadableArcgisSession', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(ArcgisImportSessionError);
       expect((e as ArcgisImportSessionError).status).toBe(HTTPResponses.CONFLICT);
+      expect((e as ArcgisImportSessionError).message).toContain('uploadable');
     }
   });
 });

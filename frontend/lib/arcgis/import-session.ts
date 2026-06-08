@@ -74,7 +74,7 @@ export function assertUploadableArcgisSession(session: ArcgisSessionRow | null, 
   if (session.file_id !== scope.fileName) {
     throw new ArcgisImportSessionError('ArcGIS import session file does not match the requested file.', HTTPResponses.CONFLICT);
   }
-  if (!['preflight', 'committing'].includes(String(session.state))) {
+  if (!['preflight', 'committing'].includes(session.state)) {
     throw new ArcgisImportSessionError(`ArcGIS import session is not uploadable from state "${session.state}".`, HTTPResponses.CONFLICT);
   }
 }
