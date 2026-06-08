@@ -706,6 +706,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       if (!response.ok) {
         throw await buildClientResponseError(response, `committing ArcGIS import for ${file.name}`);
       }
+      const payload = (await response.json()) as { rowCount?: number; alreadyCommitted?: boolean };
+      const committedTemporaryRows = Number.isFinite(Number(payload.rowCount)) ? Number(payload.rowCount) : stagedRowCount;
+      expectedTemporaryRowCounts.current.set(file.name, committedTemporaryRows);
+      if (payload.alreadyCommitted) {
+        ailogger.info(`ArcGIS import session ${arcgisImportSession.importSessionId} was already committed; continuing idempotently.`);
+      }
       if (isMountedRef.current) setCompletedChunks(prev => prev + 1);
     },
     [

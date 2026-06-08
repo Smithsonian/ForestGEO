@@ -36,6 +36,9 @@ const sharedState = vi.hoisted(() => ({
   activeTransactionID: null as string | null,
   transactionCounter: 0
 }));
+const uploadSessionState = vi.hoisted((): { requireOwnership: (...args: unknown[]) => Promise<{ sessionId: string }> } => ({
+  requireOwnership: async () => ({ sessionId: 'mock-upload-session' })
+}));
 
 // Auth mock — 'global' role lets assertCanEditMeasurementScope pass the
 // schema-access check (it still verifies plot/census exist against the DB).
@@ -115,13 +118,13 @@ vi.mock('@/ailogger', () => ({
 }));
 
 // requireUploadSessionOwnership / getSession open their own pool connection
-// (real Azure DB) — short-circuit ownership to a no-op so the commit route's
-// upload-session guard is satisfied without an external session row.
+// (real Azure DB). Delegate to a per-test handler so most integration tests can
+// short-circuit ownership while negative-path tests can force guard failures.
 vi.mock('@/config/uploadsessiontracker', async () => {
   const actual = await vi.importActual<typeof import('@/config/uploadsessiontracker')>('@/config/uploadsessiontracker');
   return {
     ...actual,
-    requireUploadSessionOwnership: async () => ({ sessionId: 'mock-upload-session' })
+    requireUploadSessionOwnership: (...args: unknown[]) => uploadSessionState.requireOwnership(...args)
   };
 });
 
@@ -130,6 +133,7 @@ import { POST as commitPOST } from '@/app/api/arcgis/commit/route';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { UploadMode } from '@/config/uploadmodes';
 import { HTTPResponses } from '@/config/macros';
+import { UploadSessionOwnershipError } from '@/config/uploadsessiontracker';
 
 async function buildWorkbook(sheets: Record<string, unknown[][]>): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
@@ -169,6 +173,7 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
   });
 
   beforeEach(async () => {
+    uploadSessionState.requireOwnership = async () => ({ sessionId: 'mock-upload-session' });
     await cleanupTestMeasurements(connection, testData);
   });
 
@@ -395,6 +400,164 @@ describe('ArcGIS xlsx import (end-to-end)', () => {
     ]);
     return Number(rows[0].total);
   }
+
+  async function getImportSession(importSessionId: string): Promise<RowDataPacket> {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT state, committed_file_id, committed_batch_id, committed_upload_session_id, committed_row_count, committed_at
+         FROM arcgis_import_sessions
+        WHERE import_session_id = ?`,
+      [importSessionId]
+    );
+    expect(rows).toHaveLength(1);
+    return rows[0];
+  }
+
+  it('commits ArcGIS rows through the normal bulk ingestion procedure after server-side staging', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-process-${Date.now()}.xlsx` });
+    const batchID = `arcgis_process_${Date.now()}`;
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-process'
+      )
+    );
+    expect(response.status).toBe(HTTPResponses.OK);
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const ingestion = await runBulkIngestion(connection, seeded.fileName, batchID);
+    expect(ingestion.batch_failed).toBe(false);
+
+    const [coreRows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total
+         FROM coremeasurements
+        WHERE UploadFileID = ? AND UploadBatchID = ?`,
+      [seeded.fileName, batchID]
+    );
+    expect(Number(coreRows[0].total)).toBe(seeded.stagedRowCount);
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+  });
+
+  it('treats an exact same-batch commit replay as idempotent and does not duplicate rows or changelog metadata', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-idempotent-${Date.now()}.xlsx` });
+    const batchID = `arcgis_idempotent_${Date.now()}`;
+    const body = {
+      schema: seeded.schema,
+      plotID: seeded.plotID,
+      censusID: seeded.censusID,
+      importSessionId: seeded.importSessionId,
+      fileName: seeded.fileName,
+      batchID,
+      uploadMode: UploadMode.REVISIONS
+    };
+
+    const first = await commitPOST(buildCommitRequest(body, 'upload-session-arcgis-idem-1'));
+    expect(first.status).toBe(HTTPResponses.OK);
+    expect((await first.json()) as { alreadyCommitted?: boolean }).toMatchObject({ alreadyCommitted: false });
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const second = await commitPOST(buildCommitRequest(body, 'upload-session-arcgis-idem-2'));
+    expect(second.status).toBe(HTTPResponses.OK);
+    const replayPayload = (await second.json()) as { rowCount: number; alreadyCommitted: boolean };
+    expect(replayPayload).toMatchObject({ rowCount: seeded.stagedRowCount, alreadyCommitted: true });
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(seeded.stagedRowCount);
+
+    const sessionRow = await getImportSession(seeded.importSessionId);
+    expect(sessionRow.state).toBe('committed');
+    expect(sessionRow.committed_batch_id).toBe(batchID);
+    expect(Number(sessionRow.committed_row_count)).toBe(seeded.stagedRowCount);
+    expect(sessionRow.committed_at).toBeTruthy();
+
+    const [changelogRows] = await connection.query<RowDataPacket[]>(
+      `SELECT NewRowState
+         FROM unifiedchangelog
+        WHERE TableName = 'file_upload' AND RecordID = ? AND CensusID = ?`,
+      [seeded.fileName, seeded.censusID]
+    );
+    expect(changelogRows).toHaveLength(1);
+    const metadata = typeof changelogRows[0].NewRowState === 'string' ? JSON.parse(changelogRows[0].NewRowState) : changelogRows[0].NewRowState;
+    expect(metadata.rowCount).toBe(seeded.stagedRowCount);
+    expect(metadata.batchCount).toBe(1);
+  });
+
+  it('rejects a committed ArcGIS import session when replayed with a different BatchID', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-replay-${Date.now()}.xlsx` });
+    const firstBatchID = `arcgis_replay_first_${Date.now()}`;
+    const secondBatchID = `arcgis_replay_second_${Date.now()}`;
+
+    const first = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID: firstBatchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-replay-1'
+      )
+    );
+    expect(first.status).toBe(HTTPResponses.OK);
+    expect(await countStagedRows(seeded.fileName, firstBatchID)).toBe(seeded.stagedRowCount);
+
+    const second = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID: secondBatchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-replay-2'
+      )
+    );
+
+    expect(second.status).toBe(HTTPResponses.CONFLICT);
+    const payload = (await second.json()) as { error: string };
+    expect(payload.error).toContain('already been committed');
+    expect(await countStagedRows(seeded.fileName, secondBatchID)).toBe(0);
+    expect((await getImportSession(seeded.importSessionId)).committed_batch_id).toBe(firstBatchID);
+  });
+
+  it('rejects a commit when the upload-session guard fails and stages no rows', async () => {
+    const seeded = await seedValidStagedSession({ fileName: `arcgis-upload-session-${Date.now()}.xlsx` });
+    const batchID = `arcgis_guard_${Date.now()}`;
+    uploadSessionState.requireOwnership = async () => {
+      throw new UploadSessionOwnershipError('Upload session does not own this ArcGIS commit', HTTPResponses.CONFLICT);
+    };
+
+    const response = await commitPOST(
+      buildCommitRequest(
+        {
+          schema: seeded.schema,
+          plotID: seeded.plotID,
+          censusID: seeded.censusID,
+          importSessionId: seeded.importSessionId,
+          fileName: seeded.fileName,
+          batchID,
+          uploadMode: UploadMode.REVISIONS
+        },
+        'upload-session-arcgis-guard-fail'
+      )
+    );
+
+    expect(response.status).toBe(HTTPResponses.CONFLICT);
+    expect(await countStagedRows(seeded.fileName, batchID)).toBe(0);
+    expect((await getImportSession(seeded.importSessionId)).state).toBe('preflight');
+  });
 
   it('rejects a commit when the staged session belongs to a DIFFERENT user (403 FORBIDDEN) and stages no rows', async () => {
     // The auth mock authenticates as AUTH_USER_EMAIL, so the resolved scope.userId

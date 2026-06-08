@@ -11,7 +11,12 @@ import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editpl
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { requireUploadSessionOwnership, UploadSessionOwnershipError, UploadSessionState as TrackedUploadSessionState } from '@/config/uploadsessiontracker';
-import { ArcgisImportSessionError, loadStagedArcgisSession } from '@/lib/arcgis/import-session';
+import {
+  ArcgisImportSessionError,
+  claimArcgisImportSessionForCommit,
+  ensureArcgisImportTables,
+  markArcgisImportSessionCommitted
+} from '@/lib/arcgis/import-session';
 import {
   buildDroppedMeasurementFailureReason,
   cleanupPreviousFileUploads,
@@ -67,10 +72,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     !Number.isSafeInteger(censusID) ||
     censusID <= 0 ||
     !importSessionId ||
-    !batchID
+    !batchID ||
+    !requestedFileName
   ) {
     return NextResponse.json(
-      { error: 'Missing or invalid parameters: schema, plotID, censusID, importSessionId, batchID' },
+      { error: 'Missing or invalid parameters: schema, plotID, censusID, importSessionId, batchID, fileName' },
       { status: HTTPResponses.INVALID_REQUEST }
     );
   }
@@ -79,7 +85,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
-    await requireUploadSessionOwnership({
+    const uploadSession = await requireUploadSessionOwnership({
       schema,
       sessionId,
       plotId: plotID,
@@ -88,19 +94,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contextLabel: `arcgis commit for session ${importSessionId}`
     });
 
-    // This endpoint intentionally does not transition arcgis_import_sessions.state to committed: the import-session state
-    // machine (committing/committed/abandoned) is a separately-scoped follow-up, and createArcgisImportSession already
-    // garbage-collects stale preflight sessions on the next preflight, so the absence of a state write here is deliberate.
-    const staged = await loadStagedArcgisSession({ schema, importSessionId, plotID, censusID, userId, fileName: requestedFileName });
-    const fileName = staged.fileName;
-    if (staged.rows.length === 0) {
-      return NextResponse.json({ error: 'ArcGIS import session contains no rows' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });
-    }
-
+    await ensureArcgisImportTables(schema);
     await ensureTemporaryMeasurementsSourceFormatColumn(connectionManager, schema);
 
     let insertedCount = 0;
+    let fileName = requestedFileName;
+    let alreadyCommitted = false;
     await connectionManager.withTransaction(async transactionID => {
+      const staged = await claimArcgisImportSessionForCommit(
+        {
+          schema,
+          importSessionId,
+          plotID,
+          censusID,
+          userId,
+          fileName: requestedFileName,
+          batchID,
+          uploadSessionID: uploadSession.sessionId ?? sessionId
+        },
+        transactionID
+      );
+      fileName = staged.fileName;
+      if (staged.alreadyCommitted) {
+        insertedCount = staged.rowCount;
+        alreadyCommitted = true;
+        return;
+      }
+
+      if (staged.rows.length === 0) {
+        throw new ArcgisImportSessionError('ArcGIS import session contains no rows', HTTPResponses.UNPROCESSABLE_ENTITY);
+      }
+
       const countSQL = format(`SELECT COUNT(*) as count FROM ??.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [schema]);
       const preInsertResult = await connectionManager.executeQuery(countSQL, [fileName, batchID], transactionID);
       const preInsertCount = preInsertResult[0]?.count || 0;
@@ -234,9 +258,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const updateChangelogSQL = format(`UPDATE ??.unifiedchangelog SET NewRowState = ?, ChangeTimestamp = NOW() WHERE ChangeID = ?`, [schema]);
         await connectionManager.executeQuery(updateChangelogSQL, [JSON.stringify(metadata), existingEntry[0].ChangeID], transactionID);
       }
+
+      await markArcgisImportSessionCommitted({ schema, importSessionId, insertedRowCount: insertedCount }, transactionID);
     });
 
-    return NextResponse.json({ rowCount: insertedCount, fileName }, { status: HTTPResponses.OK });
+    return NextResponse.json({ rowCount: insertedCount, fileName, alreadyCommitted }, { status: HTTPResponses.OK });
   } catch (error: unknown) {
     if (error instanceof ArcgisImportSessionError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
