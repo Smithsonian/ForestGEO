@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { POST, resetTemporaryMeasurementsSourceFormatColumnCacheForTests } from './route';
+import { POST } from './route';
 import ConnectionManager from '@/config/connectionmanager';
 import { insertIngestionFailureRows } from '@/config/measurementerrors';
+import { resetTemporaryMeasurementsSourceFormatColumnCacheForTests, TEMP_MEASUREMENT_INSERT_BATCH_SIZE } from '@/lib/ingestion/temporary-measurements';
 
 const { getCookieMock, authMock, handleUpsertMock } = vi.hoisted(() => ({
   getCookieMock: vi.fn(),
@@ -114,9 +115,6 @@ vi.mock('mysql2/promise', () => ({
     return result;
   })
 }));
-
-/** Must match TEMP_MEASUREMENT_INSERT_BATCH_SIZE in route.ts */
-const TEMP_MEASUREMENT_INSERT_BATCH_SIZE = 1000;
 
 /** Number of columns in the temporarymeasurements INSERT (FileID through Comments) */
 const TEMP_MEASUREMENT_COLUMNS_PER_ROW = 17;

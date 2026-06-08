@@ -27,11 +27,8 @@ import {
   ensureTemporaryMeasurementsSourceFormatColumn,
   findDroppedMeasurementCandidates,
   insertTemporaryMeasurementsInBatches,
-  resetTemporaryMeasurementsSourceFormatColumnCacheForTests,
   type DroppedMeasurementRow
 } from '@/lib/ingestion/temporary-measurements';
-
-export { resetTemporaryMeasurementsSourceFormatColumnCacheForTests };
 
 /**
  * Generate idempotency key for a batch of data
