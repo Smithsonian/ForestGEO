@@ -7,9 +7,12 @@ import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editpl
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
-import { readArcgisWorkbook } from '@/lib/arcgis/workbook-reader';
+import { describeArcgisWorkbook, readArcgisWorkbook } from '@/lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
+import { SourceFormat } from '@/config/macros/formdetails';
+import { seedMapping, validateMapping } from '@/lib/column-mapping/mapping';
+import type { ArcgisSourceMetadata, ColumnMapping } from '@/lib/column-mapping/types';
 
 export const runtime = 'nodejs';
 
@@ -77,11 +80,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const mappingRaw = formData.get('mapping');
+  let mapping: ColumnMapping | undefined;
+  if (typeof mappingRaw === 'string' && mappingRaw.length > 0) {
+    try {
+      mapping = JSON.parse(mappingRaw);
+    } catch {
+      return NextResponse.json({ error: 'Invalid mapping payload.' }, { status: HTTPResponses.INVALID_REQUEST });
+    }
+  }
+
   try {
     const connectionManager = ConnectionManager.getInstance();
     await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
 
-    const workbook = await readArcgisWorkbook(await file.arrayBuffer());
+    let workbook;
+    try {
+      workbook = await readArcgisWorkbook(await file.arrayBuffer(), mapping);
+    } catch (error: unknown) {
+      if (error instanceof MissingSheetError || error instanceof MissingColumnError || error instanceof AmbiguousSheetError) {
+        const described = await describeArcgisWorkbook(await file.arrayBuffer());
+        const metadata: ArcgisSourceMetadata = {
+          format: SourceFormat.arcgis_xlsx,
+          sheets: described.sheets,
+          detectedTreesSheet: mapping?.sheetRoles?.treesSheetName,
+          detectedStemsSheet: mapping?.sheetRoles?.stemsSheetName
+        };
+        const seeded = mapping ?? seedMapping(metadata);
+        const validation = validateMapping(seeded, metadata);
+        return NextResponse.json(
+          {
+            error: (error as Error).message,
+            mappingRequired: true,
+            format: SourceFormat.arcgis_xlsx,
+            sheets: described.sheets,
+            missingRequired: validation.missingRequired,
+            missingSheetRoles: validation.missingSheetRoles ?? []
+          },
+          { status: HTTPResponses.INVALID_REQUEST }
+        );
+      }
+      throw error;
+    }
+
     const result = transformArcgisWorkbook(workbook);
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'ArcGIS workbook did not produce any measurement rows' }, { status: HTTPResponses.UNPROCESSABLE_ENTITY });

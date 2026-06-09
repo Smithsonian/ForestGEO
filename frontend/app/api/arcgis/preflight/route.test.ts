@@ -1,0 +1,140 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
+  requireSession: vi.fn(() => null),
+  getSessionUserId: vi.fn(() => 'user-1'),
+  assertCanEditMeasurementScope: vi.fn(async () => undefined),
+  isValidSchema: vi.fn(() => true),
+  readArcgisWorkbook: vi.fn(),
+  describeArcgisWorkbook: vi.fn(),
+  transformArcgisWorkbook: vi.fn(),
+  createArcgisImportSession: vi.fn(),
+  loggerError: vi.fn()
+}));
+
+vi.mock('@/auth', () => ({ auth: mocks.auth }));
+vi.mock('@/lib/auth-helpers', () => ({
+  requireSession: mocks.requireSession,
+  getSessionUserId: mocks.getSessionUserId
+}));
+vi.mock('@/config/editplan/scopeguard', () => ({
+  assertCanEditMeasurementScope: mocks.assertCanEditMeasurementScope,
+  ScopeAccessError: class ScopeAccessError extends Error {}
+}));
+vi.mock('@/config/utils/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
+vi.mock('@/lib/arcgis/workbook-reader', () => ({
+  readArcgisWorkbook: mocks.readArcgisWorkbook,
+  describeArcgisWorkbook: mocks.describeArcgisWorkbook
+}));
+vi.mock('@/lib/arcgis/transform', () => ({ transformArcgisWorkbook: mocks.transformArcgisWorkbook }));
+vi.mock('@/lib/arcgis/import-session', () => ({ createArcgisImportSession: mocks.createArcgisImportSession }));
+vi.mock('@/config/connectionmanager', () => ({
+  default: { getInstance: () => ({}) }
+}));
+vi.mock('@/ailogger', () => ({ default: { error: mocks.loggerError } }));
+
+import { POST } from './route';
+import { MissingColumnError, UnparseableDateError } from '@/lib/arcgis/errors';
+
+const DESCRIBED_SHEETS = [
+  { name: 'TreesCustom', columns: ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'] },
+  { name: 'StemsCustom', columns: ['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'] }
+];
+
+// jsdom's File lacks Blob.arrayBuffer(); the route calls it before reading the workbook.
+if (typeof File.prototype.arrayBuffer !== 'function') {
+  File.prototype.arrayBuffer = async function arrayBuffer(this: File): Promise<ArrayBuffer> {
+    return new ArrayBuffer(this.size);
+  };
+}
+
+function formRequest(fields: Record<string, string>, withFile = true) {
+  const fd = new FormData();
+  if (withFile) fd.append('file', new File([new Uint8Array([1, 2, 3])], 'x.xlsx'));
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  const request = new Request('http://t/api/arcgis/preflight', { method: 'POST' });
+  // jsdom's Request does not round-trip multipart bodies; stub formData() like the other route tests.
+  (request as unknown as { formData: () => Promise<FormData> }).formData = async () => fd;
+  return request;
+}
+
+describe('POST /api/arcgis/preflight mapping', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireSession.mockReturnValue(null);
+    mocks.getSessionUserId.mockReturnValue('user-1');
+    mocks.isValidSchema.mockReturnValue(true);
+    mocks.auth.mockResolvedValue({ user: { email: 'user@example.com' } });
+  });
+
+  it('returns mappingRequired metadata when detection fails and no mapping was provided', async () => {
+    mocks.readArcgisWorkbook.mockRejectedValue(new MissingColumnError('Trees sheet missing lx, ly.'));
+    mocks.describeArcgisWorkbook.mockResolvedValue({ sheets: DESCRIBED_SHEETS });
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.mappingRequired).toBe(true);
+    expect(body.format).toBe('arcgis_xlsx');
+    expect(body.sheets).toHaveLength(2);
+    expect(body.missingRequired).toContain('lx');
+    expect(body.missingSheetRoles).toEqual(expect.arrayContaining(['trees', 'stems']));
+    expect(mocks.createArcgisImportSession).not.toHaveBeenCalled();
+  });
+
+  it('passes a provided mapping into readArcgisWorkbook and stages the session on success', async () => {
+    const mapping = {
+      version: 1,
+      format: 'arcgis_xlsx',
+      fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'trees' }],
+      sheetRoles: { treesSheetName: 'TreesCustom', stemsSheetName: 'StemsCustom' }
+    };
+    mocks.readArcgisWorkbook.mockResolvedValue({ trees: [{}], stems: [] });
+    mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
+    mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-1' });
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1', mapping: JSON.stringify(mapping) }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.importSessionId).toBe('sess-1');
+    expect(mocks.readArcgisWorkbook).toHaveBeenCalledWith(expect.anything(), mapping);
+  });
+
+  it('rejects an unparseable mapping payload without reading the workbook', async () => {
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1', mapping: '{not json' }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/mapping/i);
+    expect(mocks.readArcgisWorkbook).not.toHaveBeenCalled();
+  });
+
+  it('keeps returning a plain error for date parse failures (not a mapping problem)', async () => {
+    mocks.readArcgisWorkbook.mockRejectedValue(new UnparseableDateError('bad date'));
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.mappingRequired).toBeUndefined();
+    expect(body.error).toBe('bad date');
+    expect(mocks.describeArcgisWorkbook).not.toHaveBeenCalled();
+  });
+
+  it('succeeds without mapping when the workbook matches the default schema (unchanged payload)', async () => {
+    mocks.readArcgisWorkbook.mockResolvedValue({ trees: [{}], stems: [{}] });
+    mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
+    mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-2' });
+
+    const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.importSessionId).toBe('sess-2');
+    expect(body.summary).toEqual({ totalRows: 1 });
+    expect(mocks.readArcgisWorkbook).toHaveBeenCalledWith(expect.anything(), undefined);
+  });
+});
