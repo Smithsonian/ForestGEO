@@ -1,12 +1,18 @@
 import ExcelJS from 'exceljs';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError } from './errors';
-import { STEM_SIGNATURE_COLUMN, canonicalFieldFor, normalizeHeader, requiredColumnsForSheet } from './schema';
+import { STEM_SIGNATURE_COLUMN, requiredColumnsForSheet } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook } from './types';
 import type { ColumnMapping } from '@/lib/column-mapping/types';
+import { ARCGIS_RESOLVE_OPTIONS, resolveHeaders } from '@/lib/column-mapping/resolution';
+import { aliasesFor } from '@/lib/column-mapping/fields';
+import { SourceFormat } from '@/config/macros/formdetails';
+
+const ARCGIS_ALIASES = aliasesFor(SourceFormat.arcgis_xlsx);
 
 interface ParsedSheet {
   name: string;
   columns: string[];
+  rawColumns: string[];
   rows: ArcgisRow[];
 }
 
@@ -28,46 +34,20 @@ function normalizeCellValue(value: ExcelJS.CellValue): ArcgisCell {
 }
 
 /**
- * Maps each raw header to its CANONICAL schema field (when one matches a normalized alias) or to its
- * own trimmed text otherwise, so `COD_*`/OBJECTID/etc. survive. Resolution is two-pass so a
- * user-confirmed mapping's source columns ALWAYS claim their canonical keys, regardless of column
- * order; alias detection then only fills keys the mapping left unclaimed (a column the user mapped
- * to another field can never alias-claim). If two headers resolve to the same key within a pass,
- * the FIRST wins and later ones are ignored (no overwrite).
+ * Adapter over the shared resolution plan: ignored columns are not read at all (the column is
+ * absent from keyByRawHeader), preserving the reader's historical drop semantics.
  */
 function buildHeaderMap(rawHeaders: string[], mapping?: ColumnMapping): { keys: string[]; keyByRawHeader: Map<string, string> } {
-  const overrideByNorm = new Map<string, string>();
-  for (const field of mapping?.fields ?? []) {
-    for (const src of field.sourceColumns) overrideByNorm.set(normalizeHeader(src), field.canonicalField);
-  }
-  const keyByRawHeader = new Map<string, string>();
-  const claimed = new Set<string>();
-
-  for (const raw of rawHeaders) {
-    const key = overrideByNorm.get(normalizeHeader(raw.trim()));
-    if (key === undefined || claimed.has(key)) continue;
-    claimed.add(key);
-    keyByRawHeader.set(raw, key);
-  }
-
-  for (const raw of rawHeaders) {
-    if (keyByRawHeader.has(raw)) continue;
-    const trimmed = raw.trim();
-    // A header the mapping assigns elsewhere never falls back to alias/verbatim resolution.
-    if (overrideByNorm.has(normalizeHeader(trimmed))) continue;
-    const key = canonicalFieldFor(trimmed) ?? trimmed;
-    if (claimed.has(key)) continue;
-    claimed.add(key);
-    keyByRawHeader.set(raw, key);
-  }
-
+  const plan = resolveHeaders(rawHeaders, mapping ?? null, ARCGIS_ALIASES, ARCGIS_RESOLVE_OPTIONS);
   const keys: string[] = [];
+  const keyByRawHeader = new Map<string, string>();
   const seen = new Set<string>();
-  for (const raw of rawHeaders) {
-    const key = keyByRawHeader.get(raw);
-    if (key === undefined || seen.has(key)) continue;
-    seen.add(key);
-    keys.push(key);
+  for (const r of plan.resolutions) {
+    if (r.kind === 'ignored') continue;
+    if (seen.has(r.outputKey)) continue; // duplicate raw header strings share the map entry
+    seen.add(r.outputKey);
+    keys.push(r.outputKey);
+    keyByRawHeader.set(r.rawHeader, r.outputKey);
   }
   return { keys, keyByRawHeader };
 }
@@ -80,6 +60,8 @@ function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): Pars
     const value = normalizeCellValue(headerRow.getCell(column).value);
     rawHeaders.push(value === null ? '' : String(value));
   }
+
+  const rawColumns = rawHeaders.map(h => h.trim()).filter(h => h.length > 0);
 
   const { keys, keyByRawHeader } = buildHeaderMap(rawHeaders, mapping);
 
@@ -108,18 +90,10 @@ function parseSheet(worksheet: ExcelJS.Worksheet, mapping?: ColumnMapping): Pars
     if (hasValue) rows.push(normalized);
   }
 
-  return { name: worksheet.name, columns: keys, rows };
+  return { name: worksheet.name, columns: keys, rawColumns, rows };
 }
 
-export async function readArcgisWorkbook(buffer: ArrayBuffer, mapping?: ColumnMapping): Promise<ArcgisWorkbook> {
-  const workbook = new ExcelJS.Workbook();
-  // exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
-  // diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
-  // its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
-  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet, mapping));
-  const sheetRoles = mapping?.sheetRoles;
-
+function selectSheets(sheets: ParsedSheet[], sheetRoles?: ColumnMapping['sheetRoles']): { trees: ParsedSheet; stems: ParsedSheet } {
   let stemsSheet: ParsedSheet;
   if (sheetRoles?.stemsSheetName) {
     const named = sheets.find(s => s.name === sheetRoles.stemsSheetName);
@@ -185,21 +159,38 @@ export async function readArcgisWorkbook(buffer: ArrayBuffer, mapping?: ColumnMa
     treesSheet = treeCandidates[0];
   }
 
-  return { trees: treesSheet.rows, stems: stemsSheet.rows };
+  return { trees: treesSheet, stems: stemsSheet };
 }
 
-/** Enumerate worksheet names and their raw (trimmed) first-row headers without canonicalizing or validating. */
-export async function describeArcgisWorkbook(buffer: ArrayBuffer): Promise<{ sheets: { name: string; columns: string[] }[] }> {
+export interface ArcgisWorkbookSheetInfo {
+  name: string;
+  columns: string[];
+}
+
+export type ArcgisReadOutcome =
+  | { ok: true; workbook: ArcgisWorkbook }
+  | { ok: false; error: MissingSheetError | MissingColumnError | AmbiguousSheetError; sheets: ArcgisWorkbookSheetInfo[] };
+
+export async function readArcgisWorkbookDetailed(buffer: ArrayBuffer, mapping?: ColumnMapping): Promise<ArcgisReadOutcome> {
   const workbook = new ExcelJS.Workbook();
+  // exceljs ships an ambient `declare interface Buffer extends ArrayBuffer {}` that merges with and
+  // diverges from @types/node's Buffer, so neither a node Buffer nor an ArrayBuffer is assignable to
+  // its load() parameter at the type level. load() accepts the raw ArrayBuffer at runtime.
   await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
-  const sheets = workbook.worksheets.map(worksheet => {
-    const headerRow = worksheet.getRow(1);
-    const columns: string[] = [];
-    headerRow.eachCell({ includeEmpty: false }, cell => {
-      const text = String(normalizeCellValue(cell.value) ?? '').trim();
-      if (text.length > 0) columns.push(text);
-    });
-    return { name: worksheet.name, columns };
-  });
-  return { sheets };
+  const sheets = workbook.worksheets.map(worksheet => parseSheet(worksheet, mapping));
+  try {
+    const { trees, stems } = selectSheets(sheets, mapping?.sheetRoles);
+    return { ok: true, workbook: { trees: trees.rows, stems: stems.rows } };
+  } catch (error: unknown) {
+    if (error instanceof MissingSheetError || error instanceof MissingColumnError || error instanceof AmbiguousSheetError) {
+      return { ok: false, error, sheets: sheets.map(s => ({ name: s.name, columns: s.rawColumns })) };
+    }
+    throw error;
+  }
+}
+
+export async function readArcgisWorkbook(buffer: ArrayBuffer, mapping?: ColumnMapping): Promise<ArcgisWorkbook> {
+  const outcome = await readArcgisWorkbookDetailed(buffer, mapping);
+  if (!outcome.ok) throw outcome.error;
+  return outcome.workbook;
 }

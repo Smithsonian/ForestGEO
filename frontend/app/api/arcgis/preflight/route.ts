@@ -7,7 +7,7 @@ import { assertCanEditMeasurementScope, ScopeAccessError } from '@/config/editpl
 import { isValidSchema } from '@/config/utils/sqlsecurity';
 import { getSessionUserId, requireSession } from '@/lib/auth-helpers';
 import { AmbiguousSheetError, MissingColumnError, MissingSheetError, UnparseableDateError } from '@/lib/arcgis/errors';
-import { describeArcgisWorkbook, readArcgisWorkbook } from '@/lib/arcgis/workbook-reader';
+import { readArcgisWorkbookDetailed } from '@/lib/arcgis/workbook-reader';
 import { transformArcgisWorkbook } from '@/lib/arcgis/transform';
 import { createArcgisImportSession } from '@/lib/arcgis/import-session';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -99,34 +99,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const connectionManager = ConnectionManager.getInstance();
     await assertCanEditMeasurementScope(connectionManager, session!, { schema, plotID, censusID });
 
-    let workbook;
-    try {
-      workbook = await readArcgisWorkbook(await file.arrayBuffer(), mapping);
-    } catch (error: unknown) {
-      if (error instanceof MissingSheetError || error instanceof MissingColumnError || error instanceof AmbiguousSheetError) {
-        const described = await describeArcgisWorkbook(await file.arrayBuffer());
-        const metadata: ArcgisSourceMetadata = {
+    const outcome = await readArcgisWorkbookDetailed(await file.arrayBuffer(), mapping);
+    if (!outcome.ok) {
+      const metadata: ArcgisSourceMetadata = {
+        format: SourceFormat.arcgis_xlsx,
+        sheets: outcome.sheets,
+        detectedTreesSheet: mapping?.sheetRoles?.treesSheetName,
+        detectedStemsSheet: mapping?.sheetRoles?.stemsSheetName
+      };
+      const seeded = mapping ?? seedMapping(metadata);
+      const validation = validateMapping(seeded, metadata);
+      return NextResponse.json(
+        {
+          error: outcome.error.message,
+          mappingRequired: true,
           format: SourceFormat.arcgis_xlsx,
-          sheets: described.sheets,
-          detectedTreesSheet: mapping?.sheetRoles?.treesSheetName,
-          detectedStemsSheet: mapping?.sheetRoles?.stemsSheetName
-        };
-        const seeded = mapping ?? seedMapping(metadata);
-        const validation = validateMapping(seeded, metadata);
-        return NextResponse.json(
-          {
-            error: (error as Error).message,
-            mappingRequired: true,
-            format: SourceFormat.arcgis_xlsx,
-            sheets: described.sheets,
-            missingRequired: validation.missingRequired,
-            missingSheetRoles: validation.missingSheetRoles ?? []
-          },
-          { status: HTTPResponses.INVALID_REQUEST }
-        );
-      }
-      throw error;
+          sheets: outcome.sheets,
+          missingRequired: validation.missingRequired,
+          missingSheetRoles: validation.missingSheetRoles ?? []
+        },
+        { status: HTTPResponses.INVALID_REQUEST }
+      );
     }
+    const workbook = outcome.workbook;
 
     const result = transformArcgisWorkbook(workbook);
     if (result.rows.length === 0) {

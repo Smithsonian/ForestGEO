@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
-import { describeArcgisWorkbook, readArcgisWorkbook } from './workbook-reader';
+import { readArcgisWorkbook, readArcgisWorkbookDetailed } from './workbook-reader';
 import { transformArcgisWorkbook } from './transform';
 import { AmbiguousSheetError, MissingSheetError, MissingColumnError } from './errors';
 import { SourceFormat } from '@/config/macros/formdetails';
@@ -274,16 +274,35 @@ describe('readArcgisWorkbook', () => {
 const CUSTOM_TREE_HEADER = ['GlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'];
 const CUSTOM_STEM_HEADER = ['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'];
 
-describe('describeArcgisWorkbook', () => {
-  it('lists every sheet with raw headers and does not throw on missing required columns', async () => {
+describe('readArcgisWorkbookDetailed', () => {
+  it('returns ok with the workbook on success', async () => {
     const buffer = await buildWorkbook({
-      TreesCustom: [['GlobalID', 'TreeTag', 'Sp', 'Q', 'MyX', 'MyY', 'When']],
-      StemsCustom: [['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When']]
+      trees: [TREE_HEADER, ['G1', 'A25', '100', '100', 'QURU', '12.3', '1.3', 'ok', 46036, '5.1', '6.2', 'M', 'NA']],
+      stems: [STEM_HEADER, ['G1', 'S1', 'A25', '100', 'QURU', '4.4', '1.3', '', 46036, 'A', 'NA']]
     });
-    const described = await describeArcgisWorkbook(buffer);
-    expect(described.sheets.map(s => s.name)).toEqual(['TreesCustom', 'StemsCustom']);
-    expect(described.sheets[0].columns).toContain('MyX');
-    expect(described.sheets[1].columns).toContain('ParentGlobalID');
+    const outcome = await readArcgisWorkbookDetailed(buffer);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.workbook.trees).toHaveLength(1);
+  });
+
+  it('returns raw sheet headers on a mapping-resolvable failure instead of throwing', async () => {
+    const buffer = await buildWorkbook({
+      TreesCustom: [
+        ['GlobalID', 'TreeTag', 'Sp', 'Q', 'MyX', 'MyY', 'When'],
+        ['G1', '100', 'QURU', 'A25', '5.1', '6.2', 46036]
+      ],
+      StemsCustom: [
+        ['GlobalID', 'ParentGlobalID', 'TreeTag', 'StemTag', 'Sp', 'Q', 'When'],
+        ['S1', 'G1', '100', '100-1', 'QURU', 'A25', 46036]
+      ]
+    });
+    const outcome = await readArcgisWorkbookDetailed(buffer);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error).toBeInstanceOf(MissingColumnError);
+      expect(outcome.sheets.map(s => s.name)).toEqual(['TreesCustom', 'StemsCustom']);
+      expect(outcome.sheets[0].columns).toContain('MyX'); // RAW header, not canonicalized
+    }
   });
 });
 

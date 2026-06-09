@@ -6,8 +6,7 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(() => 'user-1'),
   assertCanEditMeasurementScope: vi.fn(async () => undefined),
   isValidSchema: vi.fn(() => true),
-  readArcgisWorkbook: vi.fn(),
-  describeArcgisWorkbook: vi.fn(),
+  readArcgisWorkbookDetailed: vi.fn(),
   transformArcgisWorkbook: vi.fn(),
   createArcgisImportSession: vi.fn(),
   loggerError: vi.fn()
@@ -24,8 +23,7 @@ vi.mock('@/config/editplan/scopeguard', () => ({
 }));
 vi.mock('@/config/utils/sqlsecurity', () => ({ isValidSchema: mocks.isValidSchema }));
 vi.mock('@/lib/arcgis/workbook-reader', () => ({
-  readArcgisWorkbook: mocks.readArcgisWorkbook,
-  describeArcgisWorkbook: mocks.describeArcgisWorkbook
+  readArcgisWorkbookDetailed: mocks.readArcgisWorkbookDetailed
 }));
 vi.mock('@/lib/arcgis/transform', () => ({ transformArcgisWorkbook: mocks.transformArcgisWorkbook }));
 vi.mock('@/lib/arcgis/import-session', () => ({ createArcgisImportSession: mocks.createArcgisImportSession }));
@@ -69,8 +67,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
   });
 
   it('returns mappingRequired metadata when detection fails and no mapping was provided', async () => {
-    mocks.readArcgisWorkbook.mockRejectedValue(new MissingColumnError('Trees sheet missing lx, ly.'));
-    mocks.describeArcgisWorkbook.mockResolvedValue({ sheets: DESCRIBED_SHEETS });
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: false, error: new MissingColumnError('Trees sheet missing lx, ly.'), sheets: DESCRIBED_SHEETS });
 
     const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
     const body = await res.json();
@@ -91,7 +88,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
       fields: [{ canonicalField: 'lx', sourceColumns: ['MyX'], scope: 'trees' }],
       sheetRoles: { treesSheetName: 'TreesCustom', stemsSheetName: 'StemsCustom' }
     };
-    mocks.readArcgisWorkbook.mockResolvedValue({ trees: [{}], stems: [] });
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: true, workbook: { trees: [{}], stems: [] } });
     mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
     mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-1' });
 
@@ -100,7 +97,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
 
     expect(res.status).toBe(200);
     expect(body.importSessionId).toBe('sess-1');
-    expect(mocks.readArcgisWorkbook).toHaveBeenCalledWith(expect.anything(), mapping);
+    expect(mocks.readArcgisWorkbookDetailed).toHaveBeenCalledWith(expect.anything(), mapping);
   });
 
   it('rejects an unparseable mapping payload without reading the workbook', async () => {
@@ -109,7 +106,7 @@ describe('POST /api/arcgis/preflight mapping', () => {
 
     expect(res.status).toBe(400);
     expect(body.error).toMatch(/mapping/i);
-    expect(mocks.readArcgisWorkbook).not.toHaveBeenCalled();
+    expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
   });
 
   it('rejects well-formed JSON with the wrong mapping shape without reading the workbook', async () => {
@@ -120,12 +117,15 @@ describe('POST /api/arcgis/preflight mapping', () => {
       expect(res.status, `shape ${mapping} must 400`).toBe(400);
       expect(body.error).toMatch(/mapping/i);
     }
-    expect(mocks.readArcgisWorkbook).not.toHaveBeenCalled();
+    expect(mocks.readArcgisWorkbookDetailed).not.toHaveBeenCalled();
     expect(mocks.loggerError).not.toHaveBeenCalled();
   });
 
   it('keeps returning a plain error for date parse failures (not a mapping problem)', async () => {
-    mocks.readArcgisWorkbook.mockRejectedValue(new UnparseableDateError('bad date'));
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: true, workbook: { trees: [{}], stems: [] } });
+    mocks.transformArcgisWorkbook.mockImplementation(() => {
+      throw new UnparseableDateError('bad date');
+    });
 
     const res = await POST(formRequest({ schema: 'forestgeo_testing', plotID: '1', censusID: '1' }) as any);
     const body = await res.json();
@@ -133,11 +133,10 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(res.status).toBe(400);
     expect(body.mappingRequired).toBeUndefined();
     expect(body.error).toBe('bad date');
-    expect(mocks.describeArcgisWorkbook).not.toHaveBeenCalled();
   });
 
   it('succeeds without mapping when the workbook matches the default schema (unchanged payload)', async () => {
-    mocks.readArcgisWorkbook.mockResolvedValue({ trees: [{}], stems: [{}] });
+    mocks.readArcgisWorkbookDetailed.mockResolvedValue({ ok: true, workbook: { trees: [{}], stems: [{}] } });
     mocks.transformArcgisWorkbook.mockReturnValue({ rows: [{ tag: '100' }], summary: { totalRows: 1 }, warnings: [] });
     mocks.createArcgisImportSession.mockResolvedValue({ importSessionId: 'sess-2' });
 
@@ -147,6 +146,6 @@ describe('POST /api/arcgis/preflight mapping', () => {
     expect(res.status).toBe(200);
     expect(body.importSessionId).toBe('sess-2');
     expect(body.summary).toEqual({ totalRows: 1 });
-    expect(mocks.readArcgisWorkbook).toHaveBeenCalledWith(expect.anything(), undefined);
+    expect(mocks.readArcgisWorkbookDetailed).toHaveBeenCalledWith(expect.anything(), undefined);
   });
 });
