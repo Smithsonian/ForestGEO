@@ -3,9 +3,43 @@ import { excelSerialToISODate } from './excel-date';
 import { CODE_COLUMN_PREFIX, CODE_JOIN_SEPARATOR, NULL_CODE_TOKEN, normalizeHeader, resolveColumn } from './schema';
 import type { ArcgisCell, ArcgisRow, ArcgisWorkbook, TransformResult, TransformWarning } from './types';
 
+// Expand JS exponential notation (e.g. "1e-7", "1e+21") into a plain decimal string with the same
+// exact digits. Downstream SQL/SP parsing expects plain decimals, not exponential floats.
+function expandExponential(text: string): string {
+  const match = text.match(/^([+-]?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i);
+  if (!match) return text;
+  const [, sign, intDigits, fracDigits = '', expDigits] = match;
+  const exponent = Number(expDigits);
+  const digits = intDigits + fracDigits;
+  const pointIndex = intDigits.length + exponent;
+  let result: string;
+  if (pointIndex <= 0) {
+    result = `0.${'0'.repeat(-pointIndex)}${digits}`;
+  } else if (pointIndex >= digits.length) {
+    result = digits + '0'.repeat(pointIndex - digits.length);
+  } else {
+    result = `${digits.slice(0, pointIndex)}.${digits.slice(pointIndex)}`;
+  }
+  if (result.includes('.')) result = result.replace(/0+$/, '').replace(/\.$/, '');
+  return `${sign}${result}`;
+}
+
+// IEEE 754 double-precision carries ~15.9 significant digits; rounding to 15 collapses
+// representation noise the double could never faithfully store, without touching real data.
+const DOUBLE_SIGNIFICANT_DIGITS = 15;
+
+// Render a numeric cell as a faithful plain-decimal string. toPrecision collapses
+// double-representation noise (0.1+0.2 -> 0.30000000000000004) that lives beyond what a
+// double can actually carry, without altering any value a real measurement could hold; the
+// expansion step then removes exponential notation. Non-finite values fall back to String().
+function numberToCanonicalString(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  return expandExponential(String(Number(value.toPrecision(DOUBLE_SIGNIFICANT_DIGITS))));
+}
+
 function cellToString(value: ArcgisCell): string | null {
   if (value === null || value === undefined) return null;
-  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? String(value) : value.trim();
+  const text = value instanceof Date ? excelSerialToISODate(value) : typeof value === 'number' ? numberToCanonicalString(value) : value.trim();
   return text === '' ? null : text;
 }
 

@@ -196,3 +196,31 @@ describe('transformArcgisWorkbook', () => {
     expect(summary.missingRequired).toBe(1);
   });
 });
+
+describe('cellToString numeric formatting (via transformArcgisWorkbook)', () => {
+  it('strips float-representation noise from numeric cells', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ lx: (0.1 + 0.2) as unknown as string })], stems: [] });
+    expect(rows[0].lx).toBe('0.3');
+  });
+
+  it('renders small numeric cells without exponential notation', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ ly: 0.0000001 as unknown as string })], stems: [] });
+    expect(rows[0].ly).toBe('0.0000001');
+  });
+
+  it('renders large numeric cells without exponential notation', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ DBH_CURRENT: 1e21 as unknown as string })], stems: [] });
+    expect(rows[0].dbh).toBe('1000000000000000000000');
+  });
+
+  it('passes through ordinary numeric cells unchanged', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ HOM: 12.3 as unknown as string, lx: 100 as unknown as string })], stems: [] });
+    expect(rows[0].hom).toBe('12.3');
+    expect(rows[0].lx).toBe('100');
+  });
+
+  it('renders negative numeric cells correctly', () => {
+    const { rows } = transformArcgisWorkbook({ trees: [tree({ lx: -0.0000015 as unknown as string })], stems: [] });
+    expect(rows[0].lx).toBe('-0.0000015');
+  });
+});
